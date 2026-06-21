@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "slug": "sourcemind-autonomous-mastery-course-generation-",
+  "verdict": "blocked",
+  "passed": false,
+  "summary": "Blocked by stale Codex goal objective reconciliation after ultragoal completion",
+  "evidence": "autoresearch-goal complete expected the older SourceMind autonomous mastery course generation Codex goal objective, but the active/fresh get_goal snapshot is already complete for the later ultragoal aggregate objective. Hook instruction says not to blindly retry after objective mismatch; explicit blocked verdict recorded while ultragoal artifact is complete and verified.",
+  "critic_command": "Review the implemented SourceMind course generation system against the rubric and fail if lesson splitting is still based on random PDF numeric lines, if competencies are not visible, if lessons do not teach concepts, or if regeneration/background progress is not wired.",
+  "recorded_at": "2026-06-21T08:48:16.885Z"
+}

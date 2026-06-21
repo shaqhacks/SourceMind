@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "createdAt": "2026-06-21T10:03:15.203Z",
+  "updatedAt": "2026-06-21T10:03:28.873Z",
+  "briefPath": ".omc/ultragoal/brief.md",
+  "goalsPath": ".omc/ultragoal/goals.json",
+  "ledgerPath": ".omc/ultragoal/ledger.jsonl",
+  "claudeGoalMode": "aggregate",
+  "goals": [
+    {
+      "id": "G001-t0-decompose-seam",
+      "title": "T0 decompose seam",
+      "objective": "Extract a standalone decompose(raw_text)->competency_tree function in backend/services/course_engine.py, decoupled from the full generation pipeline. Refactor-first; existing backend/tests/test_course_engine.py must stay green.",
+      "status": "in_progress",
+      "attempt": 1,
+      "createdAt": "2026-06-21T10:03:15.203Z",
+      "updatedAt": "2026-06-21T10:03:28.873Z",
+      "startedAt": "2026-06-21T10:03:28.873Z"
+    },
+    {
+      "id": "G002-t2-eval-harness",
+      "title": "T2 eval harness",
+      "objective": "Build a decomposition eval harness: a rubric scorer (no cycles, genuine prerequisites, cold-start roots, correct ordering) run over 5 varied sources (>=3 domains, >=3 source types, one messy). Human-graded ground truth is authoritative; record scores. This must exist before T3.",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-06-21T10:03:15.203Z",
+      "updatedAt": "2026-06-21T10:03:15.203Z"
+    },
+    {
+      "id": "G003-t2-5-demoable-cli",
+      "title": "T2.5 demoable CLI",
+      "objective": "Add a CLI entrypoint: ingest a source, run decompose() + the eval scorer, print the competency tree and its rubric score. Forcing function so moat work has a visible result.",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-06-21T10:03:15.203Z",
+      "updatedAt": "2026-06-21T10:03:15.203Z"
+    },
+    {
+      "id": "G004-t1-empty-guard",
+      "title": "T1 empty-guard",
+      "objective": "In decompose(), reject empty/malformed/refusal LLM output with a named error, retry once with a stricter prompt, and NEVER persist an empty or partial tree. User sees 'couldn't structure this source'. Add tests for image-only PDF, malformed JSON, refusal.",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-06-21T10:03:15.203Z",
+      "updatedAt": "2026-06-21T10:03:15.203Z"
+    },
+    {
+      "id": "G005-t4-multi-source-ingest",
+      "title": "T4 multi-source ingest",
+      "objective": "Create backend/services/ingest/ with per-source parsers (PDF moved from upload.py, plus YouTube transcript, URL, pasted text, .md) sharing a normalize()->raw_text contract. Reject empty/garbage at upload with named errors. Wire into backend/routers/upload.py. Add a fixture test per source type.",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-06-21T10:03:15.203Z",
+      "updatedAt": "2026-06-21T10:03:15.203Z"
+    },
+    {
+      "id": "G006-t3-judge-conditional",
+      "title": "T3 judge (conditional)",
+      "objective": "LLM-judge self-repair of the competency tree, async/skippable, that KEEPS the repaired tree only if it scores >= the original on the eval rubric, else reverts. BUILD ONLY IF T2 shows decomposition is good-but-improvable AND a quick prototype shows the judge raises the eval score. Otherwise skip and record why.",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-06-21T10:03:15.203Z",
+      "updatedAt": "2026-06-21T10:03:15.203Z"
+    },
+    {
+      "id": "G007-t5-t6-robustness",
+      "title": "T5+T6 robustness",
+      "objective": "Add huge-source cap/chunking so a 500-page source does not hang or exceed the token limit, and structured logging of source hash, raw LLM output, parsed tree, and eval score for every decomposition.",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-06-21T10:03:15.203Z",
+      "updatedAt": "2026-06-21T10:03:15.203Z"
+    },
+    {
+      "id": "G008-t8-t7-identity-correction",
+      "title": "T8+T7 identity+correction",
+      "objective": "Add stable UUID competency node ids in md_store (renames must not reset mastery). Add human-in-loop correction minimum slice: edit/persist a decomposition with prerequisite-cycle rejection; defer mastery-state reconciliation.",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-06-21T10:03:15.203Z",
+      "updatedAt": "2026-06-21T10:03:15.203Z"
+    },
+    {
+      "id": "G009-t9-t10-t11-hardening",
+      "title": "T9+T10+T11 hardening",
+      "objective": "SSRF + prompt-injection guard on URL/YouTube ingestion; per-call Ollama timeout so a hung judge cannot stall ingestion; external ground-truth spot-check on >=1 unfamiliar-domain source before trusting the harness.",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-06-21T10:03:15.203Z",
+      "updatedAt": "2026-06-21T10:03:15.203Z"
+    }
+  ],
+  "claudeObjective": "Complete all ultragoal stories in .omc/ultragoal/goals.json: G001-t0-decompose-seam T0 decompose seam; G002-t2-eval-harness T2 eval harness; G003-t2-5-demoable-cli T2.5 demoable CLI; G004-t1-empty-guard T1 empty-guard; G005-t4-multi-source-ingest T4 multi-source ingest; G006-t3-judge-conditional T3 judge (conditional); G007-t5-t6-robustness T5+T6 robustness; G008-t8-t7-identity-correction T8+T7 identity+correction; G009-t9-t10-t11-hardening T9+T10+T11 hardening",
+  "activeGoalId": "G001-t0-decompose-seam"
+}

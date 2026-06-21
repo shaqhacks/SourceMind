@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "slug": "sourcemind-autonomous-mastery-course-generation-",
+  "verdict": "pass",
+  "passed": true,
+  "summary": "Implemented first-class CourseCompetency model, automatic competency map creation on upload/load/outline updates, TOC-based course spine extraction with source-page attachment, filtering of practice pages and numeric worked-solution lines, competency-aware lesson generation fallback, section API competency context, course overview mastery path UI, lesson competency panel UI, and tests. Verification: backend test suite 56 passed; frontend npx tsc --noEmit passed; npm --prefix frontend run build passed; backend compileall passed.",
+  "evidence": "Implemented first-class CourseCompetency model, automatic competency map creation on upload/load/outline updates, TOC-based course spine extraction with source-page attachment, filtering of practice pages and numeric worked-solution lines, competency-aware lesson generation fallback, section API competency context, course overview mastery path UI, lesson competency panel UI, and tests. Verification: backend test suite 56 passed; frontend npx tsc --noEmit passed; npm --prefix frontend run build passed; backend compileall passed.",
+  "critic_command": "Review the implemented SourceMind course generation system against the rubric and fail if lesson splitting is still based on random PDF numeric lines, if competencies are not visible, if lessons do not teach concepts, or if regeneration/background progress is not wired.",
+  "recorded_at": "2026-06-21T08:00:23.177Z"
+}

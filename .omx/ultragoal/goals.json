@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "createdAt": "2026-06-21T08:16:31.875Z",
+  "updatedAt": "2026-06-21T08:47:16.944Z",
+  "briefPath": ".omx/ultragoal/brief.md",
+  "goalsPath": ".omx/ultragoal/goals.json",
+  "ledgerPath": ".omx/ultragoal/ledger.jsonl",
+  "codexGoalMode": "aggregate",
+  "goals": [
+    {
+      "id": "G001-make-sourcemind-production-ready-for",
+      "title": "Make SourceMind production ready for students: upload any number of c...",
+      "objective": "Make SourceMind production ready for students: upload any number of course materials, generate a full competency-backed course/book with lessons, make students competent through mastery workflows, add review notifications, add a due-material page, harden edge cases, and verify with tests/build. Use team when the tmux runtime is available and materially helpful; outside tmux, use the nearest app-safe execution path.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-06-21T08:16:31.875Z",
+      "updatedAt": "2026-06-21T08:47:16.944Z",
+      "startedAt": "2026-06-21T08:16:48.114Z",
+      "completedAt": "2026-06-21T08:47:16.944Z"
+    }
+  ],
+  "codexObjective": "Complete the durable ultragoal plan in .omx/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .omx/ultragoal/ledger.jsonl as the audit trail."
+}

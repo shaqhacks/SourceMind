@@ -1,0 +1,90 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1782036260653,
+  "projectRoot": "/Users/shaquillejohnson/code/SourceMind",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "scripts"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "backend": {
+      "path": "backend",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1782036260612,
+      "keyFiles": [
+        "__init__.py",
+        "main.py",
+        "requirements.txt"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 1,
+      "lastAccessed": 1782036260613,
+      "keyFiles": [
+        "sourcemind-first-draft.md"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 2,
+      "lastAccessed": 1782036260613,
+      "keyFiles": [
+        "build.sh",
+        "dev.sh"
+      ]
+    },
+    "backend/services": {
+      "path": "backend/services",
+      "purpose": "Business logic services",
+      "fileCount": 9,
+      "lastAccessed": 1782036260614,
+      "keyFiles": [
+        "__init__.py",
+        "course_engine.py",
+        "course_models.py"
+      ]
+    },
+    "backend/tests": {
+      "path": "backend/tests",
+      "purpose": "Test files",
+      "fileCount": 9,
+      "lastAccessed": 1782036260614,
+      "keyFiles": [
+        "test_course_api.py",
+        "test_course_engine.py",
+        "test_lesson_api.py"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}
