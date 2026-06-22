@@ -348,7 +348,12 @@ def test_course_due_reviews_endpoint_can_include_upcoming_items(tmp_path: Path, 
     )
     engine.generate_lessons(course)
     competency = course.competencies[0]
-    engine.record_mastery_review(competency.mastery, score=100, confidence=6)
+    competency.mastery.mastery_percent = 90
+    competency.mastery.last_score = 100
+    competency.mastery.confidence_history = [6]
+    competency.mastery.review_interval = 7
+    competency.mastery.last_reviewed_at = "2026-06-21T00:00:00+00:00"
+    competency.mastery.next_review_at = "2099-01-01T00:00:00+00:00"
     store.save(course)
     monkeypatch.setattr(courses_router, "course_store", store)
     monkeypatch.setattr(courses_router, "course_engine", engine)
