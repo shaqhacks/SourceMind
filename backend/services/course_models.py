@@ -99,22 +99,15 @@ class LessonBlock(BaseModel):
         "common_mistake",
         "quick_check",
         "self_explanation",
-        "overview",
-        "key_concept",
-        "highlight",
-        "warning",
-        "prerequisite",
-        "source_evidence",
         "background",
-        "example",
         "contrast_case",
-        "check",
         "next_action",
     ]
     title: str
     body: str
     support_status: SupportStatus = SupportStatus.pdf_backed
     source_refs: list[str] = Field(default_factory=list)
+    support_status: SupportStatus = SupportStatus.pdf_backed
 
 
 class WorkedExample(BaseModel):
