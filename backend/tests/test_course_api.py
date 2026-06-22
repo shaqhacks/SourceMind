@@ -239,6 +239,94 @@ def test_multiple_choice_grading_requires_exact_choice(tmp_path: Path, monkeypat
     assert response.json()["score"] == 0
 
 
+
+def test_course_list_summary_exposes_next_section_and_due_review_count(tmp_path: Path, monkeypatch) -> None:
+    store = CourseStore(tmp_path)
+    engine = CourseEngine(allow_deterministic_fallback=True)
+    monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[source],
+        chapters=engine.detect_outline(
+            "Algebra",
+            [source],
+            [
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=1,
+                    text="Chapter 1: Foundations
+1.1 Integers
+An integer is a positive or negative whole number. Integers can be added by comparing signs.",
+                )
+            ],
+        ),
+    )
+    engine.generate_lessons(course)
+    first_section = course.chapters[0].sections[0]
+    first_section.completed = True
+    engine.record_mastery_review(course.competencies[0].mastery, score=0, confidence=6)
+    store.save(course)
+    monkeypatch.setattr(courses_router, "course_store", store)
+    monkeypatch.setattr(courses_router, "course_engine", engine)
+    client = TestClient(api.app)
+
+    response = client.get("/courses")
+
+    assert response.status_code == 200
+    payload = response.json()["courses"]
+    assert len(payload) == 1
+    summary = payload[0]
+    assert summary["completed_sections"] == 1
+    assert summary["next_section_id"] is None
+    assert summary["next_section_title"] == first_section.title
+    assert summary["due_reviews_count"] == 1
+    assert summary["generation_status"] == course.generation.status.value
+
+
+def test_archived_courses_are_excluded_from_due_reviews_and_notifications(tmp_path: Path, monkeypatch) -> None:
+    store = CourseStore(tmp_path)
+    engine = CourseEngine(allow_deterministic_fallback=True)
+    monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[source],
+        chapters=engine.detect_outline(
+            "Algebra",
+            [source],
+            [
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=1,
+                    text="Chapter 1: Foundations
+1.1 Integers
+An integer is a positive or negative whole number. Integers can be added by comparing signs.",
+                )
+            ],
+        ),
+    )
+    engine.generate_lessons(course)
+    engine.record_mastery_review(course.competencies[0].mastery, score=0, confidence=6)
+    course.archived_at = "2026-06-22T00:00:00+00:00"
+    store.save(course)
+    monkeypatch.setattr(courses_router, "course_store", store)
+    monkeypatch.setattr(courses_router, "course_engine", engine)
+    client = TestClient(api.app)
+
+    due = client.get("/courses/reviews/due")
+    notifications = client.get("/courses/notifications")
+
+    assert due.status_code == 200
+    assert due.json() == {"items": [], "due_count": 0, "upcoming_count": 0}
+    assert notifications.status_code == 200
+    assert notifications.json() == {"items": [], "unread_count": 0}
+
+
 def test_due_reviews_endpoint_lists_scheduled_course_material(tmp_path: Path, monkeypatch) -> None:
     store = CourseStore(tmp_path)
     engine = CourseEngine(allow_deterministic_fallback=True)
