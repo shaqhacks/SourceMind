@@ -615,7 +615,7 @@ def _run_generation_job(course_id: str) -> None:
         course_store.save(course)
     except CourseGenerationError as exc:
         retry_delay = _handle_generation_failure(course_id, str(exc))
-    except Exception as exc:  # pragma: no cover - defensive job boundary
+    except Exception:  # pragma: no cover - defensive job boundary
         logger.exception("Background course generation failed for %s", course_id)
         retry_delay = _handle_generation_failure(course_id, "Course generation failed. Check backend logs.")
     finally:
