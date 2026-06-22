@@ -25,9 +25,11 @@ from SourceMind.backend.services.course_models import (
     CourseDocument,
     CourseStatus,
     LessonBlock,
+    OrganizationPolicy,
     QuizItem,
     SectionLesson,
     SourceFile,
+    SourceBundleType,
     SourceSpan,
     SupportStatus,
     WorkedExample,
@@ -214,10 +216,34 @@ class CourseEngine:
             course_id=course_id,
             title=title,
             status=CourseStatus.outline_draft,
+            source_bundle_type=SourceBundleType.structured_course,
+            organization_policy=OrganizationPolicy.preserve_source_spine,
             source_files=source_files,
             competencies=tree.competencies,
             chapters=tree.chapters,
             notes="Draft mastery course generated from ordered source materials. Review the outline, then generate the course book.",
+        )
+
+    def create_draft_from_source_text(
+        self,
+        course_id: str,
+        title: str,
+        raw_text: str,
+        *,
+        source_name: str = "source.txt",
+    ) -> CourseDocument:
+        source_file = SourceFile(id="SRC_1", filename=source_name, order=0)
+        tree = self.decompose(raw_text, title=title, emit_telemetry=False)
+        return CourseDocument(
+            course_id=course_id,
+            title=title,
+            status=CourseStatus.outline_draft,
+            source_bundle_type=SourceBundleType.loose_sources,
+            organization_policy=OrganizationPolicy.reorganize_learning_path,
+            source_files=[source_file],
+            competencies=tree.competencies,
+            chapters=tree.chapters,
+            notes="Draft learning path generated from loose source material. Review the generated organization before lesson generation.",
         )
 
     def decompose(
@@ -401,19 +427,21 @@ class CourseEngine:
         if not course.competencies:
             course.competencies = self.build_competency_map(course.chapters)
         prior_section_concept_ids: list[str] = []
-        assessment_reasons = self._assessment_section_reasons(course.chapters)
+        assessment_policies = self._assessment_policies(course.chapters)
         for chapter in course.chapters:
             for section in chapter.sections:
                 if section.status == CourseStatus.ready and section.concepts:
-                    self._apply_assessment_policy(section, section.id in assessment_reasons, assessment_reasons.get(section.id, ""))
+                    policy = assessment_policies.get(section.id, {"kind": "none", "reason": ""})
+                    self._apply_assessment_policy(section, policy["kind"], policy["reason"])
                     prior_section_concept_ids.extend(concept.id for concept in section.concepts)
                     continue
+                policy = assessment_policies.get(section.id, {"kind": "none", "reason": ""})
                 self._generate_section(
                     section,
                     prior_section_concept_ids,
                     course.competencies,
-                    include_assessment=section.id in assessment_reasons,
-                    assessment_reason=assessment_reasons.get(section.id, ""),
+                    assessment_kind=policy["kind"],
+                    assessment_reason=policy["reason"],
                 )
                 prior_section_concept_ids.extend(concept.id for concept in section.concepts)
                 if progress_callback:
@@ -638,7 +666,7 @@ class CourseEngine:
         prerequisite_ids: list[str],
         course_competencies: list[CourseCompetency] | None = None,
         *,
-        include_assessment: bool = True,
+        assessment_kind: str = "section_assessment",
         assessment_reason: str = "",
     ) -> None:
         evidence = self._section_evidence(section)
@@ -649,6 +677,7 @@ class CourseEngine:
             return
 
         competencies = [competency for competency in (course_competencies or []) if competency.id in section.competency_ids]
+        include_assessment = assessment_kind != "none"
         payload = self._generate_with_ollama(section, evidence, competencies, include_assessment=include_assessment)
         if payload is None:
             if not self.allow_deterministic_fallback:
@@ -679,6 +708,7 @@ class CourseEngine:
                 title=item["title"],
                 body=item["body"],
                 source_refs=refs,
+                support_status=self._coerce_support_status(item.get("support_status"), SupportStatus.pdf_backed),
             )
             for index, item in enumerate(payload["lesson_blocks"])
         ]
@@ -715,7 +745,7 @@ class CourseEngine:
             )
             for index, item in enumerate(payload["mastery_quiz"])
         ]
-        self._apply_assessment_policy(section, include_assessment, assessment_reason)
+        self._apply_assessment_policy(section, assessment_kind, assessment_reason)
         section.prerequisites = prerequisite_ids[-2:]
         section.status = CourseStatus.ready
 
@@ -864,7 +894,18 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
         if not concepts:
             concepts = fallback["concepts"]
 
-        block_kinds = {"teaching", "source_excerpt", "definition", "worked_example", "common_mistake", "quick_check", "self_explanation"}
+        block_kinds = {
+            "teaching",
+            "source_excerpt",
+            "definition",
+            "worked_example",
+            "common_mistake",
+            "quick_check",
+            "self_explanation",
+            "background",
+            "contrast_case",
+            "next_action",
+        }
         llm_blocks = []
         for item in self._coerce_list(payload.get("lesson_blocks"))[:8]:
             if not isinstance(item, dict):
@@ -874,7 +915,14 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
             body = self._coerce_text(item.get("body"), "")
             # Keep only blocks with a real body so empty/skeletal output is dropped.
             if title and body and len(re.findall(r"\b\w+\b", body)) >= 25:
-                llm_blocks.append({"kind": kind, "title": title, "body": body})
+                llm_blocks.append(
+                    {
+                        "kind": kind,
+                        "title": title,
+                        "body": body,
+                        "support_status": self._coerce_support_status(item.get("support_status"), SupportStatus.pdf_backed).value,
+                    }
+                )
 
         # Merge per-kind: keep the model's real teaching where present, and fill ONLY
         # the genuinely missing required kinds from the deterministic fallback. This
@@ -895,6 +943,7 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
             lesson_blocks.extend(block for block in llm_blocks if block["kind"] not in used)
         else:
             lesson_blocks = fallback["lesson_blocks"]
+        lesson_blocks = self._ensure_module_labels(lesson_blocks, fallback["lesson_blocks"])
 
         worked_example = payload.get("worked_example") if isinstance(payload.get("worked_example"), dict) else {}
         worked_steps = [
