@@ -4,7 +4,19 @@ import pytest
 
 from SourceMind.backend.services import course_engine as course_engine_module
 from SourceMind.backend.services.course_engine import CompetencyTree, CourseEngine, ExtractedPage
-from SourceMind.backend.services.course_models import Chapter, CourseDocument, CourseStatus, SectionLesson, SourceFile, SourceSpan
+from SourceMind.backend.services.course_models import (
+    AdaptiveSuggestion,
+    Chapter,
+    CourseDocument,
+    CourseStatus,
+    LessonBlock,
+    Misconception,
+    SectionLesson,
+    SourceFile,
+    SourceSpan,
+    SupportStatus,
+    TransferTask,
+)
 from SourceMind.backend.services.course_store import CourseStore
 
 
@@ -23,6 +35,103 @@ def test_course_store_round_trip_markdown_json(tmp_path):
     assert loaded.course_id == "algebra"
     assert loaded.title == "Algebra"
     assert "COURSE_JSON" in store.course_path("algebra").read_text(encoding="utf-8")
+
+
+def test_course_document_defaults_new_learning_path_metadata_for_legacy_payload():
+    loaded = CourseDocument.model_validate(
+        {
+            "schema_version": 1,
+            "course_id": "legacy_algebra",
+            "title": "Legacy Algebra",
+            "source_files": [],
+            "competencies": [],
+            "chapters": [],
+            "generation": {},
+        }
+    )
+
+    assert loaded.schema_version == 1
+    assert loaded.source_bundle_type == "structured_course"
+    assert loaded.organization_policy == "preserve_source_spine"
+
+
+def test_course_store_round_trip_preserves_learning_path_metadata(tmp_path):
+    course = CourseDocument(
+        course_id="learning_path",
+        title="Learning Path",
+        source_bundle_type="mixed",
+        organization_policy="reorganize_learning_path",
+        chapters=[
+            Chapter(
+                id="CH_1",
+                number="1",
+                title="Foundations",
+                order=0,
+                sections=[
+                    SectionLesson(
+                        id="SEC_1",
+                        chapter_id="CH_1",
+                        number="1.1",
+                        title="Integers",
+                        order=0,
+                        lesson_blocks=[
+                            LessonBlock(
+                                id="LB_1",
+                                kind="background",
+                                title="Context",
+                                body="Helpful prerequisite context",
+                                support_status=SupportStatus.course_inference,
+                            )
+                        ],
+                        misconceptions=[
+                            Misconception(
+                                id="MIS_1",
+                                title="Sign confusion",
+                                trap="Treating negative signs as subtraction in every context.",
+                                correction="Separate unary sign from subtraction operation.",
+                                concept_ids=["CON_1"],
+                                source_refs=["p. 1"],
+                            )
+                        ],
+                        transfer_tasks=[
+                            TransferTask(
+                                id="TT_1",
+                                title="Apply the rule",
+                                prompt="Classify signs in a new expression.",
+                                concept_ids=["CON_1"],
+                                prerequisite_ids=["CON_0"],
+                                source_refs=["p. 2"],
+                            )
+                        ],
+                        adaptive_suggestions=[
+                            AdaptiveSuggestion(
+                                id="AS_1",
+                                kind="worked_example",
+                                title="Revisit worked example",
+                                body="Review the integer-sign example before retrying.",
+                                concept_ids=["CON_1"],
+                                source_refs=["p. 1"],
+                                priority=0.8,
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+    store = CourseStore(tmp_path)
+
+    store.save(course)
+    loaded = store.load("learning_path")
+
+    assert loaded.schema_version == 2
+    assert loaded.source_bundle_type == "mixed"
+    assert loaded.organization_policy == "reorganize_learning_path"
+    section = loaded.chapters[0].sections[0]
+    assert section.lesson_blocks[0].support_status == "course_inference"
+    assert section.misconceptions[0].title == "Sign confusion"
+    assert section.transfer_tasks[0].prerequisite_ids == ["CON_0"]
+    assert section.adaptive_suggestions[0].kind == "worked_example"
 
 
 def test_course_store_save_keeps_existing_file_readable_until_atomic_replace(tmp_path):
