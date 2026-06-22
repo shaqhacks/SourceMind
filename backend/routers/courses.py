@@ -89,6 +89,8 @@ class CourseNotificationItem(BaseModel):
     due: bool
     urgency: str
     course_id: str
+    competency_id: str
+    competency_title: str
     section_id: str
     next_review_at: str | None = None
     next_action_type: str | None = None
@@ -458,6 +460,8 @@ def _notification_from_due_item(item: dict[str, Any]) -> CourseNotificationItem:
         due=due,
         urgency=urgency,
         course_id=item["course_id"],
+        competency_id=item["competency_id"],
+        competency_title=item["competency_title"],
         section_id=item["section_id"],
         next_review_at=item.get("next_review_at"),
         next_action_type=item.get("next_action_type"),

@@ -406,6 +406,57 @@ def test_notifications_endpoint_surfaces_due_review_reminders(tmp_path: Path, mo
     assert payload["unread_count"] == 1
     assert payload["items"][0]["kind"] == "review_reminder"
     assert payload["items"][0]["href"] == f"/courses/algebra/sections/{section.id}"
+    assert payload["items"][0]["next_action_type"] == "retry_now"
+    assert "Next:" in payload["items"][0]["message"]
+    assert "Retry" in payload["items"][0]["next_action"]
+
+
+def test_notifications_endpoint_suggests_prerequisite_review_when_failures_stack(tmp_path: Path, monkeypatch) -> None:
+    store = CourseStore(tmp_path)
+    engine = CourseEngine(allow_deterministic_fallback=True)
+    monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[source],
+        chapters=engine.detect_outline(
+            "Algebra",
+            [source],
+            [
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=1,
+                    text="Chapter 1: Foundations\n1.1 Integers\nAn integer is a positive or negative whole number. Integers can be added by comparing signs.",
+                ),
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=2,
+                    text="Chapter 2: Equations\n2.1 Linear equations\nA linear equation is solved by preserving equality while using inverse operations.",
+                ),
+            ],
+        ),
+    )
+    engine.generate_lessons(course)
+    dependent = course.competencies[1]
+    dependent.mastery.mastery_percent = 40
+    dependent.mastery.last_score = 50
+    dependent.mastery.confidence_history = [3]
+    dependent.mastery.failure_streak = 2
+    store.save(course)
+    monkeypatch.setattr(courses_router, "course_store", store)
+    monkeypatch.setattr(courses_router, "course_engine", engine)
+    client = TestClient(api.app)
+
+    response = client.get("/courses/notifications")
+
+    assert response.status_code == 200
+    payload = response.json()
+    target = next(item for item in payload["items"] if item["competency_id"] == dependent.id)
+    assert target["next_action_type"] == "review_prerequisite"
+    assert "prerequisite" in target["next_action"].lower()
 
 
 def test_due_reviews_endpoint_does_not_mask_broken_course_files(tmp_path: Path, monkeypatch) -> None:
