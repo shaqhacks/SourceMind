@@ -407,8 +407,8 @@ def test_notifications_endpoint_surfaces_due_review_reminders(tmp_path: Path, mo
     assert payload["items"][0]["kind"] == "review_reminder"
     assert payload["items"][0]["href"] == f"/courses/algebra/sections/{section.id}"
     assert payload["items"][0]["next_action_type"] == "retry_now"
-    assert "Next:" in payload["items"][0]["message"]
     assert "Retry" in payload["items"][0]["next_action"]
+    assert "Next:" in payload["items"][0]["message"]
 
 
 def test_notifications_endpoint_suggests_prerequisite_review_when_failures_stack(tmp_path: Path, monkeypatch) -> None:

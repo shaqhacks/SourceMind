@@ -134,6 +134,53 @@ def test_course_store_round_trip_preserves_learning_path_metadata(tmp_path):
     assert section.adaptive_suggestions[0].kind == "worked_example"
 
 
+def test_course_store_loads_legacy_markdown_without_learning_path_metadata(tmp_path):
+    store = CourseStore(tmp_path)
+    store.course_path("legacy_algebra").write_text(
+        """---
+schema_version: 1
+course_id: legacy_algebra
+title: Legacy Algebra
+status: outline_draft
+created_at: 2026-06-22T00:00:00+00:00
+updated_at: 2026-06-22T00:00:00+00:00
+---
+
+# Legacy Algebra
+
+## COMPETENCY_MAP:
+- No competencies generated yet.
+
+## OUTLINE:
+- No outline generated yet.
+
+## COURSE_JSON:
+```json
+{
+  "schema_version": 1,
+  "course_id": "legacy_algebra",
+  "title": "Legacy Algebra",
+  "status": "outline_draft",
+  "source_files": [],
+  "competencies": [],
+  "chapters": [],
+  "generation": {},
+  "created_at": "2026-06-22T00:00:00+00:00",
+  "updated_at": "2026-06-22T00:00:00+00:00",
+  "notes": ""
+}
+```
+""",
+        encoding="utf-8",
+    )
+
+    loaded = store.load("legacy_algebra")
+
+    assert loaded.schema_version == 1
+    assert loaded.source_bundle_type == "structured_course"
+    assert loaded.organization_policy == "preserve_source_spine"
+
+
 def test_course_store_save_keeps_existing_file_readable_until_atomic_replace(tmp_path):
     course = CourseDocument(
         course_id="algebra",
@@ -427,7 +474,7 @@ def test_generate_lessons_creates_workbook_items_from_source_spans(monkeypatch):
     assert len(section.checks) == 3
     assert len(section.mastery_quiz) == 3
     assert section.is_assessment_section is True
-    assert section.assessment_reason == "End-of-chapter knowledge check."
+    assert section.assessment_reason == "End-of-section concept assessment."
     assert {check.kind for check in section.checks} == {"multiple_choice"}
     assert {item.kind for item in section.mastery_quiz} == {"multiple_choice"}
     assert all(check.choices and check.expected_answer in check.choices for check in section.checks)
@@ -474,7 +521,7 @@ def test_generate_lessons_only_adds_assessments_at_chapter_end(monkeypatch):
     assert len(second.checks) == 3
     assert len(second.mastery_quiz) == 3
     assert second.is_assessment_section is True
-    assert second.assessment_reason == "End-of-chapter knowledge check."
+    assert second.assessment_reason == "End-of-section concept assessment."
     assert {check.kind for check in second.checks} == {"multiple_choice"}
 
 
@@ -518,9 +565,10 @@ def test_generate_lessons_adds_long_chapter_checkpoint_assessments(monkeypatch):
     assert course.chapters[0].sections[2].checks == []
     assert len(course.chapters[0].sections[3].checks) == 3
     assert len(course.chapters[0].sections[5].checks) == 3
-    assert course.chapters[0].sections[3].assessment_reason == "Long-chapter checkpoint."
-    assert course.chapters[0].sections[5].assessment_reason == "End-of-chapter knowledge check."
-    assert {item.kind for item in course.chapters[0].sections[3].mastery_quiz} == {"multiple_choice"}
+    assert course.chapters[0].sections[3].assessment_reason == "Long-chapter concept checkpoint."
+    assert course.chapters[0].sections[5].assessment_reason == "End-of-section concept assessment."
+    assert course.chapters[0].sections[3].mastery_quiz == []
+    assert {item.kind for item in course.chapters[0].sections[5].mastery_quiz} == {"multiple_choice"}
 
 
 def test_generate_lessons_replaces_thin_ollama_lesson_blocks(monkeypatch):
