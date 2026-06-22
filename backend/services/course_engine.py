@@ -989,25 +989,46 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
         }
 
     def _assessment_section_ids(self, chapters: list[Chapter]) -> set[str]:
-        return set(self._assessment_section_reasons(chapters))
+        return {section_id for section_id, policy in self._assessment_policies(chapters).items() if policy["kind"] != "none"}
 
-    def _assessment_section_reasons(self, chapters: list[Chapter]) -> dict[str, str]:
-        section_reasons: dict[str, str] = {}
+    def _assessment_policies(self, chapters: list[Chapter]) -> dict[str, dict[str, str]]:
+        policies: dict[str, dict[str, str]] = {}
         for chapter in chapters:
             sections = chapter.sections or []
             if not sections:
                 continue
-            section_reasons[sections[-1].id] = "End-of-chapter knowledge check."
+            final_section = sections[-1]
+            policies[final_section.id] = {
+                "kind": "section_assessment",
+                "reason": "End-of-section concept assessment.",
+            }
             if len(sections) >= LONG_CHAPTER_SECTION_COUNT:
                 for index, section in enumerate(sections, start=1):
+                    if section.id == final_section.id:
+                        continue
                     if index % LONG_CHAPTER_CHECKPOINT_INTERVAL == 0:
-                        section_reasons.setdefault(section.id, "Long-chapter checkpoint.")
-        return section_reasons
+                        policies.setdefault(
+                            section.id,
+                            {
+                                "kind": "checkpoint",
+                                "reason": "Long-chapter concept checkpoint.",
+                            },
+                        )
+            elif len(sections) >= 2 and self._section_introduces_new_concept(sections[0], sections[1]):
+                policies.setdefault(
+                    sections[0].id,
+                    {
+                        "kind": "checkpoint",
+                        "reason": "Concept checkpoint before the next section shift.",
+                    },
+                )
+        return policies
 
-    def _apply_assessment_policy(self, section: SectionLesson, include_assessment: bool, reason: str = "") -> None:
+    def _apply_assessment_policy(self, section: SectionLesson, assessment_kind: str, reason: str = "") -> None:
+        include_assessment = assessment_kind != "none"
         section.is_assessment_section = include_assessment
         section.assessment_reason = reason if include_assessment else ""
-        if not include_assessment:
+        if assessment_kind == "none":
             section.checks = []
             section.mastery_quiz = []
             return
@@ -1026,7 +1047,7 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
             for check in section.checks
             if check.prompt and check.expected_answer
         ]
-        section.mastery_quiz = [
+        quiz_items = [
             QuizItem(
                 id=item.id,
                 kind="multiple_choice",
@@ -1039,6 +1060,7 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
             for item in section.mastery_quiz
             if item.prompt and item.expected_answer
         ]
+        section.mastery_quiz = quiz_items if assessment_kind == "section_assessment" else []
 
     def _normalize_multiple_choice_item(self, item: dict[str, Any]) -> dict[str, Any] | None:
         prompt = self._coerce_text(item.get("prompt"), "")
@@ -1076,15 +1098,16 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
     def repair_thin_lessons(self, course: CourseDocument) -> bool:
         changed = False
         competencies_by_id = {competency.id: competency for competency in course.competencies}
-        assessment_reasons = self._assessment_section_reasons(course.chapters)
+        assessment_policies = self._assessment_policies(course.chapters)
         for section in course.all_sections():
             if section.status != CourseStatus.ready:
                 continue
-            include_assessment = section.id in assessment_reasons
+            policy = assessment_policies.get(section.id, {"kind": "none", "reason": ""})
+            include_assessment = policy["kind"] != "none"
             before_checks = [check.model_dump(mode="json") for check in section.checks]
             before_quiz = [item.model_dump(mode="json") for item in section.mastery_quiz]
             before_assessment_state = (section.is_assessment_section, section.assessment_reason)
-            self._apply_assessment_policy(section, include_assessment, assessment_reasons.get(section.id, ""))
+            self._apply_assessment_policy(section, policy["kind"], policy["reason"])
             if before_checks != [check.model_dump(mode="json") for check in section.checks]:
                 changed = True
             if before_quiz != [item.model_dump(mode="json") for item in section.mastery_quiz]:
@@ -1109,6 +1132,7 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
                     title=item["title"],
                     body=item["body"],
                     source_refs=refs,
+                    support_status=self._coerce_support_status(item.get("support_status"), SupportStatus.pdf_backed),
                 )
                 for index, item in enumerate(fallback["lesson_blocks"])
             ]
