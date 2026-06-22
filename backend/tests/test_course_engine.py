@@ -35,6 +35,25 @@ def test_course_store_round_trip_markdown_json(tmp_path):
     assert loaded.course_id == "algebra"
     assert loaded.title == "Algebra"
     assert "COURSE_JSON" in store.course_path("algebra").read_text(encoding="utf-8")
+    assert loaded.source_bundle_type == "structured_course"
+    assert loaded.organization_policy == "preserve_source_spine"
+
+
+def test_create_draft_from_source_text_marks_loose_source_policy():
+    engine = CourseEngine()
+    raw_text = (
+        "Learning objectives for a mixed source bundle\n"
+        "Spacing effect improves recall when retrieval is effortful."
+        "\f"
+        "Interleaving helps learners compare adjacent strategies."
+    )
+
+    course = engine.create_draft_from_source_text("learning-science", "Learning Science", raw_text)
+
+    assert course.source_bundle_type == "loose_sources"
+    assert course.organization_policy == "reorganize_learning_path"
+    assert course.source_files[0].filename == "source.txt"
+    assert course.chapters
 
 
 def test_course_document_defaults_new_learning_path_metadata_for_legacy_payload():
@@ -479,12 +498,15 @@ def test_generate_lessons_creates_workbook_items_from_source_spans(monkeypatch):
     assert {item.kind for item in section.mastery_quiz} == {"multiple_choice"}
     assert all(check.choices and check.expected_answer in check.choices for check in section.checks)
     assert all(item.choices and item.expected_answer in item.choices for item in section.mastery_quiz)
+    assert {"source_excerpt", "background", "next_action"} <= {block.kind for block in section.lesson_blocks}
+    assert any(block.support_status.value == "pdf_backed" for block in section.lesson_blocks)
+    assert any(block.support_status.value == "outside_knowledge" for block in section.lesson_blocks)
     assert course.competencies
     assert section.competency_ids == [course.competencies[0].id]
     assert course.competencies[0].lesson_ids == [section.id]
 
 
-def test_generate_lessons_only_adds_assessments_at_chapter_end(monkeypatch):
+def test_generate_lessons_adds_checkpoint_before_concept_shift_and_section_assessment_at_end(monkeypatch):
     engine = CourseEngine(allow_deterministic_fallback=True)
     monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
     source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
@@ -515,14 +537,53 @@ def test_generate_lessons_only_adds_assessments_at_chapter_end(monkeypatch):
     engine.generate_lessons(course)
     first, second = course.chapters[0].sections
 
-    assert first.checks == []
+    assert len(first.checks) == 3
     assert first.mastery_quiz == []
-    assert first.is_assessment_section is False
+    assert first.is_assessment_section is True
+    assert first.assessment_reason == "Concept checkpoint before the next section shift."
     assert len(second.checks) == 3
     assert len(second.mastery_quiz) == 3
     assert second.is_assessment_section is True
     assert second.assessment_reason == "End-of-section concept assessment."
     assert {check.kind for check in second.checks} == {"multiple_choice"}
+
+
+def test_generate_lessons_skips_checkpoint_for_continuation_sections(monkeypatch):
+    engine = CourseEngine(allow_deterministic_fallback=True)
+    monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[source],
+        chapters=engine.detect_outline(
+            "Algebra",
+            [source],
+            [
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=1,
+                    text="Chapter 1: Foundations\n1.1 Solving Equations Part 1\nUse inverse operations to isolate the variable step by step.",
+                ),
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=2,
+                    text="1.2 Solving Equations Part 2\nContinue isolating the variable while preserving equality at each step.",
+                ),
+            ],
+        ),
+    )
+
+    engine.generate_lessons(course)
+    first, second = course.chapters[0].sections
+
+    assert first.checks == []
+    assert first.mastery_quiz == []
+    assert first.is_assessment_section is False
+    assert len(second.checks) == 3
+    assert len(second.mastery_quiz) == 3
 
 
 def test_generate_lessons_adds_long_chapter_checkpoint_assessments(monkeypatch):
