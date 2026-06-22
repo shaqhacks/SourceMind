@@ -29,6 +29,20 @@ class SupportStatus(str, Enum):
     outside_knowledge = "outside_knowledge"
 
 
+class SourceBundleType(str, Enum):
+    structured_course = "structured_course"
+    loose_sources = "loose_sources"
+    paper = "paper"
+    book = "book"
+    mixed = "mixed"
+    unknown = "unknown"
+
+
+class OrganizationPolicy(str, Enum):
+    preserve_source_spine = "preserve_source_spine"
+    reorganize_learning_path = "reorganize_learning_path"
+
+
 class SourceFile(BaseModel):
     id: str
     filename: str
@@ -47,8 +61,11 @@ class ConceptMastery(BaseModel):
     mastery_percent: float = Field(default=0, ge=0, le=100)
     confidence_history: list[int] = Field(default_factory=list)
     review_interval: int = Field(default=0, ge=0)
+    ease: float = Field(default=2.5, ge=1.3, le=3.5)
+    repetitions: int = Field(default=0, ge=0)
     last_score: float | None = Field(default=None, ge=0, le=100)
     failure_streak: int = Field(default=0, ge=0)
+    review_priority: float = Field(default=0, ge=0)
     last_reviewed_at: str | None = None
     next_review_at: str | None = None
 
@@ -74,9 +91,29 @@ class CourseCompetency(BaseModel):
 
 class LessonBlock(BaseModel):
     id: str
-    kind: Literal["teaching", "source_excerpt", "definition", "worked_example", "common_mistake", "quick_check", "self_explanation"]
+    kind: Literal[
+        "teaching",
+        "source_excerpt",
+        "definition",
+        "worked_example",
+        "common_mistake",
+        "quick_check",
+        "self_explanation",
+        "overview",
+        "key_concept",
+        "highlight",
+        "warning",
+        "prerequisite",
+        "source_evidence",
+        "background",
+        "example",
+        "contrast_case",
+        "check",
+        "next_action",
+    ]
     title: str
     body: str
+    support_status: SupportStatus = SupportStatus.pdf_backed
     source_refs: list[str] = Field(default_factory=list)
 
 
@@ -110,6 +147,35 @@ class QuizItem(BaseModel):
     concept_ids: list[str] = Field(default_factory=list)
 
 
+class Misconception(BaseModel):
+    id: str
+    title: str
+    trap: str
+    correction: str
+    concept_ids: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+
+
+class TransferTask(BaseModel):
+    id: str
+    title: str
+    prompt: str
+    concept_ids: list[str] = Field(default_factory=list)
+    prerequisite_ids: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    locked: bool = True
+
+
+class AdaptiveSuggestion(BaseModel):
+    id: str
+    kind: Literal["prerequisite_review", "worked_example", "source_reference", "alternate_explanation", "contrast_case", "practice_set"]
+    title: str
+    body: str
+    concept_ids: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    priority: float = Field(default=0, ge=0)
+
+
 class ChatTurn(BaseModel):
     question: str
     answer: str
@@ -133,6 +199,9 @@ class SectionLesson(BaseModel):
     worked_examples: list[WorkedExample] = Field(default_factory=list)
     checks: list[CheckItem] = Field(default_factory=list)
     mastery_quiz: list[QuizItem] = Field(default_factory=list)
+    misconceptions: list[Misconception] = Field(default_factory=list)
+    transfer_tasks: list[TransferTask] = Field(default_factory=list)
+    adaptive_suggestions: list[AdaptiveSuggestion] = Field(default_factory=list)
     is_assessment_section: bool = False
     assessment_reason: str = ""
     prerequisites: list[str] = Field(default_factory=list)
@@ -164,10 +233,12 @@ class CourseGenerationProgress(BaseModel):
 
 
 class CourseDocument(BaseModel):
-    schema_version: int = Field(default=1, ge=1)
+    schema_version: int = Field(default=2, ge=1)
     course_id: str
     title: str
     status: CourseStatus = CourseStatus.outline_draft
+    source_bundle_type: SourceBundleType = SourceBundleType.structured_course
+    organization_policy: OrganizationPolicy = OrganizationPolicy.preserve_source_spine
     source_files: list[SourceFile] = Field(default_factory=list)
     competencies: list[CourseCompetency] = Field(default_factory=list)
     chapters: list[Chapter] = Field(default_factory=list)
