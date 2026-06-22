@@ -323,6 +323,47 @@ def test_archived_courses_are_excluded_from_due_reviews_and_notifications(tmp_pa
     assert notifications.json() == {"items": [], "unread_count": 0}
 
 
+
+def test_course_due_reviews_endpoint_can_include_upcoming_items(tmp_path: Path, monkeypatch) -> None:
+    store = CourseStore(tmp_path)
+    engine = CourseEngine(allow_deterministic_fallback=True)
+    monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[source],
+        chapters=engine.detect_outline(
+            "Algebra",
+            [source],
+            [
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=1,
+                    text="Chapter 1: Foundations\n1.1 Integers\nAn integer is a positive or negative whole number. Integers can be added by comparing signs.",
+                )
+            ],
+        ),
+    )
+    engine.generate_lessons(course)
+    competency = course.competencies[0]
+    engine.record_mastery_review(competency.mastery, score=100, confidence=6)
+    store.save(course)
+    monkeypatch.setattr(courses_router, "course_store", store)
+    monkeypatch.setattr(courses_router, "course_engine", engine)
+    client = TestClient(api.app)
+
+    response = client.get("/courses/algebra/reviews/due?include_upcoming=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["due_count"] == 0
+    assert payload["upcoming_count"] == 1
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["course_id"] == "algebra"
+    assert payload["items"][0]["due"] is False
+
 def test_due_reviews_endpoint_lists_scheduled_course_material(tmp_path: Path, monkeypatch) -> None:
     store = CourseStore(tmp_path)
     engine = CourseEngine(allow_deterministic_fallback=True)
