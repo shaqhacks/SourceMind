@@ -70,6 +70,8 @@ class ReviewDueItem(BaseModel):
     next_review_at: str | None
     due: bool
     reason: str
+    next_action_type: str | None = None
+    next_action: str | None = None
 
 
 class DueReviewsResponse(BaseModel):
@@ -89,6 +91,8 @@ class CourseNotificationItem(BaseModel):
     course_id: str
     section_id: str
     next_review_at: str | None = None
+    next_action_type: str | None = None
+    next_action: str | None = None
 
 
 class CourseNotificationsResponse(BaseModel):
@@ -444,17 +448,20 @@ def _notification_from_due_item(item: dict[str, Any]) -> CourseNotificationItem:
     due = bool(item.get("due"))
     urgency = "due" if due else "upcoming"
     section_label = f"{item.get('section_number', '')} {item.get('section_title', '')}".strip()
+    next_action = item.get("next_action") or "Open the section and review the next recommended step."
     return CourseNotificationItem(
         id=f"review:{item['course_id']}:{item['competency_id']}",
         kind="review_reminder",
         title="Review due" if due else "Review scheduled",
-        message=f"{item.get('reason') or 'Review this checkpoint.'} {section_label}".strip(),
+        message=f"{item.get('reason') or 'Review this checkpoint.'} Next: {next_action} {section_label}".strip(),
         href=f"/courses/{item['course_id']}/sections/{item['section_id']}",
         due=due,
         urgency=urgency,
         course_id=item["course_id"],
         section_id=item["section_id"],
         next_review_at=item.get("next_review_at"),
+        next_action_type=item.get("next_action_type"),
+        next_action=next_action,
     )
 
 

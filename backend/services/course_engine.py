@@ -537,6 +537,7 @@ class CourseEngine:
             if not due and not low_after_attempt and not include_upcoming:
                 continue
 
+            next_action_type, next_action = self._next_review_action(course, competency)
             if due and competency.mastery.last_score is not None and competency.mastery.last_score < 70:
                 reason = "Needs immediate review after a missed check."
             elif due:
@@ -560,6 +561,8 @@ class CourseEngine:
                     "next_review_at": competency.mastery.next_review_at,
                     "due": due or low_after_attempt,
                     "reason": reason,
+                    "next_action_type": next_action_type,
+                    "next_action": next_action,
                 }
             )
 
@@ -570,6 +573,31 @@ class CourseEngine:
                 item["next_review_at"] or "9999",
                 item["mastery_percent"],
             ),
+        )
+
+    def _next_review_action(self, course: CourseDocument, competency: CourseCompetency) -> tuple[str, str]:
+        mastery = competency.mastery
+        last_confidence = mastery.confidence_history[-1] if mastery.confidence_history else 0
+        if mastery.last_score is not None and mastery.last_score < 70 and last_confidence >= 5:
+            return (
+                "retry_now",
+                f"Retry {competency.title} now, then revisit the section evidence for the missed idea.",
+            )
+        if mastery.failure_streak >= 2 and competency.prerequisite_ids:
+            prerequisite = course.competency_by_id(competency.prerequisite_ids[0])
+            prerequisite_title = prerequisite.title if prerequisite else competency.prerequisite_ids[0]
+            return (
+                "review_prerequisite",
+                f"Review prerequisite {prerequisite_title} before attempting {competency.title} again.",
+            )
+        if mastery.mastery_percent < MASTERY_GATE_PERCENT:
+            return (
+                "review_worked_example",
+                f"Re-open the worked example for {competency.title} and retry one short check.",
+            )
+        return (
+            "scheduled_review",
+            f"Do a quick recall pass for {competency.title} to keep the concept fresh.",
         )
 
     def section_by_id(self, course: CourseDocument, section_id: str) -> SectionLesson:

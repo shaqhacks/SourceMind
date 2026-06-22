@@ -706,6 +706,56 @@ def test_due_review_items_prioritize_high_confidence_misses(monkeypatch):
     assert due_items[0]["competency_id"] == competency.id
     assert due_items[0]["section_id"] == section.id
     assert "missed" in due_items[0]["reason"]
+    assert due_items[0]["next_action_type"] == "retry_now"
+    assert "Retry" in due_items[0]["next_action"]
+
+
+def test_due_review_items_prioritize_weaker_competencies(monkeypatch):
+    engine = CourseEngine(allow_deterministic_fallback=True)
+    monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[source],
+        chapters=engine.detect_outline(
+            "Algebra",
+            [source],
+            [
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=1,
+                    text="Chapter 1: Foundations\n1.1 Integers\nAn integer is a positive or negative whole number. Integers can be added by comparing signs.",
+                ),
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=2,
+                    text="Chapter 2: Equations\n2.1 Linear equations\nA linear equation is solved with inverse operations while preserving equality.",
+                ),
+            ],
+        ),
+    )
+    engine.generate_lessons(course)
+
+    weak, strong = course.competencies[:2]
+    weak.mastery.mastery_percent = 35
+    weak.mastery.last_score = 55
+    weak.mastery.confidence_history = [4]
+    weak.mastery.next_review_at = None
+
+    strong.mastery.mastery_percent = 92
+    strong.mastery.last_score = 95
+    strong.mastery.confidence_history = [5]
+    engine.record_mastery_review(strong.mastery, score=95, confidence=5)
+
+    due_items = engine.due_review_items(course, include_upcoming=True)
+
+    assert len(due_items) >= 2
+    assert due_items[0]["competency_id"] == weak.id
+    assert due_items[0]["next_action_type"] == "review_worked_example"
+    assert due_items[1]["competency_id"] == strong.id
 
 
 def test_freshly_generated_course_has_no_due_reviews_before_attempt(monkeypatch):
