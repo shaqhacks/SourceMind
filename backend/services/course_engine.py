@@ -1195,8 +1195,8 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
         return augmented
 
     def _section_introduces_new_concept(self, current: SectionLesson, next_section: SectionLesson) -> bool:
-        current_terms = self._significant_terms(f"{current.title} {current.lesson_goal}")
-        next_terms = self._significant_terms(f"{next_section.title} {next_section.lesson_goal}")
+        current_terms = self._significant_terms(current.title)
+        next_terms = self._significant_terms(next_section.title)
         if not current_terms or not next_terms:
             return True
         overlap = len(current_terms & next_terms)
