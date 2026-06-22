@@ -257,9 +257,7 @@ def test_course_list_summary_exposes_next_section_and_due_review_count(tmp_path:
                     source_file_id="SRC_1",
                     source_name="algebra.pdf",
                     page_number=1,
-                    text="Chapter 1: Foundations
-1.1 Integers
-An integer is a positive or negative whole number. Integers can be added by comparing signs.",
+                    text="Chapter 1: Foundations\n1.1 Integers\nAn integer is a positive or negative whole number. Integers can be added by comparing signs.",
                 )
             ],
         ),
@@ -280,7 +278,7 @@ An integer is a positive or negative whole number. Integers can be added by comp
     assert len(payload) == 1
     summary = payload[0]
     assert summary["completed_sections"] == 1
-    assert summary["next_section_id"] is None
+    assert summary["next_section_id"] == first_section.id
     assert summary["next_section_title"] == first_section.title
     assert summary["due_reviews_count"] == 1
     assert summary["generation_status"] == course.generation.status.value
@@ -303,9 +301,7 @@ def test_archived_courses_are_excluded_from_due_reviews_and_notifications(tmp_pa
                     source_file_id="SRC_1",
                     source_name="algebra.pdf",
                     page_number=1,
-                    text="Chapter 1: Foundations
-1.1 Integers
-An integer is a positive or negative whole number. Integers can be added by comparing signs.",
+                    text="Chapter 1: Foundations\n1.1 Integers\nAn integer is a positive or negative whole number. Integers can be added by comparing signs.",
                 )
             ],
         ),
