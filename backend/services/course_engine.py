@@ -1170,6 +1170,46 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
     def _coerce_choice(self, value: Any, allowed: set[str], fallback: str) -> str:
         return value if isinstance(value, str) and value in allowed else fallback
 
+    def _coerce_support_status(self, value: Any, fallback: SupportStatus) -> SupportStatus:
+        if isinstance(value, SupportStatus):
+            return value
+        if isinstance(value, str):
+            try:
+                return SupportStatus(value)
+            except ValueError:
+                return fallback
+        return fallback
+
+    def _ensure_module_labels(
+        self,
+        lesson_blocks: list[dict[str, Any]],
+        fallback_blocks: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        required_extra_kinds = ("source_excerpt", "background", "next_action")
+        by_kind = {block.get("kind"): block for block in lesson_blocks}
+        fallback_by_kind = {block.get("kind"): block for block in fallback_blocks}
+        augmented = list(lesson_blocks)
+        for kind in required_extra_kinds:
+            if kind not in by_kind and kind in fallback_by_kind:
+                augmented.append(fallback_by_kind[kind])
+        return augmented
+
+    def _section_introduces_new_concept(self, current: SectionLesson, next_section: SectionLesson) -> bool:
+        current_terms = self._significant_terms(f"{current.title} {current.lesson_goal}")
+        next_terms = self._significant_terms(f"{next_section.title} {next_section.lesson_goal}")
+        if not current_terms or not next_terms:
+            return True
+        overlap = len(current_terms & next_terms)
+        return overlap < max(1, min(len(current_terms), len(next_terms)) // 2)
+
+    def _significant_terms(self, text: str) -> set[str]:
+        stop = {"the", "and", "for", "with", "from", "into", "part", "section", "lesson", "topic", "continued"}
+        return {
+            term
+            for term in re.findall(r"[A-Za-z][A-Za-z-]{3,}", (text or "").lower())
+            if term not in stop
+        }
+
     def _source_bound_section_payload(
         self,
         section: SectionLesson,
@@ -1281,6 +1321,16 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
                         "A fuller, fully-taught version of this lesson is produced when the language model is available; "
                         "what follows is grounded directly in the source text above."
                     ),
+                    "support_status": SupportStatus.course_inference.value,
+                },
+                {
+                    "kind": "source_excerpt",
+                    "title": "Source-backed evidence",
+                    "body": (
+                        f"Use these source-backed points as the anchor for this lesson: {primary} {secondary} "
+                        "Treat this block as the evidence spine for any explanation, practice, or review."
+                    ),
+                    "support_status": SupportStatus.pdf_backed.value,
                 },
                 {
                     "kind": "definition",
@@ -1289,6 +1339,7 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
                         f"The central detail to hold onto is: {secondary} {tertiary} "
                         "Use this as the working rule when you tackle problems in this section."
                     ),
+                    "support_status": SupportStatus.pdf_backed.value,
                 },
                 {
                     "kind": "worked_example",
@@ -1298,6 +1349,7 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
                         "Trace each statement in order and notice how one point leads to the next; "
                         "that progression is the method you will reuse on the practice problems."
                     ),
+                    "support_status": SupportStatus.pdf_backed.value,
                 },
                 {
                     "kind": "common_mistake",
@@ -1307,6 +1359,16 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
                         "a rule to apply. The source frames it as something you use while solving, so before you trust an "
                         "answer, confirm the conditions described above actually hold for the problem in front of you."
                     ),
+                    "support_status": SupportStatus.course_inference.value,
+                },
+                {
+                    "kind": "background",
+                    "title": "Background or prerequisite reminder",
+                    "body": (
+                        f"If you need extra context before practicing {concept_title}, review the prerequisite skill in this lesson goal: "
+                        f"{competency_goal} This reminder is useful guidance, but it is not additional source-backed evidence."
+                    ),
+                    "support_status": SupportStatus.outside_knowledge.value,
                 },
                 {
                     "kind": "self_explanation",
@@ -1315,6 +1377,16 @@ PDF evidence (anchor, may be terse — supplement with correct domain knowledge)
                         f"Reflect on the specific source points above for {concept_title}: {primary} "
                         "If any step in that reasoning is unclear, that is the part to re-read before attempting the checks below."
                     ),
+                    "support_status": SupportStatus.course_inference.value,
+                },
+                {
+                    "kind": "next_action",
+                    "title": "Next action",
+                    "body": (
+                        f"Before moving on, make sure you can restate {concept_title} from the evidence block and connect it to this goal: "
+                        f"{competency_goal} Then use the checks below to confirm you can apply it, not just recognize it."
+                    ),
+                    "support_status": SupportStatus.course_inference.value,
                 },
             ],
             "worked_example": {
