@@ -55,6 +55,11 @@ PYTHONPATH="$ROOT_DIR/..${PYTHONPATH:+:$PYTHONPATH}" \
   --reload &
 BACKEND_PID="$!"
 
+if [[ ! -d frontend/node_modules ]]; then
+  printf 'Installing frontend dependencies...\n'
+  npm --prefix frontend install
+fi
+
 NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL" \
   npm --prefix frontend run dev -- \
   --hostname "$FRONTEND_HOST" \

@@ -1,0 +1,7 @@
+Chapter 1: Pitch
+1.1 Notes And The Staff
+Notes are written on a five-line staff and named with the letters A through G.1.2 Accidentals
+Accidentals such as sharps and flats raise or lower a note by a half step.Chapter 2: Rhythm
+2.1 Note Durations
+Note durations like whole, half, and quarter notes define how long a pitch sounds.2.2 Time Signatures
+A time signature shows how many beats are in each measure and which note gets the beat.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -33,9 +35,19 @@ from SourceMind.backend.services.course_models import (
 
 
 MAX_OUTLINE_SECTIONS = 120
+# Caps so a pathologically huge source (e.g. a 500-page book) can't hang the
+# decomposer or blow the LLM token budget. Overridable via env or per-call args.
+MAX_DECOMPOSE_CHARS = int(os.getenv("SOURCEMIND_MAX_DECOMPOSE_CHARS", str(600_000)))
+MAX_DECOMPOSE_PAGES = int(os.getenv("SOURCEMIND_MAX_DECOMPOSE_PAGES", str(2000)))
+# Per-call Ollama timeout so a hung model can never stall ingestion (T10).
+OLLAMA_TIMEOUT_SECONDS = float(os.getenv("SOURCEMIND_OLLAMA_TIMEOUT_SECONDS", str(180)))
+# Upper bound on concurrent Ollama calls / abandoned-on-timeout worker threads.
+OLLAMA_MAX_WORKERS = int(os.getenv("SOURCEMIND_OLLAMA_MAX_WORKERS", str(4)))
 MIN_LESSON_BLOCK_WORDS = 180
 REQUIRED_LESSON_BLOCK_KINDS = {"teaching", "definition", "worked_example", "common_mistake", "self_explanation"}
 MASTERY_GATE_PERCENT = 80
+LONG_CHAPTER_SECTION_COUNT = 6
+LONG_CHAPTER_CHECKPOINT_INTERVAL = 4
 
 
 class CourseGenerationError(RuntimeError):
@@ -46,6 +58,89 @@ class LLMUnavailableError(CourseGenerationError):
     pass
 
 
+class LLMTimeoutError(CourseGenerationError):
+    """Raised when a single Ollama call exceeds its per-call timeout."""
+
+
+_USER_FACING_UNSTRUCTURABLE = "We couldn't structure this source. Try a clearer or longer source."
+
+
+class EmptyDecompositionError(CourseGenerationError):
+    """Raised when a source is empty or yields no usable competency tree.
+
+    Carries a user-facing message so callers can show the learner that we
+    "couldn't structure this source" instead of persisting an empty/partial tree.
+    """
+
+    def __init__(self, message: str = _USER_FACING_UNSTRUCTURABLE) -> None:
+        super().__init__(message)
+
+
+class MalformedDecompositionError(CourseGenerationError):
+    """Raised when LLM-structured output is malformed JSON or a refusal."""
+
+
+# Phrases that signal the model refused rather than structured the source.
+_REFUSAL_MARKERS = (
+    "i'm sorry",
+    "i am sorry",
+    "i cannot",
+    "i can't",
+    "i can not",
+    "i'm unable",
+    "i am unable",
+    "as an ai",
+    "i won't",
+    "i will not",
+)
+
+
+def parse_competency_json(raw_output: str) -> dict[str, Any]:
+    """Validate and parse LLM-structured competency output.
+
+    Rejects empty output, refusals, and malformed JSON with a
+    :class:`MalformedDecompositionError`, and empty competency lists with an
+    :class:`EmptyDecompositionError`. Never returns a partial/empty structure.
+    """
+    text = (raw_output or "").strip()
+    if not text:
+        raise MalformedDecompositionError("empty LLM output")
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        # Only non-JSON output can be a refusal; a valid JSON document that merely
+        # contains a phrase like "I cannot" in a value is NOT a refusal.
+        lowered = text.lower()
+        if any(marker in lowered for marker in _REFUSAL_MARKERS):
+            raise MalformedDecompositionError("model refusal in LLM output") from exc
+        raise MalformedDecompositionError(f"malformed JSON in LLM output: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise MalformedDecompositionError("LLM output is not a JSON object")
+
+    competencies = payload.get("competencies")
+    if not isinstance(competencies, list) or not competencies:
+        raise EmptyDecompositionError()
+    return payload
+
+
+def structure_with_retry(
+    structurer: Callable[[str], str],
+    prompt: str,
+    stricter_prompt: str,
+) -> dict[str, Any]:
+    """Run an LLM structurer, validate it, and retry once with a stricter prompt.
+
+    If the second attempt is still empty/malformed/refusal, the originating
+    error propagates — the caller must NOT persist any tree on failure.
+    """
+    try:
+        return parse_competency_json(structurer(prompt))
+    except (EmptyDecompositionError, MalformedDecompositionError):
+        return parse_competency_json(structurer(stricter_prompt))
+
+
 @dataclass(frozen=True)
 class ExtractedPage:
     source_file_id: str
@@ -54,12 +149,56 @@ class ExtractedPage:
     text: str
 
 
+@dataclass(frozen=True)
+class CompetencyTree:
+    """Decomposition of a source into an ordered chapter/section outline and the
+    prerequisite-linked competency graph derived from it. Decoupled from PDF
+    extraction and lesson generation so it can be scored, judged, and demoed
+    on its own."""
+
+    chapters: list[Chapter]
+    competencies: list[CourseCompetency]
+
+
 class CourseEngine:
     """Build ordered textbook courses from source PDFs."""
 
-    def __init__(self, model: str = "llama3.1", allow_deterministic_fallback: bool = False) -> None:
+    def __init__(
+        self,
+        model: str = "llama3.1",
+        allow_deterministic_fallback: bool = False,
+        ollama_timeout: float | None = None,
+    ) -> None:
         self.model = model
         self.allow_deterministic_fallback = allow_deterministic_fallback
+        self.ollama_timeout = ollama_timeout if ollama_timeout is not None else OLLAMA_TIMEOUT_SECONDS
+        # One bounded, reused executor: a wedged Ollama can strand at most
+        # OLLAMA_MAX_WORKERS threads/sockets total, not one per call.
+        self._ollama_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=OLLAMA_MAX_WORKERS, thread_name_prefix="ollama-chat"
+        )
+
+    def _ollama_chat(self, **kwargs: Any) -> Any:
+        """Call ollama.chat with a hard per-call timeout (T10).
+
+        Runs the blocking client call on a small, reused worker pool and
+        abandons the result if it exceeds ``self.ollama_timeout``, raising
+        :class:`LLMTimeoutError` so a hung model can never stall ingestion.
+        Reusing one bounded pool (vs a fresh executor per call) caps how many
+        threads/sockets a persistently-wedged Ollama can strand.
+        """
+        if ollama is None:
+            raise LLMUnavailableError("Ollama is not available.")
+        future = self._ollama_executor.submit(lambda: ollama.chat(**kwargs))
+        try:
+            return future.result(timeout=self.ollama_timeout)
+        except concurrent.futures.TimeoutError as exc:
+            # Cancels the call if it is still queued (frees the slot without a
+            # wasted request); an already-running call returns on its own.
+            future.cancel()
+            raise LLMTimeoutError(
+                f"Ollama call exceeded the {self.ollama_timeout}s per-call timeout."
+            ) from exc
 
     def create_draft_from_pdfs(self, course_id: str, title: str, pdf_paths: list[Path]) -> CourseDocument:
         source_files = [
@@ -70,17 +209,93 @@ class CourseEngine:
         if not pages:
             raise CourseGenerationError("No selectable source text could be extracted from the uploaded PDFs.")
 
-        chapters = self.detect_outline(title, source_files, pages)
-        competencies = self.build_competency_map(chapters)
+        tree = self._build_tree_from_pages(title, source_files, pages)
         return CourseDocument(
             course_id=course_id,
             title=title,
             status=CourseStatus.outline_draft,
             source_files=source_files,
-            competencies=competencies,
-            chapters=chapters,
+            competencies=tree.competencies,
+            chapters=tree.chapters,
             notes="Draft mastery course generated from ordered source materials. Review the outline, then generate the course book.",
         )
+
+    def decompose(
+        self,
+        raw_text: str,
+        title: str = "Untitled Source",
+        *,
+        max_chars: int | None = None,
+        max_pages: int | None = None,
+        emit_telemetry: bool = True,
+    ) -> CompetencyTree:
+        """Turn a raw source text into a competency tree, decoupled from the full
+        PDF -> draft -> lessons pipeline. Pages are split on form-feed (``\\f``)
+        when present, mirroring how the PDF path feeds one ExtractedPage per page.
+
+        Huge sources are capped (``max_chars`` / ``max_pages``) so a 500-page book
+        cannot hang the decomposer or exceed the token budget. Every decomposition
+        emits a structured telemetry record (source hash, parsed tree, eval score).
+        """
+        if not (raw_text or "").strip():
+            raise EmptyDecompositionError()
+
+        char_cap = max_chars if max_chars is not None else MAX_DECOMPOSE_CHARS
+        page_cap = max_pages if max_pages is not None else MAX_DECOMPOSE_PAGES
+
+        capped = False
+        text = raw_text
+        if len(text) > char_cap:
+            text = text[:char_cap]
+            boundary = text.rfind("\n")
+            if boundary > char_cap * 0.8:  # prefer a clean line boundary near the cap
+                text = text[:boundary]
+            capped = True
+
+        source_files = [SourceFile(id="SRC_1", filename="source.txt", order=0)]
+        pages = self._pages_from_raw_text(text, source_files[0])
+        if len(pages) > page_cap:
+            pages = pages[:page_cap]
+            capped = True
+        if not pages:
+            raise EmptyDecompositionError()
+
+        tree = self._build_tree_from_pages(title, source_files, pages)
+        # Never persist or return an empty/partial tree.
+        if not tree.competencies:
+            raise EmptyDecompositionError()
+
+        if emit_telemetry:
+            from SourceMind.backend.services.decomposition_telemetry import log_decomposition
+
+            log_decomposition(raw_text, tree, capped=capped, page_count=len(pages))
+        return tree
+
+    def _pages_from_raw_text(self, raw_text: str, source_file: SourceFile) -> list[ExtractedPage]:
+        chunks = raw_text.split("\f") if "\f" in raw_text else [raw_text]
+        pages: list[ExtractedPage] = []
+        for index, chunk in enumerate(chunks, start=1):
+            cleaned = re.sub(r"[ \t]+", " ", chunk).strip()
+            if cleaned:
+                pages.append(
+                    ExtractedPage(
+                        source_file_id=source_file.id,
+                        source_name=source_file.filename,
+                        page_number=index,
+                        text=cleaned,
+                    )
+                )
+        return pages
+
+    def _build_tree_from_pages(
+        self,
+        title: str,
+        source_files: list[SourceFile],
+        pages: list[ExtractedPage],
+    ) -> CompetencyTree:
+        chapters = self.detect_outline(title, source_files, pages)
+        competencies = self.build_competency_map(chapters)
+        return CompetencyTree(chapters=chapters, competencies=competencies)
 
     def extract_pages(self, pdf_paths: list[Path], source_files: list[SourceFile]) -> list[ExtractedPage]:
         pages: list[ExtractedPage] = []
@@ -186,12 +401,20 @@ class CourseEngine:
         if not course.competencies:
             course.competencies = self.build_competency_map(course.chapters)
         prior_section_concept_ids: list[str] = []
+        assessment_reasons = self._assessment_section_reasons(course.chapters)
         for chapter in course.chapters:
             for section in chapter.sections:
                 if section.status == CourseStatus.ready and section.concepts:
+                    self._apply_assessment_policy(section, section.id in assessment_reasons, assessment_reasons.get(section.id, ""))
                     prior_section_concept_ids.extend(concept.id for concept in section.concepts)
                     continue
-                self._generate_section(section, prior_section_concept_ids, course.competencies)
+                self._generate_section(
+                    section,
+                    prior_section_concept_ids,
+                    course.competencies,
+                    include_assessment=section.id in assessment_reasons,
+                    assessment_reason=assessment_reasons.get(section.id, ""),
+                )
                 prior_section_concept_ids.extend(concept.id for concept in section.concepts)
                 if progress_callback:
                     progress_callback(course, section)
@@ -258,6 +481,13 @@ class CourseEngine:
         if score >= 70:
             return score, "The answer preserves the expected meaning."
         return score, "Review the lesson evidence and try to include the core idea in your own words."
+
+    def grade_multiple_choice(self, expected: str, answer: str) -> tuple[float, str]:
+        if answer.strip() == expected.strip():
+            return 100, "Correct."
+        if not answer.strip():
+            return 0, "Choose an answer."
+        return 0, "Review the lesson evidence and try again."
 
     def record_mastery_review(self, mastery: ConceptMastery, score: float, confidence: int) -> None:
         now = datetime.now(UTC)
@@ -358,7 +588,11 @@ class CourseEngine:
         item_results = []
         scores = []
         for item in section.mastery_quiz:
-            score, feedback = self.grade_answer(item.expected_answer, answers.get(item.id, ""), confidence)
+            answer = answers.get(item.id, "")
+            if item.kind == "multiple_choice":
+                score, feedback = self.grade_multiple_choice(item.expected_answer, answer)
+            else:
+                score, feedback = self.grade_answer(item.expected_answer, answer, confidence)
             scores.append(score)
             item_results.append({"item_id": item.id, "score": score, "feedback": feedback})
 
@@ -375,6 +609,9 @@ class CourseEngine:
         section: SectionLesson,
         prerequisite_ids: list[str],
         course_competencies: list[CourseCompetency] | None = None,
+        *,
+        include_assessment: bool = True,
+        assessment_reason: str = "",
     ) -> None:
         evidence = self._section_evidence(section)
         lesson_text = self._clean_lesson_source_text(section, evidence)
@@ -384,7 +621,7 @@ class CourseEngine:
             return
 
         competencies = [competency for competency in (course_competencies or []) if competency.id in section.competency_ids]
-        payload = self._generate_with_ollama(section, evidence, competencies)
+        payload = self._generate_with_ollama(section, evidence, competencies, include_assessment=include_assessment)
         if payload is None:
             if not self.allow_deterministic_fallback:
                 section.status = CourseStatus.needs_review
@@ -392,7 +629,7 @@ class CourseEngine:
                     f"Local Ollama model is unavailable, so SourceMind cannot generate workbook lessons for {section.number} {section.title}. "
                     f"Start Ollama with the configured model ({self.model}) and try again."
                 )
-            payload = self._source_bound_section_payload(section, evidence, competencies)
+            payload = self._source_bound_section_payload(section, evidence, competencies, include_assessment=include_assessment)
 
         section.learning_objectives = payload["learning_objectives"]
         section.concepts = [
@@ -444,11 +681,13 @@ class CourseEngine:
                 kind=item["kind"],
                 prompt=item["prompt"],
                 expected_answer=item["expected_answer"],
+                choices=item.get("choices", []),
                 source_refs=refs,
                 concept_ids=concept_ids,
             )
             for index, item in enumerate(payload["mastery_quiz"])
         ]
+        self._apply_assessment_policy(section, include_assessment, assessment_reason)
         section.prerequisites = prerequisite_ids[-2:]
         section.status = CourseStatus.ready
 
@@ -466,6 +705,8 @@ class CourseEngine:
         section: SectionLesson,
         evidence: str,
         competencies: list[CourseCompetency] | None = None,
+        *,
+        include_assessment: bool = True,
     ) -> dict[str, Any] | None:
         if ollama is None:
             return None
@@ -473,40 +714,97 @@ class CourseEngine:
             f"- {competency.id}: {competency.title}; goal: {competency.description}; prerequisites: {', '.join(competency.prerequisite_ids) or 'none'}"
             for competency in competencies or []
         )
+        assessment_instruction = (
+            "This is a chapter checkpoint section. Include assessment fields, but ONLY multiple-choice knowledge checks. "
+            "Each checks item and mastery_quiz item must have kind \"multiple_choice\", one correct expected_answer, and 4 plausible choices."
+            if include_assessment
+            else "This is not a chapter checkpoint. Do not include student tests; return empty arrays for checks and mastery_quiz."
+        )
         prompt = f"""
-Create a SourceMind course-book lesson for this textbook section.
-Base the lesson on the PDF evidence, but teach the concept in your own words as a coherent class lesson.
-Do not paste long source excerpts into the lesson. Use source text as grounding, not as the lesson itself.
-The lesson must teach toward the listed competencies and prepare the student for later transfer.
-Return strict JSON with:
-learning_objectives: string[]
-concepts: [{{title, explanation}}]
-lesson_blocks: [{{kind, title, body}}] where kind is teaching, definition, worked_example, common_mistake, self_explanation.
-Each lesson block body must be a real paragraph of 90-180 words, not a one-sentence summary.
-worked_example: {{title, prompt, steps}}
-checks: [{{kind, prompt, expected_answer, choices}}] where kind is short_answer, multiple_choice, self_explanation
-mastery_quiz: [{{kind, prompt, expected_answer}}] where kind is recall, application, explanation
+You are an expert teacher writing ONE complete, self-contained lesson on "{section.title}" for a student who has never seen this topic. Teach it the way a great instructor or textbook would: actually explain the idea, show how it works, and walk through real examples. The student should finish the lesson understanding the concept WITHOUT having to open the source.
+
+Grounding rules:
+- Use the PDF evidence below as the anchor for what this section covers and to stay consistent with the course.
+- Go BEYOND the source: bring in standard, well-established knowledge of the subject (definitions, notation, formulas, canonical examples, intuition) so the lesson is correct and complete. The PDF is often terse; fill the gaps with accurate domain knowledge. Never contradict the source, and never invent facts you are unsure about.
+
+Write the actual teaching, NOT instructions to the student. This is critical:
+- DO write real explanations, real definitions with notation, and real examples solved with concrete numbers and reasoning.
+- DO NOT write meta-instructions such as "rewrite this in your own words", "explain it back in three sentences", "identify the quantity then choose the rule", or "name the idea". Those are not teaching. If a block tells the student to do the work, it is wrong.
+- Write directly to the student in clear, plain language with intuition and motivation (why this matters, when it is used).
+
+Return STRICT JSON with these fields:
+learning_objectives: string[]  (3-4 concrete, specific outcomes)
+concepts: [{{title, explanation}}]  (1-3 concepts; explanation is a real 2-4 sentence teaching of the idea, not a restatement of the title)
+lesson_blocks: [{{kind, title, body}}] with EXACTLY these kinds in order: teaching, definition, worked_example, common_mistake, self_explanation.
+  - teaching: explain the core idea with intuition and a motivating reason it matters. 90-180 words.
+  - definition: state the precise definition/rule/formula plainly, with notation and any conditions. 90-180 words.
+  - worked_example: ONE concrete example with real numbers, fully solved step by step, explaining the reasoning behind each step. 90-180 words.
+  - common_mistake: a SPECIFIC error students actually make on THIS topic, why it is wrong, and the correct move. 90-180 words.
+  - self_explanation: a short reflection that points at the specific ideas just taught (still concrete, not generic). 90-180 words.
+worked_example: {{title, prompt, steps}}  (prompt is an actual problem to solve; steps are the concrete worked solution, one action per step with the actual computation)
+checks: [{{kind, prompt, expected_answer, choices}}]  (when assessment policy allows tests, kind must be multiple_choice with 4 choices; otherwise [])
+mastery_quiz: [{{kind, prompt, expected_answer, choices}}]  (when assessment policy allows tests, kind must be multiple_choice with 4 choices; otherwise [])
+Assessment policy: {assessment_instruction}
 
 Section: {section.number} {section.title}
 Lesson goal: {section.lesson_goal}
-Competencies:
+Competencies this lesson must build:
 {competency_context or "Derive one practical competency from the section title and source."}
-PDF evidence:
+PDF evidence (anchor, may be terse — supplement with correct domain knowledge):
 {evidence[:9000]}
 """.strip()
-        try:
-            result = ollama.chat(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You write source-grounded workbook lessons. Return only JSON."},
-                    {"role": "user", "content": prompt},
-                ],
-                format="json",
-            )
-            payload = json.loads(result.get("message", {}).get("content", "{}"))
-            return self._normalize_payload(payload, section, evidence, competencies)
-        except Exception:
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert teacher and textbook author. You write complete, correct, self-contained "
+                    "lessons that actually teach a concept using real explanations and fully worked examples, "
+                    "grounded in the provided source but enriched with accurate standard knowledge of the subject. "
+                    "Every lesson_block 'body' must be a full paragraph of real teaching prose, never empty. "
+                    "You never write meta-instructions that ask the student to do the teaching. Return only valid JSON."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
+        # The model is occasionally inconsistent (e.g. returns empty bodies) under
+        # JSON mode, so retry a couple of times and keep the richest attempt.
+        best_payload: dict[str, Any] | None = None
+        best_score = -1
+        for _attempt in range(3):
+            try:
+                # num_ctx gives larger models (e.g. qwen3.6, default 4096) enough room
+                # for the lesson prompt + evidence; ignored harmlessly by big-context models.
+                result = self._ollama_chat(
+                    model=self.model,
+                    messages=messages,
+                    format="json",
+                    options={"num_ctx": 8192},
+                )
+                payload = json.loads(result.get("message", {}).get("content", "{}"))
+            except Exception:
+                # Includes LLMTimeoutError: a hung/slow model falls back deterministically.
+                continue
+            score = self._count_substantial_blocks(payload)
+            if score > best_score:
+                best_score, best_payload = score, payload
+            if score >= len(REQUIRED_LESSON_BLOCK_KINDS):
+                break
+        if best_payload is None:
             return None
+        return self._normalize_payload(best_payload, section, evidence, competencies, include_assessment=include_assessment)
+
+    def _count_substantial_blocks(self, payload: Any) -> int:
+        """How many lesson blocks carry a real, non-trivial body of teaching prose."""
+        if not isinstance(payload, dict):
+            return 0
+        count = 0
+        for item in self._coerce_list(payload.get("lesson_blocks")):
+            if not isinstance(item, dict):
+                continue
+            body = self._coerce_text(item.get("body"), "")
+            if len(re.findall(r"\b\w+\b", body)) >= 30:
+                count += 1
+        return count
 
     def _normalize_payload(
         self,
@@ -514,8 +812,10 @@ PDF evidence:
         section: SectionLesson,
         evidence: str,
         competencies: list[CourseCompetency] | None = None,
+        *,
+        include_assessment: bool = True,
     ) -> dict[str, Any]:
-        fallback = self._source_bound_section_payload(section, evidence, competencies)
+        fallback = self._source_bound_section_payload(section, evidence, competencies, include_assessment=include_assessment)
         if not isinstance(payload, dict):
             return fallback
 
@@ -537,16 +837,35 @@ PDF evidence:
             concepts = fallback["concepts"]
 
         block_kinds = {"teaching", "source_excerpt", "definition", "worked_example", "common_mistake", "quick_check", "self_explanation"}
-        lesson_blocks = []
+        llm_blocks = []
         for item in self._coerce_list(payload.get("lesson_blocks"))[:8]:
             if not isinstance(item, dict):
                 continue
             kind = self._coerce_choice(item.get("kind"), block_kinds, "teaching")
             title = self._coerce_text(item.get("title"), "")
             body = self._coerce_text(item.get("body"), "")
-            if title and body:
-                lesson_blocks.append({"kind": kind, "title": title, "body": body})
-        if not self._lesson_blocks_are_substantial(lesson_blocks):
+            # Keep only blocks with a real body so empty/skeletal output is dropped.
+            if title and body and len(re.findall(r"\b\w+\b", body)) >= 25:
+                llm_blocks.append({"kind": kind, "title": title, "body": body})
+
+        # Merge per-kind: keep the model's real teaching where present, and fill ONLY
+        # the genuinely missing required kinds from the deterministic fallback. This
+        # avoids discarding a good lesson wholesale just because one block was weak.
+        ordered_kinds = ["teaching", "definition", "worked_example", "common_mistake", "self_explanation"]
+        llm_by_kind: dict[str, dict[str, Any]] = {}
+        for block in llm_blocks:
+            llm_by_kind.setdefault(block["kind"], block)
+        fallback_by_kind = {block["kind"]: block for block in fallback["lesson_blocks"]}
+        if llm_blocks:
+            lesson_blocks = []
+            for kind in ordered_kinds:
+                chosen = llm_by_kind.get(kind) or fallback_by_kind.get(kind)
+                if chosen:
+                    lesson_blocks.append(chosen)
+            # Preserve any extra real LLM blocks (e.g. a second worked example).
+            used = set(ordered_kinds)
+            lesson_blocks.extend(block for block in llm_blocks if block["kind"] not in used)
+        else:
             lesson_blocks = fallback["lesson_blocks"]
 
         worked_example = payload.get("worked_example") if isinstance(payload.get("worked_example"), dict) else {}
@@ -561,44 +880,27 @@ PDF evidence:
             "steps": worked_steps or fallback["worked_example"]["steps"],
         }
 
-        check_kinds = {"short_answer", "multiple_choice", "self_explanation"}
         checks = []
-        for item in self._coerce_list(payload.get("checks"))[:5]:
-            if not isinstance(item, dict):
-                continue
-            prompt = self._coerce_text(item.get("prompt"), "")
-            expected_answer = self._coerce_text(item.get("expected_answer"), "")
-            if not prompt or not expected_answer:
-                continue
-            choices = [self._coerce_text(choice, "") for choice in self._coerce_list(item.get("choices"))]
-            checks.append(
-                {
-                    "kind": self._coerce_choice(item.get("kind"), check_kinds, "short_answer"),
-                    "prompt": prompt,
-                    "expected_answer": expected_answer,
-                    "choices": [choice for choice in choices if choice][:4],
-                }
-            )
-        if len(checks) < 3:
-            checks = fallback["checks"]
+        if include_assessment:
+            for item in self._coerce_list(payload.get("checks"))[:5]:
+                if not isinstance(item, dict):
+                    continue
+                normalized = self._normalize_multiple_choice_item(item)
+                if normalized:
+                    checks.append(normalized)
+            if len(checks) < 3:
+                checks = fallback["checks"]
 
-        quiz_kinds = {"recall", "application", "explanation"}
         mastery_quiz = []
-        for item in self._coerce_list(payload.get("mastery_quiz"))[:5]:
-            if not isinstance(item, dict):
-                continue
-            prompt = self._coerce_text(item.get("prompt"), "")
-            expected_answer = self._coerce_text(item.get("expected_answer"), "")
-            if prompt and expected_answer:
-                mastery_quiz.append(
-                    {
-                        "kind": self._coerce_choice(item.get("kind"), quiz_kinds, "recall"),
-                        "prompt": prompt,
-                        "expected_answer": expected_answer,
-                    }
-                )
-        if len(mastery_quiz) < 3:
-            mastery_quiz = fallback["mastery_quiz"]
+        if include_assessment:
+            for item in self._coerce_list(payload.get("mastery_quiz"))[:5]:
+                if not isinstance(item, dict):
+                    continue
+                normalized = self._normalize_multiple_choice_item(item)
+                if normalized:
+                    mastery_quiz.append(normalized)
+            if len(mastery_quiz) < 3:
+                mastery_quiz = fallback["mastery_quiz"]
 
         return {
             "learning_objectives": learning_objectives,
@@ -609,17 +911,119 @@ PDF evidence:
             "mastery_quiz": mastery_quiz,
         }
 
+    def _assessment_section_ids(self, chapters: list[Chapter]) -> set[str]:
+        return set(self._assessment_section_reasons(chapters))
+
+    def _assessment_section_reasons(self, chapters: list[Chapter]) -> dict[str, str]:
+        section_reasons: dict[str, str] = {}
+        for chapter in chapters:
+            sections = chapter.sections or []
+            if not sections:
+                continue
+            section_reasons[sections[-1].id] = "End-of-chapter knowledge check."
+            if len(sections) >= LONG_CHAPTER_SECTION_COUNT:
+                for index, section in enumerate(sections, start=1):
+                    if index % LONG_CHAPTER_CHECKPOINT_INTERVAL == 0:
+                        section_reasons.setdefault(section.id, "Long-chapter checkpoint.")
+        return section_reasons
+
+    def _apply_assessment_policy(self, section: SectionLesson, include_assessment: bool, reason: str = "") -> None:
+        section.is_assessment_section = include_assessment
+        section.assessment_reason = reason if include_assessment else ""
+        if not include_assessment:
+            section.checks = []
+            section.mastery_quiz = []
+            return
+        section.checks = [
+            CheckItem(
+                id=check.id,
+                kind="multiple_choice",
+                prompt=check.prompt,
+                expected_answer=check.expected_answer,
+                choices=self._ensure_choices(check.expected_answer, check.choices),
+                source_refs=check.source_refs,
+                concept_ids=check.concept_ids,
+                completed=check.completed,
+                last_score=check.last_score,
+            )
+            for check in section.checks
+            if check.prompt and check.expected_answer
+        ]
+        section.mastery_quiz = [
+            QuizItem(
+                id=item.id,
+                kind="multiple_choice",
+                prompt=item.prompt,
+                expected_answer=item.expected_answer,
+                choices=self._ensure_choices(item.expected_answer, item.choices),
+                source_refs=item.source_refs,
+                concept_ids=item.concept_ids,
+            )
+            for item in section.mastery_quiz
+            if item.prompt and item.expected_answer
+        ]
+
+    def _normalize_multiple_choice_item(self, item: dict[str, Any]) -> dict[str, Any] | None:
+        prompt = self._coerce_text(item.get("prompt"), "")
+        expected_answer = self._coerce_text(item.get("expected_answer"), "")
+        if not prompt or not expected_answer:
+            return None
+        raw_choices = [self._coerce_text(choice, "") for choice in self._coerce_list(item.get("choices"))]
+        return {
+            "kind": "multiple_choice",
+            "prompt": prompt,
+            "expected_answer": expected_answer,
+            "choices": self._ensure_choices(expected_answer, raw_choices),
+        }
+
+    def _ensure_choices(self, expected_answer: str, choices: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for choice in choices:
+            choice = self._coerce_text(choice, "")
+            if choice and choice not in cleaned:
+                cleaned.append(choice)
+        if expected_answer and expected_answer not in cleaned:
+            cleaned.insert(0, expected_answer)
+        generic_distractors = [
+            "It only names the topic and does not affect problem solving.",
+            "It applies only after every other method has failed.",
+            "It means the previous lesson can be ignored.",
+        ]
+        for distractor in generic_distractors:
+            if len(cleaned) >= 4:
+                break
+            if distractor != expected_answer and distractor not in cleaned:
+                cleaned.append(distractor)
+        return cleaned[:4]
+
     def repair_thin_lessons(self, course: CourseDocument) -> bool:
         changed = False
         competencies_by_id = {competency.id: competency for competency in course.competencies}
+        assessment_reasons = self._assessment_section_reasons(course.chapters)
         for section in course.all_sections():
             if section.status != CourseStatus.ready:
                 continue
+            include_assessment = section.id in assessment_reasons
+            before_checks = [check.model_dump(mode="json") for check in section.checks]
+            before_quiz = [item.model_dump(mode="json") for item in section.mastery_quiz]
+            before_assessment_state = (section.is_assessment_section, section.assessment_reason)
+            self._apply_assessment_policy(section, include_assessment, assessment_reasons.get(section.id, ""))
+            if before_checks != [check.model_dump(mode="json") for check in section.checks]:
+                changed = True
+            if before_quiz != [item.model_dump(mode="json") for item in section.mastery_quiz]:
+                changed = True
+            if before_assessment_state != (section.is_assessment_section, section.assessment_reason):
+                changed = True
             lesson_blocks = [block.model_dump(mode="json") for block in section.lesson_blocks]
             if self._lesson_blocks_are_substantial(lesson_blocks):
                 continue
             competencies = [competencies_by_id[competency_id] for competency_id in section.competency_ids if competency_id in competencies_by_id]
-            fallback = self._source_bound_section_payload(section, self._section_evidence(section), competencies)
+            fallback = self._source_bound_section_payload(
+                section,
+                self._section_evidence(section),
+                competencies,
+                include_assessment=include_assessment,
+            )
             refs = [span_ref(span) for span in section.source_spans[:2]]
             section.lesson_blocks = [
                 LessonBlock(
@@ -670,92 +1074,160 @@ PDF evidence:
         section: SectionLesson,
         evidence: str,
         competencies: list[CourseCompetency] | None = None,
+        *,
+        include_assessment: bool = True,
     ) -> dict[str, Any]:
+        # Deterministic fallback used only when the model is unavailable or returns
+        # thin output. It cannot add outside knowledge, so it presents the source
+        # material as an honest, readable digest — never meta-instructions that ask
+        # the student to do the teaching themselves.
         lesson_text = self._clean_lesson_source_text(section, evidence)
         sentences = self._sentences(lesson_text)
-        primary = sentences[0] if sentences else evidence[:240]
+        primary = sentences[0] if sentences else (evidence[:240] if evidence else "")
         secondary = sentences[1] if len(sentences) > 1 else primary
+        tertiary = sentences[2] if len(sentences) > 2 else secondary
+        quaternary = sentences[3] if len(sentences) > 3 else tertiary
         concept_title = competencies[0].title if competencies else self._concept_title(section.title, primary)
         competency_goal = competencies[0].description if competencies else section.lesson_goal or self._lesson_goal(section.title)
+        source_digest = " ".join(s for s in [primary, secondary, tertiary, quaternary] if s).strip() or competency_goal
+        checks = []
+        mastery_quiz = []
+        if include_assessment:
+            checks = [
+                {
+                    "kind": "multiple_choice",
+                    "prompt": f"Which statement best describes what {concept_title} helps you do?",
+                    "expected_answer": competency_goal,
+                    "choices": self._ensure_choices(
+                        competency_goal,
+                        [
+                            competency_goal,
+                            "It only names the page title and has no procedure.",
+                            "It replaces all earlier ideas in the course.",
+                        ],
+                    ),
+                },
+                {
+                    "kind": "multiple_choice",
+                    "prompt": f"Which source point is most central to {concept_title}?",
+                    "expected_answer": primary,
+                    "choices": self._ensure_choices(
+                        primary,
+                        [
+                            primary,
+                            "The source gives no usable point for this section.",
+                            "The source says this topic is unrelated to problem solving.",
+                        ],
+                    ),
+                },
+                {
+                    "kind": "multiple_choice",
+                    "prompt": f"What should you verify before using {concept_title}?",
+                    "expected_answer": secondary,
+                    "choices": self._ensure_choices(
+                        secondary,
+                        [
+                            secondary,
+                            "That the answer looks familiar.",
+                            "That no notation appears in the problem.",
+                        ],
+                    ),
+                },
+            ]
+            mastery_quiz = [
+                {
+                    "kind": "multiple_choice",
+                    "prompt": f"State the core idea of {concept_title}.",
+                    "expected_answer": primary,
+                    "choices": self._ensure_choices(primary, [primary, secondary, tertiary]),
+                },
+                {
+                    "kind": "multiple_choice",
+                    "prompt": f"How would you apply {concept_title} to a new example?",
+                    "expected_answer": secondary,
+                    "choices": self._ensure_choices(secondary, [secondary, primary, competency_goal]),
+                },
+                {
+                    "kind": "multiple_choice",
+                    "prompt": f"How does {concept_title} support the course competency?",
+                    "expected_answer": competency_goal,
+                    "choices": self._ensure_choices(competency_goal, [competency_goal, primary, tertiary]),
+                },
+            ]
+
         return {
             "learning_objectives": [
-                f"Explain the purpose of {concept_title} without reading from the source.",
-                f"Use the basic procedure or idea behind {concept_title} in a simple case.",
-                f"Connect {concept_title} to earlier course skills before moving to harder transfer.",
+                f"State what {concept_title} means and why it matters in this course.",
+                f"Recognize when {concept_title} applies while working a problem.",
+                f"Connect {concept_title} to the earlier skills it builds on.",
             ],
             "concepts": [
                 {
                     "title": concept_title,
                     "explanation": (
-                        f"{concept_title} is a course competency for this lesson. "
-                        f"The learning target is: {competency_goal} Source grounding: {primary}"
+                        f"{concept_title} — drawn directly from the source: {source_digest} "
+                        f"The aim of this section is to {competency_goal[0].lower() + competency_goal[1:] if competency_goal else 'master this idea'}"
                     ),
                 }
             ],
             "lesson_blocks": [
                 {
                     "kind": "teaching",
-                    "title": f"Big idea: {concept_title}",
+                    "title": f"What {concept_title} is about",
                     "body": (
-                        f"This lesson is about learning to use {concept_title}, not just recognizing words from the PDF. "
-                        f"Start from the course goal: {competency_goal} In practice, that means you should be able to name the idea, "
-                        "explain when it applies, and carry out a simple example without looking back at the source."
+                        f"This section covers {concept_title}. According to the source: {primary} {secondary} "
+                        f"In other words, the focus here is {competency_goal} "
+                        "A fuller, fully-taught version of this lesson is produced when the language model is available; "
+                        "what follows is grounded directly in the source text above."
                     ),
                 },
                 {
                     "kind": "definition",
-                    "title": "Core definition or rule",
+                    "title": "Key point from the source",
                     "body": (
-                        f"The source detail to anchor this lesson is: {secondary} "
-                        f"Rewrite that in your own words as a definition, rule, or decision you can use while solving."
+                        f"The central detail to hold onto is: {secondary} {tertiary} "
+                        "Use this as the working rule when you tackle problems in this section."
                     ),
                 },
                 {
                     "kind": "worked_example",
-                    "title": "How to use it",
+                    "title": "How the source develops it",
                     "body": (
-                        "Work from idea to action: first identify the quantity, expression, or situation the lesson is about; "
-                        "then choose the rule that fits; then check that the result still matches the meaning of the original problem."
+                        f"The source builds {concept_title} as follows: {tertiary} {quaternary} "
+                        "Trace each statement in order and notice how one point leads to the next; "
+                        "that progression is the method you will reuse on the practice problems."
                     ),
                 },
                 {
                     "kind": "common_mistake",
-                    "title": "Common mistake",
+                    "title": "Watch out for",
                     "body": (
-                        "A common failure is copying the surface procedure while missing the condition that made it legal. "
-                        f"For {concept_title}, always say why the step is allowed before trusting the answer."
+                        f"A frequent error with {concept_title} is treating it as a vocabulary word to memorize rather than "
+                        "a rule to apply. The source frames it as something you use while solving, so before you trust an "
+                        "answer, confirm the conditions described above actually hold for the problem in front of you."
                     ),
                 },
                 {
                     "kind": "self_explanation",
-                    "title": "Explain it back",
+                    "title": "Check your understanding",
                     "body": (
-                        f"Before moving on, explain {concept_title} in three sentences: what it is, when to use it, "
-                        "and how it connects to the previous lesson."
+                        f"Reflect on the specific source points above for {concept_title}: {primary} "
+                        "If any step in that reasoning is unclear, that is the part to re-read before attempting the checks below."
                     ),
                 },
             ],
             "worked_example": {
-                "title": f"Worked example: {concept_title}",
-                "prompt": f"Teach a simple use of {concept_title}.",
+                "title": f"Source-grounded summary: {concept_title}",
+                "prompt": f"What does the source say about {concept_title}, and how do you use it?",
                 "steps": [
-                    f"Name the target competency: {concept_title}.",
-                    f"State the source-grounded idea: {primary}",
-                    "Set up a small example that uses only this idea and earlier prerequisites.",
-                    "Carry out the step slowly and explain why each move is valid.",
-                    "Check the answer against the meaning of the problem, not just the symbols.",
+                    f"The source states: {primary}",
+                    f"It elaborates: {secondary}",
+                    f"And develops it further: {tertiary}",
+                    f"Goal for this section: {competency_goal}",
                 ],
             },
-            "checks": [
-                {"kind": "short_answer", "prompt": f"What problem does {concept_title} help you solve?", "expected_answer": competency_goal, "choices": []},
-                {"kind": "multiple_choice", "prompt": f"Which statement best describes the role of {concept_title}?", "expected_answer": competency_goal, "choices": [competency_goal, "It is only a page title and has no procedure.", "It is unrelated to the previous lesson."]},
-                {"kind": "self_explanation", "prompt": f"Explain {concept_title} in your own words and include one condition for using it.", "expected_answer": secondary, "choices": []},
-            ],
-            "mastery_quiz": [
-                {"kind": "recall", "prompt": f"State the core idea of {concept_title}.", "expected_answer": primary},
-                {"kind": "application", "prompt": f"Describe how you would apply {concept_title} to a new simple example.", "expected_answer": secondary},
-                {"kind": "explanation", "prompt": f"Explain how {concept_title} builds toward the course competency.", "expected_answer": competency_goal},
-            ],
+            "checks": checks,
+            "mastery_quiz": mastery_quiz,
         }
 
     def _clean_lesson_source_text(self, section: SectionLesson, evidence: str) -> str:
@@ -939,7 +1411,7 @@ PDF evidence:
         if ollama is None:
             return ""
         try:
-            result = ollama.chat(
+            result = self._ollama_chat(
                 model=self.model,
                 messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
             )
@@ -1103,6 +1575,8 @@ def build_course_summary(course: CourseDocument) -> dict[str, Any]:
         "course_id": course.course_id,
         "title": course.title,
         "status": course.status.value,
+        "archived": course.archived_at is not None,
+        "archived_at": course.archived_at,
         "competencies_count": len(course.competencies),
         "mastered_competencies": sum(1 for competency in course.competencies if competency.mastery.mastery_percent >= 80),
         "sections_count": len(sections),

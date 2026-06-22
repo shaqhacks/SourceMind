@@ -1,0 +1,6 @@
+Chapter 1: Foundations
+1.1 Integers
+Integers are positive and negative whole numbers used to count and order quantities.1.2 Fractions
+A fraction represents part of a whole and is added by finding a common denominator.Chapter 2: Equations
+2.1 Linear Equations
+A linear equation sets two expressions equal and is solved by isolating the variable.

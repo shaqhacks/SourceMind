@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -50,7 +52,7 @@ class CourseStore:
     def save(self, course: CourseDocument) -> Path:
         course.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
         path = self.course_path(course.course_id)
-        path.write_text(self.render(course), encoding="utf-8")
+        self._write_text_atomic(path, self.render(course))
         return path
 
     def save_new(self, course: CourseDocument) -> Path:
@@ -59,6 +61,24 @@ class CourseStore:
         with path.open("x", encoding="utf-8") as handle:
             handle.write(self.render(course))
         return path
+
+    def delete(self, course_id: str) -> None:
+        path = self.course_path(course_id)
+        if not path.exists():
+            raise FileNotFoundError(f"Course file does not exist: {path}")
+        path.unlink()
+
+    def _write_text_atomic(self, path: Path, content: str) -> None:
+        tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with tmp_path.open("w", encoding="utf-8") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            tmp_path.replace(path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
     def render(self, course: CourseDocument) -> str:
         frontmatter: dict[str, Any] = {
@@ -69,6 +89,8 @@ class CourseStore:
             "created_at": course.created_at,
             "updated_at": course.updated_at,
         }
+        if course.archived_at:
+            frontmatter["archived_at"] = course.archived_at
         frontmatter_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
         json_text = json.dumps(course.model_dump(mode="json"), indent=2, ensure_ascii=False)
 

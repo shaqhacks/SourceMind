@@ -1,0 +1,6 @@
+Chapter 1: Functions
+1.1 Defining Functions
+A function groups reusable code and is defined with the def keyword followed by parameters.1.2 Return Values
+Functions return values with the return statement so callers can use the computed result.Chapter 2: Scope
+2.1 Local And Global Scope
+Variables defined inside a function are local, while names defined at module level are global.

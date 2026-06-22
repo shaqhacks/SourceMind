@@ -7,8 +7,20 @@ import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from SourceMind.backend.services.course_engine import (
+    CourseEngine,
+    EmptyDecompositionError,
+    MalformedDecompositionError,
+)
+from SourceMind.backend.services.decomposition_eval import score_competency_tree
+from SourceMind.backend.services.ingest import (
+    EmptySourceError,
+    GarbageSourceError,
+    UnsupportedSourceError,
+    normalize_source,
+)
 from SourceMind.backend.services.llm_local import LocalLLMService
 from SourceMind.backend.services.md_store import MarkdownSubjectStore
 from SourceMind.backend.services.notebooklm_service import NotebookLMService
@@ -28,6 +40,49 @@ class UploadResponse(BaseModel):
     competencies_count: int
     quotes_count: int
     status: str
+
+
+class SourceIngestRequest(BaseModel):
+    source_type: str
+    # Cap the JSON body so a huge payload can't exhaust memory or block a worker
+    # in the regex-heavy sanitize/normalize path (the PDF path has its own cap).
+    content: str = Field(max_length=2_000_000)
+    title: str | None = Field(default=None, max_length=500)
+
+
+class SourceDecomposeResponse(BaseModel):
+    title: str
+    source_type: str
+    competencies_count: int
+    chapters_count: int
+    rubric_passed: bool
+    rubric_total: float
+
+
+@router.post("/source", response_model=SourceDecomposeResponse)
+def upload_source(request: SourceIngestRequest) -> SourceDecomposeResponse:
+    """Ingest a non-PDF source (pasted text, markdown, URL HTML, YouTube
+    transcript), normalize it to raw_text, decompose it into a competency tree,
+    and score the tree. Empty/garbage/unsupported sources are rejected up front
+    with named errors mapped to 4xx responses."""
+    title = request.title or "Untitled Source"
+    try:
+        raw_text = normalize_source(request.source_type, request.content)
+        tree = CourseEngine().decompose(raw_text, title=title)
+    except UnsupportedSourceError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except (EmptySourceError, GarbageSourceError, EmptyDecompositionError, MalformedDecompositionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    score = score_competency_tree(tree)
+    return SourceDecomposeResponse(
+        title=title,
+        source_type=request.source_type,
+        competencies_count=len(tree.competencies),
+        chapters_count=len(tree.chapters),
+        rubric_passed=score.passed,
+        rubric_total=score.total,
+    )
 
 
 @router.post("/pdf", response_model=UploadResponse)

@@ -1,0 +1,5 @@
+[
+  {"start": 0.0, "duration": 4.2, "text": "Today we talk about gradient descent"},
+  {"start": 4.2, "duration": 3.8, "text": "and how it minimizes a loss function"},
+  {"start": 8.0, "duration": 5.0, "text": "by stepping in the direction of the negative gradient"}
+]

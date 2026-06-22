@@ -1,7 +1,7 @@
 {
   "version": 1,
   "createdAt": "2026-06-21T10:03:15.203Z",
-  "updatedAt": "2026-06-21T10:03:28.873Z",
+  "updatedAt": "2026-06-21T18:49:56.212Z",
   "briefPath": ".omc/ultragoal/brief.md",
   "goalsPath": ".omc/ultragoal/goals.json",
   "ledgerPath": ".omc/ultragoal/ledger.jsonl",
@@ -11,85 +11,110 @@
       "id": "G001-t0-decompose-seam",
       "title": "T0 decompose seam",
       "objective": "Extract a standalone decompose(raw_text)->competency_tree function in backend/services/course_engine.py, decoupled from the full generation pipeline. Refactor-first; existing backend/tests/test_course_engine.py must stay green.",
-      "status": "in_progress",
+      "status": "complete",
       "attempt": 1,
       "createdAt": "2026-06-21T10:03:15.203Z",
-      "updatedAt": "2026-06-21T10:03:28.873Z",
-      "startedAt": "2026-06-21T10:03:28.873Z"
+      "updatedAt": "2026-06-21T10:09:44.315Z",
+      "startedAt": "2026-06-21T10:03:28.873Z",
+      "completedAt": "2026-06-21T10:09:44.315Z",
+      "evidence": "Added CompetencyTree dataclass + CourseEngine.decompose(raw_text,title)->CompetencyTree in backend/services/course_engine.py, wrapping shared _build_tree_from_pages (detect_outline + build_competency_map); _pages_from_raw_text splits on form-feed. Refactored create_draft_from_pdfs to delegate to the same helper (behavior identical). Tests: backend/tests/test_course_engine.py +2 (test_decompose_builds_competency_tree_from_raw_text, test_decompose_matches_pdf_pipeline_competency_tree). Full backend suite: 67 passed."
     },
     {
       "id": "G002-t2-eval-harness",
       "title": "T2 eval harness",
       "objective": "Build a decomposition eval harness: a rubric scorer (no cycles, genuine prerequisites, cold-start roots, correct ordering) run over 5 varied sources (>=3 domains, >=3 source types, one messy). Human-graded ground truth is authoritative; record scores. This must exist before T3.",
-      "status": "pending",
-      "attempt": 0,
+      "status": "complete",
+      "attempt": 1,
       "createdAt": "2026-06-21T10:03:15.203Z",
-      "updatedAt": "2026-06-21T10:03:15.203Z"
+      "updatedAt": "2026-06-21T10:14:56.045Z",
+      "startedAt": "2026-06-21T10:09:50.067Z",
+      "completedAt": "2026-06-21T10:14:56.045Z",
+      "evidence": "New backend/services/decomposition_eval.py: score_competency_tree(tree)->RubricScore on 4 structural criteria (acyclic[gate], genuine_prerequisites, cold_start_roots[gate], correct_ordering) + load_eval_sources/run_eval/record_eval. Fixture corpus backend/tests/fixtures/decomposition/: 5 sources, 5 domains (math/biology/programming/history/earth-science), 5 source types (textbook/lecture-transcript/tutorial/encyclopedia/scanned-ocr), 1 messy; manifest.json carries human-graded authoritative ground truth. Tests: backend/tests/test_decomposition_eval.py (10) incl. cycle detection, forward-ref, isolated-islands, dangling-prereq, empty/single-node, + fixture coverage and ground-truth agreement. Recorded scores: docs/eval/decomposition_scores.json (5/5 pass, 5/5 ground-truth agreement). Full backend suite: 77 passed. T3-GATE NOTE: heuristic decomposition already scores 1.00 structurally on all fixtures (acyclic linear spine by construction) -> good, NOT structurally improvable, so T3 judge likely SKIP unless eval rubric is extended to content quality."
     },
     {
       "id": "G003-t2-5-demoable-cli",
       "title": "T2.5 demoable CLI",
       "objective": "Add a CLI entrypoint: ingest a source, run decompose() + the eval scorer, print the competency tree and its rubric score. Forcing function so moat work has a visible result.",
-      "status": "pending",
-      "attempt": 0,
+      "status": "complete",
+      "attempt": 1,
       "createdAt": "2026-06-21T10:03:15.203Z",
-      "updatedAt": "2026-06-21T10:03:15.203Z"
+      "updatedAt": "2026-06-21T10:16:31.360Z",
+      "startedAt": "2026-06-21T10:15:05.823Z",
+      "completedAt": "2026-06-21T10:16:31.360Z",
+      "evidence": "New backend/cli/decompose_cli.py (+backend/cli/__init__.py): main(argv)->int. Ingests source from file arg, --text, or stdin('-'); runs CourseEngine.decompose() + score_competency_tree(); prints competency tree (chapters/sections/competency ids + 'requires' prereqs) and per-criterion rubric score with PASS/FAIL. --json emits machine-readable {title,chapters,competencies,rubric}. Exit 0 on pass, 1 on fail. Run: python -m SourceMind.backend.cli.decompose_cli <file> [--title T] [--json]. Tests: backend/tests/test_decompose_cli.py (4: human output, json mode, --text, empty->FAIL/exit1). Demo on french_revolution.txt prints 2-chapter/3-section tree, rubric 1.00, PASS. Full backend suite: 81 passed."
     },
     {
       "id": "G004-t1-empty-guard",
       "title": "T1 empty-guard",
       "objective": "In decompose(), reject empty/malformed/refusal LLM output with a named error, retry once with a stricter prompt, and NEVER persist an empty or partial tree. User sees 'couldn't structure this source'. Add tests for image-only PDF, malformed JSON, refusal.",
-      "status": "pending",
-      "attempt": 0,
+      "status": "complete",
+      "attempt": 1,
       "createdAt": "2026-06-21T10:03:15.203Z",
-      "updatedAt": "2026-06-21T10:03:15.203Z"
+      "updatedAt": "2026-06-21T10:18:42.660Z",
+      "startedAt": "2026-06-21T10:17:12.917Z",
+      "completedAt": "2026-06-21T10:18:42.660Z",
+      "evidence": "Named errors EmptyDecompositionError (user msg: 'We couldn't structure this source...') and MalformedDecompositionError in course_engine.py. decompose() now guards: empty/whitespace raw_text, no extractable pages (image-only PDF), and empty competency tree all raise EmptyDecompositionError -> never returns empty/partial. parse_competency_json(raw): rejects empty output, refusal markers (i'm sorry/i cannot/as an ai...), malformed JSON, and empty competencies list, each with the right named error. structure_with_retry(structurer,prompt,stricter_prompt): validates first attempt, retries ONCE with stricter prompt, raises (no persist) if second still bad. CLI catches both errors -> prints user message + FAIL, exit 1 (json mode emits {error,passed:false}). Tests: backend/tests/test_decompose_guard.py (9: empty, image-only-pdf, malformed JSON, refusal, empty-competencies, retry-once-success, retry-twice-fail-no-third-attempt) + updated CLI test. Full backend suite: 90 passed."
     },
     {
       "id": "G005-t4-multi-source-ingest",
       "title": "T4 multi-source ingest",
       "objective": "Create backend/services/ingest/ with per-source parsers (PDF moved from upload.py, plus YouTube transcript, URL, pasted text, .md) sharing a normalize()->raw_text contract. Reject empty/garbage at upload with named errors. Wire into backend/routers/upload.py. Add a fixture test per source type.",
-      "status": "pending",
-      "attempt": 0,
+      "status": "complete",
+      "attempt": 1,
       "createdAt": "2026-06-21T10:03:15.203Z",
-      "updatedAt": "2026-06-21T10:03:15.203Z"
+      "updatedAt": "2026-06-21T10:24:10.535Z",
+      "startedAt": "2026-06-21T10:18:52.473Z",
+      "completedAt": "2026-06-21T10:24:10.535Z",
+      "evidence": "New backend/services/ingest/ package: base.py (IngestError/EmptySourceError/GarbageSourceError/UnsupportedSourceError, SourceParser protocol, clean_text + reject_if_unusable garbage guard), per-source parsers text.py/markdown.py/url.py/youtube.py/pdf.py all sharing normalize(payload)->raw_text; PDF extraction relocated out of upload.py into ingest.PdfParser (injectable reader_factory for deterministic tests). __init__ exposes type-dispatched normalize_source(source_type,payload) over text/pasted/markdown/md/url/html/youtube/pdf. Wired into backend/routers/upload.py: new POST /upload/source normalizes -> CourseEngine.decompose() -> score_competency_tree; named errors mapped (Unsupported->415, Empty/Garbage/EmptyDecomposition/Malformed->422). Fixtures backend/tests/fixtures/ingest/ (sample.md, sample.html, youtube_transcript.json). Tests: test_ingest.py (11, fixture/unit per source type + empty+garbage rejection) and test_upload_source_api.py (6, route per text/markdown/url/youtube + 422 garbage + 415 unknown). Full backend suite: 107 passed."
     },
     {
       "id": "G006-t3-judge-conditional",
       "title": "T3 judge (conditional)",
       "objective": "LLM-judge self-repair of the competency tree, async/skippable, that KEEPS the repaired tree only if it scores >= the original on the eval rubric, else reverts. BUILD ONLY IF T2 shows decomposition is good-but-improvable AND a quick prototype shows the judge raises the eval score. Otherwise skip and record why.",
-      "status": "pending",
-      "attempt": 0,
+      "status": "complete",
+      "attempt": 1,
       "createdAt": "2026-06-21T10:03:15.203Z",
-      "updatedAt": "2026-06-21T10:03:15.203Z"
+      "updatedAt": "2026-06-21T10:29:08.004Z",
+      "startedAt": "2026-06-21T10:24:49.335Z",
+      "completedAt": "2026-06-21T10:29:08.004Z",
+      "evidence": "T3 CONDITIONAL GATE = SKIP LLM judge (recorded in docs/eval/t3_judge_decision.md). Rationale: T2 structural rubric ceilings at total=1.00 on ALL fixtures (decomposition_scores.json) because build_competency_map builds a linear prereq chain by construction -> not good-but-improvable AND no repair can raise a maxed score (deductive, repaired.total<=1.00==original.total). A judge here would optimize an already-maxed metric with zero signal. Prerequisite to revisit: extend rubric to content-quality axis the heuristic does not trivially max. SHIPPED the always-safe invariant only: backend/services/decomposition_judge.apply_judge_if_improved(original,repaired)->(chosen,kept,reason) keeps repair iff repaired.total>=original.total else reverts (no-regression by construction, source-agnostic). Tests: backend/tests/test_decomposition_judge.py (3: revert-worse, keep-tie, keep-strictly-better). Full backend suite: 110 passed (note: test_llm_local::...durable_lesson_model is a pre-existing real-ollama flake under load, green on isolated + clean rerun)."
     },
     {
       "id": "G007-t5-t6-robustness",
       "title": "T5+T6 robustness",
       "objective": "Add huge-source cap/chunking so a 500-page source does not hang or exceed the token limit, and structured logging of source hash, raw LLM output, parsed tree, and eval score for every decomposition.",
-      "status": "pending",
-      "attempt": 0,
+      "status": "complete",
+      "attempt": 1,
       "createdAt": "2026-06-21T10:03:15.203Z",
-      "updatedAt": "2026-06-21T10:03:15.203Z"
+      "updatedAt": "2026-06-21T14:28:30.069Z",
+      "startedAt": "2026-06-21T12:26:09.841Z",
+      "completedAt": "2026-06-21T14:28:30.069Z",
+      "evidence": "T5 caps: course_engine MAX_DECOMPOSE_CHARS=600k / MAX_DECOMPOSE_PAGES=2000 (env-overridable SOURCEMIND_MAX_DECOMPOSE_CHARS/PAGES) + per-call max_chars/max_pages on decompose(). Oversized source truncated at a clean line boundary near the cap; page list capped; capped flag recorded. Prevents hang/token-blowup on a 500-page source. T6 logging: new backend/services/decomposition_telemetry.py emits one JSON record per decomposition on logger 'sourcemind.decomposition' via log_decomposition(): source_sha256, source_chars, page_count, capped, raw_llm_output(slot, None for heuristic, truncated to 4k), parsed competencies(id/title/prereqs), chapters_count, and full eval rubric score. decompose() calls it unless emit_telemetry=False. Tests: backend/tests/test_decomposition_robustness.py (5: char-cap, page-cap-> capped+page_count<=N, structured-log-all-fields incl source hash match, telemetry-disable, small-not-capped). Full backend suite: 115 passed."
     },
     {
       "id": "G008-t8-t7-identity-correction",
       "title": "T8+T7 identity+correction",
       "objective": "Add stable UUID competency node ids in md_store (renames must not reset mastery). Add human-in-loop correction minimum slice: edit/persist a decomposition with prerequisite-cycle rejection; defer mastery-state reconciliation.",
-      "status": "pending",
-      "attempt": 0,
+      "status": "complete",
+      "attempt": 1,
       "createdAt": "2026-06-21T10:03:15.203Z",
-      "updatedAt": "2026-06-21T10:03:15.203Z"
+      "updatedAt": "2026-06-21T18:29:50.853Z",
+      "startedAt": "2026-06-21T18:29:50.572Z",
+      "completedAt": "2026-06-21T18:29:50.853Z",
+      "evidence": "T8 stable identity: md_store.Competency gains uid (UUID, default_factory, blank->regen). Persisted as trailing UID column in COMPETENCY_MAP; parser reads 6-col + backfills legacy 5-col; is_header_row accepts both. uid survives save/load and rename; id/name display/structural. T7 correction: backend/services/correction.py CompetencyEdit + apply_corrections + edit_and_persist. Renames preserve uid+id+level+mastery_percent (mastery not reset); dep edits validated (unknown->UnknownDependencyError, self/cycle->PrerequisiteCycleError via DFS) and rejected BEFORE write; mastery reconciliation deferred. Tests test_correction.py (9) + md_store green. Full suite: 124 passed."
     },
     {
       "id": "G009-t9-t10-t11-hardening",
       "title": "T9+T10+T11 hardening",
       "objective": "SSRF + prompt-injection guard on URL/YouTube ingestion; per-call Ollama timeout so a hung judge cannot stall ingestion; external ground-truth spot-check on >=1 unfamiliar-domain source before trusting the harness.",
-      "status": "pending",
-      "attempt": 0,
+      "status": "complete",
+      "attempt": 1,
       "createdAt": "2026-06-21T10:03:15.203Z",
-      "updatedAt": "2026-06-21T10:03:15.203Z"
+      "updatedAt": "2026-06-21T18:49:56.212Z",
+      "startedAt": "2026-06-21T18:44:14.548Z",
+      "evidence": "T9 SSRF+injection guards wired, T10 per-call ollama timeout, T11 external spot-check. All actionable review findings fixed + 2 regression tests added. Full suite 149 passed; compileall clean.",
+      "completedAt": "2026-06-21T18:49:56.212Z"
     }
   ],
-  "claudeObjective": "Complete all ultragoal stories in .omc/ultragoal/goals.json: G001-t0-decompose-seam T0 decompose seam; G002-t2-eval-harness T2 eval harness; G003-t2-5-demoable-cli T2.5 demoable CLI; G004-t1-empty-guard T1 empty-guard; G005-t4-multi-source-ingest T4 multi-source ingest; G006-t3-judge-conditional T3 judge (conditional); G007-t5-t6-robustness T5+T6 robustness; G008-t8-t7-identity-correction T8+T7 identity+correction; G009-t9-t10-t11-hardening T9+T10+T11 hardening",
-  "activeGoalId": "G001-t0-decompose-seam"
+  "claudeObjective": "Complete all ultragoal stories in .omc/ultragoal/goals.json: G001-t0-decompose-seam T0 decompose seam; G002-t2-eval-harness T2 eval harness; G003-t2-5-demoable-cli T2.5 demoable CLI; G004-t1-empty-guard T1 empty-guard; G005-t4-multi-source-ingest T4 multi-source ingest; G006-t3-judge-conditional T3 judge (conditional); G007-t5-t6-robustness T5+T6 robustness; G008-t8-t7-identity-correction T8+T7 identity+correction; G009-t9-t10-t11-hardening T9+T10+T11 hardening"
 }

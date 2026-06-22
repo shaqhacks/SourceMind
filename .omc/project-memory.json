@@ -9,8 +9,8 @@
     "runtime": null
   },
   "build": {
-    "buildCommand": null,
-    "testCommand": null,
+    "buildCommand": "cd /Users/shaquillejohnson/code/SourceMind/frontend && NEXT_TELEMETRY_DISABLED=1 rtk npm run build 2>&1 | tail -14",
+    "testCommand": "cd /Users/shaquillejohnson/code/SourceMind\nuv run --with pytest --with pydantic --with PyYAML --with pypdf --with python-frontmatter --with ollama --with fastapi --with httpx --with google-auth --with requests --with python-multipart pytest backend/tests/test_md_store.py backend/tests/test_hardening.py -q 2>&1 | tail -6",
     "lintCommand": null,
     "devCommand": null,
     "scripts": {}
@@ -85,6 +85,307 @@
       ]
     }
   },
-  "hotPaths": [],
+  "hotPaths": [
+    {
+      "path": "backend/services/course_engine.py",
+      "accessCount": 50,
+      "lastAccessed": 1782080782052,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/md_store.py",
+      "accessCount": 18,
+      "lastAccessed": 1782080830383,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/ingest/security.py",
+      "accessCount": 13,
+      "lastAccessed": 1782080620702,
+      "type": "file"
+    },
+    {
+      "path": "backend/routers/upload.py",
+      "accessCount": 11,
+      "lastAccessed": 1782076749229,
+      "type": "file"
+    },
+    {
+      "path": "frontend/app/courses/[id]/sections/[sid]/page.js",
+      "accessCount": 9,
+      "lastAccessed": 1782074409931,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/decomposition_eval.py",
+      "accessCount": 8,
+      "lastAccessed": 1782076753148,
+      "type": "file"
+    },
+    {
+      "path": "frontend/app/page.js",
+      "accessCount": 7,
+      "lastAccessed": 1782072405869,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/ingest/url.py",
+      "accessCount": 7,
+      "lastAccessed": 1782076682916,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/ingest/__init__.py",
+      "accessCount": 7,
+      "lastAccessed": 1782076926646,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_course_engine.py",
+      "accessCount": 6,
+      "lastAccessed": 1782067063226,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/ingest/youtube.py",
+      "accessCount": 6,
+      "lastAccessed": 1782076644612,
+      "type": "file"
+    },
+    {
+      "path": "backend/routers/courses.py",
+      "accessCount": 6,
+      "lastAccessed": 1782076672587,
+      "type": "file"
+    },
+    {
+      "path": "frontend/app/courses/[id]/page.js",
+      "accessCount": 6,
+      "lastAccessed": 1782076700816,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_hardening.py",
+      "accessCount": 5,
+      "lastAccessed": 1782067558508,
+      "type": "file"
+    },
+    {
+      "path": "backend/cli/decompose_cli.py",
+      "accessCount": 5,
+      "lastAccessed": 1782076671505,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/correction.py",
+      "accessCount": 5,
+      "lastAccessed": 1782076696532,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/ingest/base.py",
+      "accessCount": 5,
+      "lastAccessed": 1782076926538,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/decomposition_telemetry.py",
+      "accessCount": 5,
+      "lastAccessed": 1782076926599,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_upload_source_api.py",
+      "accessCount": 4,
+      "lastAccessed": 1782067565912,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_decompose_guard.py",
+      "accessCount": 4,
+      "lastAccessed": 1782067726816,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_correction.py",
+      "accessCount": 4,
+      "lastAccessed": 1782067734382,
+      "type": "file"
+    },
+    {
+      "path": "frontend/app/lib/api.js",
+      "accessCount": 4,
+      "lastAccessed": 1782072431534,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/course_models.py",
+      "accessCount": 4,
+      "lastAccessed": 1782072477972,
+      "type": "file"
+    },
+    {
+      "path": "frontend/app/layout.js",
+      "accessCount": 4,
+      "lastAccessed": 1782073305082,
+      "type": "file"
+    },
+    {
+      "path": "frontend/app/globals.css",
+      "accessCount": 4,
+      "lastAccessed": 1782073329785,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_decomposition_robustness.py",
+      "accessCount": 3,
+      "lastAccessed": 1782067077262,
+      "type": "file"
+    },
+    {
+      "path": "scripts/dev.sh",
+      "accessCount": 3,
+      "lastAccessed": 1782071285117,
+      "type": "file"
+    },
+    {
+      "path": "frontend/app/upload/page.js",
+      "accessCount": 3,
+      "lastAccessed": 1782072025009,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/ingest/pdf.py",
+      "accessCount": 3,
+      "lastAccessed": 1782076645018,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_md_store.py",
+      "accessCount": 3,
+      "lastAccessed": 1782080889026,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/ingest/text.py",
+      "accessCount": 2,
+      "lastAccessed": 1782067041950,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/ingest/markdown.py",
+      "accessCount": 2,
+      "lastAccessed": 1782067042237,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_decomposition_eval.py",
+      "accessCount": 2,
+      "lastAccessed": 1782067068156,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_decompose_cli.py",
+      "accessCount": 2,
+      "lastAccessed": 1782067069869,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_decomposition_judge.py",
+      "accessCount": 2,
+      "lastAccessed": 1782067073151,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_ingest.py",
+      "accessCount": 2,
+      "lastAccessed": 1782067077077,
+      "type": "file"
+    },
+    {
+      "path": "frontend/app/components/ui.js",
+      "accessCount": 2,
+      "lastAccessed": 1782072020129,
+      "type": "file"
+    },
+    {
+      "path": "frontend/app/reviews/page.js",
+      "accessCount": 2,
+      "lastAccessed": 1782072027001,
+      "type": "file"
+    },
+    {
+      "path": "backend/services/decomposition_judge.py",
+      "accessCount": 2,
+      "lastAccessed": 1782076704935,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/test_upload_api.py",
+      "accessCount": 1,
+      "lastAccessed": 1782037171906,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/fixtures/ingest/sample.md",
+      "accessCount": 1,
+      "lastAccessed": 1782037257628,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/fixtures/ingest/sample.html",
+      "accessCount": 1,
+      "lastAccessed": 1782037263333,
+      "type": "file"
+    },
+    {
+      "path": "backend/tests/fixtures/ingest/youtube_transcript.json",
+      "accessCount": 1,
+      "lastAccessed": 1782037268428,
+      "type": "file"
+    },
+    {
+      "path": "docs/eval/t3_judge_decision.md",
+      "accessCount": 1,
+      "lastAccessed": 1782037611567,
+      "type": "file"
+    },
+    {
+      "path": "docs/eval/t11_external_spotcheck.md",
+      "accessCount": 1,
+      "lastAccessed": 1782066962361,
+      "type": "file"
+    },
+    {
+      "path": "frontend/package.json",
+      "accessCount": 1,
+      "lastAccessed": 1782071173241,
+      "type": "file"
+    },
+    {
+      "path": "frontend/next.config.mjs",
+      "accessCount": 1,
+      "lastAccessed": 1782071181100,
+      "type": "file"
+    },
+    {
+      "path": "frontend/jsconfig.json",
+      "accessCount": 1,
+      "lastAccessed": 1782071191712,
+      "type": "file"
+    },
+    {
+      "path": "docs/sourcemind-first-draft.md",
+      "accessCount": 1,
+      "lastAccessed": 1782071431325,
+      "type": "file"
+    },
+    {
+      "path": "backend/main.py",
+      "accessCount": 1,
+      "lastAccessed": 1782071431574,
+      "type": "file"
+    }
+  ],
   "userDirectives": []
 }

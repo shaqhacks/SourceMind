@@ -169,3 +169,37 @@ Q1:
     assert loaded.competencies[0].mastery_percent == 85
     assert loaded.quotes[0].competency_id == "Q1"
     assert loaded.srs_data["Q1"].interval == 2
+
+
+def test_garbled_numeric_cells_do_not_make_subject_unloadable(tmp_path: Path) -> None:
+    # A hand-edited/garbled Level or Mastery cell must not crash load() (which
+    # would make the subject permanently unloadable). It degrades gracefully.
+    (tmp_path / "broken.md").write_text(
+        "---\ncurrent_level: 1\ntotal_mastery: 0\n---\n\n"
+        "## COMPETENCY_MAP:\n"
+        "| ID | Name | Level | Dependencies | Mastery % | UID |\n"
+        "| --- | --- | ---: | --- | ---: | --- |\n"
+        "| C1 | Integers | not-a-number | - | oops% | uid-1 |\n"
+        "\n## SRS_DATA:\n```yaml\nC1:\n  interval: 2\n",  # truncated (missing closing fence)
+        encoding="utf-8",
+    )
+
+    loaded = MarkdownSubjectStore(tmp_path).load("broken")
+
+    assert loaded.competencies[0].id == "C1"
+    assert loaded.competencies[0].level == 1  # defaulted
+    assert loaded.competencies[0].mastery_percent == 0  # defaulted
+    assert loaded.srs_data["C1"].interval == 2  # partial fence still parsed
+
+
+def test_uid_with_pipe_round_trips(tmp_path: Path) -> None:
+    store = MarkdownSubjectStore(tmp_path)
+    store.save(
+        SubjectDocument(
+            subject_id="piped_uid",
+            competencies=[Competency(id="C1", name="Integers", level=1, dependencies=[], mastery_percent=50, uid="a|b")],
+        )
+    )
+    loaded = store.load("piped_uid")
+    assert loaded.competencies[0].uid == "a|b"
+    assert loaded.competencies[0].mastery_percent == 50

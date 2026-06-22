@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -15,12 +16,20 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SUBJECT_DIR = PROJECT_ROOT / "data" / "subjects"
 
 
+def new_competency_uid() -> str:
+    """Stable, rename-proof identity for a competency node."""
+    return uuid.uuid4().hex
+
+
 class Competency(BaseModel):
     id: str
     name: str
     level: int
     dependencies: list[str] = Field(default_factory=list)
     mastery_percent: float = Field(ge=0, le=100)
+    # Stable UUID identity that survives renames so mastery is never reset.
+    # ``id``/``name`` are display/structural; ``uid`` is the durable key.
+    uid: str = Field(default_factory=new_competency_uid)
 
     @field_validator("id", "name")
     @classmethod
@@ -29,6 +38,12 @@ class Competency(BaseModel):
         if not value:
             raise ValueError("value cannot be empty")
         return value
+
+    @field_validator("uid")
+    @classmethod
+    def uid_default_if_blank(cls, value: str) -> str:
+        value = (value or "").strip()
+        return value or new_competency_uid()
 
 
 class Quote(BaseModel):
@@ -377,13 +392,15 @@ class MarkdownSubjectStore:
         for row in rows:
             if len(row) < 5:
                 raise ValueError(f"Invalid competency row: {row}")
+            uid = row[5].strip() if len(row) >= 6 and row[5].strip() and row[5].strip() != "-" else ""
             competencies.append(
                 Competency(
                     id=row[0],
                     name=row[1],
-                    level=int(row[2]),
+                    level=self._safe_int(row[2], 1),
                     dependencies=self._parse_dependency_cell(row[3]),
                     mastery_percent=self._parse_percent(row[4]),
+                    uid=uid or new_competency_uid(),
                 )
             )
         return competencies
@@ -399,7 +416,7 @@ class MarkdownSubjectStore:
                     text=row[0],
                     source_ref=row[1],
                     competency_id=row[2],
-                    level_id=int(row[3]),
+                    level_id=self._safe_int(row[3], 1),
                 )
             )
         return quotes
@@ -479,14 +496,14 @@ class MarkdownSubjectStore:
 
     def _render_competencies(self, competencies: list[Competency]) -> str:
         lines = [
-            "| ID | Name | Level | Dependencies | Mastery % |",
-            "| --- | --- | ---: | --- | ---: |",
+            "| ID | Name | Level | Dependencies | Mastery % | UID |",
+            "| --- | --- | ---: | --- | ---: | --- |",
         ]
         for competency in competencies:
             dependencies = ", ".join(competency.dependencies) if competency.dependencies else "-"
             lines.append(
-                f"| {competency.id} | {competency.name} | {competency.level} | "
-                f"{dependencies} | {competency.mastery_percent:g}% |"
+                f"| {competency.id} | {self._escape_table_cell(competency.name)} | {competency.level} | "
+                f"{self._escape_table_cell(dependencies)} | {competency.mastery_percent:g}% | {self._escape_table_cell(competency.uid)} |"
             )
         return "\n".join(lines)
 
@@ -518,7 +535,12 @@ class MarkdownSubjectStore:
         lines = text.splitlines()
         if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
             return "\n".join(lines[1:-1]).strip()
-        raise ValueError("Malformed fenced SRS_DATA block")
+        # Tolerate a missing/partial closing fence (truncated or hand-edited file)
+        # by best-effort stripping the opening fence, so one bad block does not
+        # make the whole subject permanently unloadable.
+        if lines and lines[0].startswith("```"):
+            return "\n".join(lines[1:]).strip()
+        return text.strip()
 
     def _normalize_heading(self, title: str) -> str:
         return title.strip().rstrip(":")
@@ -536,7 +558,18 @@ class MarkdownSubjectStore:
         return [item.strip() for item in value.split(",") if item.strip()]
 
     def _parse_percent(self, value: str) -> float:
-        return float(value.strip().rstrip("%"))
+        # Resilient to a hand-edited/garbled cell: default to 0 rather than
+        # crashing the entire subject load on one bad value.
+        try:
+            return float(value.strip().rstrip("%"))
+        except (ValueError, AttributeError):
+            return 0.0
+
+    def _safe_int(self, value: str, default: int) -> int:
+        try:
+            return int(str(value).strip())
+        except (ValueError, TypeError):
+            return default
 
     def _is_separator_row(self, cells: list[str]) -> bool:
         return all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells)
@@ -545,6 +578,7 @@ class MarkdownSubjectStore:
         lowered = tuple(cell.lower() for cell in cells)
         return lowered in {
             ("id", "name", "level", "dependencies", "mastery %"),
+            ("id", "name", "level", "dependencies", "mastery %", "uid"),
             ("verbatim text", "source page/ref", "competency id", "level id"),
         }
 

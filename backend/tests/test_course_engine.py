@@ -1,7 +1,9 @@
+import threading
+
 import pytest
 
 from SourceMind.backend.services import course_engine as course_engine_module
-from SourceMind.backend.services.course_engine import CourseEngine, ExtractedPage
+from SourceMind.backend.services.course_engine import CompetencyTree, CourseEngine, ExtractedPage
 from SourceMind.backend.services.course_models import Chapter, CourseDocument, CourseStatus, SectionLesson, SourceFile, SourceSpan
 from SourceMind.backend.services.course_store import CourseStore
 
@@ -21,6 +23,48 @@ def test_course_store_round_trip_markdown_json(tmp_path):
     assert loaded.course_id == "algebra"
     assert loaded.title == "Algebra"
     assert "COURSE_JSON" in store.course_path("algebra").read_text(encoding="utf-8")
+
+
+def test_course_store_save_keeps_existing_file_readable_until_atomic_replace(tmp_path):
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[SourceFile(id="SRC_1", filename="algebra.pdf", order=0)],
+        chapters=[],
+    )
+    store = CourseStore(tmp_path)
+    store.save(course)
+
+    started = threading.Event()
+    finish_replace = threading.Event()
+    original_write = store._write_text_atomic
+
+    def delayed_atomic_write(path, content):
+        tmp_path = path.with_name(f".{path.name}.pending")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            handle.write(content)
+        started.set()
+        assert finish_replace.wait(timeout=2), "timed out waiting to complete atomic replace"
+        tmp_path.replace(path)
+
+    store._write_text_atomic = delayed_atomic_write
+
+    updated_course = store.load("algebra")
+    updated_course.title = "Algebra II"
+
+    save_thread = threading.Thread(target=store.save, args=(updated_course,))
+    save_thread.start()
+    assert started.wait(timeout=2), "timed out waiting for delayed save to stage new content"
+
+    loaded_during_save = store.load("algebra")
+    assert loaded_during_save.title == "Algebra"
+
+    finish_replace.set()
+    save_thread.join(timeout=2)
+    assert not save_thread.is_alive(), "timed out waiting for save thread to finish"
+
+    store._write_text_atomic = original_write
+    assert store.load("algebra").title == "Algebra II"
 
 
 def test_detect_outline_preserves_chapter_and_section_order():
@@ -273,9 +317,101 @@ def test_generate_lessons_creates_workbook_items_from_source_spans(monkeypatch):
     assert section.worked_examples
     assert len(section.checks) == 3
     assert len(section.mastery_quiz) == 3
+    assert section.is_assessment_section is True
+    assert section.assessment_reason == "End-of-chapter knowledge check."
+    assert {check.kind for check in section.checks} == {"multiple_choice"}
+    assert {item.kind for item in section.mastery_quiz} == {"multiple_choice"}
+    assert all(check.choices and check.expected_answer in check.choices for check in section.checks)
+    assert all(item.choices and item.expected_answer in item.choices for item in section.mastery_quiz)
     assert course.competencies
     assert section.competency_ids == [course.competencies[0].id]
     assert course.competencies[0].lesson_ids == [section.id]
+
+
+def test_generate_lessons_only_adds_assessments_at_chapter_end(monkeypatch):
+    engine = CourseEngine(allow_deterministic_fallback=True)
+    monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[source],
+        chapters=engine.detect_outline(
+            "Algebra",
+            [source],
+            [
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=1,
+                    text="Chapter 1: Foundations\n1.1 Integers\nAn integer is a positive or negative whole number. Integers can be added by comparing signs.",
+                ),
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=2,
+                    text="1.2 Fractions\nA fraction represents part of a whole and can be compared using equivalent forms.",
+                ),
+            ],
+        ),
+    )
+
+    engine.generate_lessons(course)
+    first, second = course.chapters[0].sections
+
+    assert first.checks == []
+    assert first.mastery_quiz == []
+    assert first.is_assessment_section is False
+    assert len(second.checks) == 3
+    assert len(second.mastery_quiz) == 3
+    assert second.is_assessment_section is True
+    assert second.assessment_reason == "End-of-chapter knowledge check."
+    assert {check.kind for check in second.checks} == {"multiple_choice"}
+
+
+def test_generate_lessons_adds_long_chapter_checkpoint_assessments(monkeypatch):
+    engine = CourseEngine(allow_deterministic_fallback=True)
+    monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    sections = [
+        SectionLesson(
+            id=f"SEC_{index}",
+            chapter_id="CH_1",
+            number=f"1.{index}",
+            title=f"Topic {index}",
+            order=index - 1,
+            source_spans=[
+                SourceSpan(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_start=index,
+                    page_end=index,
+                    text=(
+                        f"1.{index} Topic {index}\n"
+                        f"Topic {index} explains a useful algebra rule with examples and conditions for applying it correctly."
+                    ),
+                )
+            ],
+        )
+        for index in range(1, 7)
+    ]
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[source],
+        chapters=[Chapter(id="CH_1", number="1", title="Long Chapter", order=0, sections=sections)],
+    )
+    course.competencies = engine.build_competency_map(course.chapters)
+
+    engine.generate_lessons(course)
+
+    assert course.chapters[0].sections[0].checks == []
+    assert course.chapters[0].sections[2].checks == []
+    assert len(course.chapters[0].sections[3].checks) == 3
+    assert len(course.chapters[0].sections[5].checks) == 3
+    assert course.chapters[0].sections[3].assessment_reason == "Long-chapter checkpoint."
+    assert course.chapters[0].sections[5].assessment_reason == "End-of-chapter knowledge check."
+    assert {item.kind for item in course.chapters[0].sections[3].mastery_quiz} == {"multiple_choice"}
 
 
 def test_generate_lessons_replaces_thin_ollama_lesson_blocks(monkeypatch):
@@ -585,3 +721,65 @@ def test_normalize_payload_replaces_invalid_llm_shapes():
     assert normalized["lesson_blocks"][0]["kind"] == "teaching"
     assert len(normalized["checks"]) == 3
     assert len(normalized["mastery_quiz"]) == 3
+    assert {item["kind"] for item in normalized["checks"]} == {"multiple_choice"}
+    assert {item["kind"] for item in normalized["mastery_quiz"]} == {"multiple_choice"}
+
+
+def test_decompose_builds_competency_tree_from_raw_text():
+    engine = CourseEngine()
+    raw_text = (
+        "Chapter 0: Pre-Algebra\n"
+        "0.1 Integers\n"
+        "Integers are positive and negative whole numbers."
+        "\f"
+        "0.2 Fractions\n"
+        "A fraction represents part of a whole."
+    )
+
+    tree = engine.decompose(raw_text, title="Algebra")
+
+    assert isinstance(tree, CompetencyTree)
+    assert tree.chapters[0].number == "0"
+    assert [section.number for section in tree.chapters[0].sections] == ["0.1", "0.2"]
+    assert len(tree.competencies) == 2
+    # Linear prerequisite chain: the second competency depends on the first.
+    assert tree.competencies[0].id in tree.competencies[1].prerequisite_ids
+    assert tree.competencies[0].prerequisite_ids == []
+
+
+def test_decompose_matches_pdf_pipeline_competency_tree():
+    """decompose(raw_text) must yield the same tree the PDF pipeline builds."""
+    engine = CourseEngine()
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    pages = [
+        ExtractedPage(
+            source_file_id="SRC_1",
+            source_name="algebra.pdf",
+            page_number=1,
+            text="Chapter 0: Pre-Algebra\n0.1 Integers\nIntegers are positive and negative whole numbers.",
+        ),
+        ExtractedPage(
+            source_file_id="SRC_1",
+            source_name="algebra.pdf",
+            page_number=2,
+            text="0.2 Fractions\nA fraction represents part of a whole.",
+        ),
+    ]
+    expected_chapters = engine.detect_outline("Algebra", [source], pages)
+    expected_competencies = engine.build_competency_map(expected_chapters)
+
+    raw_text = (
+        "Chapter 0: Pre-Algebra\n0.1 Integers\nIntegers are positive and negative whole numbers."
+        "\f"
+        "0.2 Fractions\nA fraction represents part of a whole."
+    )
+    tree = engine.decompose(raw_text, title="Algebra")
+
+    assert [c.number for c in tree.chapters] == [c.number for c in expected_chapters]
+    assert [s.number for c in tree.chapters for s in c.sections] == [
+        s.number for c in expected_chapters for s in c.sections
+    ]
+    assert [comp.id for comp in tree.competencies] == [comp.id for comp in expected_competencies]
+    assert [comp.prerequisite_ids for comp in tree.competencies] == [
+        comp.prerequisite_ids for comp in expected_competencies
+    ]

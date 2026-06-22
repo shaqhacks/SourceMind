@@ -102,9 +102,10 @@ class CheckItem(BaseModel):
 
 class QuizItem(BaseModel):
     id: str
-    kind: Literal["recall", "application", "explanation"]
+    kind: Literal["recall", "application", "explanation", "multiple_choice"]
     prompt: str
     expected_answer: str
+    choices: list[str] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
     concept_ids: list[str] = Field(default_factory=list)
 
@@ -132,6 +133,8 @@ class SectionLesson(BaseModel):
     worked_examples: list[WorkedExample] = Field(default_factory=list)
     checks: list[CheckItem] = Field(default_factory=list)
     mastery_quiz: list[QuizItem] = Field(default_factory=list)
+    is_assessment_section: bool = False
+    assessment_reason: str = ""
     prerequisites: list[str] = Field(default_factory=list)
     completed: bool = False
     status: CourseStatus = CourseStatus.outline_draft
@@ -171,6 +174,7 @@ class CourseDocument(BaseModel):
     generation: CourseGenerationProgress = Field(default_factory=CourseGenerationProgress)
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
+    archived_at: str | None = None
     notes: str = ""
 
     @field_validator("course_id", "title")

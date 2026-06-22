@@ -1,0 +1,65 @@
+{
+  "description": "Curated decomposition eval corpus. Ground truth is human-graded and authoritative.",
+  "sources": [
+    {
+      "id": "algebra",
+      "file": "algebra.txt",
+      "title": "Intro Algebra",
+      "domain": "mathematics",
+      "source_type": "textbook",
+      "messy": false,
+      "ground_truth": {
+        "passed": true,
+        "note": "Clean textbook outline; valid linear prerequisite spine with a cold-start root."
+      }
+    },
+    {
+      "id": "cell_biology",
+      "file": "cell_biology.txt",
+      "title": "Cell Biology",
+      "domain": "biology",
+      "source_type": "lecture-transcript",
+      "messy": false,
+      "ground_truth": {
+        "passed": true,
+        "note": "Lecture sections decompose into an ordered, acyclic competency chain."
+      }
+    },
+    {
+      "id": "python_functions",
+      "file": "python_functions.txt",
+      "title": "Python Functions",
+      "domain": "programming",
+      "source_type": "tutorial",
+      "messy": false,
+      "ground_truth": {
+        "passed": true,
+        "note": "Tutorial sections yield genuine prerequisites (functions before scope)."
+      }
+    },
+    {
+      "id": "french_revolution",
+      "file": "french_revolution.txt",
+      "title": "French Revolution",
+      "domain": "history",
+      "source_type": "encyclopedia",
+      "messy": false,
+      "ground_truth": {
+        "passed": true,
+        "note": "Encyclopedia outline produces a sound chronological prerequisite chain."
+      }
+    },
+    {
+      "id": "messy_scan",
+      "file": "messy_scan.txt",
+      "title": "Weather Notes",
+      "domain": "earth-science",
+      "source_type": "scanned-ocr",
+      "messy": true,
+      "ground_truth": {
+        "passed": true,
+        "note": "Garbled OCR with no headings; decomposer still yields a structurally valid (if shallow) spine. Content quality is low but the four STRUCTURAL criteria hold."
+      }
+    }
+  ]
+}

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from SourceMind.backend.services.course_engine import CourseEngine, CourseGenerationError, build_course_summary
 from SourceMind.backend.services.course_models import (
@@ -78,12 +78,35 @@ class DueReviewsResponse(BaseModel):
     upcoming_count: int
 
 
+class CourseNotificationItem(BaseModel):
+    id: str
+    kind: str
+    title: str
+    message: str
+    href: str
+    due: bool
+    urgency: str
+    course_id: str
+    section_id: str
+    next_review_at: str | None = None
+
+
+class CourseNotificationsResponse(BaseModel):
+    items: list[CourseNotificationItem]
+    unread_count: int
+
+
+class CourseDeleteResponse(BaseModel):
+    course_id: str
+    deleted: bool
+
+
 class OutlineUpdateRequest(BaseModel):
     chapters: list[Chapter]
 
 
 class ChatRequest(BaseModel):
-    question: str = Field(min_length=1)
+    question: str = Field(min_length=1, max_length=2000)
 
 
 class ChatResponse(BaseModel):
@@ -94,7 +117,7 @@ class ChatResponse(BaseModel):
 
 
 class CheckGradeRequest(BaseModel):
-    answer: str = ""
+    answer: str = Field(default="", max_length=4000)
     confidence: int = Field(default=4, ge=1, le=6)
 
 
@@ -107,6 +130,18 @@ class CheckGradeResponse(BaseModel):
 class QuizSubmitRequest(BaseModel):
     answers: dict[str, str] = Field(default_factory=dict)
     confidence: int = Field(default=4, ge=1, le=6)
+
+    @field_validator("answers")
+    @classmethod
+    def cap_answers(cls, value: dict[str, str]) -> dict[str, str]:
+        if len(value) > 20:
+            raise ValueError("Submit at most 20 answers at a time.")
+        for key, answer in value.items():
+            if len(key) > 200:
+                raise ValueError("Answer id is too long.")
+            if len(answer) > 4000:
+                raise ValueError("Answer is too long.")
+        return value
 
 
 @router.post("/uploads", response_model=CourseUploadResponse)
@@ -160,11 +195,13 @@ async def upload_course_pdfs(
 
 
 @router.get("", response_model=CourseListResponse)
-def list_courses() -> CourseListResponse:
+def list_courses(include_archived: bool = False) -> CourseListResponse:
     courses = []
     for course_id in course_store.list_course_ids():
         try:
             course = course_store.load(course_id)
+            if course.archived_at and not include_archived:
+                continue
             _ensure_course_plan(course)
             _enqueue_due_generation(course)
             courses.append(build_course_summary(course))
@@ -178,9 +215,27 @@ def list_due_reviews(include_upcoming: bool = False) -> DueReviewsResponse:
     items: list[dict[str, Any]] = []
     for course_id in course_store.list_course_ids():
         course = course_store.load(course_id)
+        if course.archived_at:
+            continue
         _ensure_course_plan(course)
         items.extend(course_engine.due_review_items(course, include_upcoming=include_upcoming))
     return _due_reviews_response(items)
+
+
+@router.get("/notifications", response_model=CourseNotificationsResponse)
+def list_course_notifications(include_upcoming: bool = True) -> CourseNotificationsResponse:
+    items: list[dict[str, Any]] = []
+    for course_id in course_store.list_course_ids():
+        course = course_store.load(course_id)
+        if course.archived_at:
+            continue
+        _ensure_course_plan(course)
+        items.extend(course_engine.due_review_items(course, include_upcoming=include_upcoming))
+    notifications = [_notification_from_due_item(item) for item in items]
+    return CourseNotificationsResponse(
+        items=notifications,
+        unread_count=sum(1 for item in notifications if item.due),
+    )
 
 
 @router.get("/{course_id}", response_model=CourseDocument)
@@ -219,6 +274,33 @@ def update_outline(course_id: str, request: OutlineUpdateRequest) -> CourseDocum
     _reset_course_generation(course)
     course_store.save(course)
     return course
+
+
+@router.post("/{course_id}/archive", response_model=CourseDocument)
+def archive_course(course_id: str) -> CourseDocument:
+    course = _load_course(course_id, reconcile_generation=False)
+    if course.archived_at is None:
+        course.archived_at = _now_iso()
+        course_store.save(course)
+    return course
+
+
+@router.post("/{course_id}/restore", response_model=CourseDocument)
+def restore_course(course_id: str) -> CourseDocument:
+    course = _load_course(course_id, reconcile_generation=False)
+    if course.archived_at is not None:
+        course.archived_at = None
+        course_store.save(course)
+    return course
+
+
+@router.delete("/{course_id}", response_model=CourseDeleteResponse)
+def delete_course(course_id: str) -> CourseDeleteResponse:
+    try:
+        course_store.delete(course_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return CourseDeleteResponse(course_id=course_id, deleted=True)
 
 
 @router.post("/{course_id}/generate", response_model=CourseDocument)
@@ -294,7 +376,10 @@ def grade_check(course_id: str, section_id: str, check_id: str, request: CheckGr
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    score, feedback = course_engine.grade_answer(check.expected_answer, request.answer, request.confidence)
+    if check.kind == "multiple_choice":
+        score, feedback = course_engine.grade_multiple_choice(check.expected_answer, request.answer)
+    else:
+        score, feedback = course_engine.grade_answer(check.expected_answer, request.answer, request.confidence)
     check.last_score = score
     check.completed = score >= 70
     for concept in section.concepts:
@@ -352,6 +437,24 @@ def _due_reviews_response(items: list[dict[str, Any]]) -> DueReviewsResponse:
         items=[ReviewDueItem.model_validate(item) for item in items],
         due_count=due_count,
         upcoming_count=max(0, len(items) - due_count),
+    )
+
+
+def _notification_from_due_item(item: dict[str, Any]) -> CourseNotificationItem:
+    due = bool(item.get("due"))
+    urgency = "due" if due else "upcoming"
+    section_label = f"{item.get('section_number', '')} {item.get('section_title', '')}".strip()
+    return CourseNotificationItem(
+        id=f"review:{item['course_id']}:{item['competency_id']}",
+        kind="review_reminder",
+        title="Review due" if due else "Review scheduled",
+        message=f"{item.get('reason') or 'Review this checkpoint.'} {section_label}".strip(),
+        href=f"/courses/{item['course_id']}/sections/{item['section_id']}",
+        due=due,
+        urgency=urgency,
+        course_id=item["course_id"],
+        section_id=item["section_id"],
+        next_review_at=item.get("next_review_at"),
     )
 
 

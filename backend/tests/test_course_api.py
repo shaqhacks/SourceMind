@@ -109,6 +109,39 @@ def test_course_upload_rejects_total_pdf_size_limit(tmp_path: Path, monkeypatch)
     assert "too large together" in response.json()["detail"]
 
 
+def test_course_archive_restore_and_delete_workflow(tmp_path: Path, monkeypatch) -> None:
+    store = CourseStore(tmp_path)
+    course = CourseDocument(course_id="algebra", title="Algebra")
+    store.save(course)
+    monkeypatch.setattr(courses_router, "course_store", store)
+    client = TestClient(api.app)
+
+    archive = client.post("/courses/algebra/archive")
+    assert archive.status_code == 200
+    assert archive.json()["archived_at"] is not None
+
+    active_list = client.get("/courses")
+    assert active_list.status_code == 200
+    assert active_list.json()["courses"] == []
+
+    archived_list = client.get("/courses?include_archived=true")
+    assert archived_list.status_code == 200
+    assert archived_list.json()["courses"][0]["course_id"] == "algebra"
+    assert archived_list.json()["courses"][0]["archived"] is True
+
+    restore = client.post("/courses/algebra/restore")
+    assert restore.status_code == 200
+    assert restore.json()["archived_at"] is None
+
+    delete = client.delete("/courses/algebra")
+    assert delete.status_code == 200
+    assert delete.json() == {"course_id": "algebra", "deleted": True}
+    assert not store.exists("algebra")
+
+    missing = client.delete("/courses/algebra")
+    assert missing.status_code == 404
+
+
 def test_course_generate_and_section_workflow(tmp_path: Path, monkeypatch) -> None:
     store = CourseStore(tmp_path)
     engine = CourseEngine(allow_deterministic_fallback=True)
@@ -165,6 +198,47 @@ def test_course_generate_and_section_workflow(tmp_path: Path, monkeypatch) -> No
     assert quiz.json()["score"] >= 70
 
 
+def test_multiple_choice_grading_requires_exact_choice(tmp_path: Path, monkeypatch) -> None:
+    store = CourseStore(tmp_path)
+    engine = CourseEngine(allow_deterministic_fallback=True)
+    monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[source],
+        chapters=engine.detect_outline(
+            "Algebra",
+            [source],
+            [
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=1,
+                    text="Chapter 1: Foundations\n1.1 Integers\nAn integer is a positive or negative whole number. Integers can be added by comparing signs.",
+                )
+            ],
+        ),
+    )
+    engine.generate_lessons(course)
+    store.save(course)
+    monkeypatch.setattr(courses_router, "course_store", store)
+    monkeypatch.setattr(courses_router, "course_engine", engine)
+    client = TestClient(api.app)
+    section = course.chapters[0].sections[0]
+    check = section.checks[0]
+    wrong = next(choice for choice in check.choices if choice != check.expected_answer)
+
+    response = client.post(
+        f"/courses/algebra/sections/{section.id}/checks/{check.id}/grade",
+        json={"answer": wrong, "confidence": 6},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["passed"] is False
+    assert response.json()["score"] == 0
+
+
 def test_due_reviews_endpoint_lists_scheduled_course_material(tmp_path: Path, monkeypatch) -> None:
     store = CourseStore(tmp_path)
     engine = CourseEngine(allow_deterministic_fallback=True)
@@ -208,6 +282,46 @@ def test_due_reviews_endpoint_lists_scheduled_course_material(tmp_path: Path, mo
     assert payload["due_count"] == 1
     assert payload["items"][0]["course_id"] == "algebra"
     assert payload["items"][0]["section_id"] == section_id
+
+
+def test_notifications_endpoint_surfaces_due_review_reminders(tmp_path: Path, monkeypatch) -> None:
+    store = CourseStore(tmp_path)
+    engine = CourseEngine(allow_deterministic_fallback=True)
+    monkeypatch.setattr(engine, "_generate_with_ollama", lambda *args, **kwargs: None)
+    source = SourceFile(id="SRC_1", filename="algebra.pdf", order=0)
+    course = CourseDocument(
+        course_id="algebra",
+        title="Algebra",
+        source_files=[source],
+        chapters=engine.detect_outline(
+            "Algebra",
+            [source],
+            [
+                ExtractedPage(
+                    source_file_id="SRC_1",
+                    source_name="algebra.pdf",
+                    page_number=1,
+                    text="Chapter 1: Foundations\n1.1 Integers\nAn integer is a positive or negative whole number. Integers can be added by comparing signs.",
+                )
+            ],
+        ),
+    )
+    engine.generate_lessons(course)
+    section = course.chapters[0].sections[0]
+    competency = course.competencies[0]
+    engine.record_mastery_review(competency.mastery, score=0, confidence=6)
+    store.save(course)
+    monkeypatch.setattr(courses_router, "course_store", store)
+    monkeypatch.setattr(courses_router, "course_engine", engine)
+    client = TestClient(api.app)
+
+    response = client.get("/courses/notifications")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["unread_count"] == 1
+    assert payload["items"][0]["kind"] == "review_reminder"
+    assert payload["items"][0]["href"] == f"/courses/algebra/sections/{section.id}"
 
 
 def test_due_reviews_endpoint_does_not_mask_broken_course_files(tmp_path: Path, monkeypatch) -> None:

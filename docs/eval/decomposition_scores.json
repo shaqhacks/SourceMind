@@ -1,0 +1,107 @@
+{
+  "source_count": 5,
+  "passed_count": 5,
+  "ground_truth_agreement": 5,
+  "results": [
+    {
+      "source_id": "algebra",
+      "domain": "mathematics",
+      "source_type": "textbook",
+      "messy": false,
+      "harness_score": {
+        "acyclic": 1.0,
+        "genuine_prerequisites": 1.0,
+        "cold_start_roots": 1.0,
+        "correct_ordering": 1.0,
+        "total": 1.0,
+        "passed": true,
+        "notes": []
+      },
+      "ground_truth": {
+        "passed": true,
+        "note": "Clean textbook outline; valid linear prerequisite spine with a cold-start root."
+      },
+      "agrees_with_ground_truth": true
+    },
+    {
+      "source_id": "cell_biology",
+      "domain": "biology",
+      "source_type": "lecture-transcript",
+      "messy": false,
+      "harness_score": {
+        "acyclic": 1.0,
+        "genuine_prerequisites": 1.0,
+        "cold_start_roots": 1.0,
+        "correct_ordering": 1.0,
+        "total": 1.0,
+        "passed": true,
+        "notes": []
+      },
+      "ground_truth": {
+        "passed": true,
+        "note": "Lecture sections decompose into an ordered, acyclic competency chain."
+      },
+      "agrees_with_ground_truth": true
+    },
+    {
+      "source_id": "python_functions",
+      "domain": "programming",
+      "source_type": "tutorial",
+      "messy": false,
+      "harness_score": {
+        "acyclic": 1.0,
+        "genuine_prerequisites": 1.0,
+        "cold_start_roots": 1.0,
+        "correct_ordering": 1.0,
+        "total": 1.0,
+        "passed": true,
+        "notes": []
+      },
+      "ground_truth": {
+        "passed": true,
+        "note": "Tutorial sections yield genuine prerequisites (functions before scope)."
+      },
+      "agrees_with_ground_truth": true
+    },
+    {
+      "source_id": "french_revolution",
+      "domain": "history",
+      "source_type": "encyclopedia",
+      "messy": false,
+      "harness_score": {
+        "acyclic": 1.0,
+        "genuine_prerequisites": 1.0,
+        "cold_start_roots": 1.0,
+        "correct_ordering": 1.0,
+        "total": 1.0,
+        "passed": true,
+        "notes": []
+      },
+      "ground_truth": {
+        "passed": true,
+        "note": "Encyclopedia outline produces a sound chronological prerequisite chain."
+      },
+      "agrees_with_ground_truth": true
+    },
+    {
+      "source_id": "messy_scan",
+      "domain": "earth-science",
+      "source_type": "scanned-ocr",
+      "messy": true,
+      "harness_score": {
+        "acyclic": 1.0,
+        "genuine_prerequisites": 1.0,
+        "cold_start_roots": 1.0,
+        "correct_ordering": 1.0,
+        "total": 1.0,
+        "passed": true,
+        "notes": []
+      },
+      "ground_truth": {
+        "passed": true,
+        "note": "Garbled OCR with no headings; decomposer still yields a structurally valid (if shallow) spine. Content quality is low but the four STRUCTURAL criteria hold."
+      },
+      "agrees_with_ground_truth": true
+    }
+  ]
+}
