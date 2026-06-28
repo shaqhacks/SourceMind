@@ -16,6 +16,9 @@ UV_DEPS=(
   --with python-multipart
   --with python-frontmatter
   --with ollama
+  --with sqlalchemy
+  --with anthropic
+  --with pymupdf
 )
 
 run_step() {
