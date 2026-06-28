@@ -59,7 +59,10 @@ def generate_chapter(
     max_tokens = max(max_tokens, 4096)  # always at least 4096
 
     body = provider.complete(prompt, max_tokens=max_tokens)
-    assert isinstance(body, str), "Chapter provider must return str (call without schema)"
+    if not isinstance(body, str):
+        raise TypeError(
+            f"provider.complete must return str without a schema, got {type(body).__name__}"
+        )
 
     return ChapterDraft(
         section_id=plan_item.section_id,

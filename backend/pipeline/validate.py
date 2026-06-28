@@ -274,9 +274,10 @@ def generate_validated(
 
         repair_prompt = _build_repair_prompt(draft, report)
         repaired_body = provider.complete(repair_prompt, max_tokens=_REPAIR_MAX_TOKENS)
-        assert isinstance(repaired_body, str), (
-            "Repair provider call must return str (called without schema)"
-        )
+        if not isinstance(repaired_body, str):
+            raise TypeError(
+                f"provider.complete must return str without a schema, got {type(repaired_body).__name__}"
+            )
 
         draft = ChapterDraft(
             section_id=plan_item.section_id,

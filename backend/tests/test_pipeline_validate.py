@@ -376,3 +376,100 @@ def test_generate_validated_repair_loop():
     assert gen_calls == 2
     # Exactly 2 grounding calls (1 per internal validate round).
     assert grounding_calls == 2
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — quiz item with empty explain fails
+# ---------------------------------------------------------------------------
+
+
+def test_quiz_item_empty_explain_fails():
+    """ChapterDraft with a quiz item whose explain is empty → Report has a 'quiz' issue."""
+    # Build a draft manually so we can inject a quiz item with explain="".
+    quiz_with_empty_explain = [
+        {
+            "q": "What is the primary purpose of this concept?",
+            "options": ["Option A", "Option B", "Option C", "Option D"],
+            "answer": 0,
+            "explain": "",  # empty — should trigger quiz issue
+        }
+    ]
+    draft = ChapterDraft(
+        section_id="ch01-test",
+        title="Test Section",
+        body_md=GOOD_CHAPTER_MD,
+        quiz=quiz_with_empty_explain,
+        cards=parse_cards(GOOD_CHAPTER_MD),
+        word_count=count_words(GOOD_CHAPTER_MD),
+    )
+    plan = _plan_item(importance="supporting", target_words=0)
+    provider = _grounded_provider()
+
+    report = validate(draft, plan, "source text", provider, had_figures=False)
+
+    assert report.ok is False
+    codes = {i.code for i in report.issues}
+    assert "quiz" in codes
+
+
+# ---------------------------------------------------------------------------
+# Test 8 — non-core section with zero cards passes
+# ---------------------------------------------------------------------------
+
+
+def test_non_core_zero_cards_passes():
+    """Non-core section with empty cards + all other checks satisfied → report.ok is True."""
+    draft = ChapterDraft(
+        section_id="ch01-test",
+        title="Test Section",
+        body_md=GOOD_CHAPTER_MD,
+        quiz=parse_quiz(GOOD_CHAPTER_MD),
+        cards=[],  # empty — but importance is "supporting", so no cards check
+        word_count=count_words(GOOD_CHAPTER_MD),
+    )
+    plan = _plan_item(importance="supporting", target_words=0)
+    provider = _grounded_provider()
+
+    report = validate(draft, plan, "source text", provider, had_figures=False)
+
+    codes = {i.code for i in report.issues}
+    assert "cards" not in codes
+    assert report.ok is True
+
+
+# ---------------------------------------------------------------------------
+# Test 9 — generate_validated returns non-ok draft after max_rounds exhaustion
+# ---------------------------------------------------------------------------
+
+
+def test_generate_validated_returns_non_ok_after_exhaustion():
+    """All provider responses are bad; generate_validated returns without raising,
+    and a follow-up validate on the result is NOT ok."""
+    provider = FakeProvider(
+        # Both initial generation and repair return a chapter with 0 worked examples.
+        markdown_responses=[BAD_CHAPTER_MD_NO_EXAMPLES, BAD_CHAPTER_MD_NO_EXAMPLES],
+        grounding_response={"grounded": True, "unsupported": []},
+    )
+    plan = _plan_item(importance="supporting", target_words=0)
+
+    final_draft = generate_validated(
+        plan,
+        source_text="The source text for this section.",
+        image_urls=[],
+        provider=provider,
+        had_figures=False,
+        max_rounds=2,
+    )
+
+    # Must return a ChapterDraft without raising.
+    assert isinstance(final_draft, ChapterDraft)
+
+    # A follow-up validate on the returned draft must NOT be ok.
+    final_report = validate(
+        final_draft,
+        plan,
+        "The source text for this section.",
+        provider,
+        had_figures=False,
+    )
+    assert final_report.ok is False
