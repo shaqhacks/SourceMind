@@ -1,5 +1,13 @@
 import os
+import pytest
 from SourceMind.backend.db import base
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_engine_cache():
+    """Dispose all cached engines after each test to prevent ResourceWarning."""
+    yield
+    base.reset_engine_cache()
 
 
 def test_init_db_creates_sqlite(tmp_path, monkeypatch):
@@ -18,9 +26,6 @@ def test_get_session_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("SOURCEMIND_DB_URL", f"sqlite:///{tmp_path / 't.db'}")
     # Clear any cached engine for this URL so the test starts fresh.
     base._engine_cache.pop(base.db_url(), None)
-
-    eng = base.make_engine()
-    base.init_db(eng)
 
     # First session: create a throwaway table and insert a sentinel value.
     with base.get_session() as s:

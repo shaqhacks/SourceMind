@@ -39,22 +39,28 @@ def make_engine(url: str | None = None) -> Engine:
     return create_engine(resolved_url, **kwargs)
 
 
-# Module-level engine and session factory, constructed from the current env.
-# Kept for application convenience — do NOT rely on these inside get_session().
-engine = make_engine()
-SessionLocal: sessionmaker[Session] = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-
 # Per-URL engine + sessionmaker cache.  Populated lazily by _session_factory_for_url().
 # Tests that monkeypatch SOURCEMIND_DB_URL can pop their URL from this dict to
 # ensure a clean engine is created for their tmp-path database.
 _engine_cache: dict[str, tuple[Engine, sessionmaker[Session]]] = {}
 
 
+def reset_engine_cache() -> None:
+    """Dispose every cached engine and clear the cache.
+
+    Call this in test teardown to ensure no open database connections linger
+    across tests (prevents ResourceWarning: unclosed database).
+    """
+    for eng, _ in _engine_cache.values():
+        eng.dispose()
+    _engine_cache.clear()
+
+
 def _session_factory_for_url(url: str) -> sessionmaker[Session]:
     """Return a cached sessionmaker for *url*, creating one on first access."""
     if url not in _engine_cache:
         eng = make_engine(url)
-        factory: sessionmaker[Session] = sessionmaker(bind=eng, autocommit=False, autoflush=False)
+        factory: sessionmaker[Session] = sessionmaker(eng, autocommit=False, autoflush=False)
         _engine_cache[url] = (eng, factory)
     return _engine_cache[url][1]
 
@@ -70,7 +76,7 @@ def get_session(engine: Engine | None = None):
     automatically receive sessions connected to the patched database.
     """
     if engine is not None:
-        factory: sessionmaker[Session] = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+        factory: sessionmaker[Session] = sessionmaker(engine, autocommit=False, autoflush=False)
     else:
         factory = _session_factory_for_url(db_url())
     session: Session = factory()
