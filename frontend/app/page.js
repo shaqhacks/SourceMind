@@ -10,6 +10,7 @@ function GenerationProgress({ course }) {
   if (!prog) return null;
   const completed = prog.completed ?? 0;
   const total = prog.total ?? 0;
+  const failed = prog.failed ?? 0;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
   return (
     <div style={{ marginTop: 6 }}>
@@ -32,7 +33,7 @@ function GenerationProgress({ course }) {
         />
       </div>
       <p className="muted" style={{ margin: "3px 0 0", fontSize: 12 }}>
-        {completed}/{total} chapters generated
+        {completed}/{total} chapters generated{failed > 0 ? ` · ${failed} failed` : ""}
       </p>
     </div>
   );

@@ -27,7 +27,7 @@ function ReviewsInner() {
   useEffect(() => {
     library
       .listCourses()
-      .then((list) => setCourses(list || []))
+      .then((data) => setCourses(Array.isArray(data) ? data : (data?.courses || [])))
       .catch((err) => setError(err.message))
       .finally(() => setLoadingCourses(false));
   }, []);

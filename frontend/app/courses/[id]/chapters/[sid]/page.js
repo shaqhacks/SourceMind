@@ -212,7 +212,17 @@ export default function ChapterPage() {
       setChapter(ch);
       setCompleted(!!ch.completed);
       if (courseData?.chapters) {
-        setSiblings(findSiblings(courseData.chapters, sid));
+        const planItems = courseData.plan || [];
+        const orderMap = {};
+        planItems.forEach((item) => {
+          if (item.section_id != null) orderMap[item.section_id] = item.order ?? Infinity;
+        });
+        const sorted = [...courseData.chapters].sort((a, b) => {
+          const oa = orderMap[a.section_id] ?? Infinity;
+          const ob = orderMap[b.section_id] ?? Infinity;
+          return oa - ob;
+        });
+        setSiblings(findSiblings(sorted, sid));
       }
     } catch (err) {
       setError(err.message || "Failed to load chapter.");

@@ -76,8 +76,8 @@ function GenerationProgress({ course, chapters }) {
       </div>
       {chapters && chapters.length > 0 && (
         <div style={{ fontSize: 13 }}>
-          {chapters.map((ch) => (
-            <div key={ch.id || ch.chapter_id || ch.title} className="row" style={{ padding: "3px 0" }}>
+          {chapters.map((ch, i) => (
+            <div key={ch.section_id || i} className="row" style={{ padding: "3px 0" }}>
               <span className="muted">{ch.title}</span>
               <Badge tone={ch.status === "ready" ? "ok" : ch.status === "failed" ? "bad" : "muted"}>
                 {ch.status || "pending"}
@@ -153,10 +153,10 @@ function LibraryUploadFlow() {
           const data = await library.getCourse(courseId);
           setCourseData(data);
 
-          const status = data.course?.status;
-          if (status === "ready" || status === "failed") {
+          const s = data.course?.generation_status || data.course?.status;
+          if (s === "ready" || s === "failed") {
             stopPolling();
-            setStage(status);
+            setStage(s);
           }
         } catch (pollErr) {
           // Don't stop on transient poll errors
@@ -222,7 +222,7 @@ function LibraryUploadFlow() {
           </div>
 
           {planItems && planItems.length > 0 ? (
-            planItems.map((item, i) => <PlanItem key={item.id || i} item={item} />)
+            planItems.map((item, i) => <PlanItem key={item.section_id || i} item={item} />)
           ) : (
             <pre className="muted" style={{ fontSize: 12, overflow: "auto" }}>
               {JSON.stringify(plan, null, 2)}

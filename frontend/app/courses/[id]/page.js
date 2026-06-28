@@ -194,7 +194,17 @@ export default function CoursePage() {
     );
   }
 
-  const { course = {}, chapters = [] } = data;
+  const { course = {}, plan: planItems = [], chapters: rawChapters = [] } = data;
+  // Sort chapters by plan order defensively (backend sorts too, but be robust)
+  const orderMap = {};
+  (planItems || []).forEach((item) => {
+    if (item.section_id != null) orderMap[item.section_id] = item.order ?? Infinity;
+  });
+  const chapters = [...rawChapters].sort((a, b) => {
+    const oa = orderMap[a.section_id] ?? Infinity;
+    const ob = orderMap[b.section_id] ?? Infinity;
+    return oa - ob;
+  });
 
   const completedCount = chapters.filter((c) => c.completed).length;
   const readyCount = chapters.filter((c) => c.status === "ready").length;
