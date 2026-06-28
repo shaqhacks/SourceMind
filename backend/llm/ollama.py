@@ -22,13 +22,16 @@ class OllamaProvider:
         schema: dict | None = None,
         max_tokens: int = 4096,
     ) -> str | dict:
-        resp = _ollama_chat(
+        kwargs = dict(
             model=self.model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
-            format="json" if schema else None,
+            options={"num_predict": max_tokens},
         )
+        if schema:
+            kwargs["format"] = "json"
+        resp = _ollama_chat(**kwargs)
         text = resp["message"]["content"]
         return json.loads(text) if schema else text

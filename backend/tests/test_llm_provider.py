@@ -12,8 +12,6 @@ import pytest
 def test_factory_selects_ollama(monkeypatch):
     monkeypatch.setenv("SOURCEMIND_LLM_PROVIDER", "ollama")
     from SourceMind.backend.llm import provider
-    import importlib
-    importlib.reload(provider)  # pick up new env
     p = provider.get_provider()
     assert p.__class__.__name__ == "OllamaProvider"
 
@@ -21,8 +19,6 @@ def test_factory_selects_ollama(monkeypatch):
 def test_factory_defaults_to_claude(monkeypatch):
     monkeypatch.delenv("SOURCEMIND_LLM_PROVIDER", raising=False)
     from SourceMind.backend.llm import provider
-    import importlib
-    importlib.reload(provider)
     p = provider.get_provider()
     assert p.__class__.__name__ == "ClaudeProvider"
 
@@ -136,3 +132,26 @@ def test_ollama_complete_schema(monkeypatch):
     result = p.complete("give me a name", schema=schema)
     assert result == expected
     assert isinstance(result, dict)
+
+
+def test_ollama_complete_passes_max_tokens(monkeypatch):
+    import importlib
+    from SourceMind.backend.llm import ollama as ollama_mod
+    importlib.reload(ollama_mod)
+
+    captured = {}
+
+    def fake_chat(**kwargs):
+        captured.update(kwargs)
+        return {"message": {"content": "ok"}}
+
+    monkeypatch.setattr(ollama_mod, "_ollama_chat", fake_chat)
+
+    p = ollama_mod.OllamaProvider(model="llama3.1")
+    p.complete("hi", max_tokens=123)
+    assert captured.get("options") == {"num_predict": 123}
+
+
+def test_default_claude_model_reexported():
+    from SourceMind.backend.llm import DEFAULT_CLAUDE_MODEL
+    assert DEFAULT_CLAUDE_MODEL == "claude-sonnet-4-6"
