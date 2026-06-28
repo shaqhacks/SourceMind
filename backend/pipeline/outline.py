@@ -77,15 +77,31 @@ def detect_outline(pages: list[ExtractedPage], provider: LLMProvider) -> list[Se
 
     raw_sections: list[dict] = result.get("sections", [])  # type: ignore[union-attr]
 
-    cap = _max_sections()
-    raw_sections = raw_sections[:cap]
+    sections: list[Section] = []
+    for index, s in enumerate(raw_sections):
+        # A section with no title is useless — skip it rather than crash.
+        title = s.get("title")
+        if not title:
+            continue
 
-    return [
-        Section(
-            section_id=s["section_id"],
-            title=s["title"],
-            page_start=s["page_start"],
-            page_end=s["page_end"],
-        )
-        for s in raw_sections
-    ]
+        section_id = s.get("section_id") or f"s{index}"
+
+        try:
+            page_start = int(s["page_start"])
+        except (KeyError, TypeError, ValueError):
+            page_start = 0
+
+        try:
+            page_end = int(s["page_end"])
+        except (KeyError, TypeError, ValueError):
+            page_end = page_start
+
+        sections.append(Section(
+            section_id=section_id,
+            title=title,
+            page_start=page_start,
+            page_end=page_end,
+        ))
+
+    cap = _max_sections()
+    return sections[:cap]

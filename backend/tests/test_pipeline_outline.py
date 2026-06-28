@@ -74,7 +74,7 @@ def test_detect_outline_passes_schema_to_provider():
 
 
 def test_detect_outline_prompt_contains_page_text():
-    """The prompt sent to the provider must include page text and page numbers."""
+    """The prompt sent to the provider must include page text and page-number markers."""
     provider = FakeProvider(FIXED_SECTIONS)
     detect_outline(FAKE_PAGES, provider)
 
@@ -82,6 +82,10 @@ def test_detect_outline_prompt_contains_page_text():
     assert "Intro text" in prompt
     assert "Methods text" in prompt
     assert "Conclusion text" in prompt
+    # Page-number markers must be present so stripping them is caught early.
+    assert "--- Page 0 ---" in prompt
+    assert "--- Page 1 ---" in prompt
+    assert "--- Page 2 ---" in prompt
 
 
 def test_detect_outline_section_cap_truncates(monkeypatch):
@@ -118,3 +122,31 @@ def test_section_is_dataclass():
     assert dataclasses.is_dataclass(Section)
     fields = {f.name for f in dataclasses.fields(Section)}
     assert fields == {"section_id", "title", "page_start", "page_end"}
+
+
+def test_detect_outline_skips_malformed_sections():
+    """Malformed section dicts are handled gracefully: no crash, title-less entries dropped,
+    entries missing page_end are kept with a defaulted int page_end."""
+    malformed_sections = [
+        # Valid entry — kept as-is.
+        {"section_id": "s1", "title": "Introduction", "page_start": 0, "page_end": 2},
+        # Missing page_end — kept; page_end defaults to page_start.
+        {"section_id": "s2", "title": "Methods", "page_start": 3},
+        # Missing title — must be skipped entirely.
+        {"section_id": "s3", "page_start": 5, "page_end": 6},
+    ]
+    provider = FakeProvider(malformed_sections)
+
+    # Must not raise.
+    sections = detect_outline(FAKE_PAGES, provider)
+
+    # Title-less entry is skipped → only 2 sections returned.
+    assert len(sections) == 2
+
+    # Valid entry is unchanged.
+    assert sections[0] == Section(section_id="s1", title="Introduction", page_start=0, page_end=2)
+
+    # Missing page_end entry is kept; page_end defaults to page_start (3).
+    assert sections[1].title == "Methods"
+    assert isinstance(sections[1].page_end, int)
+    assert sections[1].page_end == sections[1].page_start
