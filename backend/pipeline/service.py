@@ -8,8 +8,9 @@ Public API (imported by the Task 11 API layer):
     regenerate_section(course_id, section_id, provider, assets_dir) -> None
 
 Helper functions (also importable for unit testing):
+    course_assets_dir(course_id) -> Path
     get_source_text(pages, page_start, page_end) -> str
-    get_image_urls(assets, page_start, page_end) -> list[str]
+    get_image_urls(assets, page_start, page_end, course_id) -> list[str]
 """
 from __future__ import annotations
 
@@ -30,13 +31,20 @@ from SourceMind.backend.pipeline.validate import generate_validated
 # ---------------------------------------------------------------------------
 
 
-def _default_assets_dir(course_id: str) -> Path:
-    """Return the default assets directory for a course.
+def course_assets_dir(course_id: str) -> Path:
+    """Return the assets directory for a course (canonical, public API).
 
     Reads SOURCEMIND_ASSETS_DIR env var as the base; falls back to "data".
+    Both the ingest pipeline and the HTTP asset-serving endpoint use this
+    single source of truth.
     """
     base_dir = os.environ.get("SOURCEMIND_ASSETS_DIR", "data")
     return Path(base_dir) / course_id / "assets"
+
+
+def _default_assets_dir(course_id: str) -> Path:
+    """Backward-compat alias for course_assets_dir."""
+    return course_assets_dir(course_id)
 
 
 def _pages_file(assets_dir: Path) -> Path:
@@ -83,8 +91,15 @@ def get_image_urls(
     assets: list,
     page_start: int,
     page_end: int,
+    course_id: str = "",
 ) -> list[str]:
-    """Return asset paths for assets whose source_page falls within [page_start, page_end].
+    """Return HTTP asset URLs for assets whose source_page falls within [page_start, page_end].
+
+    Each URL has the form ``/library/courses/{course_id}/assets/{relpath}`` where
+    *relpath* is the asset file's path relative to ``course_assets_dir(course_id)``.
+    If the path cannot be made relative (e.g. it lives outside the assets dir),
+    the basename is used as the relpath.  When *course_id* is empty the raw
+    filesystem path is returned unchanged (legacy / test behaviour).
 
     Accepts both mapping-style inputs (plain dicts with ``"path"`` / ``"source_page"``
     keys, as produced by ``generate_course``'s asset_records list) and attribute-style
@@ -94,8 +109,17 @@ def get_image_urls(
     def _get(a, key: str):
         return a[key] if isinstance(a, dict) else getattr(a, key)
 
+    def _to_url(path_str: str) -> str:
+        if not course_id:
+            return path_str
+        try:
+            relpath = Path(path_str).relative_to(course_assets_dir(course_id)).as_posix()
+        except ValueError:
+            relpath = Path(path_str).name
+        return f"/library/courses/{course_id}/assets/{relpath}"
+
     return [
-        _get(a, "path")
+        _to_url(_get(a, "path"))
         for a in assets
         if _get(a, "source_page") is not None
         and page_start <= _get(a, "source_page") <= page_end
@@ -250,7 +274,7 @@ def _generate_one_section(
 
     page_start, page_end = source_pages[0], source_pages[1]
     source_text = get_source_text(pages, page_start, page_end)
-    image_urls = get_image_urls(asset_records, page_start, page_end)
+    image_urls = get_image_urls(asset_records, page_start, page_end, course_id=course_id)
     had_figures = len(image_urls) > 0
 
     plan_dc = PlanItemDC(

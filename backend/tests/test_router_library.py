@@ -373,3 +373,70 @@ def test_upload_uniqueness_suffix(client: TestClient, tmp_path: Path) -> None:
     assert id1 != id2
     assert id1 == "algebra_basics"
     assert id2.startswith("algebra_basics_")
+
+
+# ─── Asset serving ────────────────────────────────────────────────────────────
+
+
+def test_asset_endpoint_serves_file(client: TestClient, tmp_path: Path) -> None:
+    """GET /library/courses/{id}/assets/{relpath} returns 200 and the file bytes."""
+    course_id = _upload(client, tmp_path)
+
+    from SourceMind.backend.pipeline.service import course_assets_dir
+
+    assets_dir = course_assets_dir(course_id)
+    src_dir = assets_dir / "src0"
+    src_dir.mkdir(parents=True, exist_ok=True)
+    img = src_dir / "test_image.png"
+    img.write_bytes(b"\x89PNG_FAKE_BYTES")
+
+    resp = client.get(f"/library/courses/{course_id}/assets/src0/test_image.png")
+    assert resp.status_code == 200
+    assert resp.content == b"\x89PNG_FAKE_BYTES"
+
+
+def test_asset_endpoint_404_missing_file(client: TestClient, tmp_path: Path) -> None:
+    """GET /library/courses/{id}/assets/{relpath} returns 404 when the file is absent."""
+    course_id = _upload(client, tmp_path)
+    resp = client.get(f"/library/courses/{course_id}/assets/nonexistent.png")
+    assert resp.status_code == 404
+
+
+def test_asset_endpoint_403_traversal(tmp_path: Path) -> None:
+    """Path traversal (../../) in the asset_path parameter is rejected with 403.
+
+    TestClient (httpx-backed) normalises '..' in URL paths before the request
+    reaches the router, so this test calls the route function directly to supply
+    the raw traversal string — the same string an adversarial HTTP client would
+    deliver to the ASGI scope.
+    """
+    import pytest
+    from fastapi import HTTPException
+
+    from SourceMind.backend.db import base, models
+    from SourceMind.backend.pipeline.service import course_assets_dir
+    from SourceMind.backend.routers.library import get_course_asset
+
+    course_id = "traversal_guard_test"
+    with base.get_session() as session:
+        session.add(
+            models.Course(
+                id=course_id,
+                title="Guard Test",
+                status="ready",
+                generation_status="idle",
+            )
+        )
+
+    assets_dir = course_assets_dir(course_id)
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_course_asset(course_id, "../../etc/passwd")
+    assert exc_info.value.status_code == 403
+
+
+def test_asset_endpoint_404_unknown_course(client: TestClient) -> None:
+    """GET /library/courses/unknown/assets/img.png returns 404."""
+    resp = client.get("/library/courses/nonexistent_xyz/assets/image.png")
+    assert resp.status_code == 404

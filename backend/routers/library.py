@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from SourceMind.backend.db import base, models
@@ -390,6 +390,33 @@ def grade_review(course_id: str, body: GradeBody) -> dict:
             "due_at": row.due_at,
             "reps": row.reps,
         }
+
+
+# ─── Asset serving ────────────────────────────────────────────────────────────
+
+
+@router.get("/courses/{course_id}/assets/{asset_path:path}")
+def get_course_asset(course_id: str, asset_path: str) -> FileResponse:
+    """Serve an extracted PDF asset image for a course.
+
+    Path-traversal guard: resolves both the base assets directory and the
+    requested target to their canonical absolute paths and rejects (403) any
+    request whose target falls outside the assets directory.
+    """
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is None:
+            raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
+
+    base_dir = service.course_assets_dir(course_id).resolve()
+    target = (base_dir / asset_path).resolve()
+
+    if not target.is_relative_to(base_dir):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    return FileResponse(target)
 
 
 # ─── Anki export ──────────────────────────────────────────────────────────────

@@ -323,17 +323,22 @@ def test_source_text_helper():
 
 
 def test_image_urls_helper():
-    # Attribute-style (ORM objects / SimpleNamespace)
+    """get_image_urls returns HTTP URL strings when course_id is supplied."""
+    prefix = "/library/courses/algebra/assets/"
+
+    # Attribute-style (ORM objects / SimpleNamespace) — paths not under the
+    # real assets dir, so the basename fallback is used as the relpath.
     assets = [
         SimpleNamespace(path="img0.png", source_page=0),
         SimpleNamespace(path="img1.png", source_page=1),
         SimpleNamespace(path="img2.png", source_page=2),
         SimpleNamespace(path="img3.png", source_page=3),
     ]
-    result = get_image_urls(assets, 1, 2)
+    result = get_image_urls(assets, 1, 2, course_id="algebra")
     assert len(result) == 2
-    assert "img1.png" in result
-    assert "img2.png" in result
+    assert all(r.startswith(prefix) for r in result)
+    assert any(r.endswith("img1.png") for r in result)
+    assert any(r.endswith("img2.png") for r in result)
 
     # Dict-style (mirrors the plain-dict asset_records used in generate_course)
     dict_assets = [
@@ -342,10 +347,32 @@ def test_image_urls_helper():
         {"path": "img2.png", "source_page": 2},
         {"path": "img3.png", "source_page": 3},
     ]
-    dict_result = get_image_urls(dict_assets, 1, 2)
+    dict_result = get_image_urls(dict_assets, 1, 2, course_id="algebra")
     assert len(dict_result) == 2
-    assert "img1.png" in dict_result
-    assert "img2.png" in dict_result
+    assert all(r.startswith(prefix) for r in dict_result)
+    assert any(r.endswith("img1.png") for r in dict_result)
+    assert any(r.endswith("img2.png") for r in dict_result)
+
+
+def test_get_image_urls_http_url_format(tmp_path, db_url):
+    """get_image_urls returns /library/courses/{id}/assets/{relpath} for real asset paths."""
+    from SourceMind.backend.pipeline.service import course_assets_dir
+
+    course_id = "url_format_test"
+    assets_dir = course_assets_dir(course_id)
+    src_dir = assets_dir / "src0"
+    src_dir.mkdir(parents=True, exist_ok=True)
+
+    real_file = src_dir / "page0_img1.png"
+    real_file.write_bytes(b"PNG")
+
+    assets = [SimpleNamespace(path=str(real_file), source_page=0)]
+    result = get_image_urls(assets, 0, 0, course_id=course_id)
+
+    assert len(result) == 1
+    url = result[0]
+    assert url.startswith(f"/library/courses/{course_id}/assets/"), url
+    assert url.endswith("src0/page0_img1.png"), url
 
 
 def test_generate_course_isolates_section_failure(tmp_path, db_url, monkeypatch):
