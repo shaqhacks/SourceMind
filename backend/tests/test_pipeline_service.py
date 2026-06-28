@@ -504,3 +504,62 @@ def test_regenerate_section_marks_failed_on_error(tmp_path, db_url, monkeypatch)
 
         course = session.get(models.Course, "algebra")
         assert course.generation_last_error, "generation_last_error should be set"
+
+
+# ---------------------------------------------------------------------------
+# SRS seed tests (RED → GREEN after Fix 1 in service.py)
+# ---------------------------------------------------------------------------
+
+def test_generate_course_seeds_review_states(tmp_path, db_url):
+    """After generate_course, ReviewState rows exist for all cards and are immediately due."""
+    from SourceMind.backend.services import review
+
+    stub = StubProvider()
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+    approve_plan("algebra")
+    generate_course("algebra", provider=stub)
+
+    with base.get_session() as session:
+        chapters = (
+            session.query(models.Chapter).filter_by(course_id="algebra").all()
+        )
+        total_cards = sum(len(ch.cards or []) for ch in chapters)
+        assert total_cards > 0, "Expected at least one card after generation"
+
+        due = review.due_cards(session, "algebra")
+        assert len(due) == total_cards, (
+            f"Expected {total_cards} due ReviewState rows, got {len(due)}"
+        )
+
+        # Spot-check: first chapter's cards have correct (section_id, card_index)
+        chapter = chapters[0]
+        section_rows = [r for r in due if r.section_id == chapter.section_id]
+        assert len(section_rows) == len(chapter.cards or [])
+        indices = {r.card_index for r in section_rows}
+        assert indices == set(range(len(chapter.cards or [])))
+
+
+def test_regenerate_section_does_not_duplicate_review_states(tmp_path, db_url):
+    """Regenerating a section replaces (not duplicates) its ReviewState rows."""
+    stub = StubProvider()
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+    approve_plan("algebra")
+    generate_course("algebra", provider=stub)
+
+    with base.get_session() as session:
+        count_before = (
+            session.query(models.ReviewState).filter_by(course_id="algebra").count()
+        )
+    assert count_before > 0
+
+    regenerate_section("algebra", "s1", provider=stub)
+
+    with base.get_session() as session:
+        count_after = (
+            session.query(models.ReviewState).filter_by(course_id="algebra").count()
+        )
+    assert count_after == count_before, (
+        f"Regeneration duplicated ReviewState rows: before={count_before}, after={count_after}"
+    )

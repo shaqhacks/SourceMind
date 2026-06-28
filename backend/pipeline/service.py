@@ -307,6 +307,22 @@ def _generate_one_section(
             chap.word_count = draft.word_count
             chap.status = "ready"
 
+        # Seed ReviewState rows so the SRS queue is immediately populated.
+        # Delete first for idempotency (e.g. regeneration won't duplicate rows).
+        session.query(models.ReviewState).filter_by(
+            course_id=course_id, section_id=section_id
+        ).delete()
+        for i, _card in enumerate(draft.cards):
+            session.add(models.ReviewState(
+                course_id=course_id,
+                section_id=section_id,
+                card_index=i,
+                ease=2.5,
+                interval=0,
+                due_at="",
+                reps=0,
+            ))
+
 
 def generate_course(
     course_id: str,

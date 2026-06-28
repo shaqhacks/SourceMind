@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -80,7 +81,10 @@ async def upload_pdfs(
         dest.write_bytes(await upload.read())
         pdf_paths.append(dest)
 
-    service.ingest_pdfs(course_id, title, pdf_paths, provider=provider)
+    try:
+        service.ingest_pdfs(course_id, title, pdf_paths, provider=provider)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
     return {"course_id": course_id}
 
 
@@ -261,6 +265,12 @@ def get_chapter(course_id: str, section_id: str) -> dict:
         if chapter is None:
             raise HTTPException(status_code=404, detail=f"Chapter {section_id!r} not found")
 
+        progress = (
+            session.query(models.ProgressState)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+
         return {
             "section_id": chapter.section_id,
             "title": chapter.title,
@@ -273,6 +283,7 @@ def get_chapter(course_id: str, section_id: str) -> dict:
             "cards": chapter.cards,
             "word_count": chapter.word_count,
             "status": chapter.status,
+            "completed": bool(progress and progress.completed),
         }
 
 

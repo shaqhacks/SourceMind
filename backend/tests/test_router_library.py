@@ -556,3 +556,31 @@ def test_chapter_completed_reflects_progress(client: TestClient) -> None:
     by_sid = {ch["section_id"]: ch for ch in chapters}
     assert by_sid["s1"]["completed"] is True, "s1 should be marked completed"
     assert by_sid["s2"]["completed"] is False, "s2 should not be marked completed"
+
+
+def test_get_chapter_returns_completed_field(client: TestClient, tmp_path: Path) -> None:
+    """GET .../chapters/{sid} includes completed; reflects ProgressState after marking."""
+    course_id = _upload(client, tmp_path)
+    client.post(f"/library/courses/{course_id}/plan/approve")
+    client.post(f"/library/courses/{course_id}/generate")
+
+    resp = client.get(f"/library/courses/{course_id}")
+    section_id = resp.json()["plan"][0]["section_id"]
+
+    # Before marking: completed must be present and False
+    resp = client.get(f"/library/courses/{course_id}/chapters/{section_id}")
+    assert resp.status_code == 200
+    chapter = resp.json()
+    assert "completed" in chapter, "get_chapter response must include 'completed'"
+    assert chapter["completed"] is False, "Expected completed=False before marking"
+
+    # Mark complete via progress endpoint
+    client.post(
+        f"/library/courses/{course_id}/chapters/{section_id}/progress",
+        json={"completed": True},
+    )
+
+    # After marking: completed must be True
+    resp = client.get(f"/library/courses/{course_id}/chapters/{section_id}")
+    assert resp.status_code == 200
+    assert resp.json()["completed"] is True, "Expected completed=True after marking"
