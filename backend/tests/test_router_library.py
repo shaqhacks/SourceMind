@@ -440,3 +440,119 @@ def test_asset_endpoint_404_unknown_course(client: TestClient) -> None:
     """GET /library/courses/unknown/assets/img.png returns 404."""
     resp = client.get("/library/courses/nonexistent_xyz/assets/image.png")
     assert resp.status_code == 404
+
+
+# ─── Plan ordering + completed flag ──────────────────────────────────────────
+
+
+def test_courses_chapters_in_plan_order(client: TestClient) -> None:
+    """Chapters returned by GET /library/courses/{id} follow plan order, not DB insert order."""
+    course_id = "order_test_course"
+    with base.get_session() as session:
+        session.add(
+            models.Course(
+                id=course_id,
+                title="Order Test",
+                status="ready",
+                generation_status="idle",
+            )
+        )
+        # Chapters inserted in DB order: "a" first, then "b".
+        session.add(
+            models.Chapter(
+                course_id=course_id,
+                section_id="a",
+                title="Section A",
+                status="ready",
+                importance="core",
+            )
+        )
+        session.add(
+            models.Chapter(
+                course_id=course_id,
+                section_id="b",
+                title="Section B",
+                status="ready",
+                importance="supplemental",
+            )
+        )
+        # Plan assigns "b" order=0 and "a" order=1 — the reverse of DB order.
+        session.add(
+            models.PlanItem(
+                course_id=course_id, section_id="b", title="Section B", order=0
+            )
+        )
+        session.add(
+            models.PlanItem(
+                course_id=course_id, section_id="a", title="Section A", order=1
+            )
+        )
+
+    resp = client.get(f"/library/courses/{course_id}")
+    assert resp.status_code == 200
+    chapters = resp.json()["chapters"]
+    assert len(chapters) == 2
+    assert chapters[0]["section_id"] == "b", (
+        f"Expected 'b' first (plan order=0), got {chapters[0]['section_id']!r}"
+    )
+    assert chapters[1]["section_id"] == "a", (
+        f"Expected 'a' second (plan order=1), got {chapters[1]['section_id']!r}"
+    )
+
+
+def test_chapter_completed_reflects_progress(client: TestClient) -> None:
+    """completed flag per chapter reflects ProgressState; unmarked chapters return False."""
+    course_id = "progress_flag_test"
+    with base.get_session() as session:
+        session.add(
+            models.Course(
+                id=course_id,
+                title="Progress Flag Test",
+                status="ready",
+                generation_status="idle",
+            )
+        )
+        session.add(
+            models.PlanItem(
+                course_id=course_id, section_id="s1", title="Section 1", order=0
+            )
+        )
+        session.add(
+            models.PlanItem(
+                course_id=course_id, section_id="s2", title="Section 2", order=1
+            )
+        )
+        session.add(
+            models.Chapter(
+                course_id=course_id,
+                section_id="s1",
+                title="Section 1",
+                status="ready",
+                importance="core",
+            )
+        )
+        session.add(
+            models.Chapter(
+                course_id=course_id,
+                section_id="s2",
+                title="Section 2",
+                status="ready",
+                importance="core",
+            )
+        )
+
+    # Mark s1 complete via the progress endpoint.
+    resp = client.post(
+        f"/library/courses/{course_id}/chapters/s1/progress",
+        json={"completed": True},
+    )
+    assert resp.status_code == 200
+
+    resp = client.get(f"/library/courses/{course_id}")
+    assert resp.status_code == 200
+    chapters = resp.json()["chapters"]
+    assert len(chapters) == 2
+
+    by_sid = {ch["section_id"]: ch for ch in chapters}
+    assert by_sid["s1"]["completed"] is True, "s1 should be marked completed"
+    assert by_sid["s2"]["completed"] is False, "s2 should not be marked completed"

@@ -120,6 +120,31 @@ def get_course(course_id: str) -> dict:
         )
         chapters = session.query(models.Chapter).filter_by(course_id=course_id).all()
 
+        # Build {section_id: order} map from plan items for stable sort.
+        order_map: dict[str, int] = {
+            p.section_id: (p.order if p.order is not None else 0)
+            for p in plan
+            if p.section_id is not None
+        }
+
+        # Build {section_id: completed} map from ProgressState rows.
+        progress_rows = (
+            session.query(models.ProgressState)
+            .filter_by(course_id=course_id)
+            .all()
+        )
+        completed_map: dict[str, bool] = {
+            row.section_id: bool(row.completed)
+            for row in progress_rows
+            if row.section_id is not None
+        }
+
+        # Sort chapters by plan order; chapters absent from plan go last (stable).
+        sorted_chapters = sorted(
+            chapters,
+            key=lambda ch: order_map.get(ch.section_id, float("inf")),
+        )
+
         return {
             "course": {
                 "id": course.id,
@@ -147,8 +172,9 @@ def get_course(course_id: str) -> dict:
                     "title": ch.title,
                     "status": ch.status,
                     "importance": ch.importance,
+                    "completed": completed_map.get(ch.section_id, False),
                 }
-                for ch in chapters
+                for ch in sorted_chapters
             ],
         }
 
