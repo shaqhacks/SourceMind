@@ -2,41 +2,148 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { api } from "../../lib/api";
-import { Badge, ErrorBanner, Panel, ProgressBar, Spinner, StatusBadge } from "../../components/ui";
+import { useParams } from "next/navigation";
+import { library } from "../../lib/api";
+import { Badge, ErrorBanner, ProgressBar, Spinner, StatusBadge } from "../../components/ui";
 
-const ACTIVE_GEN = new Set(["queued", "running", "retry_scheduled"]);
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-// Per-section generation state for the outline indicator.
-function sectionState(section) {
-  if (section.status === "ready") return { tone: "ok", label: "ready" };
-  if (section.status === "needs_review") return { tone: "warn", label: "review" };
-  if (section.status === "generating") return { tone: "warn", label: "generating" };
-  return { tone: "muted", label: "pending" };
+const ACTIVE_GEN = new Set(["queued", "running", "retry_scheduled", "generating"]);
+
+const IMPORTANCE_TONE = {
+  core: "ok",
+  essential: "ok",
+  important: "info",
+  supplemental: "muted",
+  optional: "muted",
+  advanced: "warn",
+};
+
+function importanceTone(imp) {
+  if (!imp) return "muted";
+  return IMPORTANCE_TONE[String(imp).toLowerCase()] || "muted";
 }
+
+function statusTone(status) {
+  if (!status) return "muted";
+  if (status === "ready") return "ok";
+  if (status === "generating") return "warn";
+  if (status === "failed") return "bad";
+  return "muted";
+}
+
+// ---------------------------------------------------------------------------
+// Chapter row
+// ---------------------------------------------------------------------------
+
+function ChapterRow({ chapter, courseId, index }) {
+  const sid = chapter.section_id;
+  const isReady = chapter.status === "ready";
+
+  return (
+    <li
+      style={{
+        borderTop: "1px solid var(--border)",
+        padding: "0",
+      }}
+    >
+      <Link
+        href={`/courses/${encodeURIComponent(courseId)}/chapters/${encodeURIComponent(sid)}`}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          padding: "14px 16px",
+          textDecoration: "none",
+          color: "var(--text)",
+          borderRadius: 0,
+          transition: "background 0.12s",
+        }}
+        className="toc-row"
+      >
+        {/* Chapter number */}
+        <span
+          style={{
+            flexShrink: 0,
+            width: 28,
+            height: 28,
+            border: "1px solid var(--border)",
+            borderRadius: "50%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 12,
+            fontWeight: 700,
+            color: "var(--muted)",
+            background: "#0e1422",
+          }}
+        >
+          {index + 1}
+        </span>
+
+        {/* Title + meta */}
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span
+            style={{
+              display: "block",
+              fontWeight: isReady ? 500 : 400,
+              fontSize: 15,
+              color: isReady ? "var(--text)" : "var(--muted)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {chapter.title || sid}
+          </span>
+        </span>
+
+        {/* Badges */}
+        <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {chapter.importance && (
+            <Badge tone={importanceTone(chapter.importance)}>
+              {chapter.importance}
+            </Badge>
+          )}
+          {chapter.completed && (
+            <Badge tone="ok" dot>
+              done
+            </Badge>
+          )}
+          {!isReady && chapter.status && (
+            <Badge tone={statusTone(chapter.status)} dot>
+              {chapter.status.replace(/_/g, " ")}
+            </Badge>
+          )}
+          <span className="muted" style={{ fontSize: 13, marginLeft: 2 }}>→</span>
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Course TOC page
+// ---------------------------------------------------------------------------
 
 export default function CoursePage() {
   const params = useParams();
-  const router = useRouter();
   const id = decodeURIComponent(params.id);
 
-  const [course, setCourse] = useState(null);
+  const [data, setData] = useState(null);   // { course, plan, chapters }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState(null);
-  const [generating, setGenerating] = useState(false);
-  const [courseActionBusy, setCourseActionBusy] = useState(false);
   const pollRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
-      const doc = await api.getCourse(id);
-      setCourse(doc);
-      return doc;
+      const result = await library.getCourse(id);
+      setData(result);
+      return result;
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Failed to load course.");
       return null;
     } finally {
       setLoading(false);
@@ -48,237 +155,205 @@ export default function CoursePage() {
     return () => pollRef.current && clearInterval(pollRef.current);
   }, [load]);
 
-  // Poll while generation is in flight.
+  // Poll while generation is in flight
   useEffect(() => {
-    const status = course && course.generation && course.generation.status;
-    if (ACTIVE_GEN.has(status)) {
+    const genStatus = data?.course?.generation_status || data?.course?.status;
+    if (ACTIVE_GEN.has(genStatus)) {
       if (!pollRef.current) {
         pollRef.current = setInterval(async () => {
-          const doc = await load();
-          const s = doc && doc.generation && doc.generation.status;
+          const result = await load();
+          const s = result?.course?.generation_status || result?.course?.status;
           if (!ACTIVE_GEN.has(s) && pollRef.current) {
             clearInterval(pollRef.current);
             pollRef.current = null;
           }
-        }, 2500);
+        }, 3000);
       }
     } else if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
-  }, [course, load]);
+  }, [data, load]);
 
-  function editChapter(ci, field, value) {
-    setCourse((prev) => {
-      const next = structuredClone(prev);
-      next.chapters[ci][field] = value;
-      return next;
-    });
-  }
-  function editSection(ci, si, field, value) {
-    setCourse((prev) => {
-      const next = structuredClone(prev);
-      next.chapters[ci].sections[si][field] = value;
-      return next;
-    });
+  // ── Loading / error ─────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <main>
+        <Link href="/" className="muted" style={{ fontSize: 14 }}>← Library</Link>
+        <Spinner label="Loading course…" />
+      </main>
+    );
   }
 
-  async function saveOutline() {
-    setSaving(true);
-    setError(null);
-    try {
-      const updated = await api.putOutline(id, course.chapters);
-      setCourse(updated);
-      setSavedAt(new Date().toLocaleTimeString());
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
+  if (error || !data) {
+    return (
+      <main>
+        <Link href="/" className="muted" style={{ fontSize: 14 }}>← Library</Link>
+        <ErrorBanner error={error || "Course not found."} />
+      </main>
+    );
   }
 
-  async function generate() {
-    setGenerating(true);
-    setError(null);
-    try {
-      const updated = await api.generateCourse(id);
-      setCourse(updated);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setGenerating(false);
-    }
-  }
+  const { course = {}, chapters = [] } = data;
 
-  async function regenerate(sid) {
-    setError(null);
-    try {
-      setCourse(await api.regenerateSection(id, sid));
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  async function archiveToggle() {
-    setCourseActionBusy(true);
-    setError(null);
-    try {
-      const updated = course.archived_at ? await api.restoreCourse(id) : await api.archiveCourse(id);
-      setCourse(updated);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setCourseActionBusy(false);
-    }
-  }
-
-  async function deleteCourse() {
-    if (!window.confirm(`Delete "${course.title || id}" permanently?`)) return;
-    setCourseActionBusy(true);
-    setError(null);
-    try {
-      await api.deleteCourse(id);
-      router.push("/");
-    } catch (err) {
-      setError(err.message);
-      setCourseActionBusy(false);
-    }
-  }
-
-  if (loading) return <Spinner label="Loading course…" />;
-  if (!course) return <ErrorBanner error={error || "Course not found."} />;
-
-  const gen = course.generation || {};
-  const chapters = course.chapters || [];
+  const completedCount = chapters.filter((c) => c.completed).length;
+  const readyCount = chapters.filter((c) => c.status === "ready").length;
+  const isGenerating = ACTIVE_GEN.has(course.generation_status || course.status);
 
   return (
     <main>
-      <div className="row" style={{ marginBottom: 16 }}>
-        <div>
-          <Link href="/" className="muted">
-            ← Dashboard
-          </Link>
-          <h2 style={{ margin: "6px 0 0" }}>{course.title || id}</h2>
-        </div>
-        <span className="row" style={{ gap: 8 }}>
-          {course.archived_at && <Badge tone="muted">archived</Badge>}
-          <StatusBadge status={course.status} />
-        </span>
+      {/* ── Back link ── */}
+      <div style={{ marginBottom: 24 }}>
+        <Link href="/" className="muted" style={{ fontSize: 14 }}>
+          ← Library
+        </Link>
       </div>
 
       <ErrorBanner error={error} />
 
-      <Panel
-        title="Course actions"
-        action={
-          <span className="row" style={{ gap: 8 }}>
-            <button className="btn-secondary" type="button" onClick={archiveToggle} disabled={courseActionBusy}>
-              {course.archived_at ? "Restore" : "Archive"}
-            </button>
-            <button className="btn-danger" type="button" onClick={deleteCourse} disabled={courseActionBusy}>
-              Delete
-            </button>
-          </span>
-        }
-      >
-        {course.archived_at ? (
-          <p className="muted" style={{ margin: 0 }}>Archived {course.archived_at}</p>
-        ) : (
-          <p className="muted" style={{ margin: 0 }}>Visible on the dashboard and included in review reminders.</p>
-        )}
-      </Panel>
+      {/* ── Book cover / header ── */}
+      <div style={{
+        background: "var(--panel)",
+        border: "1px solid var(--border)",
+        borderRadius: 16,
+        padding: "28px 32px",
+        marginBottom: 28,
+      }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+          {/* Book icon */}
+          <div style={{
+            flexShrink: 0,
+            width: 56,
+            height: 56,
+            background: "rgba(91,140,255,0.1)",
+            border: "1px solid rgba(91,140,255,0.25)",
+            borderRadius: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 28,
+          }}>
+            📖
+          </div>
 
-      <Panel
-        title="Generation"
-        action={
-          <button onClick={generate} disabled={generating || ACTIVE_GEN.has(gen.status)}>
-            {generating || ACTIVE_GEN.has(gen.status) ? "Generating…" : "Generate course book"}
-          </button>
-        }
-      >
-        <div className="row">
-          <StatusBadge status={gen.status || "idle"} />
-          <span className="muted">
-            {gen.completed_sections || 0}/{gen.total_sections || 0} sections
-            {gen.failed_sections ? ` · ${gen.failed_sections} failed` : ""}
-          </span>
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <ProgressBar
-            value={gen.completed_sections || 0}
-            max={gen.total_sections || 1}
-            tone={gen.status === "failed" ? "bad" : gen.status === "succeeded" ? "ok" : "accent"}
-          />
-        </div>
-        {gen.last_error && <p className="error" style={{ marginBottom: 0 }}>Last error: {gen.last_error}</p>}
-        {gen.next_retry_at && <p className="muted" style={{ marginBottom: 0 }}>Next retry: {gen.next_retry_at}</p>}
-      </Panel>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h1 style={{ margin: "0 0 8px", fontSize: 26, fontWeight: 800, lineHeight: 1.25 }}>
+              {course.title || id}
+            </h1>
 
-      <Panel
-        title="Outline"
-        action={
-          <span className="row" style={{ gap: 8 }}>
-            {savedAt && <span className="muted" style={{ fontSize: 12 }}>saved {savedAt}</span>}
-            <button className="btn-secondary" onClick={saveOutline} disabled={saving}>
-              {saving ? "Saving…" : "Save outline"}
-            </button>
-          </span>
-        }
-      >
-        {chapters.length === 0 ? (
-          <p className="muted">No chapters.</p>
-        ) : (
-          chapters.map((ch, ci) => (
-            <div key={ch.id || ci} style={{ marginBottom: 18 }}>
-              <div className="row" style={{ gap: 8 }}>
-                <input
-                  style={{ maxWidth: 90 }}
-                  value={ch.number || ""}
-                  onChange={(e) => editChapter(ci, "number", e.target.value)}
-                  aria-label="Chapter number"
-                />
-                <input value={ch.title || ""} onChange={(e) => editChapter(ci, "title", e.target.value)} aria-label="Chapter title" />
-              </div>
-              <ul className="list" style={{ marginTop: 8 }}>
-                {(ch.sections || []).map((s, si) => (
-                  <li key={s.id || si}>
-                    <div className="row" style={{ gap: 8 }}>
-                      <input
-                        style={{ maxWidth: 90 }}
-                        value={s.number || ""}
-                        onChange={(e) => editSection(ci, si, "number", e.target.value)}
-                        aria-label="Section number"
-                      />
-                      <input
-                        value={s.title || ""}
-                        onChange={(e) => editSection(ci, si, "title", e.target.value)}
-                        aria-label="Section title"
-                      />
-                      <span className="row" style={{ gap: 6, flexShrink: 0 }}>
-                        {(() => {
-                          const st = sectionState(s);
-                          return (
-                            <Badge tone={st.tone} dot>
-                              {st.label}
-                            </Badge>
-                          );
-                        })()}
-                        {s.completed && <Badge tone="ok">studied</Badge>}
-                        <button className="btn-secondary" onClick={() => regenerate(s.id)} type="button">
-                          Regenerate
-                        </button>
-                        <Link href={`/courses/${encodeURIComponent(id)}/sections/${encodeURIComponent(s.id)}`}>
-                          Study →
-                        </Link>
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+            {/* Status row */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {course.status && <StatusBadge status={course.status} />}
+              {course.generation_status && course.generation_status !== course.status && (
+                <StatusBadge status={course.generation_status} />
+              )}
+              <span className="muted" style={{ fontSize: 13 }}>
+                {chapters.length} chapter{chapters.length !== 1 ? "s" : ""}
+                {readyCount > 0 && readyCount < chapters.length
+                  ? ` · ${readyCount} ready`
+                  : ""}
+              </span>
             </div>
-          ))
+
+            {/* Progress if studying */}
+            {completedCount > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
+                  <span className="muted">Progress</span>
+                  <span className="muted">{completedCount}/{chapters.length} completed</span>
+                </div>
+                <ProgressBar
+                  value={completedCount}
+                  max={chapters.length}
+                  tone="ok"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Generation in progress banner ── */}
+      {isGenerating && (
+        <div style={{
+          background: "rgba(210,153,34,0.08)",
+          border: "1px solid rgba(210,153,34,0.35)",
+          borderRadius: 10,
+          padding: "12px 18px",
+          marginBottom: 20,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          fontSize: 14,
+          color: "var(--warn)",
+        }}>
+          <span className="spinner-dot" style={{ borderTopColor: "var(--warn)", borderColor: "rgba(210,153,34,0.3)" }} />
+          Generating chapter content… chapters will become readable as they complete.
+        </div>
+      )}
+
+      {/* ── Table of Contents ── */}
+      <div style={{
+        background: "var(--panel)",
+        border: "1px solid var(--border)",
+        borderRadius: 12,
+        overflow: "hidden",
+      }}>
+        {/* TOC header */}
+        <div style={{
+          padding: "16px 20px",
+          borderBottom: "1px solid var(--border)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}>
+          <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Table of Contents</h2>
+          {readyCount > 0 && (
+            <span className="muted" style={{ fontSize: 13 }}>
+              {readyCount}/{chapters.length} ready to read
+            </span>
+          )}
+        </div>
+
+        {chapters.length === 0 ? (
+          <div style={{ padding: "24px 20px" }}>
+            {isGenerating ? (
+              <p className="muted" style={{ margin: 0 }}>
+                Chapters are being generated — check back shortly.
+              </p>
+            ) : (
+              <p className="muted" style={{ margin: 0 }}>
+                No chapters yet. Generate course content to populate the table of contents.
+              </p>
+            )}
+          </div>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {/* Inject hover style via global rule — keeps rows clean */}
+            <style>{`
+              .toc-row:hover {
+                background: rgba(91,140,255,0.05);
+                text-decoration: none !important;
+              }
+            `}</style>
+            {chapters.map((ch, i) => (
+              <ChapterRow
+                key={ch.section_id || i}
+                chapter={ch}
+                courseId={id}
+                index={i}
+              />
+            ))}
+          </ul>
         )}
-      </Panel>
+      </div>
+
+      {/* ── Footer note ── */}
+      {chapters.length > 0 && (
+        <p className="muted" style={{ marginTop: 16, fontSize: 13, textAlign: "center" }}>
+          Click any chapter to start reading.
+        </p>
+      )}
     </main>
   );
 }
