@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +25,14 @@ from SourceMind.backend.routers.library import router as library_router
 from SourceMind.backend.routers.upload import router as upload_router
 
 
+@asynccontextmanager
+async def _lifespan(application: FastAPI):  # noqa: ARG001
+    from SourceMind.backend.db import base
+
+    base.init_db()
+    yield
+
+
 def _cors_origins() -> list[str]:
     defaults = ["http://localhost:3000", "http://127.0.0.1:3000"]
     configured = [
@@ -34,7 +43,7 @@ def _cors_origins() -> list[str]:
     return [*defaults, *[origin for origin in configured if origin not in defaults]]
 
 
-app = FastAPI(title="SourceMind API")
+app = FastAPI(title="SourceMind API", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),

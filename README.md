@@ -1,23 +1,33 @@
 # SourceMind
 
-SourceMind is a local-first course workbook generator for evidence-grounded study, retrieval practice, spaced review, and vertical knowledge transfer. Students can upload one or more course PDFs, approve the extracted outline, generate a full course book in the background, study each lesson with a tutor chat, and revisit material when it becomes due.
+SourceMind is a local-first course workbook generator for evidence-grounded study, retrieval practice, spaced review, and vertical knowledge transfer. Upload one or more course PDFs, approve the extracted chapter outline, and SourceMind generates a full verbose course book in the background — chapter by chapter, source-grounded, written in a Path-to-Staff style. Study each chapter in the built-in mdBook-style reader, track mastery with in-app spaced-repetition reviews, and export flashcards to Anki.
 
-This repository is scaffolded as a monorepo:
+This repository is a monorepo:
 
-- `backend/`: FastAPI services and learning engines.
-- `frontend/`: Next.js App Router frontend.
-- `data/subjects/`: legacy local Markdown subject files used by the original subject workflow.
-- `data/courses/`: local Markdown course files used by the course workbook workflow.
+- `backend/` — FastAPI API, pipeline services, DB models, and learning engines.
+- `frontend/` — Next.js App Router frontend.
+- `data/subjects/` — legacy local Markdown subject files (original subject workflow).
+- `data/courses/` — legacy local Markdown course files (original course workbook workflow).
 
-## Build
+## New Pipeline
 
-Run the full local verification path:
+1. **Upload** — open `http://127.0.0.1:3000/upload` and drop one or more ordered PDFs for a course.
+2. **Review plan** — SourceMind extracts a chapter/section outline and presents it for review. Edit titles or reorder sections as needed.
+3. **Approve** — confirm the plan to kick off background generation.
+4. **Generate** — chapters are generated one at a time in the background. Each chapter is verbose, source-grounded, and written in a Path-to-Staff pedagogical style (motivation → concept → worked examples → understanding checks → mastery quiz).
+5. **Read** — browse the generated course in the mdBook-style reader. Each chapter includes objectives, teaching blocks, worked examples, comprehension checks, and a tutor chat.
+6. **Review** — open `http://127.0.0.1:3000/reviews/due` for spaced-repetition review of material that is coming due. Export any chapter's importance cards to Anki via the `.tsv` download link.
 
-```bash
-./scripts/build.sh
-```
+## Environment Variables
 
-The build script compiles the backend, runs the backend test suite with `uv`-managed Python dependencies, and builds the Next.js frontend.
+| Variable | Default | Description |
+|---|---|---|
+| `SOURCEMIND_LLM_PROVIDER` | `claude` | LLM backend — `claude` (Anthropic) or `ollama` (local). |
+| `SOURCEMIND_LLM_MODEL` | provider default | Override the model name (e.g. `claude-opus-4-5` or `llama3.1`). |
+| `ANTHROPIC_API_KEY` | — | Required when `SOURCEMIND_LLM_PROVIDER=claude`. |
+| `SOURCEMIND_DB_URL` | `sqlite:///data/sourcemind.db` | SQLAlchemy DB URL. Defaults to a local SQLite file. |
+| `SOURCEMIND_ASSETS_DIR` | `data/` | Directory for uploaded PDFs and extracted assets. |
+| `SOURCEMIND_CORS_ORIGINS` | — | Comma-separated additional CORS origins (localhost:3000 is always allowed). |
 
 ## Run Locally
 
@@ -27,38 +37,39 @@ Start the backend and frontend together:
 ./scripts/dev.sh
 ```
 
-The app runs at `http://127.0.0.1:3000` and the API runs at `http://127.0.0.1:8000`. Press `Ctrl+C` in the terminal to stop both processes.
+The frontend runs at `http://127.0.0.1:3000` and the API at `http://127.0.0.1:8000`.
+Press `Ctrl+C` to stop both processes.
 
-Optional overrides:
+Override port or provider:
 
 ```bash
 BACKEND_PORT=8001 FRONTEND_PORT=3001 ./scripts/dev.sh
+SOURCEMIND_LLM_PROVIDER=ollama SOURCEMIND_LLM_MODEL=llama3.2 ./scripts/dev.sh
 ```
 
-## Course Workflow
+## Build and Test
 
-1. Open `http://127.0.0.1:3000/upload`.
-2. Upload one or more ordered PDFs for the same course.
-3. Review and approve the extracted chapter/section outline.
-4. Start generation. Lessons are generated in the background with progress and retry status.
-5. Study lessons from the course page. Each lesson includes objectives, teaching blocks, worked examples, understanding checks, a mastery quiz, competency progress, and tutor chat.
-6. Open `http://127.0.0.1:3000/reviews/due` to see material scheduled for review.
-
-Review scheduling is driven by score and confidence. High-confidence misses are due immediately; passing work is spaced out over later review intervals. The dashboard shows a due-review notification count.
-
-## Local Model
-
-Course generation and tutor chat use Ollama through the backend. By default the backend asks for `llama3.1`; override it with:
+Run the full local verification path (compile backend, run test suite, build frontend):
 
 ```bash
-OLLAMA_MODEL=llama3.2 ./scripts/dev.sh
+./scripts/build.sh
 ```
 
-For development-only deterministic lesson generation without Ollama:
+Run only the backend tests:
 
 ```bash
-SOURCEMIND_ALLOW_DETERMINISTIC_GENERATION=1 ./scripts/dev.sh
+uv run pytest backend/tests
 ```
+
+## Database
+
+The backend auto-creates its SQLite schema on startup (`init_db()` runs via the FastAPI lifespan hook). No manual migration step is required for a fresh checkout.
+
+The `data/sourcemind.db` file is listed in `.gitignore` and is never committed. Tests redirect the DB to a temporary path automatically — no stray DB file is written during `uv run pytest`.
+
+## Legacy Endpoints (Deprecated)
+
+The original `/courses`, `/upload`, `/subjects`, and competency-decomposition endpoints remain in place for backwards compatibility but are superseded by the `/library` flow described above. They will be removed in a future cleanup once all consumers are migrated.
 
 ## Product Drafts
 
