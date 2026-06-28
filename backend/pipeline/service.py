@@ -136,10 +136,15 @@ def ingest_pdfs(
     assets_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Extract all PDFs with contiguous page numbers ---
+    # Each source PDF extracts into its own subdir (src0/, src1/, ...) so that
+    # per-PDF local image filenames (``page{i}_img{xref}.png``) cannot collide
+    # across PDFs.  The contiguous global page-number offset is applied unchanged.
     all_pages: list[ExtractedPage] = []
     offset = 0
-    for pdf_path in pdf_paths:
-        raw_pages = extract_pdf(Path(pdf_path), assets_dir)
+    for idx, pdf_path in enumerate(pdf_paths):
+        src_assets = assets_dir / f"src{idx}"
+        src_assets.mkdir(parents=True, exist_ok=True)
+        raw_pages = extract_pdf(Path(pdf_path), src_assets)
         for page in raw_pages:
             page.page_number = offset + page.page_number
         all_pages.extend(raw_pages)
@@ -288,8 +293,9 @@ def generate_course(
 
     Resumes from where a previous run left off (skips sections already
     ``status="ready"``).  Sets ``generation_status`` to ``"succeeded"`` or
-    ``"failed"`` based on per-section outcomes; always sets ``status="ready"``
-    at the end.
+    ``"failed"`` based on per-section outcomes, and sets the course
+    ``status`` to ``"ready"`` only when every section succeeded, otherwise
+    ``"failed"``.
 
     Args:
         course_id:  Course to generate.
@@ -391,7 +397,7 @@ def generate_course(
         course = session.get(models.Course, course_id)
         if course is not None:
             course.generation_status = "succeeded" if failed == 0 else "failed"
-            course.status = "ready"
+            course.status = "ready" if failed == 0 else "failed"
             course.generation_progress = {
                 "total": total,
                 "completed": completed,
@@ -492,11 +498,27 @@ def regenerate_section(
 
     pages = _load_pages(assets_dir)
 
-    _generate_one_section(
-        course_id,
-        section_id,
-        plan_records,
-        asset_records,
-        pages,
-        provider,
-    )
+    # Mirror generate_course's per-section handling: on failure mark the
+    # chapter "failed" and record the error rather than re-raising, so the
+    # API can poll status instead of seeing the chapter stuck "pending".
+    try:
+        _generate_one_section(
+            course_id,
+            section_id,
+            plan_records,
+            asset_records,
+            pages,
+            provider,
+        )
+    except Exception as exc:
+        with base.get_session() as session:
+            chap = (
+                session.query(models.Chapter)
+                .filter_by(course_id=course_id, section_id=section_id)
+                .first()
+            )
+            if chap is not None:
+                chap.status = "failed"
+            course = session.get(models.Course, course_id)
+            if course is not None:
+                course.generation_last_error = str(exc)

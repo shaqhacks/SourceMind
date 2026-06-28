@@ -168,6 +168,28 @@ def _build_four_page_pdf(tmp_path: Path) -> Path:
     return pdf_path
 
 
+def _build_one_page_pdf_with_image(
+    pdf_path: Path, color: tuple[int, int, int]
+) -> Path:
+    """Create a 1-page PDF with text and a single distinctly-coloured image.
+
+    Mirrors backend/tests/test_extract_pdf.py: a tiny 10x10 RGB Pixmap is
+    inserted via ``page.insert_image`` so ``extract_pdf`` saves it under
+    ``page0_img{xref}.png`` in the assets directory it is given.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 72), "page-0 content algebra topic section")
+
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 10, 10))
+    pix.set_rect(fitz.IRect(0, 0, 10, 10), color)
+    page.insert_image(fitz.Rect(100, 100, 150, 150), pixmap=pix)
+
+    doc.save(str(pdf_path))
+    doc.close()
+    return pdf_path
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -252,6 +274,7 @@ def test_generate_course_persists_quiz_and_cards(tmp_path, db_url):
         for ch in chapters:
             assert ch.quiz is not None and len(ch.quiz) > 0
             assert ch.cards is not None and len(ch.cards) > 0
+            assert ch.word_count is not None and ch.word_count > 0
 
 
 def test_regenerate_section(tmp_path, db_url):
@@ -387,3 +410,70 @@ def test_generate_course_isolates_section_failure(tmp_path, db_url, monkeypatch)
 
         # Overall course generation status reflects the partial failure
         assert course.generation_status == "failed"
+
+        # The course's public status is "failed" when any section failed
+        assert course.status == "failed"
+
+
+def test_ingest_two_pdfs_with_images_no_collision(tmp_path, db_url):
+    """Two PDFs each with a page-0 image must persist distinct, non-overwritten assets.
+
+    ``extract_pdf`` names images by LOCAL page index (``page0_img{xref}.png``),
+    so extracting two single-page PDFs into the SAME directory would overwrite
+    the first PDF's image with the second's.  ``ingest_pdfs`` must isolate each
+    source PDF into its own subdir so the Asset rows record distinct paths that
+    all still exist on disk.
+    """
+    stub = StubProvider()
+    pdf_a = _build_one_page_pdf_with_image(tmp_path / "a.pdf", (255, 0, 0))
+    pdf_b = _build_one_page_pdf_with_image(tmp_path / "b.pdf", (0, 0, 255))
+
+    ingest_pdfs("algebra", "Algebra", [pdf_a, pdf_b], provider=stub)
+
+    with base.get_session() as session:
+        assets = (
+            session.query(models.Asset).filter_by(course_id="algebra").all()
+        )
+        paths = [a.path for a in assets]
+
+    # At least one image per PDF was persisted
+    assert len(paths) >= 2, f"Expected >=2 asset rows, got {len(paths)}: {paths}"
+
+    # Paths are distinct (no collision / overwrite)
+    assert len(set(paths)) == len(paths), f"Asset paths collided: {paths}"
+
+    # Every recorded image still exists on disk (neither was overwritten)
+    for p in paths:
+        assert Path(p).exists(), f"Asset image missing on disk: {p}"
+
+
+def test_regenerate_section_marks_failed_on_error(tmp_path, db_url, monkeypatch):
+    """If regeneration raises, the chapter ends 'failed' and no exception escapes."""
+    stub = StubProvider()
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+    approve_plan("algebra")
+    generate_course("algebra", provider=stub)
+
+    def _always_fail(plan_dc, source_text, image_urls, provider, *, had_figures=False):
+        raise RuntimeError("Simulated regeneration failure")
+
+    monkeypatch.setattr(
+        "SourceMind.backend.pipeline.service.generate_validated",
+        _always_fail,
+    )
+
+    # Must NOT raise — failure is recorded on the chapter/course instead.
+    regenerate_section("algebra", "s1", provider=stub)
+
+    with base.get_session() as session:
+        ch = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="s1")
+            .first()
+        )
+        assert ch is not None
+        assert ch.status == "failed"
+
+        course = session.get(models.Course, "algebra")
+        assert course.generation_last_error, "generation_last_error should be set"
