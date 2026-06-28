@@ -20,6 +20,7 @@ from SourceMind.backend.services.md_store import (
 from SourceMind.backend.services.llm_local import GroundingScore, LocalLLMResponse, LocalLLMService
 from SourceMind.backend.services.srs_engine import EvaluationResult, SRSEngine, StudySession
 from SourceMind.backend.routers.courses import router as courses_router
+from SourceMind.backend.routers.library import router as library_router
 from SourceMind.backend.routers.upload import router as upload_router
 
 
@@ -43,6 +44,7 @@ app.add_middleware(
 )
 app.include_router(courses_router)
 app.include_router(upload_router)
+app.include_router(library_router)
 
 store = MarkdownSubjectStore()
 srs_engine = SRSEngine()
