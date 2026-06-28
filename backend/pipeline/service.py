@@ -84,15 +84,21 @@ def get_image_urls(
     page_start: int,
     page_end: int,
 ) -> list[str]:
-    """Return asset paths for assets whose source_page is within [page_start, page_end].
+    """Return asset paths for assets whose source_page falls within [page_start, page_end].
 
-    Works with any object (ORM Asset or duck-typed) that has ``.path`` and
-    ``.source_page`` attributes.
+    Accepts both mapping-style inputs (plain dicts with ``"path"`` / ``"source_page"``
+    keys, as produced by ``generate_course``'s asset_records list) and attribute-style
+    objects (ORM ``Asset`` instances or any duck-typed object with ``.path`` /
+    ``.source_page`` attributes).
     """
+    def _get(a, key: str):
+        return a[key] if isinstance(a, dict) else getattr(a, key)
+
     return [
-        a.path
+        _get(a, "path")
         for a in assets
-        if a.source_page is not None and page_start <= a.source_page <= page_end
+        if _get(a, "source_page") is not None
+        and page_start <= _get(a, "source_page") <= page_end
     ]
 
 
@@ -239,12 +245,7 @@ def _generate_one_section(
 
     page_start, page_end = source_pages[0], source_pages[1]
     source_text = get_source_text(pages, page_start, page_end)
-    image_urls = [
-        a["path"]
-        for a in asset_records
-        if a["source_page"] is not None
-        and page_start <= a["source_page"] <= page_end
-    ]
+    image_urls = get_image_urls(asset_records, page_start, page_end)
     had_figures = len(image_urls) > 0
 
     plan_dc = PlanItemDC(

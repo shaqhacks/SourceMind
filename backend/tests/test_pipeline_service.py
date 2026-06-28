@@ -183,6 +183,7 @@ def test_ingest_creates_course_and_plan(tmp_path, db_url):
         assert course is not None
         assert course.id == "algebra"
         assert course.status == "needs_review"
+        assert course.generation_status == "idle"
 
         plan_items = (
             session.query(models.PlanItem).filter_by(course_id="algebra").all()
@@ -231,6 +232,7 @@ def test_generate_course_full_flow(tmp_path, db_url):
         assert progress is not None
         assert progress["completed"] == progress["total"]
         assert progress["failed"] == 0
+        assert course.generation_status == "succeeded"
 
 
 def test_generate_course_persists_quiz_and_cards(tmp_path, db_url):
@@ -298,6 +300,7 @@ def test_source_text_helper():
 
 
 def test_image_urls_helper():
+    # Attribute-style (ORM objects / SimpleNamespace)
     assets = [
         SimpleNamespace(path="img0.png", source_page=0),
         SimpleNamespace(path="img1.png", source_page=1),
@@ -308,3 +311,79 @@ def test_image_urls_helper():
     assert len(result) == 2
     assert "img1.png" in result
     assert "img2.png" in result
+
+    # Dict-style (mirrors the plain-dict asset_records used in generate_course)
+    dict_assets = [
+        {"path": "img0.png", "source_page": 0},
+        {"path": "img1.png", "source_page": 1},
+        {"path": "img2.png", "source_page": 2},
+        {"path": "img3.png", "source_page": 3},
+    ]
+    dict_result = get_image_urls(dict_assets, 1, 2)
+    assert len(dict_result) == 2
+    assert "img1.png" in dict_result
+    assert "img2.png" in dict_result
+
+
+def test_generate_course_isolates_section_failure(tmp_path, db_url, monkeypatch):
+    """Verify that a single section failure does not abort generation of other sections.
+
+    The first call to generate_validated raises; subsequent calls delegate to the
+    real implementation via the StubProvider.  After generate_course completes:
+    - exactly the first chapter is ``status="failed"``
+    - the remaining chapter(s) are ``status="ready"``
+    - Course.generation_last_error is set
+    - generation_progress["failed"] >= 1 and completed+failed == total
+    - Course.generation_status == "failed"
+    """
+    stub = StubProvider()
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+    approve_plan("algebra")
+
+    # Import the real function so we can delegate non-failing calls to it.
+    from SourceMind.backend.pipeline.validate import (
+        generate_validated as _real_generate_validated,
+    )
+
+    call_count = 0
+
+    def _failing_first(plan_dc, source_text, image_urls, provider, *, had_figures=False):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("Simulated section failure for isolation test")
+        return _real_generate_validated(
+            plan_dc, source_text, image_urls, provider, had_figures=had_figures
+        )
+
+    monkeypatch.setattr(
+        "SourceMind.backend.pipeline.service.generate_validated",
+        _failing_first,
+    )
+
+    generate_course("algebra", provider=stub)
+
+    with base.get_session() as session:
+        course = session.get(models.Course, "algebra")
+        chapters = (
+            session.query(models.Chapter).filter_by(course_id="algebra").all()
+        )
+
+        failed_chapters = [ch for ch in chapters if ch.status == "failed"]
+        ready_chapters = [ch for ch in chapters if ch.status == "ready"]
+
+        # At least one section failed and at least one continued to succeed
+        assert len(failed_chapters) >= 1, "Expected at least one failed chapter"
+        assert len(ready_chapters) >= 1, "Expected remaining sections to still succeed"
+
+        # Error was recorded on the course
+        assert course.generation_last_error, "generation_last_error should be non-empty"
+
+        # Progress counters are consistent
+        progress = course.generation_progress
+        assert progress["failed"] >= 1
+        assert progress["completed"] + progress["failed"] == progress["total"]
+
+        # Overall course generation status reflects the partial failure
+        assert course.generation_status == "failed"
