@@ -306,13 +306,34 @@ export default function CoursePage() {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
         }}>
           <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>Table of Contents</h2>
-          {readyCount > 0 && (
-            <span className="muted" style={{ fontSize: 13 }}>
-              {readyCount}/{chapters.length} ready to read
-            </span>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {readyCount > 0 && (
+              <span className="muted" style={{ fontSize: 13 }}>
+                {readyCount}/{chapters.length} ready to read
+              </span>
+            )}
+            <a
+              href={library.ankiTsvUrl(id)}
+              download={`${id}.tsv`}
+              style={{
+                fontSize: 12,
+                padding: "5px 11px",
+                background: "rgba(91,140,255,0.10)",
+                border: "1px solid rgba(91,140,255,0.28)",
+                borderRadius: 6,
+                color: "var(--accent, #5b8cff)",
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+                fontWeight: 500,
+              }}
+            >
+              Export Anki deck (.tsv)
+            </a>
+          </div>
         </div>
 
         {chapters.length === 0 ? (
