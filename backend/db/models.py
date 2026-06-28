@@ -1,0 +1,116 @@
+"""SQLAlchemy ORM models for SourceMind."""
+
+from __future__ import annotations
+
+from sqlalchemy import JSON, TEXT, Boolean, Float, ForeignKey, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from SourceMind.backend.db.base import Base
+
+
+class Course(Base):
+    __tablename__ = "courses"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str | None] = mapped_column(String, nullable=True)
+    generation_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    generation_progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    generation_last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    plan_items: Mapped[list[PlanItem]] = relationship("PlanItem", back_populates="course")
+    chapters: Mapped[list[Chapter]] = relationship("Chapter", back_populates="course")
+    assets: Mapped[list[Asset]] = relationship("Asset", back_populates="course")
+    progress_states: Mapped[list[ProgressState]] = relationship("ProgressState", back_populates="course")
+    review_states: Mapped[list[ReviewState]] = relationship("ReviewState", back_populates="course")
+    chat_turns: Mapped[list[ChatTurn]] = relationship("ChatTurn", back_populates="course")
+
+
+class PlanItem(Base):
+    __tablename__ = "plan_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    objectives: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    importance: Mapped[str | None] = mapped_column(String, nullable=True)
+    prerequisites: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    target_words: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    course: Mapped[Course] = relationship("Course", back_populates="plan_items")
+
+
+class Chapter(Base):
+    __tablename__ = "chapters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    objectives: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    importance: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_pages: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    assets: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    body_md: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    quiz: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    cards: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    course: Mapped[Course] = relationship("Course", back_populates="chapters")
+
+
+class Asset(Base):
+    __tablename__ = "assets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
+    path: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    caption: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    course: Mapped[Course] = relationship("Course", back_populates="assets")
+
+
+class ProgressState(Base):
+    __tablename__ = "progress_states"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    completed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    last_viewed_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    course: Mapped[Course] = relationship("Course", back_populates="progress_states")
+
+
+class ReviewState(Base):
+    __tablename__ = "review_states"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    card_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ease: Mapped[float | None] = mapped_column(Float, nullable=True)
+    interval: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    due_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    course: Mapped[Course] = relationship("Course", back_populates="review_states")
+
+
+class ChatTurn(Base):
+    __tablename__ = "chat_turns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    role: Mapped[str | None] = mapped_column(String, nullable=True)
+    content: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    course: Mapped[Course] = relationship("Course", back_populates="chat_turns")
