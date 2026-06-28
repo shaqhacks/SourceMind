@@ -2,219 +2,139 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { API_URL, api } from "./lib/api";
-import { Badge, EmptyState, ErrorBanner, MasteryBar, Panel, Spinner, StatusBadge } from "./components/ui";
+import { library } from "./lib/api";
+import { Badge, EmptyState, ErrorBanner, Panel, Spinner, StatusBadge } from "./components/ui";
+
+function GenerationProgress({ course }) {
+  const prog = course.generation_progress;
+  if (!prog) return null;
+  const completed = prog.completed ?? 0;
+  const total = prog.total ?? 0;
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div
+        style={{
+          height: 4,
+          borderRadius: 2,
+          background: "var(--border, #e2e8f0)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${pct}%`,
+            background: "var(--accent, #6366f1)",
+            borderRadius: 2,
+            transition: "width 0.3s ease",
+          }}
+        />
+      </div>
+      <p className="muted" style={{ margin: "3px 0 0", fontSize: 12 }}>
+        {completed}/{total} chapters generated
+      </p>
+    </div>
+  );
+}
 
 export default function Dashboard() {
-  const [health, setHealth] = useState("checking");
   const [courses, setCourses] = useState([]);
-  const [subjects, setSubjects] = useState([]);
-  const [due, setDue] = useState(null);
-  const [notifications, setNotifications] = useState(null);
-  const [includeArchived, setIncludeArchived] = useState(false);
-  const [busyCourseId, setBusyCourseId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     setLoading(true);
-    api
-      .health()
-      .then((h) => setHealth(h && h.status === "ok" ? "ok" : "bad"))
-      .catch(() => setHealth("bad"));
-
-    Promise.allSettled([api.listCourses(includeArchived), api.listSubjects(), api.dueReviews(false), api.notifications(true)])
-      .then(([c, s, d, n]) => {
-        if (c.status === "fulfilled") setCourses((c.value && c.value.courses) || []);
-        else setError(c.reason && c.reason.message);
-        if (s.status === "fulfilled") setSubjects((s.value && s.value.subjects) || []);
-        if (d.status === "fulfilled") setDue(d.value);
-        if (n.status === "fulfilled") setNotifications(n.value);
+    setError(null);
+    library
+      .listCourses()
+      .then((data) => {
+        // backend may return array directly or wrapped in { courses: [...] }
+        setCourses(Array.isArray(data) ? data : (data && data.courses) || []);
       })
+      .catch((err) => setError(err.message || "Failed to load courses"))
       .finally(() => setLoading(false));
-  }, [includeArchived]);
-
-  async function updateCourse(id, action) {
-    setBusyCourseId(id);
-    setError(null);
-    try {
-      const updated =
-        action === "archive"
-          ? await api.archiveCourse(id)
-          : action === "restore"
-            ? await api.restoreCourse(id)
-            : null;
-      setCourses((items) =>
-        action === "archive" && !includeArchived
-          ? items.filter((course) => course.course_id !== id)
-          : items.map((course) =>
-              course.course_id === id
-                ? { ...course, archived: Boolean(updated && updated.archived_at), archived_at: updated ? updated.archived_at : course.archived_at }
-                : course
-            )
-      );
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusyCourseId(null);
-    }
-  }
-
-  async function removeCourse(id, title) {
-    if (!window.confirm(`Delete "${title || id}" permanently?`)) return;
-    setBusyCourseId(id);
-    setError(null);
-    try {
-      await api.deleteCourse(id);
-      setCourses((items) => items.filter((course) => course.course_id !== id));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusyCourseId(null);
-    }
-  }
+  }, []);
 
   return (
     <main>
-      <div className="row" style={{ marginBottom: 20 }}>
-        <Badge tone={health === "ok" ? "ok" : health === "bad" ? "bad" : "muted"} dot>
-          {health === "ok" ? "Backend connected" : health === "bad" ? "Backend unreachable" : "Checking…"}
-        </Badge>
-        <span className="muted" style={{ fontSize: 13 }}>{API_URL}</span>
-      </div>
-
-      <div className="grid" style={{ marginBottom: 20 }}>
-        <Panel>
-          <div className="stat-label">Courses</div>
-          <div className="stat">{courses.length}</div>
-        </Panel>
-        <Panel>
-          <div className="stat-label">Subjects</div>
-          <div className="stat">{subjects.length}</div>
-        </Panel>
-        <Panel>
-          <div className="stat-label">Reviews due</div>
-          <div className="stat">{due ? due.due_count ?? (due.items || []).length : "—"}</div>
-          {due && <Link href="/reviews">View reviews →</Link>}
-        </Panel>
-        <Panel>
-          <div className="stat-label">Notifications</div>
-          <div className="stat">{notifications ? notifications.unread_count ?? 0 : "—"}</div>
-          {notifications && <Link href="#notifications">Open reminders ↓</Link>}
-        </Panel>
+      <div className="row" style={{ alignItems: "center", marginBottom: 24, gap: 16 }}>
+        <div style={{ flex: 1 }}>
+          <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 700 }}>My Library</h1>
+          <p className="muted" style={{ margin: "4px 0 0", fontSize: 14 }}>
+            Your uploaded courses and study materials
+          </p>
+        </div>
+        <Link
+          href="/upload"
+          className="btn-primary"
+          style={{
+            display: "inline-block",
+            padding: "10px 20px",
+            borderRadius: 8,
+            fontWeight: 600,
+            fontSize: 14,
+            textDecoration: "none",
+          }}
+        >
+          + Upload PDF
+        </Link>
       </div>
 
       <ErrorBanner error={error} />
 
-      <Panel title="Notifications" action={<Link href="/reviews">Review queue →</Link>}>
-        {loading ? (
+      {loading ? (
+        <Panel>
           <Spinner />
-        ) : notifications && notifications.items && notifications.items.length > 0 ? (
-          <div className="grid" id="notifications">
-            {notifications.items.slice(0, 6).map((item) => (
-              <Link key={item.id} href={item.href} className="card-link panel">
-                <div className="row">
-                  <strong>{item.title}</strong>
-                  <Badge tone={item.due ? "warn" : "muted"} dot>
-                    {item.urgency}
-                  </Badge>
-                </div>
-                <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
-                  {item.message}
-                </p>
-                {item.next_review_at && (
-                  <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                    {item.next_review_at}
-                  </p>
-                )}
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <EmptyState>No review reminders right now.</EmptyState>
-        )}
-      </Panel>
+        </Panel>
+      ) : courses.length === 0 ? (
+        <Panel>
+          <EmptyState>
+            No courses yet — upload a PDF to begin.{" "}
+            <Link href="/upload" style={{ fontWeight: 600 }}>
+              Upload now →
+            </Link>
+          </EmptyState>
+        </Panel>
+      ) : (
+        <div className="grid">
+          {courses.map((c) => {
+            const courseId = c.id ?? c.course_id;
+            const title = c.title || courseId;
+            const status = c.status;
+            const genStatus = c.generation_status;
 
-      <Panel
-        title="Courses"
-        action={
-          <span className="row" style={{ gap: 10 }}>
-            <label className="row" style={{ gap: 6, margin: 0 }}>
-              <input
-                type="checkbox"
-                checked={includeArchived}
-                onChange={(e) => setIncludeArchived(e.target.checked)}
-                style={{ width: "auto" }}
-              />
-              <span className="muted">Archived</span>
-            </label>
-            <Link href="/upload">+ New</Link>
-          </span>
-        }
-      >
-        {loading ? (
-          <Spinner />
-        ) : courses.length === 0 ? (
-          <EmptyState>No courses yet. Upload sources to create one.</EmptyState>
-        ) : (
-          <div className="grid">
-            {courses.map((c) => (
-              <div key={c.course_id} className="panel course-card">
-                <div className="row">
-                  <Link href={`/courses/${encodeURIComponent(c.course_id)}`}>
-                    <strong>{c.title || c.course_id}</strong>
-                  </Link>
-                  <span className="row" style={{ gap: 6 }}>
-                    {c.archived && <Badge tone="muted">archived</Badge>}
-                    <StatusBadge status={c.status} />
+            return (
+              <Link
+                key={courseId}
+                href={`/courses/${encodeURIComponent(courseId)}`}
+                className="panel card-link"
+                style={{ textDecoration: "none", display: "block" }}
+              >
+                <div className="row course-card-head" style={{ alignItems: "flex-start", gap: 8 }}>
+                  <strong
+                    className="course-card-title"
+                    style={{ flex: 1, fontSize: "1rem", lineHeight: 1.4 }}
+                  >
+                    {title}
+                  </strong>
+                  <span className="row" style={{ gap: 6, flexShrink: 0 }}>
+                    {status && <StatusBadge status={status} />}
                   </span>
                 </div>
-                <MasteryBar percent={c.mastery_percent || 0} />
-                <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
-                  {c.generation_status ? `${String(c.generation_status).replace(/_/g, " ")} · ` : ""}
-                  {c.generation_completed_sections ?? 0}/{c.generation_total_sections ?? c.sections_count ?? 0} sections
-                  {c.competencies_count != null ? ` · ${c.competencies_count} competencies` : ""}
-                </p>
-                {c.generation_last_error && (
-                  <p className="error" style={{ margin: "4px 0 0", fontSize: 12 }}>{c.generation_last_error}</p>
-                )}
-                <div className="row" style={{ gap: 8, marginTop: 12 }}>
-                  <button
-                    className="btn-secondary"
-                    type="button"
-                    onClick={() => updateCourse(c.course_id, c.archived ? "restore" : "archive")}
-                    disabled={busyCourseId === c.course_id}
-                  >
-                    {c.archived ? "Restore" : "Archive"}
-                  </button>
-                  <button
-                    className="btn-danger"
-                    type="button"
-                    onClick={() => removeCourse(c.course_id, c.title)}
-                    disabled={busyCourseId === c.course_id}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Panel>
 
-      <Panel title={`Subjects (${subjects.length})`}>
-        {loading ? (
-          <Spinner />
-        ) : subjects.length === 0 ? (
-          <EmptyState>No subjects yet.</EmptyState>
-        ) : (
-          <ul className="list">
-            {subjects.map((id) => (
-              <li key={id}>{id}</li>
-            ))}
-          </ul>
-        )}
-      </Panel>
+                {genStatus && (
+                  <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                    {String(genStatus).replace(/_/g, " ")}
+                  </p>
+                )}
+
+                <GenerationProgress course={c} />
+              </Link>
+            );
+          })}
+        </div>
+      )}
     </main>
   );
 }
