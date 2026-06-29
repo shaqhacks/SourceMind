@@ -26,6 +26,7 @@ class Course(Base):
     progress_states: Mapped[list[ProgressState]] = relationship("ProgressState", back_populates="course")
     review_states: Mapped[list[ReviewState]] = relationship("ReviewState", back_populates="course")
     chat_turns: Mapped[list[ChatTurn]] = relationship("ChatTurn", back_populates="course")
+    test_attempts: Mapped[list["TestAttempt"]] = relationship("TestAttempt", back_populates="course")
 
 
 class PlanItem(Base):
@@ -126,3 +127,20 @@ class Chunk(Base):
     content: Mapped[str] = mapped_column(TEXT, nullable=False)
     embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class TestAttempt(Base):
+    __tablename__ = "test_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    scope: Mapped[str] = mapped_column(String, nullable=False)   # "section" or "course"
+    answers: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    correct: Mapped[int] = mapped_column(Integer, nullable=False)
+    total: Mapped[int] = mapped_column(Integer, nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    course: Mapped["Course"] = relationship("Course", back_populates="test_attempts")
