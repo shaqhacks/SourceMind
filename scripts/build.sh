@@ -19,6 +19,8 @@ UV_DEPS=(
   --with sqlalchemy
   --with anthropic
   --with pymupdf
+  --with python-docx
+  --with python-pptx
 )
 
 run_step() {
