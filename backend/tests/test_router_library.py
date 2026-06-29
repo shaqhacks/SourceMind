@@ -746,3 +746,92 @@ def test_section_test_404(client: TestClient, tmp_path: Path) -> None:
         json={"answers": []},
     )
     assert resp.status_code == 404
+
+
+# ─── Multi-format upload tests (Task 3) ──────────────────────────────────────
+
+
+def test_upload_txt_file(client: TestClient, tmp_path: Path, monkeypatch) -> None:
+    """Upload a .txt file with ~600 words → 200 with course_id; course row exists."""
+    monkeypatch.setattr(
+        "SourceMind.backend.pipeline.service.embed_texts",
+        lambda texts: [[0.0] * 8 for _ in texts],
+    )
+    words = " ".join(["word"] * 600)
+    txt_path = tmp_path / "lecture.txt"
+    txt_path.write_text(words)
+
+    with txt_path.open("rb") as fh:
+        resp = client.post(
+            "/library/uploads",
+            files=[("files", ("lecture.txt", fh, "text/plain"))],
+        )
+    assert resp.status_code == 200, resp.text
+    course_id = resp.json()["course_id"]
+    assert course_id
+
+    resp = client.get(f"/library/courses/{course_id}")
+    assert resp.status_code == 200
+    assert resp.json()["course"]["status"] in ("needs_review", "ingesting")
+
+
+def test_upload_unsupported_extension(client: TestClient, tmp_path: Path) -> None:
+    """Upload a .xyz file → 400 with a descriptive error before any background job."""
+    bad_path = tmp_path / "notes.xyz"
+    bad_path.write_bytes(b"some data")
+
+    with bad_path.open("rb") as fh:
+        resp = client.post(
+            "/library/uploads",
+            files=[("files", ("notes.xyz", fh, "application/octet-stream"))],
+        )
+    assert resp.status_code == 400
+
+
+def test_upload_source_text(client: TestClient, tmp_path: Path, monkeypatch) -> None:
+    """POST /library/uploads/source with kind='text' → 200 with course_id; course row exists."""
+    monkeypatch.setattr(
+        "SourceMind.backend.pipeline.service.embed_texts",
+        lambda texts: [[0.0] * 8 for _ in texts],
+    )
+    resp = client.post(
+        "/library/uploads/source",
+        json={"kind": "text", "value": "word " * 600},
+    )
+    assert resp.status_code == 200, resp.text
+    course_id = resp.json()["course_id"]
+    assert course_id
+
+    resp = client.get(f"/library/courses/{course_id}")
+    assert resp.status_code == 200
+    assert resp.json()["course"]["id"] == course_id
+
+
+def test_upload_source_url_no_network(client: TestClient, monkeypatch) -> None:
+    """POST /library/uploads/source with kind='url'; run_materials_job is a no-op → 200, placeholder row exists."""
+    monkeypatch.setattr(
+        "SourceMind.backend.routers.library.service.run_materials_job",
+        lambda *a, **k: None,
+    )
+    resp = client.post(
+        "/library/uploads/source",
+        json={"kind": "url", "value": "https://example.com", "title": "My URL"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "course_id" in data
+    course_id = data["course_id"]
+
+    with base.get_session() as session:
+        course = session.get(models.Course, course_id)
+        assert course is not None
+        assert course.status == "ingesting"
+
+
+def test_upload_source_unknown_kind(client: TestClient) -> None:
+    """POST /library/uploads/source with kind='file' → 422 (pydantic Literal rejects it)."""
+    resp = client.post(
+        "/library/uploads/source",
+        json={"kind": "file", "value": "x"},
+    )
+    assert resp.status_code == 422

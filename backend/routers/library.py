@@ -7,12 +7,13 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-
-from SourceMind.backend.extract.pdf import derive_title_from_pdf
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
+
+from SourceMind.backend.extract.material import detect_kind, material_title
 
 from SourceMind.backend.db import base, models
 from SourceMind.backend.llm.provider import get_provider
@@ -70,39 +71,104 @@ class CourseTestBody(BaseModel):
     answers: dict[str, list[int]]  # section_id -> list of answer indices
 
 
+class SourceBody(BaseModel):
+    kind: Literal["url", "text", "markdown", "youtube"]
+    value: str
+    title: str = ""
+
+
 # ─── Upload / Ingest ──────────────────────────────────────────────────────────
 
 
+@router.post("/uploads/source")
+async def upload_source(
+    body: SourceBody,
+    background_tasks: BackgroundTasks,
+    provider=Depends(provider_dependency),
+) -> dict:
+    """Accept a URL/text/markdown/youtube source; ingest in background.
+
+    Returns ``{course_id}`` immediately with the course in ``status="ingesting"``.
+    The client polls ``GET /library/courses/{id}`` until ``status`` becomes
+    ``needs_review`` or ``ingest_failed``.
+    """
+    if body.kind in ("url", "youtube"):
+        material: dict = {"kind": body.kind, "url": body.value}
+    else:
+        material = {"kind": body.kind, "text": body.value}
+    materials = [material]
+
+    title = body.title.strip()
+    if not title:
+        if body.kind in ("url", "youtube"):
+            title = material_title(body.kind, url=body.value)
+        elif body.kind == "text":
+            title = "Pasted text"
+        else:  # markdown
+            title = "Markdown content"
+    if not title:
+        title = "Untitled Course"
+
+    slug = _slug(title) or "course"
+    course_id = slug
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is not None:
+            course_id = f"{slug}_{uuid.uuid4().hex[:8]}"
+        session.add(models.Course(
+            id=course_id,
+            title=title,
+            status="ingesting",
+            generation_status="idle",
+        ))
+
+    background_tasks.add_task(
+        service.run_materials_job, course_id, title, materials, provider, None,
+    )
+    return {"course_id": course_id}
+
+
 @router.post("/uploads")
-async def upload_pdfs(
+async def upload_files(
     background_tasks: BackgroundTasks,
     title: str = Form(""),
     files: list[UploadFile] = File(...),
     provider=Depends(provider_dependency),
 ) -> dict:
-    """Accept one or more PDFs and an OPTIONAL title; ingest runs in the background.
+    """Accept one or more files of any supported type and an OPTIONAL title; ingest runs in the background.
 
-    Returns ``{course_id}`` immediately with the course in ``status="ingesting"``.
-    The client polls ``GET /library/courses/{id}`` until ``status`` becomes
-    ``needs_review`` (plan ready) or ``ingest_failed``. When no title is supplied
-    it is derived from the first PDF's metadata title, falling back to its filename.
+    Supported types: pdf, docx, pptx, txt, md. Unsupported extensions are
+    rejected immediately with 400 before any background job is scheduled.
+    Returns ``{course_id}`` with the course in ``status="ingesting"``.
     """
-    # Persist uploads to a temp dir the background job consumes and then cleans up.
     tmp_dir = Path(tempfile.mkdtemp())
-    pdf_paths: list[Path] = []
-    first_name = ""
+    materials: list[dict] = []
+    first_kind: str | None = None
+    first_dest: Path | None = None
+
     for upload in files:
-        safe_name = Path(upload.filename or "upload.pdf").name
-        if not first_name:
-            first_name = safe_name
+        safe_name = Path(upload.filename or "upload").name
+        try:
+            kind = detect_kind(safe_name)
+        except ValueError:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {safe_name}",
+            )
         dest = tmp_dir / safe_name
         dest.write_bytes(await upload.read())
-        pdf_paths.append(dest)
+        materials.append({"kind": kind, "path": str(dest)})
+        if first_kind is None:
+            first_kind = kind
+            first_dest = dest
 
-    # Auto-derive a title from the PDF when the user didn't provide one.
+    # Auto-derive a title from the first material when the user didn't provide one.
     title = (title or "").strip()
-    if not title and pdf_paths:
-        title = derive_title_from_pdf(pdf_paths[0], first_name)
+    if not title and first_kind is not None and first_dest is not None:
+        try:
+            title = material_title(first_kind, path=first_dest, url=None)
+        except Exception:
+            pass
     if not title:
         title = "Untitled Course"
 
@@ -121,7 +187,7 @@ async def upload_pdfs(
 
     # Run extract -> outline -> plan off the request thread.
     background_tasks.add_task(
-        service.run_ingest_job, course_id, title, pdf_paths, provider, tmp_dir,
+        service.run_materials_job, course_id, title, materials, provider, tmp_dir,
     )
     return {"course_id": course_id}
 
