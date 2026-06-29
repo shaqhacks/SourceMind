@@ -326,7 +326,7 @@ function LibraryUploadFlow() {
       {stage === "ingesting" && (
         <div className="panel">
           <div className="row" style={{ marginBottom: 6 }}>
-            <span>Reading the PDF and detecting chapters…</span>
+            <span>Reading your material and detecting chapters…</span>
             <Badge tone="ok">{courseData?.course?.status || "ingesting"}</Badge>
           </div>
           <p className="muted" style={{ margin: 0, fontSize: 13 }}>
