@@ -114,4 +114,12 @@ export const library = {
 
   // Fetches the Anki TSV file content as text
   getAnkiTsv: (id) => getText(`/library/courses/${encodeURIComponent(id)}/anki.tsv`),
+
+  // Course-level grounded chat over all uploaded materials
+  courseChat: (id, question) =>
+    postJson(`/library/courses/${encodeURIComponent(id)}/chat`, { question }),
+
+  // Course-level chat history
+  courseChatHistory: (id) =>
+    getJson(`/library/courses/${encodeURIComponent(id)}/chat/history`),
 };

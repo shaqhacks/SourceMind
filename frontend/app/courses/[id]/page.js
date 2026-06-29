@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { library } from "../../lib/api";
-import { Badge, ErrorBanner, ProgressBar, Spinner, StatusBadge } from "../../components/ui";
+import { Badge, ErrorBanner, Panel, ProgressBar, Spinner, StatusBadge } from "../../components/ui";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -121,6 +121,197 @@ function ChapterRow({ chapter, courseId, index }) {
         </span>
       </Link>
     </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Course-level chat panel
+// ---------------------------------------------------------------------------
+
+function CourseChatPanel({ courseId }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [chatError, setChatError] = useState(null);
+
+  useEffect(() => {
+    library.courseChatHistory(courseId)
+      .then((res) => {
+        const history = res.history || [];
+        setMessages(
+          history.map(({ role, content, citations }) => ({ role, content, citations }))
+        );
+      })
+      .catch(() => {
+        // Non-fatal: a brand-new course has no history — stay empty
+      });
+  }, [courseId]);
+
+  const handleSend = useCallback(async () => {
+    const question = input.trim();
+    if (!question || sending) return;
+    setMessages((prev) => [...prev, { role: "user", content: question, citations: null }]);
+    setInput("");
+    setSending(true);
+    setChatError(null);
+    try {
+      const res = await library.courseChat(courseId, question);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: res.answer, citations: res.citations },
+      ]);
+    } catch (err) {
+      setChatError(err.message || "Failed to get a response.");
+    } finally {
+      setSending(false);
+    }
+  }, [input, sending, courseId]);
+
+  const handleKeyDown = useCallback(
+    (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    },
+    [handleSend]
+  );
+
+  return (
+    <Panel title="Ask about this material">
+      {/* Transcript */}
+      {messages.length > 0 && (
+        <div
+          style={{
+            marginBottom: 14,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            maxHeight: 380,
+            overflowY: "auto",
+          }}
+        >
+          {messages.map((msg, i) => {
+            const isUser = msg.role === "user";
+            return (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  justifyContent: isUser ? "flex-end" : "flex-start",
+                }}
+              >
+                <div
+                  style={{
+                    maxWidth: "82%",
+                    background: isUser
+                      ? "rgba(91,140,255,0.12)"
+                      : "rgba(255,255,255,0.04)",
+                    border: isUser
+                      ? "1px solid rgba(91,140,255,0.25)"
+                      : "1px solid var(--border)",
+                    borderRadius: isUser
+                      ? "12px 12px 4px 12px"
+                      : "12px 12px 12px 4px",
+                    padding: "9px 13px",
+                    fontSize: 14,
+                    lineHeight: 1.55,
+                    color: "var(--text)",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {msg.content}
+                  {!isUser &&
+                    msg.citations &&
+                    msg.citations.length > 0 && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontSize: 12,
+                          color: "var(--muted)",
+                        }}
+                      >
+                        Sources: {msg.citations.map((c) => c.source_ref).join(", ")}
+                      </div>
+                    )}
+                </div>
+              </div>
+            );
+          })}
+          {sending && (
+            <div style={{ display: "flex", justifyContent: "flex-start" }}>
+              <div
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "12px 12px 12px 4px",
+                  padding: "9px 13px",
+                }}
+              >
+                <Spinner label="Thinking…" />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Empty state hint */}
+      {messages.length === 0 && !sending && (
+        <p style={{ margin: "0 0 14px", fontSize: 14, color: "var(--muted)" }}>
+          Ask a question about the course material and get a grounded answer with source citations.
+        </p>
+      )}
+
+      {/* Chat error */}
+      {chatError && <ErrorBanner error={chatError} />}
+
+      {/* Input row */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask a question…"
+          disabled={sending}
+          style={{
+            flex: 1,
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: "9px 13px",
+            fontSize: 14,
+            color: "var(--text)",
+            outline: "none",
+          }}
+        />
+        <button
+          onClick={handleSend}
+          disabled={sending || !input.trim()}
+          style={{
+            flexShrink: 0,
+            padding: "9px 18px",
+            background:
+              sending || !input.trim()
+                ? "rgba(91,140,255,0.08)"
+                : "rgba(91,140,255,0.18)",
+            border: "1px solid rgba(91,140,255,0.30)",
+            borderRadius: 8,
+            color:
+              sending || !input.trim()
+                ? "var(--muted)"
+                : "var(--accent, #5b8cff)",
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: sending || !input.trim() ? "not-allowed" : "pointer",
+            transition: "background 0.12s, color 0.12s",
+          }}
+        >
+          {sending ? "Thinking…" : "Send"}
+        </button>
+      </div>
+    </Panel>
   );
 }
 
@@ -377,6 +568,11 @@ export default function CoursePage() {
             ))}
           </ul>
         )}
+      </div>
+
+      {/* ── Ask about this material ── */}
+      <div style={{ marginTop: 24 }}>
+        <CourseChatPanel courseId={id} />
       </div>
 
       {/* ── Footer note ── */}
