@@ -413,6 +413,32 @@ pre.result {
 .course-card {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+}
+
+.course-card-head {
+  align-items: flex-start;
+}
+
+.course-card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.course-card-title strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.course-card-status {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.course-card-meta,
+.course-card-error {
+  overflow-wrap: anywhere;
 }
 
 .lesson-page {

@@ -2,10 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { api, library } from "../lib/api";
+import { library } from "../lib/api";
 import { Badge, ErrorBanner, Panel } from "../components/ui";
-
-const SOURCE_TYPES = ["text", "markdown", "url", "youtube"];
 
 // ---------------------------------------------------------------------------
 // Library upload flow: upload → plan review → approve + generate → poll
@@ -128,10 +126,29 @@ function LibraryUploadFlow() {
       const id = result.course_id;
       setCourseId(id);
 
-      // Fetch the plan for review
-      const planData = await library.getPlan(id);
-      setPlan(planData);
-      setStage("reviewing");
+      // Ingest (extract → outline → plan) runs in the background. Poll the
+      // course status and show progress until the plan is ready for review.
+      setStage("ingesting");
+      stopPolling();
+      intervalRef.current = setInterval(async () => {
+        try {
+          const data = await library.getCourse(id);
+          setCourseData(data);
+          const s = data.course?.status;
+          if (s === "needs_review") {
+            stopPolling();
+            const planData = await library.getPlan(id);
+            setPlan(planData);
+            setStage("reviewing");
+          } else if (s === "ingest_failed") {
+            stopPolling();
+            setLibError(data.course?.generation_last_error || "Ingestion failed.");
+            setStage("idle");
+          }
+        } catch (pollErr) {
+          // transient error — keep polling
+        }
+      }, 1500);
     } catch (err) {
       setLibError(err.message);
       setStage("idle");
@@ -198,7 +215,15 @@ function LibraryUploadFlow() {
             type="file"
             accept="application/pdf"
             multiple
-            onChange={(e) => setLibFiles(e.target.files)}
+            onChange={(e) => {
+              const fs = e.target.files;
+              setLibFiles(fs);
+              // Auto-fill the title from the first filename when empty (editable).
+              if (fs && fs.length > 0 && !libTitle.trim()) {
+                const stem = fs[0].name.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").trim();
+                if (stem) setLibTitle(stem);
+              }
+            }}
             disabled={stage === "uploading"}
           />
 
@@ -209,6 +234,20 @@ function LibraryUploadFlow() {
             {stage === "uploading" ? "Uploading & building plan…" : "Upload & Build Plan"}
           </button>
         </form>
+      )}
+
+      {/* ── Stage: ingesting (outline + plan building in background) ── */}
+      {stage === "ingesting" && (
+        <div className="panel">
+          <div className="row" style={{ marginBottom: 6 }}>
+            <span>Reading the PDF and detecting chapters…</span>
+            <Badge tone="ok">{courseData?.course?.status || "ingesting"}</Badge>
+          </div>
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            Building the outline and study plan. This runs in the background — it
+            stays here until the plan is ready to review.
+          </p>
+        </div>
       )}
 
       {/* ── Stage: reviewing ── */}
@@ -289,127 +328,11 @@ function LibraryUploadFlow() {
 }
 
 // ---------------------------------------------------------------------------
-// Legacy upload panels (unchanged)
-// ---------------------------------------------------------------------------
 
 export default function Upload() {
-  const [sourceType, setSourceType] = useState("text");
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [subjectPdf, setSubjectPdf] = useState(null);
-  const [busy, setBusy] = useState("");
-  const [sourceResult, setSourceResult] = useState(null);
-  const [pdfResult, setPdfResult] = useState(null);
-  const [error, setError] = useState(null);
-
-  function run(kind, fn) {
-    return async (e) => {
-      e.preventDefault();
-      setBusy(kind);
-      setError(null);
-      try {
-        await fn();
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setBusy("");
-      }
-    };
-  }
-
-  const submitSource = run("source", async () => {
-    setSourceResult(null);
-    const body = { source_type: sourceType, content };
-    if (title.trim()) body.title = title.trim();
-    setSourceResult(await api.uploadSource(body));
-  });
-
-  const submitSubjectPdf = run("subject", async () => {
-    setPdfResult(null);
-    const form = new FormData();
-    form.append("file", subjectPdf);
-    if (title.trim()) form.append("title", title.trim());
-    setPdfResult({ kind: "subject", ...(await api.uploadSubjectPdf(form)) });
-  });
-
   return (
     <main>
-      <ErrorBanner error={error} />
-
-      {/* ── New library flow ── */}
       <LibraryUploadFlow />
-
-      <Panel title="Ingest a source">
-        <p className="muted">
-          Paste text, markdown, a YouTube transcript, or fetched page HTML. The backend normalizes
-          it, decomposes it into a competency tree, and scores the tree.
-        </p>
-        <form onSubmit={submitSource}>
-          <label htmlFor="title">Title (optional)</label>
-          <input id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Intro Algebra" />
-
-          <label htmlFor="type">Source type</label>
-          <select id="type" value={sourceType} onChange={(e) => setSourceType(e.target.value)}>
-            {SOURCE_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-
-          <label htmlFor="content">Content</label>
-          <textarea
-            id="content"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder={"Chapter 1: Foundations\n1.1 Integers\nIntegers are whole numbers..."}
-          />
-
-          <button type="submit" disabled={busy !== "" || !content.trim()}>
-            {busy === "source" ? "Working…" : "Decompose & score"}
-          </button>
-        </form>
-
-        {sourceResult && (
-          <div className="panel" style={{ marginTop: 16 }}>
-            <div className="row">
-              <strong>{sourceResult.title}</strong>
-              <Badge tone={sourceResult.rubric_passed ? "ok" : "bad"} dot>
-                {sourceResult.rubric_passed ? "PASS" : "FAIL"} · score{" "}
-                {Number(sourceResult.rubric_total).toFixed(2)}
-              </Badge>
-            </div>
-            <p className="muted" style={{ marginBottom: 0 }}>
-              {sourceResult.chapters_count} chapters · {sourceResult.competencies_count} competencies ·{" "}
-              {sourceResult.source_type}
-            </p>
-          </div>
-        )}
-      </Panel>
-
-      <Panel title="Upload a subject PDF (legacy)">
-        <form onSubmit={submitSubjectPdf}>
-          <label htmlFor="subjpdf">PDF file</label>
-          <input
-            id="subjpdf"
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => setSubjectPdf(e.target.files ? e.target.files[0] : null)}
-          />
-          <button type="submit" disabled={busy !== "" || !subjectPdf}>
-            {busy === "subject" ? "Uploading…" : "Create subject"}
-          </button>
-        </form>
-      </Panel>
-
-      {pdfResult && pdfResult.kind === "subject" && (
-        <Panel title="Created">
-          <p style={{ margin: 0 }}>
-            Subject <strong>{pdfResult.subject_id}</strong> · {pdfResult.competencies_count}{" "}
-            competencies · {pdfResult.quotes_count} quotes · {pdfResult.status}
-          </p>
-        </Panel>
-      )}
     </main>
   );
 }
