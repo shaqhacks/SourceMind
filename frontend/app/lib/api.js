@@ -66,6 +66,9 @@ export const library = {
   // Upload PDFs to create a new course
   uploadPdfs: (formData) => postForm("/library/uploads", formData),
 
+  // Create a course from a URL / pasted text / YouTube source
+  uploadSource: (payload) => postJson("/library/uploads/source", payload),
+
   // List all courses
   listCourses: () => getJson("/library/courses"),
 
