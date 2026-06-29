@@ -25,6 +25,7 @@ from SourceMind.backend.db import base, models
 from SourceMind.backend.llm.embed import embed_texts
 from SourceMind.backend.pipeline.chunk import chunk_pages
 from SourceMind.backend.extract.pdf import ExtractedPage, extract_pdf, extract_toc
+from SourceMind.backend.extract.material import extract_material
 from SourceMind.backend.llm.provider import LLMProvider, get_provider
 from SourceMind.backend.pipeline.outline import detect_outline, sections_from_toc
 from SourceMind.backend.pipeline.plan import PlanItem as PlanItemDC, generate_plan
@@ -171,6 +172,92 @@ def index_course(course_id: str, assets_dir: Path | None = None) -> None:
             ))
 
 
+def _finish_ingest(
+    course_id: str,
+    title: str,
+    all_pages: list[ExtractedPage],
+    toc_entries: list[tuple[int, str, int]],
+    provider: LLMProvider,
+    assets_dir: Path,
+) -> None:
+    """Shared downstream: save pages.json, run outline+plan, persist DB rows, index.
+
+    Both ``ingest_pdfs`` and ``ingest_materials`` call this after their
+    format-specific extraction loops.  ``toc_entries`` may be empty (non-PDF
+    sources); in that case ``sections_from_toc`` returns [] and the pipeline
+    falls through to ``detect_outline`` as usual.
+    """
+    # Persist page texts for use by generate_course
+    _save_pages(all_pages, assets_dir)
+
+    # --- Outline: prefer embedded TOC (instant, accurate);
+    # fall back to LLM-based detection only when no bookmarks are available. ---
+    sections = sections_from_toc(toc_entries, len(all_pages))
+    if not sections:
+        sections = detect_outline(all_pages, provider)
+    plan_items = generate_plan(sections, all_pages, provider)
+    section_map = {s.section_id: s for s in sections}
+
+    # --- Persist to DB ---
+    with base.get_session() as session:
+        # Get-or-create: the upload handler may have already inserted a
+        # placeholder row with status="ingesting" so the UI can poll.
+        course = session.get(models.Course, course_id)
+        if course is None:
+            course = models.Course(id=course_id)
+            session.add(course)
+        course.title = title
+        course.status = "needs_review"
+        course.generation_status = "idle"
+
+        # Asset rows for every extracted image (non-PDF pages have empty image_paths)
+        for page in all_pages:
+            for image_path in page.image_paths:
+                asset = models.Asset(
+                    id=str(uuid.uuid4()),
+                    course_id=course_id,
+                    path=str(image_path),
+                    source_page=page.page_number,
+                    caption="",
+                )
+                session.add(asset)
+
+        # PlanItem rows + pending Chapter placeholders
+        for order, plan_dc in enumerate(plan_items):
+            orm_plan = models.PlanItem(
+                course_id=course_id,
+                section_id=plan_dc.section_id,
+                title=plan_dc.title,
+                objectives=plan_dc.objectives,
+                importance=plan_dc.importance,
+                prerequisites=plan_dc.prerequisites,
+                target_words=plan_dc.target_words,
+                order=order,
+            )
+            session.add(orm_plan)
+
+            section = section_map.get(plan_dc.section_id)
+            source_pages = (
+                [section.page_start, section.page_end] if section else None
+            )
+
+            chapter = models.Chapter(
+                course_id=course_id,
+                section_id=plan_dc.section_id,
+                title=plan_dc.title,
+                objectives=plan_dc.objectives,
+                importance=plan_dc.importance,
+                source_pages=source_pages,
+                status="pending",
+            )
+            session.add(chapter)
+
+    try:
+        index_course(course_id, assets_dir=assets_dir)
+    except Exception as exc:  # noqa: BLE001 — embedding/index failure must NOT fail ingest
+        logger.warning("index_course failed for %s: %s", course_id, exc)
+
+
 def ingest_pdfs(
     course_id: str,
     title: str,
@@ -219,75 +306,7 @@ def ingest_pdfs(
         if raw_pages:
             offset = all_pages[-1].page_number + 1
 
-    # Persist page texts for use by generate_course
-    _save_pages(all_pages, assets_dir)
-
-    # --- Outline: prefer the PDF's own table of contents (instant, accurate);
-    # fall back to LLM-based detection only when the PDF has no bookmarks. ---
-    sections = sections_from_toc(toc_entries, len(all_pages))
-    if not sections:
-        sections = detect_outline(all_pages, provider)
-    plan_items = generate_plan(sections, all_pages, provider)
-    section_map = {s.section_id: s for s in sections}
-
-    # --- Persist to DB ---
-    with base.get_session() as session:
-        # Get-or-create: the upload handler may have already inserted a
-        # placeholder row with status="ingesting" so the UI can poll.
-        course = session.get(models.Course, course_id)
-        if course is None:
-            course = models.Course(id=course_id)
-            session.add(course)
-        course.title = title
-        course.status = "needs_review"
-        course.generation_status = "idle"
-
-        # Asset rows for every extracted image
-        for page in all_pages:
-            for image_path in page.image_paths:
-                asset = models.Asset(
-                    id=str(uuid.uuid4()),
-                    course_id=course_id,
-                    path=str(image_path),
-                    source_page=page.page_number,
-                    caption="",
-                )
-                session.add(asset)
-
-        # PlanItem rows + pending Chapter placeholders
-        for idx, plan_dc in enumerate(plan_items):
-            orm_plan = models.PlanItem(
-                course_id=course_id,
-                section_id=plan_dc.section_id,
-                title=plan_dc.title,
-                objectives=plan_dc.objectives,
-                importance=plan_dc.importance,
-                prerequisites=plan_dc.prerequisites,
-                target_words=plan_dc.target_words,
-                order=idx,
-            )
-            session.add(orm_plan)
-
-            section = section_map.get(plan_dc.section_id)
-            source_pages = (
-                [section.page_start, section.page_end] if section else None
-            )
-
-            chapter = models.Chapter(
-                course_id=course_id,
-                section_id=plan_dc.section_id,
-                title=plan_dc.title,
-                objectives=plan_dc.objectives,
-                importance=plan_dc.importance,
-                source_pages=source_pages,
-                status="pending",
-            )
-            session.add(chapter)
-
-    try:
-        index_course(course_id, assets_dir=assets_dir)
-    except Exception as exc:  # noqa: BLE001 — embedding/index failure must NOT fail ingest
-        logger.warning("index_course failed for %s: %s", course_id, exc)
+    _finish_ingest(course_id, title, all_pages, toc_entries, provider, assets_dir)
 
 
 def run_ingest_job(
@@ -305,6 +324,105 @@ def run_ingest_job(
     """
     try:
         ingest_pdfs(course_id, title, pdf_paths, provider=provider)
+    except Exception as exc:  # noqa: BLE001 — surface any ingest failure to the UI
+        with base.get_session() as session:
+            course = session.get(models.Course, course_id)
+            if course is None:
+                course = models.Course(id=course_id, title=title)
+                session.add(course)
+            course.status = "ingest_failed"
+            course.generation_last_error = str(exc)
+    finally:
+        if cleanup_dir is not None:
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
+
+
+def ingest_materials(
+    course_id: str,
+    title: str,
+    materials: list[dict],
+    provider: LLMProvider | None = None,
+    assets_dir: Path | None = None,
+) -> None:
+    """Extract heterogeneous materials, concatenate pages, run outline+plan, persist DB rows.
+
+    Each entry in *materials* is a dict with keys:
+      - ``"kind"``: one of ``pdf``, ``docx``, ``pptx``, ``txt``, ``md``,
+        ``url``, ``youtube``, ``text``
+      - ``"path"``: file path (for file-based kinds)
+      - ``"url"``: URL string (for ``url`` / ``youtube`` kinds)
+      - ``"text"``: raw text (for ``text`` kind)
+
+    Page numbers are made contiguous across materials (same offset logic as
+    ``ingest_pdfs``).  PDF materials also contribute TOC entries; all other
+    kinds produce empty image_paths and no TOC.
+
+    Args:
+        course_id:  Unique identifier for the course.
+        title:      Human-readable course title.
+        materials:  Ordered list of material descriptor dicts.
+        provider:   LLM backend; defaults to ``get_provider()``.
+        assets_dir: Directory for extracted images and pages.json.
+    """
+    provider = provider or get_provider()
+
+    if assets_dir is None:
+        assets_dir = _default_assets_dir(course_id)
+    assets_dir = Path(assets_dir)
+    assets_dir.mkdir(parents=True, exist_ok=True)
+
+    all_pages: list[ExtractedPage] = []
+    toc_entries: list[tuple[int, str, int]] = []
+    offset = 0
+
+    for idx, mat in enumerate(materials):
+        kind = (mat.get("kind") or "").strip().lower()
+        src_assets = assets_dir / f"src{idx}"
+
+        if kind == "pdf":
+            src_assets.mkdir(parents=True, exist_ok=True)
+            raw_pages = extract_material(
+                kind,
+                path=mat.get("path"),
+                assets_dir=src_assets,
+            )
+            # Collect this PDF's embedded TOC mapped onto the global page numbering.
+            if mat.get("path"):
+                for lvl, toc_title, pg in extract_toc(Path(mat["path"])):
+                    toc_entries.append((lvl, toc_title, pg + offset))
+        else:
+            raw_pages = extract_material(
+                kind,
+                path=mat.get("path"),
+                text=mat.get("text"),
+                url=mat.get("url"),
+                assets_dir=None,
+            )
+
+        # Apply contiguous global page-number offset.
+        for page in raw_pages:
+            page.page_number = offset + page.page_number
+        all_pages.extend(raw_pages)
+        if raw_pages:
+            offset = all_pages[-1].page_number + 1
+
+    _finish_ingest(course_id, title, all_pages, toc_entries, provider, assets_dir)
+
+
+def run_materials_job(
+    course_id: str,
+    title: str,
+    materials: list[dict],
+    provider: LLMProvider | None = None,
+    cleanup_dir: Path | None = None,
+) -> None:
+    """Run ``ingest_materials`` as a background job.
+
+    On any failure the course is marked ``status="ingest_failed"`` with the
+    error recorded.  The temporary upload directory (if given) is always removed.
+    """
+    try:
+        ingest_materials(course_id, title, materials, provider=provider)
     except Exception as exc:  # noqa: BLE001 — surface any ingest failure to the UI
         with base.get_session() as session:
             course = session.get(models.Course, course_id)

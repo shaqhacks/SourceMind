@@ -563,3 +563,40 @@ def test_regenerate_section_does_not_duplicate_review_states(tmp_path, db_url):
     assert count_after == count_before, (
         f"Regeneration duplicated ReviewState rows: before={count_before}, after={count_after}"
     )
+
+
+def test_ingest_materials_txt(tmp_path, db_url, monkeypatch):
+    """ingest_materials with a .txt material → Course persisted, Chapters created, pages.json written."""
+    from SourceMind.backend.pipeline.service import ingest_materials, course_assets_dir
+
+    # Stub embed_texts so no Ollama call is attempted; index_course failure is
+    # swallowed by the try/except inside _finish_ingest, but stubbing keeps
+    # test output clean.
+    monkeypatch.setattr(
+        "SourceMind.backend.pipeline.service.embed_texts",
+        lambda texts: [[0.0] * 8 for _ in texts],
+    )
+
+    # Write a text file with enough words to produce 2+ pages (paginate_text
+    # chunks at 500 words by default, so 600 words → 2 pages).
+    content = ("word " * 600).strip()
+    txt_file = tmp_path / "lecture.txt"
+    txt_file.write_text(content)
+
+    stub = StubProvider()
+    ingest_materials(
+        "algebra_txt",
+        "Algebra TXT",
+        [{"kind": "txt", "path": str(txt_file)}],
+        provider=stub,
+    )
+
+    with base.get_session() as session:
+        course = session.get(models.Course, "algebra_txt")
+        assert course is not None
+        assert course.status == "needs_review"
+        chapters = session.query(models.Chapter).filter_by(course_id="algebra_txt").all()
+        assert len(chapters) >= 1
+
+    pages_file = (course_assets_dir("algebra_txt") / ".." / "pages.json").resolve()
+    assert pages_file.exists()
