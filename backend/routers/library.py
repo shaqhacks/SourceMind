@@ -1,10 +1,13 @@
 """DB-backed library router — Task 11."""
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import tempfile
+import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -13,7 +16,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from SourceMind.backend.extract.material import detect_kind, material_title
+from SourceMind.backend.extract.material import material_title
 
 from SourceMind.backend.db import base, models
 from SourceMind.backend.llm.provider import get_provider
@@ -22,11 +25,84 @@ from SourceMind.backend.pipeline.retrieve import retrieve
 from SourceMind.backend.services import review
 from SourceMind.backend.services.anki_export import build_anki_tsv
 from SourceMind.backend.services.grading import PASS_THRESHOLD, grade_quiz
+from SourceMind.backend.services.ingest.security import sanitize_source
+from SourceMind.backend.services.upload_validation import (
+    MAGIC_PREFIX_LEN,
+    UploadValidationError,
+    validate_upload,
+)
 
 router = APIRouter(prefix="/library", tags=["library"])
 
 # Sentinel section_id for course-level chat turns (no specific chapter).
 COURSE_CHAT_SECTION = "__course__"
+
+# ─── Hardening config (env-tunable, read per request) ─────────────────────────
+
+_UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MiB streaming read granularity
+_DEFAULT_MAX_UPLOAD_MB = 50.0
+_DEFAULT_MAX_TOTAL_MB = 200.0
+_DEFAULT_MAX_TEXT_CHARS = 1_000_000
+_DEFAULT_MAX_CONCURRENT_LLM = 4
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _max_upload_bytes() -> int:
+    return int(_env_float("SOURCEMIND_MAX_UPLOAD_MB", _DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024)
+
+
+def _max_total_bytes() -> int:
+    return int(_env_float("SOURCEMIND_MAX_UPLOAD_TOTAL_MB", _DEFAULT_MAX_TOTAL_MB) * 1024 * 1024)
+
+
+def _max_text_chars() -> int:
+    return _env_int("SOURCEMIND_MAX_TEXT_CHARS", _DEFAULT_MAX_TEXT_CHARS)
+
+
+# ─── In-process LLM concurrency guard ─────────────────────────────────────────
+# A backstop, not full rate limiting: bound the number of in-flight LLM jobs so
+# a burst of chat/generation requests can't exhaust workers. Single-instance
+# only. Chat endpoints acquire non-blocking (fast 429 when saturated); the
+# background generation job acquires blocking (it serializes rather than 429,
+# since a background task cannot return a status code).
+_LLM_SEMAPHORE = threading.BoundedSemaphore(
+    _env_int("SOURCEMIND_MAX_CONCURRENT_LLM", _DEFAULT_MAX_CONCURRENT_LLM)
+)
+_LLM_BUSY_DETAIL = "Server busy: too many concurrent LLM requests. Please retry shortly."
+
+
+@contextmanager
+def _llm_slot(*, blocking: bool):
+    """Acquire an LLM concurrency slot. Non-blocking acquire raises HTTP 429
+    when saturated; blocking acquire waits for a free slot."""
+    acquired = _LLM_SEMAPHORE.acquire(blocking=blocking)
+    if not acquired:
+        raise HTTPException(status_code=429, detail=_LLM_BUSY_DETAIL)
+    try:
+        yield
+    finally:
+        _LLM_SEMAPHORE.release()
+
+
+def _generate_course_limited(course_id: str, *, provider) -> None:
+    """Background generation wrapper bounded by the LLM concurrency guard."""
+    with _llm_slot(blocking=True):
+        service.generate_course(course_id, provider=provider)
 
 
 def provider_dependency():
@@ -96,6 +172,15 @@ async def upload_source(
     if body.kind in ("url", "youtube"):
         material: dict = {"kind": body.kind, "url": body.value}
     else:
+        max_chars = _max_text_chars()
+        if len(body.value) > max_chars:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Text source too large: {len(body.value)} characters "
+                    f"(limit {max_chars})."
+                ),
+            )
         material = {"kind": body.kind, "text": body.value}
     materials = [material]
 
@@ -128,6 +213,57 @@ async def upload_source(
     return {"course_id": course_id}
 
 
+async def _write_upload_streamed(
+    upload: UploadFile,
+    dest: Path,
+    *,
+    safe_name: str,
+    per_file_limit: int,
+    total_so_far: int,
+    total_limit: int,
+) -> tuple[str, int]:
+    """Stream *upload* to *dest* in chunks, enforcing size + type validation.
+
+    Validates extension + magic bytes on the first chunk (fail fast before a
+    large bogus file is buffered) and enforces both the per-file and cumulative
+    size caps as bytes arrive. Returns ``(kind, bytes_written)``.
+
+    Raises:
+        ValueError: unsupported extension (from ``detect_kind``).
+        UploadValidationError: content/extension magic mismatch.
+        HTTPException(413): per-file or total size cap exceeded.
+    """
+    written = 0
+    head = b""
+    kind: str | None = None
+    with dest.open("wb") as fh:
+        while True:
+            chunk = await upload.read(_UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            if kind is None:
+                head = chunk[:MAGIC_PREFIX_LEN]
+                kind = validate_upload(safe_name, head)  # ValueError / UploadValidationError
+            written += len(chunk)
+            if written > per_file_limit:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"File {safe_name!r} exceeds the per-file size limit "
+                        f"({per_file_limit} bytes)."
+                    ),
+                )
+            if total_so_far + written > total_limit:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Upload exceeds the total size limit ({total_limit} bytes).",
+                )
+            fh.write(chunk)
+    if kind is None:  # empty file: still validate extension (+ empty magic)
+        kind = validate_upload(safe_name, head)
+    return kind, written
+
+
 @router.post("/uploads")
 async def upload_files(
     background_tasks: BackgroundTasks,
@@ -138,35 +274,52 @@ async def upload_files(
     """Accept one or more files of any supported type and an OPTIONAL title; ingest runs in the background.
 
     Supported types: pdf, docx, pptx, txt, md. Unsupported extensions are
-    rejected immediately with 400 before any background job is scheduled.
-    Returns ``{course_id}`` with the course in ``status="ingesting"``.
+    rejected with 400, content/extension magic-byte mismatches with 415, and
+    files exceeding the size caps (``SOURCEMIND_MAX_UPLOAD_MB`` per file,
+    ``SOURCEMIND_MAX_UPLOAD_TOTAL_MB`` total) with 413 — all before any
+    background job is scheduled. Returns ``{course_id}`` with the course in
+    ``status="ingesting"``.
     """
     tmp_dir = Path(tempfile.mkdtemp())
     materials: list[dict] = []
     first_kind: str | None = None
     first_dest: Path | None = None
 
-    for idx, upload in enumerate(files):
-        safe_name = Path(upload.filename or "upload").name
-        try:
-            kind = detect_kind(safe_name)
-        except ValueError:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: {safe_name}",
+    per_file_limit = _max_upload_bytes()
+    total_limit = _max_total_bytes()
+    total_written = 0
+    try:
+        for idx, upload in enumerate(files):
+            safe_name = Path(upload.filename or "upload").name
+            # Finding 4: prefix each dest with its index so two files sharing the
+            # same basename don't overwrite each other (silent data loss). The
+            # extension is preserved, so validation on safe_name still works.
+            dest = tmp_dir / f"{idx}_{safe_name}"
+            kind, written = await _write_upload_streamed(
+                upload,
+                dest,
+                safe_name=safe_name,
+                per_file_limit=per_file_limit,
+                total_so_far=total_written,
+                total_limit=total_limit,
             )
-        # Finding 4: prefix each dest with its index so two files sharing the same
-        # basename don't overwrite each other (silent data loss). The extension is
-        # preserved, so detect_kind on safe_name still works correctly.
-        dest = tmp_dir / f"{idx}_{safe_name}"
-        dest.write_bytes(await upload.read())
-        materials.append({"kind": kind, "path": str(dest)})
-        if first_kind is None:
-            first_kind = kind
-            # Title derivation must use the original (un-prefixed) name, not the
-            # idx-prefixed dedup path, or the title gets a stray "0 " prefix.
-            first_dest = tmp_dir / safe_name
+            total_written += written
+            materials.append({"kind": kind, "path": str(dest)})
+            if first_kind is None:
+                first_kind = kind
+                # Title derivation must use the original (un-prefixed) name, not
+                # the idx-prefixed dedup path, or the title gets a stray "0 " prefix.
+                first_dest = tmp_dir / safe_name
+    except UploadValidationError as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except ValueError as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {exc}") from exc
+    except Exception:
+        # Includes HTTPException(413) from size caps — always clean up the temp dir.
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
 
     # Auto-derive a title from the first material when the user didn't provide one.
     title = (title or "").strip()
@@ -383,7 +536,7 @@ def generate_course_endpoint(
         if session.get(models.Course, course_id) is None:
             raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
 
-    background_tasks.add_task(service.generate_course, course_id, provider=provider)
+    background_tasks.add_task(_generate_course_limited, course_id, provider=provider)
     return {"status": "started"}
 
 
@@ -491,13 +644,18 @@ def chat_with_chapter(
 
         body_md = chapter.body_md or ""
 
+    # Neutralize prompt-injection imperatives in the document-derived context
+    # (NOT the user's question, which is legitimate user input).
+    clean_body_md, _ = sanitize_source(body_md)
+
     prompt = (
         "You are a study assistant. Answer the question using ONLY the following "
         "chapter content. Do not introduce information not present in the chapter.\n\n"
-        f"=== CHAPTER CONTENT ===\n{body_md}\n\n"
+        f"=== CHAPTER CONTENT ===\n{clean_body_md}\n\n"
         f"=== QUESTION ===\n{body.question}"
     )
-    answer = provider.complete(prompt)
+    with _llm_slot(blocking=False):
+        answer = provider.complete(prompt)
     if not isinstance(answer, str):
         answer = str(answer)
 
@@ -534,6 +692,11 @@ def chat_with_course(
 
         results = retrieve(session, course_id, body.question, k=6)
 
+    # Neutralize prompt-injection imperatives in retrieved (document-derived)
+    # chunk content before it is injected as context for the model.
+    for r in results:
+        r["content"] = sanitize_source(r.get("content") or "")[0]
+
     citations = [{"source_ref": r["source_ref"], "content": r["content"]} for r in results]
 
     system = (
@@ -545,7 +708,8 @@ def chat_with_course(
     )
     prompt = f"Sources:\n{sources_block}\n\nQuestion: {body.question}"
 
-    answer = provider.complete(prompt, system=system)
+    with _llm_slot(blocking=False):
+        answer = provider.complete(prompt, system=system)
     if not isinstance(answer, str):
         answer = str(answer)
 

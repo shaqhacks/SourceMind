@@ -11,6 +11,7 @@ from SourceMind.backend.pipeline.template import (
     parse_cards,
     parse_quiz,
 )
+from SourceMind.backend.services.ingest.security import sanitize_source
 
 _MAX_TOKENS_CEILING = 8192
 _TOKENS_PER_WORD = 3
@@ -47,11 +48,15 @@ def generate_chapter(
     Returns:
         ChapterDraft with body_md, quiz, cards, and word_count populated.
     """
+    # Defense-in-depth: strip prompt-injection imperatives from the untrusted
+    # source document before it is interpolated into the generation prompt.
+    clean_source_text, _ = sanitize_source(source_text)
+
     prompt = PATH_TO_STAFF_TEMPLATE.format(
         objectives="\n".join(f"- {o}" for o in plan_item.objectives),
         importance=plan_item.importance,
         target_words=plan_item.target_words,
-        source_text=source_text,
+        source_text=clean_source_text,
         image_urls="\n".join(image_urls) if image_urls else "(none)",
     )
 

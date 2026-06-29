@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import os
 
+from SourceMind.backend.llm._timeout import call_with_timeout_retry
+
 
 def _ollama_embed(model: str, prompt: str) -> list[float]:
     """Lazy-imported ollama.embeddings call; patched in tests."""
@@ -19,8 +21,10 @@ def _model() -> str:
 
 
 def embed_text(text: str) -> list[float]:
-    return _ollama_embed(_model(), text)
+    model = _model()
+    return call_with_timeout_retry(lambda: _ollama_embed(model, text))
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    return [_ollama_embed(_model(), t) for t in texts]
+    model = _model()
+    return [call_with_timeout_retry(lambda t=t: _ollama_embed(model, t)) for t in texts]

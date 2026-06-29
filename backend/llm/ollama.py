@@ -12,6 +12,8 @@ import json
 import os
 import re
 
+from SourceMind.backend.llm._timeout import call_with_timeout_retry
+
 _DEFAULT_NUM_CTX = 16384
 
 
@@ -184,7 +186,7 @@ class OllamaProvider:
             # Pass the JSON schema directly so Ollama constrains output to it
             # (structured outputs) — far more reliable than format="json".
             kwargs["format"] = schema
-        resp = _chat(**kwargs)
+        resp = call_with_timeout_retry(lambda: _chat(**kwargs))
         text = resp["message"]["content"]
         if schema:
             return _parse_json(text)
