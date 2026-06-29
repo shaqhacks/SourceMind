@@ -2,8 +2,26 @@
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
 from SourceMind.backend.db import base, models
+from SourceMind.backend.main import app
+from SourceMind.backend.routers.library import provider_dependency
+
+
+class StubProvider:
+    """Minimal LLM stub that returns a deterministic canned answer."""
+
+    def complete(self, prompt: str, *, system: str = "", schema=None, max_tokens: int = 4096) -> str:
+        return "Grounded answer citing [1]."
+
+
+@pytest.fixture()
+def client():
+    app.dependency_overrides[provider_dependency] = lambda: StubProvider()
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.pop(provider_dependency, None)
 
 
 @pytest.fixture(autouse=True)
@@ -121,3 +139,80 @@ def test_chunk_and_chat_citations_persist():
 
         turn = session.query(models.ChatTurn).filter_by(course_id="c1").one()
         assert turn.citations == [{"source_ref": "p.1", "content": "hello"}]
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — course-level grounded cited chat + history endpoints
+# ---------------------------------------------------------------------------
+
+def test_chat_endpoint_grounded_and_cited(client, monkeypatch):
+    # Stub embed_text so no Ollama/network call is made.
+    monkeypatch.setattr(
+        "SourceMind.backend.pipeline.retrieve.embed_text",
+        lambda text: [1.0, 0.0, 0.0],
+    )
+
+    # Seed a Course + 2 Chunk rows with hand-set embeddings.
+    with base.get_session() as session:
+        session.add(models.Course(id="c1", title="T"))
+        session.add(models.Chunk(
+            course_id="c1",
+            source_ref="p.42",
+            content="Close chunk — should rank first.",
+            embedding=[1.0, 0.0, 0.0],
+            chunk_index=0,
+        ))
+        session.add(models.Chunk(
+            course_id="c1",
+            source_ref="p.99",
+            content="Distant chunk.",
+            embedding=[0.0, 1.0, 0.0],
+            chunk_index=1,
+        ))
+
+    # POST /library/courses/c1/chat — happy path
+    resp = client.post("/library/courses/c1/chat", json={"question": "What is X?"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["answer"]  # non-empty
+    assert data["citations"]  # non-empty
+    for cit in data["citations"]:
+        assert "source_ref" in cit
+        assert "content" in cit
+        assert "score" not in cit  # score must be dropped
+
+    # Exactly two ChatTurn rows with section_id == "__course__" persisted.
+    with base.get_session() as session:
+        turns = (
+            session.query(models.ChatTurn)
+            .filter_by(course_id="c1", section_id="__course__")
+            .order_by(models.ChatTurn.created_at)
+            .all()
+        )
+        assert len(turns) == 2
+        turn_data = [
+            {"role": t.role, "citations": t.citations}
+            for t in turns
+        ]
+    user_turn = next(t for t in turn_data if t["role"] == "user")
+    asst_turn = next(t for t in turn_data if t["role"] == "assistant")
+    assert user_turn["citations"] is None
+    assert asst_turn["citations"]  # non-empty
+
+    # GET /library/courses/c1/chat/history — returns turns in order with citations.
+    hist_resp = client.get("/library/courses/c1/chat/history")
+    assert hist_resp.status_code == 200
+    hist_data = hist_resp.json()
+    history = hist_data["history"]
+    assert len(history) == 2
+    assert history[0]["role"] == "user"
+    assert history[1]["role"] == "assistant"
+    asst_hist = history[1]
+    assert asst_hist["citations"]
+    for cit in asst_hist["citations"]:
+        assert "source_ref" in cit
+        assert "content" in cit
+
+    # POST to a missing course → 404.
+    miss = client.post("/library/courses/missing/chat", json={"question": "Q?"})
+    assert miss.status_code == 404

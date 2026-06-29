@@ -17,10 +17,14 @@ from pydantic import BaseModel
 from SourceMind.backend.db import base, models
 from SourceMind.backend.llm.provider import get_provider
 from SourceMind.backend.pipeline import service
+from SourceMind.backend.pipeline.retrieve import retrieve
 from SourceMind.backend.services import review
 from SourceMind.backend.services.anki_export import build_anki_tsv
 
 router = APIRouter(prefix="/library", tags=["library"])
+
+# Sentinel section_id for course-level chat turns (no specific chapter).
+COURSE_CHAT_SECTION = "__course__"
 
 
 def provider_dependency():
@@ -434,6 +438,85 @@ def chat_with_chapter(
         ))
 
     return {"answer": answer}
+
+
+@router.post("/courses/{course_id}/chat")
+def chat_with_course(
+    course_id: str,
+    body: ChatBody,
+    provider=Depends(provider_dependency),
+) -> dict:
+    """Answer a question grounded in course chunks with citations; persist the exchange."""
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is None:
+            raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
+
+        results = retrieve(session, course_id, body.question, k=6)
+
+    citations = [{"source_ref": r["source_ref"], "content": r["content"]} for r in results]
+
+    system = (
+        "Answer ONLY from the numbered sources; cite sources as [1],[2]; "
+        "if they don't contain the answer, say so."
+    )
+    sources_block = "\n".join(
+        f"[{i}] ({r['source_ref']}): {r['content']}" for i, r in enumerate(results, 1)
+    )
+    prompt = f"Sources:\n{sources_block}\n\nQuestion: {body.question}"
+
+    answer = provider.complete(prompt, system=system)
+    if not isinstance(answer, str):
+        answer = str(answer)
+
+    now = datetime.now(timezone.utc).isoformat()
+    with base.get_session() as session:
+        session.add(models.ChatTurn(
+            course_id=course_id,
+            section_id=COURSE_CHAT_SECTION,
+            role="user",
+            content=body.question,
+            citations=None,
+            created_at=now,
+        ))
+        session.add(models.ChatTurn(
+            course_id=course_id,
+            section_id=COURSE_CHAT_SECTION,
+            role="assistant",
+            content=answer,
+            citations=citations,
+            created_at=now,
+        ))
+
+    return {"answer": answer, "citations": citations}
+
+
+@router.get("/courses/{course_id}/chat/history")
+def course_chat_history(course_id: str) -> dict:
+    """Return all course-level chat turns ordered by created_at ascending."""
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is None:
+            raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
+
+        turns = (
+            session.query(models.ChatTurn)
+            .filter(
+                models.ChatTurn.course_id == course_id,
+                models.ChatTurn.section_id == COURSE_CHAT_SECTION,
+            )
+            .order_by(models.ChatTurn.created_at)
+            .all()
+        )
+        return {
+            "history": [
+                {
+                    "role": t.role,
+                    "content": t.content,
+                    "citations": t.citations,
+                    "created_at": t.created_at,
+                }
+                for t in turns
+            ]
+        }
 
 
 # ─── Reviews ──────────────────────────────────────────────────────────────────
