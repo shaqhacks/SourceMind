@@ -24,10 +24,16 @@ function ReviewsInner() {
   const [loadingCards, setLoadingCards] = useState(true);
   const [grading, setGrading] = useState(false);
   const [error, setError] = useState(null);
+  const [stats, setStats] = useState(null);
 
   const isAllMode = !courseId; // "" → All subjects
 
-  // Load course list on mount
+  // Load stats (non-critical — errors swallowed)
+  const loadStats = useCallback(() => {
+    library.reviewStats().then(setStats).catch(() => {});
+  }, []);
+
+  // Load course list on mount; also load stats on mount
   useEffect(() => {
     library
       .listCourses()
@@ -35,6 +41,10 @@ function ReviewsInner() {
       .catch((err) => setError(err.message))
       .finally(() => setLoadingCourses(false));
   }, []);
+
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
 
   // Fetch due cards whenever the selected course changes.
   // id falsy → All subjects (aggregate endpoint already includes q/a/course_*).
@@ -95,20 +105,25 @@ function ReviewsInner() {
   }, [courseId, loadReviews]);
 
   // Grade handler — grade against the card's own course (All mode spans courses).
-  const handleGrade = async (correct) => {
+  const handleGrade = async (quality) => {
     const card = dueCards[current];
     setGrading(true);
+    setError(null);
     try {
       await library.gradeReview(card.course_id || courseId, {
         section_id: card.section_id,
         card_index: card.card_index,
-        correct,
+        quality,
       });
-    } catch {
-      // grade errors are non-fatal — advance regardless
-    } finally {
+    } catch (err) {
+      setError(err.message); // show error, do NOT advance — let the user retry
       setGrading(false);
+      return;
     }
+    setGrading(false);
+    // optimistically bump today's progress, then refresh stats
+    setStats((s) => (s ? { ...s, reviewed_today: s.reviewed_today + 1 } : s));
+    loadStats(); // refresh from server (non-blocking)
     setCurrent((c) => c + 1);
     setRevealed(false);
   };
@@ -121,6 +136,105 @@ function ReviewsInner() {
       {/* ── Header + course picker ── */}
       <div style={{ marginBottom: 28 }}>
         <h2 style={{ margin: "0 0 16px" }}>Spaced Review</h2>
+
+        {/* ── Stats header (non-null guard) ── */}
+        {stats && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 10,
+              marginBottom: 20,
+            }}
+          >
+            {/* Streak */}
+            <div
+              style={{
+                background: "var(--panel)",
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: "10px 16px",
+                minWidth: 100,
+              }}
+            >
+              <div style={{ fontSize: 18, marginBottom: 2 }}>🔥</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>
+                {stats.streak_days}-day streak
+              </div>
+            </div>
+
+            {/* Today's progress */}
+            <div
+              style={{
+                background: "var(--panel)",
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: "10px 16px",
+                minWidth: 140,
+              }}
+            >
+              <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                Today
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
+                {stats.reviewed_today}/{stats.daily_goal} today
+              </div>
+              <div
+                style={{
+                  height: 4,
+                  borderRadius: 2,
+                  background: "var(--border)",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    borderRadius: 2,
+                    background: "var(--accent, #5b8cff)",
+                    width: `${stats.daily_goal > 0 ? Math.min(100, (stats.reviewed_today / stats.daily_goal) * 100) : 0}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Due count */}
+            <div
+              style={{
+                background: "var(--panel)",
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: "10px 16px",
+                minWidth: 90,
+              }}
+            >
+              <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                Due
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>
+                {stats.due_count} due
+              </div>
+            </div>
+
+            {/* Mastered count */}
+            <div
+              style={{
+                background: "var(--panel)",
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: "10px 16px",
+                minWidth: 110,
+              }}
+            >
+              <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                Mastered
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>
+                {stats.mastered_count} mastered
+              </div>
+            </div>
+          </div>
+        )}
 
         {loadingCourses ? (
           <Spinner label="Loading courses…" />
@@ -265,27 +379,10 @@ function ReviewsInner() {
                     <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6 }}>{card.a}</p>
                   </div>
 
-                  <div style={{ display: "flex", gap: 12 }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {/* Again = 0, red */}
                     <button
-                      onClick={() => handleGrade(true)}
-                      disabled={grading}
-                      style={{
-                        flex: 1,
-                        background: "rgba(52,199,89,0.12)",
-                        border: "1px solid rgba(52,199,89,0.35)",
-                        borderRadius: 8,
-                        color: "#34c759",
-                        padding: "11px 0",
-                        fontSize: 14,
-                        fontWeight: 600,
-                        cursor: grading ? "not-allowed" : "pointer",
-                        opacity: grading ? 0.6 : 1,
-                      }}
-                    >
-                      Got it
-                    </button>
-                    <button
-                      onClick={() => handleGrade(false)}
+                      onClick={() => handleGrade(0)}
                       disabled={grading}
                       style={{
                         flex: 1,
@@ -298,9 +395,70 @@ function ReviewsInner() {
                         fontWeight: 600,
                         cursor: grading ? "not-allowed" : "pointer",
                         opacity: grading ? 0.6 : 1,
+                        minWidth: 70,
                       }}
                     >
-                      Missed
+                      Again
+                    </button>
+                    {/* Hard = 1, orange */}
+                    <button
+                      onClick={() => handleGrade(1)}
+                      disabled={grading}
+                      style={{
+                        flex: 1,
+                        background: "rgba(255,159,10,0.10)",
+                        border: "1px solid rgba(255,159,10,0.3)",
+                        borderRadius: 8,
+                        color: "#ff9f0a",
+                        padding: "11px 0",
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: grading ? "not-allowed" : "pointer",
+                        opacity: grading ? 0.6 : 1,
+                        minWidth: 70,
+                      }}
+                    >
+                      Hard
+                    </button>
+                    {/* Good = 2, green */}
+                    <button
+                      onClick={() => handleGrade(2)}
+                      disabled={grading}
+                      style={{
+                        flex: 1,
+                        background: "rgba(52,199,89,0.12)",
+                        border: "1px solid rgba(52,199,89,0.35)",
+                        borderRadius: 8,
+                        color: "#34c759",
+                        padding: "11px 0",
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: grading ? "not-allowed" : "pointer",
+                        opacity: grading ? 0.6 : 1,
+                        minWidth: 70,
+                      }}
+                    >
+                      Good
+                    </button>
+                    {/* Easy = 3, blue */}
+                    <button
+                      onClick={() => handleGrade(3)}
+                      disabled={grading}
+                      style={{
+                        flex: 1,
+                        background: "rgba(91,140,255,0.12)",
+                        border: "1px solid rgba(91,140,255,0.3)",
+                        borderRadius: 8,
+                        color: "var(--accent, #5b8cff)",
+                        padding: "11px 0",
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: grading ? "not-allowed" : "pointer",
+                        opacity: grading ? 0.6 : 1,
+                        minWidth: 70,
+                      }}
+                    >
+                      Easy
                     </button>
                   </div>
                 </>

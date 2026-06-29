@@ -105,9 +105,12 @@ export const library = {
   // Get due review cards across ALL courses (already joined to q/a + course_title)
   dueReviewsAll: () => getJson("/library/reviews/due"),
 
-  // Grade a review card
-  gradeReview: (id, { section_id, card_index, correct }) =>
-    postJson(`/library/courses/${encodeURIComponent(id)}/reviews/grade`, { section_id, card_index, correct }),
+  // Grade a review card (body may contain {section_id, card_index, correct?, quality?})
+  gradeReview: (id, body) =>
+    postJson(`/library/courses/${encodeURIComponent(id)}/reviews/grade`, body),
+
+  // SRS stats summary (reviewed_today, streak_days, due_count, total_cards, mastered_count, daily_goal)
+  reviewStats: () => getJson("/library/reviews/stats"),
 
   // Notification summary (due review count + per-course status)
   notifications: () => getJson("/library/notifications"),
