@@ -45,7 +45,7 @@ def retrieve(
     qe = query_embedding if query_embedding is not None else embed_text(query)
     chunks = session.query(models.Chunk).filter_by(course_id=course_id).all()
     scored = [
-        {"source_ref": c.source_ref, "content": c.content, "score": cosine(qe, c.embedding)}
+        {"source_ref": c.source_ref, "content": c.content, "score": cosine(qe, c.embedding) if c.embedding else 0.0}
         for c in chunks
     ]
     scored.sort(key=lambda d: d["score"], reverse=True)

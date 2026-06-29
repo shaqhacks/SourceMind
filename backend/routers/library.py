@@ -503,7 +503,7 @@ def course_chat_history(course_id: str) -> dict:
                 models.ChatTurn.course_id == course_id,
                 models.ChatTurn.section_id == COURSE_CHAT_SECTION,
             )
-            .order_by(models.ChatTurn.created_at)
+            .order_by(models.ChatTurn.created_at, models.ChatTurn.id)
             .all()
         )
         return {

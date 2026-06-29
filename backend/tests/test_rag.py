@@ -68,6 +68,8 @@ def test_chunk_pages_overlap():
     refs = [sr for sr, _ in chunks]
     assert refs[0] == "p.1"       # chunk 0 lives entirely on page 1
     assert refs[1] == "pp.1-2"    # chunk 1 crosses the page boundary
+    assert refs[2] == "p.2"       # chunk 2 lives entirely on page 2
+    assert refs[3] == "p.2"       # chunk 3 lives entirely on page 2
     assert "p.1" in refs
     assert "pp.1-2" in refs
 
@@ -139,6 +141,73 @@ def test_chunk_and_chat_citations_persist():
 
         turn = session.query(models.ChatTurn).filter_by(course_id="c1").one()
         assert turn.citations == [{"source_ref": "p.1", "content": "hello"}]
+
+
+def test_index_course_inserts_chunks_and_is_idempotent(monkeypatch):
+    from SourceMind.backend.extract.pdf import ExtractedPage
+    from SourceMind.backend.pipeline.service import (
+        _save_pages,
+        course_assets_dir,
+        index_course,
+    )
+
+    course_id = "test_index_c"
+    monkeypatch.setattr(
+        "SourceMind.backend.pipeline.service.embed_texts",
+        lambda texts: [[float(len(t)), 0.0] for t in texts],
+    )
+
+    # Seed the Course row first (FK constraint).
+    with base.get_session() as session:
+        session.add(models.Course(id=course_id, title="T"))
+
+    # Write pages.json with enough words to yield at least one chunk.
+    assets_dir = course_assets_dir(course_id)
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    pages = [
+        ExtractedPage(
+            page_number=1,
+            text=" ".join(f"word{i}" for i in range(50)),
+        )
+    ]
+    _save_pages(pages, assets_dir)
+
+    # First call — creates chunks.
+    index_course(course_id)
+
+    with base.get_session() as session:
+        chunks = (
+            session.query(models.Chunk)
+            .filter_by(course_id=course_id)
+            .order_by(models.Chunk.chunk_index)
+            .all()
+        )
+        assert len(chunks) >= 1
+        first_count = len(chunks)
+
+        # chunk_index values are 0..n-1 in insertion order.
+        for expected_i, chunk in enumerate(chunks):
+            assert chunk.chunk_index == expected_i
+
+        # Each chunk has a non-empty embedding list.
+        for chunk in chunks:
+            assert chunk.embedding and len(chunk.embedding) > 0
+
+        # source_ref and content are populated.
+        for chunk in chunks:
+            assert chunk.source_ref
+            assert chunk.content
+
+    # Second call — must be idempotent (delete-then-insert, no duplication).
+    index_course(course_id)
+
+    with base.get_session() as session:
+        second_count = (
+            session.query(models.Chunk)
+            .filter_by(course_id=course_id)
+            .count()
+        )
+    assert second_count == first_count
 
 
 # ---------------------------------------------------------------------------

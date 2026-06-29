@@ -24,13 +24,13 @@ from pathlib import Path
 from SourceMind.backend.db import base, models
 from SourceMind.backend.llm.embed import embed_texts
 from SourceMind.backend.pipeline.chunk import chunk_pages
-
-logger = logging.getLogger(__name__)
 from SourceMind.backend.extract.pdf import ExtractedPage, extract_pdf, extract_toc
 from SourceMind.backend.llm.provider import LLMProvider, get_provider
 from SourceMind.backend.pipeline.outline import detect_outline, sections_from_toc
 from SourceMind.backend.pipeline.plan import PlanItem as PlanItemDC, generate_plan
 from SourceMind.backend.pipeline.validate import generate_validated
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
