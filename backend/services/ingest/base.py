@@ -2,9 +2,9 @@
 empty/garbage guard every parser applies before returning raw_text.
 
 Each parser turns one source modality into a single ``raw_text`` string that the
-decomposition seam (:meth:`CourseEngine.decompose`) can consume. Parsers reject
-empty or garbage input at the door with named errors so the upload layer can map
-them to a clear 4xx instead of silently building an unusable course.
+ingest pipeline can consume. Parsers reject empty or garbage input at the door
+with named errors so the caller can map them to a clear 4xx instead of silently
+building an unusable course.
 """
 
 from __future__ import annotations

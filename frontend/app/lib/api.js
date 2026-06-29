@@ -61,51 +61,6 @@ export async function postForm(path, formData) {
   return asJson(await fetch(`${API_URL}${path}`, { method: "POST", body: formData }));
 }
 
-// --- Named endpoint helpers (bind to the backend contract) ---
-export const api = {
-  health: () => getJson("/health"),
-
-  // Courses
-  listCourses: (includeArchived = false) => getJson(`/courses${qs({ include_archived: includeArchived })}`),
-  getCourse: (id) => getJson(`/courses/${encodeURIComponent(id)}`),
-  getOutline: (id) => getJson(`/courses/${encodeURIComponent(id)}/outline`),
-  putOutline: (id, chapters) => putJson(`/courses/${encodeURIComponent(id)}/outline`, { chapters }),
-  archiveCourse: (id) => postJson(`/courses/${encodeURIComponent(id)}/archive`, {}),
-  restoreCourse: (id) => postJson(`/courses/${encodeURIComponent(id)}/restore`, {}),
-  deleteCourse: (id) => deleteJson(`/courses/${encodeURIComponent(id)}`),
-  generateCourse: (id) => postJson(`/courses/${encodeURIComponent(id)}/generate`, {}),
-  uploadCoursePdfs: (formData) => postForm("/courses/uploads", formData),
-  regenerateSection: (id, sid) =>
-    postJson(`/courses/${encodeURIComponent(id)}/sections/${encodeURIComponent(sid)}/regenerate`, {}),
-  getSection: (id, sid) =>
-    getJson(`/courses/${encodeURIComponent(id)}/sections/${encodeURIComponent(sid)}`),
-  chatSection: (id, sid, question) =>
-    postJson(`/courses/${encodeURIComponent(id)}/sections/${encodeURIComponent(sid)}/chat`, { question }),
-  gradeCheck: (id, sid, checkId, answer, confidence) =>
-    postJson(
-      `/courses/${encodeURIComponent(id)}/sections/${encodeURIComponent(sid)}/checks/${encodeURIComponent(checkId)}/grade`,
-      { answer, confidence }
-    ),
-  submitQuiz: (id, sid, answers, confidence) =>
-    postJson(`/courses/${encodeURIComponent(id)}/sections/${encodeURIComponent(sid)}/quiz/submit`, {
-      answers,
-      confidence,
-    }),
-  notifications: (includeUpcoming = true) =>
-    getJson(`/courses/notifications${qs({ include_upcoming: includeUpcoming })}`),
-  dueReviews: (includeUpcoming = false) => getJson(`/courses/reviews/due${qs({ include_upcoming: includeUpcoming })}`),
-  courseDueReviews: (id, includeUpcoming = false) =>
-    getJson(`/courses/${encodeURIComponent(id)}/reviews/due${qs({ include_upcoming: includeUpcoming })}`),
-
-  // Ingest
-  uploadSource: ({ source_type, content, title }) => postJson("/upload/source", { source_type, content, title }),
-  uploadSubjectPdf: (formData) => postForm("/upload/pdf", formData),
-
-  // Subjects (legacy, read-only on dashboard)
-  listSubjects: () => getJson("/subjects"),
-  getDashboard: () => getJson("/dashboard"),
-};
-
 // --- Library API client (new /library/* endpoints) ---
 export const library = {
   // Upload PDFs to create a new course
