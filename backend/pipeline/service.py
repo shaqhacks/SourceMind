@@ -15,12 +15,17 @@ Helper functions (also importable for unit testing):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import uuid
 from pathlib import Path
 
 from SourceMind.backend.db import base, models
+from SourceMind.backend.llm.embed import embed_texts
+from SourceMind.backend.pipeline.chunk import chunk_pages
+
+logger = logging.getLogger(__name__)
 from SourceMind.backend.extract.pdf import ExtractedPage, extract_pdf, extract_toc
 from SourceMind.backend.llm.provider import LLMProvider, get_provider
 from SourceMind.backend.pipeline.outline import detect_outline, sections_from_toc
@@ -130,6 +135,40 @@ def get_image_urls(
 # ---------------------------------------------------------------------------
 # Core service functions
 # ---------------------------------------------------------------------------
+
+
+def index_course(course_id: str, assets_dir: Path | None = None) -> None:
+    """Embed and index all page chunks for a course into the Chunk table.
+
+    Idempotent: deletes existing chunks for the course before re-inserting.
+    Embeddings are computed before the DB write so that an embed failure
+    (e.g. Ollama down) leaves existing chunks untouched.
+
+    Args:
+        course_id:  Course to index.
+        assets_dir: Directory containing pages.json.
+                    Defaults to ``$SOURCEMIND_ASSETS_DIR/<course_id>/assets``.
+    """
+    if assets_dir is None:
+        assets_dir = _default_assets_dir(course_id)
+    assets_dir = Path(assets_dir)
+
+    pages = _load_pages(assets_dir)
+    pairs = chunk_pages(pages)
+
+    # Embed BEFORE any DB write so a failure leaves existing chunks untouched.
+    embeddings = embed_texts([content for _, content in pairs])
+
+    with base.get_session() as session:
+        session.query(models.Chunk).filter_by(course_id=course_id).delete()
+        for i, ((source_ref, content), embedding) in enumerate(zip(pairs, embeddings)):
+            session.add(models.Chunk(
+                course_id=course_id,
+                source_ref=source_ref,
+                content=content,
+                embedding=embedding,
+                chunk_index=i,
+            ))
 
 
 def ingest_pdfs(
@@ -244,6 +283,11 @@ def ingest_pdfs(
                 status="pending",
             )
             session.add(chapter)
+
+    try:
+        index_course(course_id, assets_dir=assets_dir)
+    except Exception as exc:  # noqa: BLE001 — embedding/index failure must NOT fail ingest
+        logger.warning("index_course failed for %s: %s", course_id, exc)
 
 
 def run_ingest_job(
