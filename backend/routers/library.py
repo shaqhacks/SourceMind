@@ -451,8 +451,9 @@ def delete_course(course_id: str) -> dict:
     """Delete a course and ALL of its associated rows + on-disk data.
 
     404 if the course doesn't exist.  Otherwise removes every child row
-    (ChatTurn, ReviewState, ProgressState, Asset, Chapter, PlanItem) and the
-    Course itself in one transaction, then removes the course's data dir.
+    (ChatTurn, ReviewState, ReviewLog, ProgressState, Asset, Chapter, PlanItem,
+    Chunk, TestAttempt) and the Course itself in one transaction, then removes
+    the course's data dir.
     """
     with base.get_session() as session:
         course = session.get(models.Course, course_id)
@@ -462,10 +463,13 @@ def delete_course(course_id: str) -> dict:
         for child_model in (
             models.ChatTurn,
             models.ReviewState,
+            models.ReviewLog,
             models.ProgressState,
             models.Asset,
             models.Chapter,
             models.PlanItem,
+            models.Chunk,
+            models.TestAttempt,
         ):
             session.query(child_model).filter_by(course_id=course_id).delete()
 

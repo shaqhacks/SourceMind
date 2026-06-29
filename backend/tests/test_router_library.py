@@ -596,10 +596,19 @@ def test_delete_course_removes_all_rows(client: TestClient, tmp_path: Path) -> N
     client.post(f"/library/courses/{course_id}/generate")
 
     # Sanity: generation seeded review/chapter/plan rows for this course.
+    # Also seed Chunk/ReviewLog/TestAttempt directly so the cascade is exercised
+    # (embeddings aren't run in tests, so Chunk wouldn't otherwise exist).
     with base.get_session() as session:
         assert session.query(models.ReviewState).filter_by(course_id=course_id).count() >= 1
         assert session.query(models.Chapter).filter_by(course_id=course_id).count() >= 1
         assert session.query(models.PlanItem).filter_by(course_id=course_id).count() >= 1
+        session.add(models.Chunk(course_id=course_id, source_ref="p.1",
+                                 content="x", embedding=[0.0], chunk_index=0))
+        session.add(models.ReviewLog(course_id=course_id, section_id="s1",
+                                     card_index=0, quality=2, created_at="2026-01-01T00:00:00+00:00"))
+        session.add(models.TestAttempt(course_id=course_id, section_id="s1", scope="section",
+                                       answers=[0], correct=1, total=1, score=1.0, passed=True,
+                                       created_at="2026-01-01T00:00:00+00:00"))
 
     # Delete the course.
     resp = client.delete(f"/library/courses/{course_id}")
@@ -609,11 +618,14 @@ def test_delete_course_removes_all_rows(client: TestClient, tmp_path: Path) -> N
     # Follow-up GET is 404.
     assert client.get(f"/library/courses/{course_id}").status_code == 404
 
-    # No child rows remain for the deleted course.
+    # NO child rows remain for the deleted course — across EVERY owned table.
     with base.get_session() as session:
-        assert session.query(models.ReviewState).filter_by(course_id=course_id).count() == 0
-        assert session.query(models.Chapter).filter_by(course_id=course_id).count() == 0
-        assert session.query(models.PlanItem).filter_by(course_id=course_id).count() == 0
+        for child_model in (
+            models.ReviewState, models.ReviewLog, models.ProgressState,
+            models.Asset, models.Chapter, models.PlanItem,
+            models.ChatTurn, models.Chunk, models.TestAttempt,
+        ):
+            assert session.query(child_model).filter_by(course_id=course_id).count() == 0, child_model.__name__
         assert session.get(models.Course, course_id) is None
 
     # Deleting an unknown id is 404.
