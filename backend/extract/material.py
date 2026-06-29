@@ -5,11 +5,12 @@ outline/plan/chapter/RAG pipeline continues unchanged.
 """
 from __future__ import annotations
 
+import socket
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from SourceMind.backend.extract.pdf import ExtractedPage, derive_title_from_pdf, extract_pdf
-from SourceMind.backend.services.ingest import normalize_source
+from SourceMind.backend.services.ingest import SsrfError, normalize_source, validate_public_url
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".txt", ".md"}
 
@@ -113,6 +114,60 @@ def material_title(kind: str, *, path=None, url: str | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# SSRF-safe URL fetcher
+# ---------------------------------------------------------------------------
+
+
+def _resolve(host: str) -> list[str]:
+    """Resolve *host* to unique IP address strings (IPv4+IPv6) for SSRF validation."""
+    infos = socket.getaddrinfo(host, None)
+    return list({info[4][0] for info in infos})
+
+
+def _fetch_url_safely(url: str, *, max_bytes: int = 5_000_000) -> str:
+    """Fetch *url* safely, enforcing SSRF guard, redirect re-validation, and size cap.
+
+    1. Validates the initial URL against the SSRF guard (with DNS resolution).
+    2. Fetches with redirects DISABLED; follows up to 5 hops manually,
+       re-running the SSRF guard on each Location header.
+    3. Raises ``ValueError`` if the redirect limit is exceeded or the body
+       exceeds *max_bytes*.
+    4. Returns the final response as text.
+    """
+    import httpx  # lazy import — not available in all test envs
+
+    validate_public_url(url, resolver=_resolve)
+
+    max_redirects = 5
+    current_url = url
+    resp = None
+
+    with httpx.Client(follow_redirects=False, timeout=30) as client:
+        for hop in range(max_redirects + 1):
+            resp = client.get(current_url)
+            if not resp.is_redirect:
+                break
+            location = resp.headers.get("location", "")
+            if not location:
+                break
+            next_url = urljoin(current_url, location)
+            validate_public_url(next_url, resolver=_resolve)
+            current_url = next_url
+            if hop == max_redirects:
+                raise ValueError(
+                    f"Too many redirects fetching {url!r} (limit: {max_redirects})"
+                )
+
+    if resp is None:
+        raise ValueError(f"No response received from {url!r}")
+    if len(resp.content) > max_bytes:
+        raise ValueError(
+            f"Response body too large ({len(resp.content)} bytes > {max_bytes} limit)"
+        )
+    return resp.text
+
+
+# ---------------------------------------------------------------------------
 # Unified extractor
 # ---------------------------------------------------------------------------
 
@@ -166,18 +221,18 @@ def extract_material(
         raw = Path(path).read_text(errors="replace")
         return _pages_from_text(raw)
 
-    # --- URL: fetch then normalise ---
+    # --- URL: fetch then normalise (SSRF-safe) ---
     if kind == "url":
-        import httpx  # lazy import — not available in all test envs
-
-        resp = httpx.get(url, follow_redirects=True, timeout=30)
-        normalized = normalize_source("url", resp.text)
+        html = _fetch_url_safely(url)
+        normalized = normalize_source("url", html)
         return _pages_from_text(normalized)
 
     # --- YouTube ---
     if kind == "youtube":
-        normalized = normalize_source("youtube", url)
-        return _pages_from_text(normalized)
+        raise ValueError(
+            "YouTube transcript ingestion is not yet supported. "
+            "Please paste the video transcript using the 'Paste text' option instead."
+        )
 
     # --- Pasted text ---
     if kind in ("text", "pasted"):

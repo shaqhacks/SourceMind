@@ -1,6 +1,7 @@
 """Unit tests for backend/extract/material.py — TDD: tests written first."""
 from __future__ import annotations
 
+import socket
 import pytest
 from pathlib import Path
 
@@ -218,3 +219,58 @@ def test_extract_material_text_kind():
         assert page.page_number == i
     for page in pages:
         assert page.image_paths == []
+
+
+# ---------------------------------------------------------------------------
+# extract_material — SSRF guard (Finding 1 & 2)
+# ---------------------------------------------------------------------------
+
+def test_extract_material_url_blocks_private_ip():
+    """Link-local IP 169.254.169.254 is rejected BEFORE any network call."""
+    from SourceMind.backend.extract.material import extract_material
+    from SourceMind.backend.services.ingest import SsrfError
+
+    with pytest.raises(SsrfError):
+        extract_material("url", url="http://169.254.169.254/latest/meta-data/")
+
+
+def test_extract_material_url_blocks_localhost():
+    """Blocked hostname 'localhost' is rejected BEFORE any network call."""
+    from SourceMind.backend.extract.material import extract_material
+    from SourceMind.backend.services.ingest import SsrfError
+
+    with pytest.raises(SsrfError):
+        extract_material("url", url="http://localhost/")
+
+
+def test_extract_material_url_blocks_private_hostname_via_resolver(monkeypatch):
+    """A benign-looking hostname that resolves to a private IP is rejected via the DNS resolver."""
+    from SourceMind.backend.extract.material import extract_material
+    from SourceMind.backend.services.ingest import SsrfError
+
+    # Make "example.com" appear to resolve to a private IP — no real DNS call.
+    def _fake_getaddrinfo(host, port, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.0.0.5", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+
+    with pytest.raises(SsrfError):
+        extract_material("url", url="http://example.com/")
+
+
+# ---------------------------------------------------------------------------
+# extract_material — YouTube not supported (Finding 2)
+# ---------------------------------------------------------------------------
+
+def test_extract_material_youtube_not_supported():
+    """YouTube branch raises a clear error; it must NOT return fabricated pages."""
+    from SourceMind.backend.extract.material import extract_material
+
+    with pytest.raises((ValueError, Exception)) as exc_info:
+        extract_material("youtube", url="https://www.youtube.com/watch?v=abc")
+
+    msg = str(exc_info.value).lower()
+    # The error message should mention transcript or paste so the user knows what to do.
+    assert any(kw in msg for kw in ("transcript", "paste", "not yet supported")), (
+        f"Error message does not guide the user: {exc_info.value!r}"
+    )

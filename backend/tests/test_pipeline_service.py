@@ -600,3 +600,60 @@ def test_ingest_materials_txt(tmp_path, db_url, monkeypatch):
 
     pages_file = (course_assets_dir("algebra_txt") / ".." / "pages.json").resolve()
     assert pages_file.exists()
+
+
+def test_ingest_materials_mixed_pdf_txt_uses_llm_outline(tmp_path, db_url, monkeypatch):
+    """Mixed PDF+TXT ingest clears toc_entries and falls back to detect_outline (LLM).
+
+    Without Finding-3 fix, sections_from_toc would absorb the appended TXT pages
+    into the last PDF chapter, mis-attributing content.  With the fix, toc_entries
+    is emptied for mixed sets so the LLM outline path always runs.
+    """
+    from SourceMind.backend.pipeline.service import ingest_materials, course_assets_dir
+
+    monkeypatch.setattr(
+        "SourceMind.backend.pipeline.service.embed_texts",
+        lambda texts: [[0.0] * 8 for _ in texts],
+    )
+
+    # Build a 2-page PDF with an embedded TOC.
+    pdf_path = tmp_path / "toc_course.pdf"
+    doc = fitz.open()
+    for i in range(2):
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 72), f"PDF page {i} algebra content topic section")
+    # set_toc takes [[level, title, page_number], ...] with 1-based page numbers.
+    doc.set_toc([[1, "Chapter A", 1], [1, "Chapter B", 2]])
+    doc.save(str(pdf_path))
+    doc.close()
+
+    # Add a TXT material — this makes the set mixed, triggering the fix.
+    txt_file = tmp_path / "extra.txt"
+    txt_file.write_text(("word " * 300).strip())
+
+    stub = StubProvider()
+    ingest_materials(
+        "mixed_course",
+        "Mixed Course",
+        [{"kind": "pdf", "path": str(pdf_path)}, {"kind": "txt", "path": str(txt_file)}],
+        provider=stub,
+    )
+
+    with base.get_session() as session:
+        course = session.get(models.Course, "mixed_course")
+        assert course is not None
+        assert course.status == "needs_review", (
+            f"Expected needs_review; got {course.status!r}. "
+            f"error: {course.generation_last_error!r}"
+        )
+
+        chapters = session.query(models.Chapter).filter_by(course_id="mixed_course").all()
+        assert len(chapters) >= 1
+
+        # StubProvider.detect_outline returns sections with section_ids s1/s2.
+        # Confirm the LLM outline ran (not the TOC path which would give different ids).
+        section_ids = {ch.section_id for ch in chapters}
+        assert "s1" in section_ids, (
+            f"Expected s1 from LLM outline; got section_ids={section_ids}. "
+            "The TOC path should have been suppressed for mixed material sets."
+        )

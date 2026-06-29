@@ -406,6 +406,13 @@ def ingest_materials(
         if raw_pages:
             offset = all_pages[-1].page_number + 1
 
+    # Finding 3: TOC-based outline is only valid when ALL materials are PDFs.
+    # Mixed sets (PDF + non-PDF) produce mis-attributed chapter page ranges because
+    # sections_from_toc sets the last section's page_end = total_pages-1, absorbing
+    # the appended non-PDF pages.  Clearing toc_entries forces detect_outline (LLM).
+    if any((mat.get("kind") or "").strip().lower() != "pdf" for mat in materials):
+        toc_entries = []
+
     _finish_ingest(course_id, title, all_pages, toc_entries, provider, assets_dir)
 
 

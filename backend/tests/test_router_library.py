@@ -725,6 +725,44 @@ def test_course_test_aggregates(client: TestClient, tmp_path: Path) -> None:
     assert attempts[0]["score"] == pytest.approx(1.0)
 
 
+# ─── Finding 4: duplicate-filename upload ─────────────────────────────────────
+
+
+def test_upload_two_files_same_name(client: TestClient) -> None:
+    """Two uploaded files that share the same basename must not overwrite each other.
+
+    Before the fix, both would write to ``tmp_dir/notes.txt``; the second would
+    silently clobber the first and materials would reference the same path twice.
+    After the fix, paths are ``0_notes.txt`` / ``1_notes.txt`` — both distinct.
+    """
+    content_one = ("alpha beta gamma " * 200).strip().encode()
+    content_two = ("delta epsilon zeta " * 200).strip().encode()
+
+    resp = client.post(
+        "/library/uploads",
+        data={"title": "Duplicate Names Test"},
+        files=[
+            ("files", ("notes.txt", content_one, "text/plain")),
+            ("files", ("notes.txt", content_two, "text/plain")),
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+    course_id = resp.json()["course_id"]
+    assert course_id
+
+    # The course row must exist — the upload accepted both files without error.
+    resp = client.get(f"/library/courses/{course_id}")
+    assert resp.status_code == 200
+    course = resp.json()["course"]
+
+    # After the fix, ingest_materials receives two distinct paths and processes both,
+    # so the course ends in needs_review.  Before the fix it would silently lose one.
+    assert course["status"] == "needs_review", (
+        f"Expected needs_review (both files ingested); got {course['status']!r}. "
+        f"error: {course.get('generation_last_error')!r}"
+    )
+
+
 def test_section_test_404(client: TestClient, tmp_path: Path) -> None:
     """Submit/GET on unknown course or chapter returns 404."""
     resp = client.post("/library/courses/no_such/chapters/s1/test/submit", json={"answers": []})
