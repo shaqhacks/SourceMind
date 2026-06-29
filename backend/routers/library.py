@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+
+from SourceMind.backend.extract.pdf import derive_title_from_pdf
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
@@ -60,31 +62,54 @@ class GradeBody(BaseModel):
 
 @router.post("/uploads")
 async def upload_pdfs(
-    title: str = Form(...),
+    background_tasks: BackgroundTasks,
+    title: str = Form(""),
     files: list[UploadFile] = File(...),
     provider=Depends(provider_dependency),
 ) -> dict:
-    """Accept one or more PDFs plus a title, run ingest, and return course_id."""
-    slug = _slug(title)
-    course_id = slug
+    """Accept one or more PDFs and an OPTIONAL title; ingest runs in the background.
 
-    # Ensure uniqueness: if a course with this slug already exists, append a suffix.
-    with base.get_session() as session:
-        if session.get(models.Course, course_id) is not None:
-            course_id = f"{slug}_{uuid.uuid4().hex[:8]}"
-
+    Returns ``{course_id}`` immediately with the course in ``status="ingesting"``.
+    The client polls ``GET /library/courses/{id}`` until ``status`` becomes
+    ``needs_review`` (plan ready) or ``ingest_failed``. When no title is supplied
+    it is derived from the first PDF's metadata title, falling back to its filename.
+    """
+    # Persist uploads to a temp dir the background job consumes and then cleans up.
     tmp_dir = Path(tempfile.mkdtemp())
     pdf_paths: list[Path] = []
+    first_name = ""
     for upload in files:
         safe_name = Path(upload.filename or "upload.pdf").name
+        if not first_name:
+            first_name = safe_name
         dest = tmp_dir / safe_name
         dest.write_bytes(await upload.read())
         pdf_paths.append(dest)
 
-    try:
-        service.ingest_pdfs(course_id, title, pdf_paths, provider=provider)
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+    # Auto-derive a title from the PDF when the user didn't provide one.
+    title = (title or "").strip()
+    if not title and pdf_paths:
+        title = derive_title_from_pdf(pdf_paths[0], first_name)
+    if not title:
+        title = "Untitled Course"
+
+    slug = _slug(title) or "course"
+    course_id = slug
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is not None:
+            course_id = f"{slug}_{uuid.uuid4().hex[:8]}"
+        # Placeholder row so the client can poll status while ingest runs.
+        session.add(models.Course(
+            id=course_id,
+            title=title,
+            status="ingesting",
+            generation_status="idle",
+        ))
+
+    # Run extract -> outline -> plan off the request thread.
+    background_tasks.add_task(
+        service.run_ingest_job, course_id, title, pdf_paths, provider, tmp_dir,
+    )
     return {"course_id": course_id}
 
 
@@ -181,6 +206,36 @@ def get_course(course_id: str) -> dict:
                 for ch in sorted_chapters
             ],
         }
+
+
+@router.delete("/courses/{course_id}")
+def delete_course(course_id: str) -> dict:
+    """Delete a course and ALL of its associated rows + on-disk data.
+
+    404 if the course doesn't exist.  Otherwise removes every child row
+    (ChatTurn, ReviewState, ProgressState, Asset, Chapter, PlanItem) and the
+    Course itself in one transaction, then removes the course's data dir.
+    """
+    with base.get_session() as session:
+        course = session.get(models.Course, course_id)
+        if course is None:
+            raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
+
+        for child_model in (
+            models.ChatTurn,
+            models.ReviewState,
+            models.ProgressState,
+            models.Asset,
+            models.Chapter,
+            models.PlanItem,
+        ):
+            session.query(child_model).filter_by(course_id=course_id).delete()
+
+        session.delete(course)
+
+    # Remove the whole on-disk data dir for this course (assets dir's parent).
+    shutil.rmtree(service.course_assets_dir(course_id).parent, ignore_errors=True)
+    return {"deleted": True}
 
 
 # ─── Plan ─────────────────────────────────────────────────────────────────────
@@ -426,6 +481,89 @@ def grade_review(course_id: str, body: GradeBody) -> dict:
             "interval": row.interval,
             "due_at": row.due_at,
             "reps": row.reps,
+        }
+
+
+# ─── Cross-course reviews + notifications ─────────────────────────────────────
+
+
+@router.get("/reviews/due")
+def get_due_reviews_all() -> list[dict]:
+    """Return due flashcards across ALL courses, joined to card text + course title.
+
+    Each item: ``{course_id, course_title, section_id, card_index, q, a, due_at}``.
+    Cards whose ``card_index`` is out of range for their chapter are skipped.
+    """
+    with base.get_session() as session:
+        due = review.due_cards_all(session)
+        if not due:
+            return []
+
+        # Load each referenced chapter once: (course_id, section_id) -> cards list.
+        pairs = {(r.course_id, r.section_id) for r in due}
+        cards_by_pair: dict[tuple[str, str | None], list] = {}
+        for course_id, section_id in pairs:
+            chapter = (
+                session.query(models.Chapter)
+                .filter_by(course_id=course_id, section_id=section_id)
+                .first()
+            )
+            cards_by_pair[(course_id, section_id)] = (
+                chapter.cards if chapter and chapter.cards else []
+            )
+
+        # Map course_id -> title for the referenced courses.
+        course_ids = {r.course_id for r in due}
+        title_by_course: dict[str, str | None] = {
+            c.id: c.title
+            for c in session.query(models.Course)
+            .filter(models.Course.id.in_(course_ids))
+            .all()
+        }
+
+        out: list[dict] = []
+        for r in due:
+            cards = cards_by_pair.get((r.course_id, r.section_id)) or []
+            idx = r.card_index
+            if idx is None or idx < 0 or idx >= len(cards):
+                continue
+            card = cards[idx]
+            out.append(
+                {
+                    "course_id": r.course_id,
+                    "course_title": title_by_course.get(r.course_id),
+                    "section_id": r.section_id,
+                    "card_index": idx,
+                    "q": card.get("q") if isinstance(card, dict) else None,
+                    "a": card.get("a") if isinstance(card, dict) else None,
+                    "due_at": r.due_at,
+                }
+            )
+        return out
+
+
+@router.get("/notifications")
+def get_notifications() -> dict:
+    """Return a lightweight notification summary for the client poller.
+
+    Shape: ``{due_review_count: int, courses: [{id, title, status,
+    generation_progress}, ...]}`` — every course with its current status so the
+    client can detect ready / needs_review / ingest_failed / generating.
+    """
+    with base.get_session() as session:
+        due_review_count = len(review.due_cards_all(session))
+        courses = session.query(models.Course).all()
+        return {
+            "due_review_count": due_review_count,
+            "courses": [
+                {
+                    "id": c.id,
+                    "title": c.title,
+                    "status": c.status,
+                    "generation_progress": c.generation_progress,
+                }
+                for c in courses
+            ],
         }
 
 

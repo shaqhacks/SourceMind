@@ -117,6 +117,9 @@ export const library = {
   // Get a single course (returns { course, plan, chapters })
   getCourse: (id) => getJson(`/library/courses/${encodeURIComponent(id)}`),
 
+  // Delete a course and all its data
+  deleteCourse: (id) => deleteJson(`/library/courses/${encodeURIComponent(id)}`),
+
   // Get the course study plan
   getPlan: (id) => getJson(`/library/courses/${encodeURIComponent(id)}/plan`),
 
@@ -141,9 +144,15 @@ export const library = {
   // Get due review cards for a course
   dueReviews: (id) => getJson(`/library/courses/${encodeURIComponent(id)}/reviews/due`),
 
+  // Get due review cards across ALL courses (already joined to q/a + course_title)
+  dueReviewsAll: () => getJson("/library/reviews/due"),
+
   // Grade a review card
   gradeReview: (id, { section_id, card_index, correct }) =>
     postJson(`/library/courses/${encodeURIComponent(id)}/reviews/grade`, { section_id, card_index, correct }),
+
+  // Notification summary (due review count + per-course status)
+  notifications: () => getJson("/library/notifications"),
 
   // Returns the absolute URL for downloading the Anki TSV file (use as href)
   ankiTsvUrl: (id) => `${API_URL}/library/courses/${encodeURIComponent(id)}/anki.tsv`,

@@ -11,17 +11,21 @@ import { ErrorBanner, Spinner } from "../components/ui";
 
 function ReviewsInner() {
   const searchParams = useSearchParams();
+  // Default to "" (All subjects) unless a ?course= param is present.
   const initialCourseId = searchParams.get("course") || "";
 
   const [courses, setCourses] = useState([]);
   const [courseId, setCourseId] = useState(initialCourseId);
-  const [dueCards, setDueCards] = useState([]); // [{q, a, section_id, card_index, ...}]
+  const [dueCards, setDueCards] = useState([]); // [{q, a, section_id, card_index, course_id, course_title?}]
   const [current, setCurrent] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [loadingCourses, setLoadingCourses] = useState(true);
-  const [loadingCards, setLoadingCards] = useState(false);
+  // Start true: we always auto-load on mount, so avoid a flash of "All caught up".
+  const [loadingCards, setLoadingCards] = useState(true);
   const [grading, setGrading] = useState(false);
   const [error, setError] = useState(null);
+
+  const isAllMode = !courseId; // "" → All subjects
 
   // Load course list on mount
   useEffect(() => {
@@ -32,17 +36,24 @@ function ReviewsInner() {
       .finally(() => setLoadingCourses(false));
   }, []);
 
-  // Fetch due cards whenever the selected course changes
+  // Fetch due cards whenever the selected course changes.
+  // id falsy → All subjects (aggregate endpoint already includes q/a/course_*).
   const loadReviews = useCallback(async (id) => {
-    if (!id) return;
     setLoadingCards(true);
     setError(null);
     setDueCards([]);
     setCurrent(0);
     setRevealed(false);
     try {
-      const dueRows = await library.dueReviews(id);
+      if (!id) {
+        // All subjects: cards already carry q, a, course_id, course_title.
+        const cards = await library.dueReviewsAll();
+        setDueCards(Array.isArray(cards) ? cards : []);
+        return;
+      }
 
+      // Single course: fetch due rows, then join to chapter card text.
+      const dueRows = await library.dueReviews(id);
       if (!dueRows || dueRows.length === 0) {
         setDueCards([]);
         return;
@@ -62,13 +73,14 @@ function ReviewsInner() {
         })
       );
 
-      // Join due rows to card text; skip out-of-range indices
+      // Join due rows to card text; skip out-of-range indices.
+      // Stamp course_id = id so grading works uniformly with All mode.
       const cards = [];
       for (const row of dueRows) {
         const arr = chapterMap[row.section_id] || [];
         const card = arr[row.card_index];
         if (!card) continue;
-        cards.push({ ...row, q: card.q, a: card.a });
+        cards.push({ ...row, course_id: id, q: card.q, a: card.a });
       }
       setDueCards(cards);
     } catch (err) {
@@ -79,15 +91,15 @@ function ReviewsInner() {
   }, []);
 
   useEffect(() => {
-    if (courseId) loadReviews(courseId);
+    loadReviews(courseId);
   }, [courseId, loadReviews]);
 
-  // Grade handler
+  // Grade handler — grade against the card's own course (All mode spans courses).
   const handleGrade = async (correct) => {
     const card = dueCards[current];
     setGrading(true);
     try {
-      await library.gradeReview(courseId, {
+      await library.gradeReview(card.course_id || courseId, {
         section_id: card.section_id,
         card_index: card.card_index,
         correct,
@@ -102,7 +114,7 @@ function ReviewsInner() {
   };
 
   const card = dueCards[current];
-  const done = !loadingCards && courseId && current >= dueCards.length;
+  const done = !loadingCards && current >= dueCards.length;
 
   return (
     <main>
@@ -127,7 +139,7 @@ function ReviewsInner() {
               cursor: "pointer",
             }}
           >
-            <option value="">— select a course —</option>
+            <option value="">All subjects</option>
             {courses.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.title || c.id}
@@ -140,10 +152,10 @@ function ReviewsInner() {
       <ErrorBanner error={error} />
 
       {/* ── Loading cards ── */}
-      {courseId && loadingCards && <Spinner label="Loading due cards…" />}
+      {loadingCards && <Spinner label="Loading due cards…" />}
 
       {/* ── Review session ── */}
-      {courseId && !loadingCards && !error && (
+      {!loadingCards && !error && (
         <>
           {done ? (
             /* All caught up */
@@ -159,7 +171,9 @@ function ReviewsInner() {
               <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
               <h3 style={{ margin: "0 0 8px" }}>All caught up!</h3>
               <p className="muted" style={{ margin: 0 }}>
-                No cards due for this course. Check back later.
+                {isAllMode
+                  ? "No cards due right now."
+                  : "No cards due for this course. Check back later."}
               </p>
             </div>
           ) : card ? (
@@ -189,6 +203,21 @@ function ReviewsInner() {
                   {dueCards.length - current - 1} remaining
                 </span>
               </div>
+
+              {/* Subject label (All subjects mode) */}
+              {isAllMode && card.course_title && (
+                <p
+                  className="muted"
+                  style={{
+                    margin: "0 0 10px",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "var(--accent, #5b8cff)",
+                  }}
+                >
+                  {card.course_title}
+                </p>
+              )}
 
               {/* Question */}
               <div style={{ marginBottom: 24 }}>
@@ -279,13 +308,6 @@ function ReviewsInner() {
             </div>
           ) : null}
         </>
-      )}
-
-      {/* ── No course selected prompt ── */}
-      {!courseId && !loadingCourses && (
-        <p className="muted" style={{ marginTop: 8, fontSize: 14 }}>
-          Select a course above to start your review session.
-        </p>
       )}
     </main>
   );

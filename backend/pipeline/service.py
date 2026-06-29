@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import uuid
 from pathlib import Path
 
 from SourceMind.backend.db import base, models
-from SourceMind.backend.extract.pdf import ExtractedPage, extract_pdf
+from SourceMind.backend.extract.pdf import ExtractedPage, extract_pdf, extract_toc
 from SourceMind.backend.llm.provider import LLMProvider, get_provider
-from SourceMind.backend.pipeline.outline import detect_outline
+from SourceMind.backend.pipeline.outline import detect_outline, sections_from_toc
 from SourceMind.backend.pipeline.plan import PlanItem as PlanItemDC, generate_plan
 from SourceMind.backend.pipeline.validate import generate_validated
 
@@ -164,11 +165,15 @@ def ingest_pdfs(
     # per-PDF local image filenames (``page{i}_img{xref}.png``) cannot collide
     # across PDFs.  The contiguous global page-number offset is applied unchanged.
     all_pages: list[ExtractedPage] = []
+    toc_entries: list[tuple[int, str, int]] = []
     offset = 0
     for idx, pdf_path in enumerate(pdf_paths):
         src_assets = assets_dir / f"src{idx}"
         src_assets.mkdir(parents=True, exist_ok=True)
         raw_pages = extract_pdf(Path(pdf_path), src_assets)
+        # Collect this PDF's embedded TOC, mapped onto the global page numbering.
+        for lvl, toc_title, pg in extract_toc(Path(pdf_path)):
+            toc_entries.append((lvl, toc_title, pg + offset))
         for page in raw_pages:
             page.page_number = offset + page.page_number
         all_pages.extend(raw_pages)
@@ -178,20 +183,25 @@ def ingest_pdfs(
     # Persist page texts for use by generate_course
     _save_pages(all_pages, assets_dir)
 
-    # --- Run pipeline ---
-    sections = detect_outline(all_pages, provider)
+    # --- Outline: prefer the PDF's own table of contents (instant, accurate);
+    # fall back to LLM-based detection only when the PDF has no bookmarks. ---
+    sections = sections_from_toc(toc_entries, len(all_pages))
+    if not sections:
+        sections = detect_outline(all_pages, provider)
     plan_items = generate_plan(sections, all_pages, provider)
     section_map = {s.section_id: s for s in sections}
 
     # --- Persist to DB ---
     with base.get_session() as session:
-        course = models.Course(
-            id=course_id,
-            title=title,
-            status="needs_review",
-            generation_status="idle",
-        )
-        session.add(course)
+        # Get-or-create: the upload handler may have already inserted a
+        # placeholder row with status="ingesting" so the UI can poll.
+        course = session.get(models.Course, course_id)
+        if course is None:
+            course = models.Course(id=course_id)
+            session.add(course)
+        course.title = title
+        course.status = "needs_review"
+        course.generation_status = "idle"
 
         # Asset rows for every extracted image
         for page in all_pages:
@@ -234,6 +244,34 @@ def ingest_pdfs(
                 status="pending",
             )
             session.add(chapter)
+
+
+def run_ingest_job(
+    course_id: str,
+    title: str,
+    pdf_paths: list[Path],
+    provider: LLMProvider | None = None,
+    cleanup_dir: Path | None = None,
+) -> None:
+    """Run ``ingest_pdfs`` as a background job.
+
+    On any failure the course is marked ``status="ingest_failed"`` with the
+    error recorded, so the UI can show a clear message instead of polling
+    forever. The temporary upload directory (if given) is always removed.
+    """
+    try:
+        ingest_pdfs(course_id, title, pdf_paths, provider=provider)
+    except Exception as exc:  # noqa: BLE001 — surface any ingest failure to the UI
+        with base.get_session() as session:
+            course = session.get(models.Course, course_id)
+            if course is None:
+                course = models.Course(id=course_id, title=title)
+                session.add(course)
+            course.status = "ingest_failed"
+            course.generation_last_error = str(exc)
+    finally:
+        if cleanup_dir is not None:
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
 
 
 def approve_plan(course_id: str) -> None:

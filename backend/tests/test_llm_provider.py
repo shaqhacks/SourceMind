@@ -149,9 +149,33 @@ def test_ollama_complete_passes_max_tokens(monkeypatch):
 
     p = ollama_mod.OllamaProvider(model="llama3.1")
     p.complete("hi", max_tokens=123)
-    assert captured.get("options") == {"num_predict": 123}
+    assert captured.get("options", {}).get("num_predict") == 123
+    # num_ctx is also set (raised above Ollama's small default) so long inputs
+    # aren't silently truncated.
+    assert captured.get("options", {}).get("num_ctx", 0) >= 8192
 
 
 def test_default_claude_model_reexported():
     from SourceMind.backend.llm import DEFAULT_CLAUDE_MODEL
     assert DEFAULT_CLAUDE_MODEL == "claude-sonnet-4-6"
+
+
+def test_parse_json_salvages_truncated_array():
+    """A response cut off mid-element (model hit the token limit) still yields the
+    complete objects rather than failing the whole request."""
+    from SourceMind.backend.llm.ollama import _parse_json
+    truncated = (
+        '{\n "sections": [\n '
+        '{"section_id": "1.9", "title": "Age Problems", "page_start": 71, "page_end": 72},\n '
+        '{"section_id": "", "title": "Objective: Solve age probl'
+    )
+    out = _parse_json(truncated)
+    assert isinstance(out, dict)
+    assert len(out["sections"]) == 1          # complete object kept
+    assert out["sections"][0]["section_id"] == "1.9"
+    assert out["sections"][0]["page_end"] == 72
+
+
+def test_parse_json_normal_still_works():
+    from SourceMind.backend.llm.ollama import _parse_json
+    assert _parse_json('{"a": 1, "b": [2, 3]}') == {"a": 1, "b": [2, 3]}

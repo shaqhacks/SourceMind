@@ -138,3 +138,31 @@ def test_due_cards_filters_and_orders():
 
     # Empty due_at sorts first (empty string < any date string)
     assert indices.index(2) < indices.index(0), "Empty due_at should sort before past due_at"
+
+
+# ---------------------------------------------------------------------------
+# Test 4: due_cards_all spans multiple courses
+# ---------------------------------------------------------------------------
+
+
+def test_due_cards_all_spans_courses():
+    """due_cards_all returns due rows from every course, not just one."""
+    with base.get_session() as s:
+        _ensure_course(s, "ca")
+        _ensure_course(s, "cb")
+        # Empty due_at → due now, one card per course.
+        s.add(models.ReviewState(
+            course_id="ca", section_id="sec1", card_index=0,
+            ease=2.5, interval=0, reps=0, due_at="",
+        ))
+        s.add(models.ReviewState(
+            course_id="cb", section_id="sec1", card_index=0,
+            ease=2.5, interval=0, reps=0, due_at="",
+        ))
+
+    with base.get_session() as s:
+        due = review.due_cards_all(s, now=FIXED_NOW)
+        course_ids = {r.course_id for r in due}
+
+    assert "ca" in course_ids, "due_cards_all should include course 'ca'"
+    assert "cb" in course_ids, "due_cards_all should include course 'cb'"

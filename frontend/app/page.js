@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { library } from "./lib/api";
 import { Badge, EmptyState, ErrorBanner, Panel, Spinner, StatusBadge } from "./components/ui";
@@ -43,19 +43,42 @@ export default function Dashboard() {
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
-  useEffect(() => {
+  const loadCourses = useCallback(async () => {
     setLoading(true);
     setError(null);
-    library
-      .listCourses()
-      .then((data) => {
-        // backend may return array directly or wrapped in { courses: [...] }
-        setCourses(Array.isArray(data) ? data : (data && data.courses) || []);
-      })
-      .catch((err) => setError(err.message || "Failed to load courses"))
-      .finally(() => setLoading(false));
+    try {
+      const data = await library.listCourses();
+      // backend may return array directly or wrapped in { courses: [...] }
+      setCourses(Array.isArray(data) ? data : (data && data.courses) || []);
+    } catch (err) {
+      setError(err.message || "Failed to load courses");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadCourses();
+  }, [loadCourses]);
+
+  const handleDelete = useCallback(
+    async (id) => {
+      if (!window.confirm("Delete this course and all its data?")) return;
+      setDeletingId(id);
+      setError(null);
+      try {
+        await library.deleteCourse(id);
+        await loadCourses();
+      } catch (err) {
+        setError(err.message || "Failed to delete course");
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [loadCourses]
+  );
 
   return (
     <main>
@@ -119,8 +142,32 @@ export default function Dashboard() {
                   >
                     {title}
                   </strong>
-                  <span className="row" style={{ gap: 6, flexShrink: 0 }}>
+                  <span className="row" style={{ gap: 6, flexShrink: 0, alignItems: "center" }}>
                     {status && <StatusBadge status={status} />}
+                    <button
+                      type="button"
+                      aria-label={`Delete ${title}`}
+                      disabled={deletingId === courseId}
+                      onClick={(e) => {
+                        // Keep the card's navigation Link from firing.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleDelete(courseId);
+                      }}
+                      style={{
+                        background: "rgba(255,69,58,0.10)",
+                        border: "1px solid rgba(255,69,58,0.3)",
+                        borderRadius: 6,
+                        color: "#ff453a",
+                        padding: "3px 9px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: deletingId === courseId ? "not-allowed" : "pointer",
+                        opacity: deletingId === courseId ? 0.6 : 1,
+                      }}
+                    >
+                      {deletingId === courseId ? "Deleting…" : "Delete"}
+                    </button>
                   </span>
                 </div>
 

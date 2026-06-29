@@ -584,3 +584,71 @@ def test_get_chapter_returns_completed_field(client: TestClient, tmp_path: Path)
     resp = client.get(f"/library/courses/{course_id}/chapters/{section_id}")
     assert resp.status_code == 200
     assert resp.json()["completed"] is True, "Expected completed=True after marking"
+
+
+# ─── Delete course ────────────────────────────────────────────────────────────
+
+
+def test_delete_course_removes_all_rows(client: TestClient, tmp_path: Path) -> None:
+    """DELETE removes the course + all child rows; follow-up GET is 404."""
+    course_id = _upload(client, tmp_path)
+    client.post(f"/library/courses/{course_id}/plan/approve")
+    client.post(f"/library/courses/{course_id}/generate")
+
+    # Sanity: generation seeded review/chapter/plan rows for this course.
+    with base.get_session() as session:
+        assert session.query(models.ReviewState).filter_by(course_id=course_id).count() >= 1
+        assert session.query(models.Chapter).filter_by(course_id=course_id).count() >= 1
+        assert session.query(models.PlanItem).filter_by(course_id=course_id).count() >= 1
+
+    # Delete the course.
+    resp = client.delete(f"/library/courses/{course_id}")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"deleted": True}
+
+    # Follow-up GET is 404.
+    assert client.get(f"/library/courses/{course_id}").status_code == 404
+
+    # No child rows remain for the deleted course.
+    with base.get_session() as session:
+        assert session.query(models.ReviewState).filter_by(course_id=course_id).count() == 0
+        assert session.query(models.Chapter).filter_by(course_id=course_id).count() == 0
+        assert session.query(models.PlanItem).filter_by(course_id=course_id).count() == 0
+        assert session.get(models.Course, course_id) is None
+
+    # Deleting an unknown id is 404.
+    assert client.delete("/library/courses/nonexistent_course_xyz").status_code == 404
+
+
+# ─── Cross-course reviews + notifications ─────────────────────────────────────
+
+
+def test_reviews_due_all_aggregates(client: TestClient, tmp_path: Path) -> None:
+    """GET /library/reviews/due aggregates due cards across courses, joined to text."""
+    course_id = _upload(client, tmp_path)
+    client.post(f"/library/courses/{course_id}/plan/approve")
+    client.post(f"/library/courses/{course_id}/generate")
+
+    resp = client.get("/library/reviews/due")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert isinstance(rows, list)
+    assert len(rows) >= 1, "expected at least one seeded due card after generation"
+    for row in rows:
+        for key in ("course_id", "course_title", "section_id", "card_index", "q", "a"):
+            assert key in row, f"missing key {key!r} in due row {row!r}"
+    assert any(row["course_id"] == course_id for row in rows)
+
+
+def test_notifications_summary(client: TestClient, tmp_path: Path) -> None:
+    """GET /library/notifications returns due_review_count + courses list."""
+    course_id = _upload(client, tmp_path)
+
+    resp = client.get("/library/notifications")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data["due_review_count"], int)
+    assert isinstance(data["courses"], list)
+    assert any(c["id"] == course_id for c in data["courses"])
+    for c in data["courses"]:
+        assert "id" in c and "title" in c and "status" in c

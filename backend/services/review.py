@@ -4,6 +4,7 @@ Public API
 ----------
 grade_card(session, course_id, section_id, card_index, correct, now=None) -> ReviewState
 due_cards(session, course_id, now=None) -> list[ReviewState]
+due_cards_all(session, now=None) -> list[ReviewState]
 """
 
 from __future__ import annotations
@@ -105,22 +106,16 @@ def grade_card(
     return row
 
 
-def due_cards(
-    session: Session,
-    course_id: str,
+def _filter_due(
+    rows: list[models.ReviewState],
     now: datetime | None = None,
 ) -> list[models.ReviewState]:
-    """Return all ReviewState rows for *course_id* that are due at or before *now*.
+    """Filter *rows* to those due at or before *now*, ordered by ``due_at`` asc.
 
-    Rows with an empty ``due_at`` string are treated as immediately due.
-    Results are ordered by ``due_at`` ascending (empty strings sort first).
-
-    Parameters
-    ----------
-    session:   Active SQLAlchemy session.
-    course_id: Course identifier.
-    now:       Reference datetime.  Defaults to UTC now.
-               Pass a fixed value in tests for deterministic behaviour.
+    Shared due-selection logic used by both :func:`due_cards` (one course) and
+    :func:`due_cards_all` (all courses).  Rows with an empty ``due_at`` string
+    are treated as immediately due; unparseable dates are treated as due to
+    avoid silently hiding cards.  Empty strings sort before any ISO date string.
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -128,12 +123,6 @@ def due_cards(
     # Ensure now is timezone-aware for comparison
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
-
-    rows: list[models.ReviewState] = (
-        session.query(models.ReviewState)
-        .filter_by(course_id=course_id)
-        .all()
-    )
 
     due: list[models.ReviewState] = []
     for row in rows:
@@ -154,3 +143,48 @@ def due_cards(
     # Sort ascending: empty string ("") sorts before any ISO date string
     due.sort(key=lambda r: r.due_at or "")
     return due
+
+
+def due_cards(
+    session: Session,
+    course_id: str,
+    now: datetime | None = None,
+) -> list[models.ReviewState]:
+    """Return all ReviewState rows for *course_id* that are due at or before *now*.
+
+    Rows with an empty ``due_at`` string are treated as immediately due.
+    Results are ordered by ``due_at`` ascending (empty strings sort first).
+
+    Parameters
+    ----------
+    session:   Active SQLAlchemy session.
+    course_id: Course identifier.
+    now:       Reference datetime.  Defaults to UTC now.
+               Pass a fixed value in tests for deterministic behaviour.
+    """
+    rows: list[models.ReviewState] = (
+        session.query(models.ReviewState)
+        .filter_by(course_id=course_id)
+        .all()
+    )
+    return _filter_due(rows, now)
+
+
+def due_cards_all(
+    session: Session,
+    now: datetime | None = None,
+) -> list[models.ReviewState]:
+    """Return all due ReviewState rows across *every* course.
+
+    Same due-selection logic as :func:`due_cards` but without the course filter,
+    so the result spans all courses.  Empty ``due_at`` is treated as immediately
+    due; results are ordered by ``due_at`` ascending.
+
+    Parameters
+    ----------
+    session: Active SQLAlchemy session.
+    now:     Reference datetime.  Defaults to UTC now.
+             Pass a fixed value in tests for deterministic behaviour.
+    """
+    rows: list[models.ReviewState] = session.query(models.ReviewState).all()
+    return _filter_due(rows, now)

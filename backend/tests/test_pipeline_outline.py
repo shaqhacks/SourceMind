@@ -150,3 +150,34 @@ def test_detect_outline_skips_malformed_sections():
     assert sections[1].title == "Methods"
     assert isinstance(sections[1].page_end, int)
     assert sections[1].page_end == sections[1].page_start
+
+
+def test_detect_outline_chunks_cover_whole_document(monkeypatch):
+    """Long documents are processed in word-budgeted chunks so EVERY page is
+    covered — the bug where only the first context window's chapters appeared."""
+    import re
+    monkeypatch.setenv("SOURCEMIND_OUTLINE_CHUNK_WORDS", "3")  # tiny budget -> 1 page/chunk
+
+    class ChunkAwareProvider:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, prompt, *, system="", schema=None, max_tokens=4096):
+            self.calls.append(prompt)
+            m = re.search(r"--- Page (\d+) ---", prompt)
+            pg = int(m.group(1)) if m else 0
+            return {"sections": [
+                {"section_id": f"c{pg}", "title": f"Chapter {pg}",
+                 "page_start": pg, "page_end": pg}
+            ]}
+
+    pages = [ExtractedPage(page_number=i, text=f"word{i} body here") for i in range(8)]
+    provider = ChunkAwareProvider()
+    sections = detect_outline(pages, provider)
+
+    assert len(provider.calls) == 8, "expected one outline call per page-chunk"
+    titles = {s.title for s in sections}
+    assert "Chapter 0" in titles
+    assert "Chapter 7" in titles  # last pages are NOT dropped
+    assert len(sections) == 8
+    assert len({s.section_id for s in sections}) == 8  # ids unique
