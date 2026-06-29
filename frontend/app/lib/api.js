@@ -122,4 +122,20 @@ export const library = {
   // Course-level chat history
   courseChatHistory: (id) =>
     getJson(`/library/courses/${encodeURIComponent(id)}/chat/history`),
+
+  // Submit a graded section test
+  submitSectionTest: (id, sid, answers) =>
+    postJson(`/library/courses/${encodeURIComponent(id)}/chapters/${encodeURIComponent(sid)}/test/submit`, { answers }),
+
+  // Get past section test attempts (newest first)
+  sectionTestAttempts: (id, sid) =>
+    getJson(`/library/courses/${encodeURIComponent(id)}/chapters/${encodeURIComponent(sid)}/test/attempts`),
+
+  // Submit a graded course-level test
+  submitCourseTest: (id, answers) =>
+    postJson(`/library/courses/${encodeURIComponent(id)}/test/submit`, { answers }),
+
+  // Get past course-level test attempts (newest first)
+  courseTestAttempts: (id) =>
+    getJson(`/library/courses/${encodeURIComponent(id)}/test/attempts`),
 };
