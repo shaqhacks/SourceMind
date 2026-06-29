@@ -23,6 +23,9 @@ UV_DEPS=(
   --with python-multipart
   --with python-frontmatter
   --with ollama
+  --with sqlalchemy
+  --with anthropic
+  --with pymupdf
 )
 
 BACKEND_PID=""
