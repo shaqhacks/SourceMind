@@ -126,6 +126,31 @@ def test_extract_pptx(tmp_path):
     assert "Hello from pptx slide." in result
 
 
+def test_extract_pptx_multi_run_paragraph(tmp_path):
+    """A paragraph with two runs must not gain a spurious newline between them."""
+    from pptx import Presentation
+    from pptx.util import Inches
+    from SourceMind.backend.extract.material import extract_pptx
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    txBox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(2))
+    tf = txBox.text_frame
+    # Use the initial paragraph and add two runs to it
+    para = tf.paragraphs[0]
+    run1 = para.add_run()
+    run1.text = "Hello, "
+    run2 = para.add_run()
+    run2.text = "world!"
+    dest = tmp_path / "multi_run.pptx"
+    prs.save(str(dest))
+
+    result = extract_pptx(dest)
+
+    assert "Hello, world!" in result
+    assert "Hello, \nworld!" not in result
+
+
 # ---------------------------------------------------------------------------
 # extract_material — txt
 # ---------------------------------------------------------------------------

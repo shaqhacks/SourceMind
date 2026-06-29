@@ -76,9 +76,8 @@ def extract_pptx(path) -> str:
         for shape in slide.shapes:
             if shape.has_text_frame:
                 for para in shape.text_frame.paragraphs:
-                    for run in para.runs:
-                        if run.text:
-                            texts.append(run.text)
+                    if para.text:
+                        texts.append(para.text)
     return "\n".join(texts)
 
 
@@ -99,7 +98,7 @@ def material_title(kind: str, *, path=None, url: str | None = None) -> str:
     if kind == "pdf":
         p = Path(path)
         return derive_title_from_pdf(p, p.name)
-    if kind in ("docx", "pptx", "txt", "md"):
+    if kind in ("docx", "pptx", "txt", "md", "markdown"):
         return Path(path).stem.replace("_", " ").replace("-", " ").strip()
     if kind == "url":
         try:
