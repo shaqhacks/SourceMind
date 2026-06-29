@@ -104,6 +104,17 @@ class ReviewState(Base):
     course: Mapped[Course] = relationship("Course", back_populates="review_states")
 
 
+class ReviewLog(Base):
+    __tablename__ = "review_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
+    section_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    card_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quality: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class ChatTurn(Base):
     __tablename__ = "chat_turns"
 

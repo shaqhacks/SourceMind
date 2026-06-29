@@ -835,3 +835,46 @@ def test_upload_source_unknown_kind(client: TestClient) -> None:
         json={"kind": "file", "value": "x"},
     )
     assert resp.status_code == 422
+
+
+def test_grade_with_quality(client: TestClient, tmp_path: Path) -> None:
+    """POST /reviews/grade with quality=3 (easy) on a fresh card → reps=1, interval=6.
+
+    Easy on fresh card (reps=0, interval=0, ease=2.5):
+      reps=1, interval=max(6, round(0*2.5*1.3))=max(6,0)=6, ease=2.65
+    """
+    course_id = _upload(client, tmp_path)
+    resp = client.get(f"/library/courses/{course_id}")
+    assert resp.status_code == 200
+    section_id = resp.json()["plan"][0]["section_id"]
+
+    resp = client.post(
+        f"/library/courses/{course_id}/reviews/grade",
+        json={"section_id": section_id, "card_index": 0, "quality": 3},
+    )
+    assert resp.status_code == 200
+    graded = resp.json()
+    assert graded["reps"] == 1
+    assert graded["interval"] == 6  # max(6, round(0*2.5*1.3)) = max(6, 0) = 6
+
+
+def test_reviews_stats_endpoint(client: TestClient, tmp_path: Path) -> None:
+    """GET /library/reviews/stats → 200 with all six expected keys and daily_goal==20."""
+    course_id = _upload(client, tmp_path)
+    resp = client.get(f"/library/courses/{course_id}")
+    section_id = resp.json()["plan"][0]["section_id"]
+
+    # Grade one card so reviewed_today >= 1
+    client.post(
+        f"/library/courses/{course_id}/reviews/grade",
+        json={"section_id": section_id, "card_index": 0, "quality": 2},
+    )
+
+    resp = client.get("/library/reviews/stats")
+    assert resp.status_code == 200
+    data = resp.json()
+    for key in ("reviewed_today", "streak_days", "due_count", "total_cards",
+                "mastered_count", "daily_goal"):
+        assert key in data, f"Missing key: {key}"
+    assert data["daily_goal"] == 20
+    assert data["reviewed_today"] >= 1

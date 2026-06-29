@@ -11,7 +11,7 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from SourceMind.backend.extract.material import detect_kind, material_title
 
@@ -60,7 +60,8 @@ class ChatBody(BaseModel):
 class GradeBody(BaseModel):
     section_id: str
     card_index: int
-    correct: bool
+    correct: bool | None = None
+    quality: int | None = Field(default=None, ge=0, le=3)
 
 
 class SectionTestBody(BaseModel):
@@ -145,7 +146,7 @@ async def upload_files(
     first_kind: str | None = None
     first_dest: Path | None = None
 
-    for upload in files:
+    for idx, upload in enumerate(files):
         safe_name = Path(upload.filename or "upload").name
         try:
             kind = detect_kind(safe_name)
@@ -155,12 +156,17 @@ async def upload_files(
                 status_code=400,
                 detail=f"Unsupported file type: {safe_name}",
             )
-        dest = tmp_dir / safe_name
+        # Finding 4: prefix each dest with its index so two files sharing the same
+        # basename don't overwrite each other (silent data loss). The extension is
+        # preserved, so detect_kind on safe_name still works correctly.
+        dest = tmp_dir / f"{idx}_{safe_name}"
         dest.write_bytes(await upload.read())
         materials.append({"kind": kind, "path": str(dest)})
         if first_kind is None:
             first_kind = kind
-            first_dest = dest
+            # Title derivation must use the original (un-prefixed) name, not the
+            # idx-prefixed dedup path, or the title gets a stray "0 " prefix.
+            first_dest = tmp_dir / safe_name
 
     # Auto-derive a title from the first material when the user didn't provide one.
     title = (title or "").strip()
@@ -628,7 +634,8 @@ def grade_review(course_id: str, body: GradeBody) -> dict:
             raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
 
         row = review.grade_card(
-            session, course_id, body.section_id, body.card_index, body.correct
+            session, course_id, body.section_id, body.card_index,
+            correct=body.correct, quality=body.quality,
         )
         return {
             "id": row.id,
@@ -698,6 +705,13 @@ def get_due_reviews_all() -> list[dict]:
                 }
             )
         return out
+
+
+@router.get("/reviews/stats")
+def get_review_stats() -> dict:
+    """Return aggregate review statistics across all courses."""
+    with base.get_session() as session:
+        return review.review_stats(session)
 
 
 @router.get("/notifications")
