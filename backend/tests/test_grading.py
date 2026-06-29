@@ -106,3 +106,29 @@ class TestGradeQuizScoresAndPasses:
         assert result["score"] == 0.0
         assert result["passed"] is False
         assert all(r["your_index"] is None for r in result["results"])
+
+    def test_missing_answer_key_graded_wrong(self):
+        # Item missing the "answer" key must not crash and must be graded wrong.
+        quiz = [{"q": "Q1", "options": ["A", "B"]}]
+        result = grade_quiz(quiz, [0])
+        assert result["correct"] == 0
+        assert result["total"] == 1
+        assert result["passed"] is False
+        assert result["results"][0]["answer_index"] is None
+        assert result["results"][0]["correct"] is False
+
+    def test_missing_optional_keys_use_defaults(self):
+        # Missing q/options/explain default to "" / [] / "" without crashing.
+        quiz = [{"answer": 0}]
+        result = grade_quiz(quiz, [0])
+        assert result["correct"] == 1
+        assert result["results"][0]["q"] == ""
+        assert result["results"][0]["options"] == []
+        assert result["results"][0]["explain"] == ""
+
+    def test_none_answer_with_none_your_index_is_wrong(self):
+        # answer=None and a missing submission must NOT be treated as a match.
+        quiz = [{"q": "Q1", "options": ["A"], "answer": None}]
+        result = grade_quiz(quiz, [])  # your_index = None
+        assert result["correct"] == 0
+        assert result["results"][0]["correct"] is False

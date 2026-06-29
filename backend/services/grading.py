@@ -3,7 +3,21 @@ from __future__ import annotations
 
 import os
 
-PASS_THRESHOLD: float = float(os.environ.get("SOURCEMIND_TEST_PASS_THRESHOLD", "0.7"))
+
+def _read_pass_threshold() -> float:
+    """Read the pass threshold from env, falling back to 0.7 on bad input.
+
+    Evaluated at import time; tests should monkeypatch grading.PASS_THRESHOLD
+    directly rather than the env var.
+    """
+    raw = os.environ.get("SOURCEMIND_TEST_PASS_THRESHOLD", "0.7")
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.7
+
+
+PASS_THRESHOLD: float = _read_pass_threshold()
 
 
 def grade_quiz(quiz: list[dict], answers: list[int]) -> dict:
@@ -33,14 +47,15 @@ def grade_quiz(quiz: list[dict], answers: list[int]) -> dict:
     correct = 0
     results = []
     for i, item in enumerate(quiz):
-        your_index: int | None = answers[i] if i < len(answers) else None
-        answer_index: int = item["answer"]
-        is_correct = your_index == answer_index
+        your_index = answers[i] if i < len(answers) else None
+        answer_index = item.get("answer")
+        # A missing/None correct-answer key is ungradeable -> always wrong.
+        is_correct = answer_index is not None and your_index == answer_index
         if is_correct:
             correct += 1
         results.append({
-            "q": item["q"],
-            "options": item["options"],
+            "q": item.get("q", ""),
+            "options": item.get("options", []),
             "your_index": your_index,
             "answer_index": answer_index,
             "correct": is_correct,
