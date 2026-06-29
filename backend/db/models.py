@@ -112,5 +112,17 @@ class ChatTurn(Base):
     role: Mapped[str | None] = mapped_column(String, nullable=True)
     content: Mapped[str | None] = mapped_column(TEXT, nullable=True)
     created_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    citations: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     course: Mapped[Course] = relationship("Course", back_populates="chat_turns")
+
+
+class Chunk(Base):
+    __tablename__ = "chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    course_id: Mapped[str] = mapped_column(String, ForeignKey("courses.id"), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(TEXT, nullable=False)
+    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
