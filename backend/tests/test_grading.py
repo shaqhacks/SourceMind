@@ -12,6 +12,11 @@ SAMPLE_QUIZ = [
     {"q": "Q4", "options": ["A", "B", "C", "D"], "answer": 3, "explain": "D is right."},
 ]
 
+TEN_QUIZ = [
+    {"q": f"Q{i}", "options": ["A", "B"], "answer": 0, "explain": ""}
+    for i in range(10)
+]
+
 
 class TestGradeQuizScoresAndPasses:
     """Test grade_quiz scoring, pass/fail, and edge cases."""
@@ -26,6 +31,7 @@ class TestGradeQuizScoresAndPasses:
     def test_all_wrong(self):
         result = grade_quiz(SAMPLE_QUIZ, [1, 0, 0, 0])
         assert result["correct"] == 0
+        assert result["total"] == 4
         assert result["score"] == 0.0
         assert result["passed"] is False
 
@@ -53,6 +59,7 @@ class TestGradeQuizScoresAndPasses:
         assert result["results"][2]["your_index"] is None
         assert result["results"][3]["your_index"] is None
         assert result["results"][2]["correct"] is False
+        assert result["results"][3]["correct"] is False
 
     def test_extra_answers_ignored(self):
         # 6 answers for 4 questions → extra entries ignored
@@ -78,8 +85,24 @@ class TestGradeQuizScoresAndPasses:
             assert "correct" in item
             assert "explain" in item
 
-    def test_pass_threshold_boundary(self):
-        # Score exactly at threshold (3/4 = 0.75 > 0.7 default) → pass
-        result = grade_quiz(SAMPLE_QUIZ, [0, 1, 2, 0])
-        assert result["score"] >= PASS_THRESHOLD
+    def test_threshold_straddle(self):
+        # 7/10 = 0.70 == PASS_THRESHOLD (default) → passes (>=)
+        passing = [0] * 7 + [1] * 3
+        result = grade_quiz(TEN_QUIZ, passing)
+        assert result["correct"] == 7
+        assert result["score"] == pytest.approx(0.7)
         assert result["passed"] is True
+        # 6/10 = 0.60 < 0.70 → fails
+        failing = [0] * 6 + [1] * 4
+        result2 = grade_quiz(TEN_QUIZ, failing)
+        assert result2["correct"] == 6
+        assert result2["score"] == pytest.approx(0.6)
+        assert result2["passed"] is False
+
+    def test_full_quiz_empty_answers(self):
+        result = grade_quiz(SAMPLE_QUIZ, [])
+        assert result["correct"] == 0
+        assert result["total"] == 4
+        assert result["score"] == 0.0
+        assert result["passed"] is False
+        assert all(r["your_index"] is None for r in result["results"])
