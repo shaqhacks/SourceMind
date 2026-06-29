@@ -470,6 +470,19 @@ export default function ChapterPage() {
   const [error, setError] = useState(null);
   const [completing, setCompleting] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const [scrollProgress, setScrollProgress] = useState(0);
+
+  // Reading-progress bar
+  useEffect(() => {
+    function onScroll() {
+      const el = document.documentElement;
+      const scrolled = el.scrollTop || document.body.scrollTop;
+      const total = el.scrollHeight - el.clientHeight;
+      setScrollProgress(total > 0 ? scrolled / total : 0);
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -549,6 +562,21 @@ export default function ChapterPage() {
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <main>
+      {/* ── Reading progress bar ── */}
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          height: 3,
+          width: `${scrollProgress * 100}%`,
+          background: "var(--accent, #5b8cff)",
+          zIndex: 60,
+          transition: "width 0.1s linear",
+          pointerEvents: "none",
+        }}
+      />
+
       {/* ── Top navigation bar ── */}
       <div style={{
         display: "flex",

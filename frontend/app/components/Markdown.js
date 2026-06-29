@@ -2,7 +2,10 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
+import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
 import { API_URL } from "../lib/api";
 import Quiz from "./Quiz";
 
@@ -268,8 +271,8 @@ export default function Markdown({ source = "" }) {
       `}</style>
       <div className="md-prose">
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          rehypePlugins={[rehypeRaw]}
+          remarkPlugins={[remarkMath, remarkGfm]}
+          rehypePlugins={[rehypeRaw, rehypeKatex, [rehypeHighlight, { ignoreMissing: true }]]}
           components={COMPONENTS}
         >
           {source}

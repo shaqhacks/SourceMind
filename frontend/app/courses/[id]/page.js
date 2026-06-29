@@ -326,6 +326,7 @@ export default function CoursePage() {
   const [data, setData] = useState(null);   // { course, plan, chapters }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [tocSearch, setTocSearch] = useState("");
   const pollRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -400,6 +401,12 @@ export default function CoursePage() {
   const completedCount = chapters.filter((c) => c.completed).length;
   const readyCount = chapters.filter((c) => c.status === "ready").length;
   const isGenerating = ACTIVE_GEN.has(course.generation_status || course.status);
+
+  const filteredChapters = tocSearch.trim()
+    ? chapters.filter((c) =>
+        (c.title || c.section_id || "").toLowerCase().includes(tocSearch.trim().toLowerCase())
+      )
+    : chapters;
 
   return (
     <main>
@@ -537,6 +544,30 @@ export default function CoursePage() {
           </div>
         </div>
 
+        {/* TOC search */}
+        {chapters.length > 0 && (
+          <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
+            <input
+              type="search"
+              value={tocSearch}
+              onChange={(e) => setTocSearch(e.target.value)}
+              placeholder="Filter chapters…"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                padding: "7px 12px",
+                fontSize: 14,
+                color: "var(--text)",
+                outline: "none",
+                margin: 0,
+              }}
+            />
+          </div>
+        )}
+
         {chapters.length === 0 ? (
           <div style={{ padding: "24px 20px" }}>
             {isGenerating ? (
@@ -549,6 +580,10 @@ export default function CoursePage() {
               </p>
             )}
           </div>
+        ) : filteredChapters.length === 0 ? (
+          <div style={{ padding: "24px 20px" }}>
+            <p className="muted" style={{ margin: 0 }}>No chapters match &ldquo;{tocSearch}&rdquo;.</p>
+          </div>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {/* Inject hover style via global rule — keeps rows clean */}
@@ -558,12 +593,12 @@ export default function CoursePage() {
                 text-decoration: none !important;
               }
             `}</style>
-            {chapters.map((ch, i) => (
+            {filteredChapters.map((ch, i) => (
               <ChapterRow
                 key={ch.section_id || i}
                 chapter={ch}
                 courseId={id}
-                index={i}
+                index={chapters.indexOf(ch)}
               />
             ))}
           </ul>
