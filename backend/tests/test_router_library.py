@@ -652,3 +652,97 @@ def test_notifications_summary(client: TestClient, tmp_path: Path) -> None:
     assert any(c["id"] == course_id for c in data["courses"])
     for c in data["courses"]:
         assert "id" in c and "title" in c and "status" in c
+
+
+# ─── Test mode endpoints ──────────────────────────────────────────────────────
+
+
+def test_section_test_submit_persists_attempt(client: TestClient, tmp_path: Path) -> None:
+    """Submit a section test → score in response + TestAttempt row persisted + GET attempts returns it."""
+    course_id = _upload(client, tmp_path)
+    client.post(f"/library/courses/{course_id}/plan/approve")
+    client.post(f"/library/courses/{course_id}/generate")
+
+    # Chapter section_id is "s1" (from StubProvider outline response)
+    # All correct answers: [0, 1, 2, 3]
+    resp = client.post(
+        f"/library/courses/{course_id}/chapters/s1/test/submit",
+        json={"answers": [0, 1, 2, 3]},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["correct"] == 4
+    assert data["total"] == 4
+    assert data["score"] == pytest.approx(1.0)
+    assert data["passed"] is True
+    assert "attempt_id" in data
+    assert isinstance(data["attempt_id"], int)
+
+    # Verify row persisted in DB
+    with base.get_session() as session:
+        attempt = session.get(models.TestAttempt, data["attempt_id"])
+        assert attempt is not None
+        assert attempt.scope == "section"
+        assert attempt.section_id == "s1"
+        assert attempt.correct == 4
+        assert attempt.passed is True
+
+    # GET attempts returns it
+    attempts_resp = client.get(f"/library/courses/{course_id}/chapters/s1/test/attempts")
+    assert attempts_resp.status_code == 200
+    attempts = attempts_resp.json()
+    assert len(attempts) == 1
+    assert attempts[0]["score"] == pytest.approx(1.0)
+    assert attempts[0]["passed"] is True
+
+
+def test_course_test_aggregates(client: TestClient, tmp_path: Path) -> None:
+    """Course-level test submit aggregates correct/total across sections."""
+    course_id = _upload(client, tmp_path)
+    client.post(f"/library/courses/{course_id}/plan/approve")
+    client.post(f"/library/courses/{course_id}/generate")
+
+    # Submit course test with correct answers for section s1 (4 questions: answers 0,1,2,3)
+    resp = client.post(
+        f"/library/courses/{course_id}/test/submit",
+        json={"answers": {"s1": [0, 1, 2, 3]}},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["correct"] == 4
+    assert data["total"] == 4
+    assert data["score"] == pytest.approx(1.0)
+    assert data["passed"] is True
+    assert "attempt_id" in data
+    assert len(data["sections"]) == 1
+    assert data["sections"][0]["section_id"] == "s1"
+
+    # GET course test attempts
+    attempts_resp = client.get(f"/library/courses/{course_id}/test/attempts")
+    assert attempts_resp.status_code == 200
+    attempts = attempts_resp.json()
+    assert len(attempts) == 1
+    assert attempts[0]["score"] == pytest.approx(1.0)
+
+
+def test_section_test_404(client: TestClient, tmp_path: Path) -> None:
+    """Submit/GET on unknown course or chapter returns 404."""
+    resp = client.post("/library/courses/no_such/chapters/s1/test/submit", json={"answers": []})
+    assert resp.status_code == 404
+
+    resp = client.get("/library/courses/no_such/chapters/s1/test/attempts")
+    assert resp.status_code == 404
+
+    resp = client.post("/library/courses/no_such/test/submit", json={"answers": {}})
+    assert resp.status_code == 404
+
+    resp = client.get("/library/courses/no_such/test/attempts")
+    assert resp.status_code == 404
+
+    # Existing course but nonexistent chapter → 404
+    course_id = _upload(client, tmp_path)
+    resp = client.post(
+        f"/library/courses/{course_id}/chapters/nonexistent_chapter/test/submit",
+        json={"answers": []},
+    )
+    assert resp.status_code == 404

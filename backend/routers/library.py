@@ -20,6 +20,7 @@ from SourceMind.backend.pipeline import service
 from SourceMind.backend.pipeline.retrieve import retrieve
 from SourceMind.backend.services import review
 from SourceMind.backend.services.anki_export import build_anki_tsv
+from SourceMind.backend.services.grading import PASS_THRESHOLD, grade_quiz
 
 router = APIRouter(prefix="/library", tags=["library"])
 
@@ -59,6 +60,14 @@ class GradeBody(BaseModel):
     section_id: str
     card_index: int
     correct: bool
+
+
+class SectionTestBody(BaseModel):
+    answers: list[int]
+
+
+class CourseTestBody(BaseModel):
+    answers: dict[str, list[int]]  # section_id -> list of answer indices
 
 
 # ─── Upload / Ingest ──────────────────────────────────────────────────────────
@@ -689,3 +698,160 @@ def export_anki(course_id: str) -> PlainTextResponse:
 
     tsv = build_anki_tsv(course_id)
     return PlainTextResponse(tsv, media_type="text/tab-separated-values")
+
+
+# ─── Test mode endpoints ──────────────────────────────────────────────────────
+
+
+@router.post("/courses/{course_id}/chapters/{section_id}/test/submit")
+def submit_section_test(course_id: str, section_id: str, body: SectionTestBody) -> dict:
+    """Grade a section test, persist a TestAttempt, return grade + attempt_id."""
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is None:
+            raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
+        chapter = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if chapter is None:
+            raise HTTPException(status_code=404, detail=f"Chapter {section_id!r} not found")
+
+        quiz = chapter.quiz or []
+        result = grade_quiz(quiz, body.answers)
+
+        now = datetime.now(timezone.utc).isoformat()
+        attempt = models.TestAttempt(
+            course_id=course_id,
+            section_id=section_id,
+            scope="section",
+            answers=body.answers,
+            correct=result["correct"],
+            total=result["total"],
+            score=result["score"],
+            passed=result["passed"],
+            created_at=now,
+        )
+        session.add(attempt)
+        session.flush()
+        attempt_id = attempt.id
+
+    return {**result, "attempt_id": attempt_id}
+
+
+@router.get("/courses/{course_id}/chapters/{section_id}/test/attempts")
+def get_section_test_attempts(course_id: str, section_id: str) -> list[dict]:
+    """Return section test attempts newest first."""
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is None:
+            raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
+
+        attempts = (
+            session.query(models.TestAttempt)
+            .filter_by(course_id=course_id, section_id=section_id, scope="section")
+            .order_by(models.TestAttempt.id.desc())
+            .all()
+        )
+        return [
+            {
+                "id": a.id,
+                "score": a.score,
+                "correct": a.correct,
+                "total": a.total,
+                "passed": a.passed,
+                "created_at": a.created_at,
+            }
+            for a in attempts
+        ]
+
+
+@router.post("/courses/{course_id}/test/submit")
+def submit_course_test(course_id: str, body: CourseTestBody) -> dict:
+    """Grade a course-level test across all chapters with a quiz.
+
+    body.answers is {section_id: [int, ...], ...}. Chapters that have a quiz
+    but whose section_id is absent from body.answers are graded with an empty
+    answers list (all wrong). Chapters without a quiz are skipped.
+    Aggregates: correct = sum of per-section correct, total = sum of per-section total.
+    """
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is None:
+            raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
+
+        chapters = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id)
+            .all()
+        )
+        chapters_with_quiz = [ch for ch in chapters if ch.quiz]
+
+        section_results = []
+        total_correct = 0
+        total_questions = 0
+        for ch in chapters_with_quiz:
+            answers_for_section = body.answers.get(ch.section_id, [])
+            result = grade_quiz(ch.quiz, answers_for_section)
+            total_correct += result["correct"]
+            total_questions += result["total"]
+            section_results.append({
+                "section_id": ch.section_id,
+                "title": ch.title,
+                "score": result["score"],
+                "correct": result["correct"],
+                "total": result["total"],
+                "passed": result["passed"],
+            })
+
+        agg_score = total_correct / total_questions if total_questions > 0 else 0.0
+        agg_passed = agg_score >= PASS_THRESHOLD
+
+        now = datetime.now(timezone.utc).isoformat()
+        attempt = models.TestAttempt(
+            course_id=course_id,
+            section_id=None,
+            scope="course",
+            answers=body.answers,
+            correct=total_correct,
+            total=total_questions,
+            score=agg_score,
+            passed=agg_passed,
+            created_at=now,
+        )
+        session.add(attempt)
+        session.flush()
+        attempt_id = attempt.id
+
+    return {
+        "score": agg_score,
+        "correct": total_correct,
+        "total": total_questions,
+        "passed": agg_passed,
+        "attempt_id": attempt_id,
+        "sections": section_results,
+    }
+
+
+@router.get("/courses/{course_id}/test/attempts")
+def get_course_test_attempts(course_id: str) -> list[dict]:
+    """Return course-level test attempts (scope='course') newest first."""
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is None:
+            raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
+
+        attempts = (
+            session.query(models.TestAttempt)
+            .filter_by(course_id=course_id, scope="course")
+            .order_by(models.TestAttempt.id.desc())
+            .all()
+        )
+        return [
+            {
+                "id": a.id,
+                "score": a.score,
+                "correct": a.correct,
+                "total": a.total,
+                "passed": a.passed,
+                "created_at": a.created_at,
+            }
+            for a in attempts
+        ]
