@@ -19,6 +19,7 @@ import logging
 import os
 import shutil
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from SourceMind.backend.db import base, models
@@ -133,6 +134,22 @@ def get_image_urls(
     ]
 
 
+def chapter_source_md(
+    pages: list[ExtractedPage],
+    page_start: int,
+    page_end: int,
+    assets: list,
+    course_id: str,
+) -> str:
+    """Build source markdown for a chapter: raw extracted text + inline image references."""
+    text = get_source_text(pages, page_start, page_end)
+    image_urls = get_image_urls(assets, page_start, page_end, course_id=course_id)
+    if image_urls:
+        img_block = "\n".join(f"![]({url})" for url in image_urls)
+        return f"{text}\n\n{img_block}"
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Core service functions
 # ---------------------------------------------------------------------------
@@ -156,9 +173,21 @@ def index_course(course_id: str, assets_dir: Path | None = None) -> None:
 
     pages = _load_pages(assets_dir)
     pairs = chunk_pages(pages)
+    contents = [content for _, content in pairs]
 
-    # Embed BEFORE any DB write so a failure leaves existing chunks untouched.
-    embeddings = embed_texts([content for _, content in pairs])
+    # Parallel embed BEFORE any DB write so a failure leaves existing chunks untouched.
+    MAX_EMBED_WORKERS = 6
+    embeddings: list = [None] * len(contents)
+    with ThreadPoolExecutor(max_workers=MAX_EMBED_WORKERS) as pool:
+        futures = {pool.submit(embed_texts, [c]): i for i, c in enumerate(contents)}
+        for fut in as_completed(futures):
+            idx = futures[fut]
+            try:
+                result = fut.result()
+                embeddings[idx] = result[0] if result else None
+            except Exception as exc:
+                logger.warning("embed failed for chunk %d: %s", idx, exc)
+                embeddings[idx] = None
 
     with base.get_session() as session:
         session.query(models.Chunk).filter_by(course_id=course_id).delete()
@@ -198,6 +227,14 @@ def _finish_ingest(
     plan_items = generate_plan(sections, all_pages, provider)
     section_map = {s.section_id: s for s in sections}
 
+    # Build asset records from extracted image paths BEFORE the DB session so
+    # chapter_source_md can look up images without an open session.
+    asset_records_for_source_md = [
+        {"path": str(img_path), "source_page": page.page_number}
+        for page in all_pages
+        for img_path in page.image_paths
+    ]
+
     # --- Persist to DB ---
     with base.get_session() as session:
         # Get-or-create: the upload handler may have already inserted a
@@ -207,7 +244,7 @@ def _finish_ingest(
             course = models.Course(id=course_id)
             session.add(course)
         course.title = title
-        course.status = "needs_review"
+        course.status = "ready"
         course.generation_status = "idle"
 
         # Asset rows for every extracted image (non-PDF pages have empty image_paths)
@@ -222,7 +259,7 @@ def _finish_ingest(
                 )
                 session.add(asset)
 
-        # PlanItem rows + pending Chapter placeholders
+        # PlanItem rows + ready Chapter rows with source markdown
         for order, plan_dc in enumerate(plan_items):
             orm_plan = models.PlanItem(
                 course_id=course_id,
@@ -241,6 +278,14 @@ def _finish_ingest(
                 [section.page_start, section.page_end] if section else None
             )
 
+            body = chapter_source_md(
+                all_pages,
+                source_pages[0] if source_pages else 0,
+                source_pages[1] if source_pages and len(source_pages) > 1 else 0,
+                asset_records_for_source_md,
+                course_id,
+            )
+
             chapter = models.Chapter(
                 course_id=course_id,
                 section_id=plan_dc.section_id,
@@ -248,7 +293,9 @@ def _finish_ingest(
                 objectives=plan_dc.objectives,
                 importance=plan_dc.importance,
                 source_pages=source_pages,
-                status="pending",
+                body_md=body,
+                status="ready",
+                lesson_status="none",
             )
             session.add(chapter)
 
@@ -451,6 +498,265 @@ def approve_plan(course_id: str) -> None:
             course.status = "generating"
 
 
+def generate_study_items(
+    source_text: str,
+    provider: LLMProvider,
+    *,
+    n_quiz: int = 5,
+    n_cards: int = 6,
+) -> dict:
+    """One schema'd LLM call → {"quiz": [...], "cards": [...]}.
+
+    Returns dict with keys:
+      quiz: list of {q, options (list[str]), answer (str), explain (str)}
+      cards: list of {q, a}
+    On parse failure, returns empty quiz/cards.
+    """
+    import json as _json
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "quiz": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "q": {"type": "string"},
+                        "options": {"type": "array", "items": {"type": "string"}},
+                        "answer": {"type": "string"},
+                        "explain": {"type": "string"},
+                    },
+                    "required": ["q", "options", "answer", "explain"],
+                },
+            },
+            "cards": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "q": {"type": "string"},
+                        "a": {"type": "string"},
+                    },
+                    "required": ["q", "a"],
+                },
+            },
+        },
+        "required": ["quiz", "cards"],
+    }
+    prompt = (
+        f"You are a study-aid generator. Given the source text below, produce exactly "
+        f"{n_quiz} multiple-choice quiz questions and {n_cards} spaced-repetition flashcards.\n\n"
+        f"SOURCE TEXT:\n{source_text[:8000]}\n\n"
+        f"Return ONLY a JSON object matching the schema. No prose."
+    )
+    try:
+        raw = provider.complete(prompt, schema=schema)
+        if isinstance(raw, str):
+            data = _json.loads(raw)
+        else:
+            data = raw
+        return {
+            "quiz": data.get("quiz", []),
+            "cards": data.get("cards", []),
+        }
+    except Exception as exc:
+        logger.warning("generate_study_items failed: %s", exc)
+        return {"quiz": [], "cards": []}
+
+
+def ensure_study(
+    course_id: str,
+    section_id: str,
+    provider: LLMProvider | None = None,
+) -> None:
+    """If the chapter has no quiz yet, generate study items and persist them.
+
+    Idempotent: if quiz is already populated, returns immediately.
+    Also seeds ReviewState rows for each card (deletes existing first for idempotency).
+    """
+    provider = provider or get_provider()
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if chap is None:
+            raise ValueError(f"Chapter not found: course={course_id} section={section_id}")
+        if chap.quiz:  # already has quiz — idempotent
+            return
+        source_text = chap.body_md or ""
+
+    result = generate_study_items(source_text, provider)
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if chap is None:
+            return
+        chap.quiz = result["quiz"]
+        chap.cards = result["cards"]
+
+        # Seed ReviewState rows (idempotent — delete first)
+        session.query(models.ReviewState).filter_by(
+            course_id=course_id, section_id=section_id
+        ).delete()
+        for i, _card in enumerate(result["cards"]):
+            session.add(models.ReviewState(
+                course_id=course_id,
+                section_id=section_id,
+                card_index=i,
+                ease=2.5,
+                interval=0,
+                due_at="",
+                reps=0,
+            ))
+
+
+def generate_lesson(
+    course_id: str,
+    section_id: str,
+    provider: LLMProvider | None = None,
+    assets_dir: Path | None = None,
+) -> None:
+    """Run generate_validated on chapter source, store result in lesson_md.
+
+    On success: lesson_md = verbose markdown, lesson_status = "ready".
+    Also populates quiz/cards (from the draft) and seeds ReviewState if quiz was empty.
+    On failure: lesson_status = "failed", error recorded; does not raise.
+    """
+    provider = provider or get_provider()
+    if assets_dir is None:
+        assets_dir = _default_assets_dir(course_id)
+    assets_dir = Path(assets_dir)
+
+    # Load chapter info
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if chap is None:
+            raise ValueError(f"Chapter not found: course={course_id} section={section_id}")
+        source_pages = chap.source_pages or [0, 0]
+        pi = (
+            session.query(models.PlanItem)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        plan_rec = None
+        if pi:
+            plan_rec = {
+                "section_id": pi.section_id,
+                "title": pi.title or "",
+                "objectives": list(pi.objectives or []),
+                "importance": pi.importance or "supporting",
+                "prerequisites": list(pi.prerequisites or []),
+                "target_words": pi.target_words or 0,
+            }
+        had_quiz = bool(chap.quiz)
+
+    if plan_rec is None:
+        with base.get_session() as session:
+            chap = (
+                session.query(models.Chapter)
+                .filter_by(course_id=course_id, section_id=section_id)
+                .first()
+            )
+            if chap is not None:
+                chap.lesson_status = "failed"
+        return
+
+    try:
+        pages = _load_pages(assets_dir)
+        asset_records: list[dict] = []
+        with base.get_session() as session:
+            for a in session.query(models.Asset).filter_by(course_id=course_id).all():
+                asset_records.append({"path": a.path, "source_page": a.source_page})
+
+        page_start, page_end = source_pages[0], source_pages[1]
+        source_text = get_source_text(pages, page_start, page_end)
+        image_urls = get_image_urls(asset_records, page_start, page_end, course_id=course_id)
+        had_figures = len(image_urls) > 0
+
+        plan_dc = PlanItemDC(
+            section_id=plan_rec["section_id"],
+            title=plan_rec["title"],
+            objectives=plan_rec["objectives"],
+            importance=plan_rec["importance"],
+            prerequisites=plan_rec["prerequisites"],
+            target_words=plan_rec["target_words"],
+        )
+        draft = generate_validated(plan_dc, source_text, image_urls, provider, had_figures=had_figures)
+
+        with base.get_session() as session:
+            chap = (
+                session.query(models.Chapter)
+                .filter_by(course_id=course_id, section_id=section_id)
+                .first()
+            )
+            if chap is not None:
+                chap.lesson_md = draft.body_md
+                chap.lesson_status = "ready"
+                if not had_quiz:
+                    chap.quiz = draft.quiz
+                    chap.cards = draft.cards
+                    # Seed ReviewState
+                    session.query(models.ReviewState).filter_by(
+                        course_id=course_id, section_id=section_id
+                    ).delete()
+                    for i, _card in enumerate(draft.cards):
+                        session.add(models.ReviewState(
+                            course_id=course_id,
+                            section_id=section_id,
+                            card_index=i,
+                            ease=2.5,
+                            interval=0,
+                            due_at="",
+                            reps=0,
+                        ))
+    except Exception as exc:
+        logger.warning("generate_lesson failed for %s/%s: %s", course_id, section_id, exc)
+        with base.get_session() as session:
+            chap = (
+                session.query(models.Chapter)
+                .filter_by(course_id=course_id, section_id=section_id)
+                .first()
+            )
+            if chap is not None:
+                chap.lesson_status = "failed"
+            course = session.get(models.Course, course_id)
+            if course is not None:
+                course.generation_last_error = str(exc)
+
+
+def run_lesson_job(
+    course_id: str,
+    section_id: str,
+    provider: LLMProvider | None = None,
+) -> None:
+    """Set lesson_status='generating', then run generate_lesson.
+
+    Designed to run as a FastAPI BackgroundTask.
+    """
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if chap is not None:
+            chap.lesson_status = "generating"
+
+    generate_lesson(course_id, section_id, provider=provider)
+
+
 def _generate_one_section(
     course_id: str,
     section_id: str,
@@ -559,6 +865,7 @@ def generate_course(
     # --- Load all data into plain dicts before session closes ---
     plan_records: list[dict] = []
     chapter_statuses: dict[str, str] = {}
+    lesson_statuses: dict[str, str] = {}
     asset_records: list[dict] = []
 
     with base.get_session() as session:
@@ -583,6 +890,7 @@ def generate_course(
         )
         for ch in chapters:
             chapter_statuses[ch.section_id] = ch.status or "pending"
+            lesson_statuses[ch.section_id] = ch.lesson_status or "none"
 
         assets = (
             session.query(models.Asset).filter_by(course_id=course_id).all()
@@ -602,42 +910,31 @@ def generate_course(
                 "failed": 0,
             }
 
-    # Load pages from pages.json
-    pages = _load_pages(assets_dir)
-
     completed = 0
     failed = 0
 
     for plan_rec in plan_records:
         section_id = plan_rec["section_id"]
 
-        if chapter_statuses.get(section_id) == "ready":
+        if chapter_statuses.get(section_id) == "ready" and lesson_statuses.get(section_id) == "ready":
             completed += 1
             _update_progress(course_id, total, completed, failed)
             continue
 
-        try:
-            _generate_one_section(
-                course_id,
-                section_id,
-                plan_records,
-                asset_records,
-                pages,
-                provider,
-            )
-            completed += 1
-            _update_progress(course_id, total, completed, failed)
+        generate_lesson(course_id, section_id, provider=provider, assets_dir=assets_dir)
 
-        except Exception as exc:
-            failed += 1
-            _update_progress(
-                course_id,
-                total,
-                completed,
-                failed,
-                last_error=str(exc),
-                failed_section_id=section_id,
+        # Check result (generate_lesson does not raise on failure)
+        with base.get_session() as session:
+            chap = (
+                session.query(models.Chapter)
+                .filter_by(course_id=course_id, section_id=section_id)
+                .first()
             )
+            if chap and chap.lesson_status == "ready":
+                completed += 1
+            else:
+                failed += 1
+        _update_progress(course_id, total, completed, failed)
 
     # Final status
     with base.get_session() as session:
