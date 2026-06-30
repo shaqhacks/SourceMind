@@ -41,6 +41,49 @@ function findSiblings(chapters, currentSid) {
 }
 
 // ---------------------------------------------------------------------------
+// View-mode toggle (Original source ⇄ Guided lesson)
+// ---------------------------------------------------------------------------
+
+function ViewToggle({ mode, onChange }) {
+  const btnBase = {
+    margin: 0,
+    padding: "7px 14px",
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: "pointer",
+    border: "1px solid var(--border)",
+    transition: "background 0.12s, color 0.12s",
+  };
+  const active = {
+    background: "rgba(91,140,255,0.18)",
+    border: "1px solid rgba(91,140,255,0.40)",
+    color: "var(--accent, #5b8cff)",
+  };
+  const inactive = {
+    background: "transparent",
+    color: "var(--muted)",
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+      <button
+        onClick={() => onChange("source")}
+        style={{ ...btnBase, ...(mode === "source" ? active : inactive) }}
+      >
+        Original source
+      </button>
+      <button
+        onClick={() => onChange("lesson")}
+        style={{ ...btnBase, ...(mode === "lesson" ? active : inactive) }}
+      >
+        Guided lesson
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Graded Test
 // ---------------------------------------------------------------------------
 
@@ -472,6 +515,16 @@ export default function ChapterPage() {
   const [completed, setCompleted] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
 
+  // Study (quiz/cards) lazy-load state
+  const [studyLoading, setStudyLoading] = useState(false);
+  const [studyError, setStudyError] = useState(null);
+
+  // Guided lesson state
+  const [lessonGenerating, setLessonGenerating] = useState(false);
+  const [lessonError, setLessonError] = useState(null);
+  const [viewMode, setViewMode] = useState("source"); // "source" | "lesson"
+  const lessonPollRef = useRef(null);
+
   // Reading-progress bar
   useEffect(() => {
     function onScroll() {
@@ -482,6 +535,13 @@ export default function ChapterPage() {
     }
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Cleanup lesson poll on unmount
+  useEffect(() => {
+    return () => {
+      if (lessonPollRef.current) clearInterval(lessonPollRef.current);
+    };
   }, []);
 
   const load = useCallback(async () => {
@@ -516,6 +576,84 @@ export default function ChapterPage() {
   }, [id, sid]);
 
   useEffect(() => { load(); }, [load]);
+
+  // After chapter loads: set view mode, resume lesson poll if needed, lazy-load study
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!chapter) return;
+
+    // Default to lesson view if lesson is already available
+    if (chapter.lesson_md) {
+      setViewMode("lesson");
+    }
+
+    // Resume lesson polling if generation was already in progress
+    if (chapter.lesson_status === "generating" && !lessonPollRef.current) {
+      setLessonGenerating(true);
+      lessonPollRef.current = setInterval(async () => {
+        try {
+          const updated = await library.getChapter(id, sid);
+          if (updated.lesson_status === "ready") {
+            clearInterval(lessonPollRef.current);
+            lessonPollRef.current = null;
+            setChapter(updated);
+            setViewMode("lesson");
+            setLessonGenerating(false);
+          } else if (updated.lesson_status === "failed") {
+            clearInterval(lessonPollRef.current);
+            lessonPollRef.current = null;
+            setLessonError("Lesson generation failed. Try again.");
+            setLessonGenerating(false);
+          }
+        } catch {
+          // transient error — keep polling
+        }
+      }, 3000);
+    }
+
+    // Lazy study: call ensureStudy when quiz is empty
+    if (!chapter.quiz || chapter.quiz.length === 0) {
+      setStudyLoading(true);
+      setStudyError(null);
+      library
+        .ensureStudy(id, sid)
+        .then((updated) => setChapter(updated))
+        .catch((err) => setStudyError(err.message || "Failed to prepare study tools."))
+        .finally(() => setStudyLoading(false));
+    }
+  }, [chapter?.section_id]); // fire once per chapter identity; id/sid are stable
+
+  /** Trigger guided-lesson generation and start polling until ready. */
+  async function handleGenerateLesson() {
+    if (lessonPollRef.current) return; // already polling
+    setLessonError(null);
+    setLessonGenerating(true);
+    try {
+      await library.generateLesson(id, sid);
+      lessonPollRef.current = setInterval(async () => {
+        try {
+          const updated = await library.getChapter(id, sid);
+          if (updated.lesson_status === "ready") {
+            clearInterval(lessonPollRef.current);
+            lessonPollRef.current = null;
+            setChapter(updated);
+            setViewMode("lesson");
+            setLessonGenerating(false);
+          } else if (updated.lesson_status === "failed") {
+            clearInterval(lessonPollRef.current);
+            lessonPollRef.current = null;
+            setLessonError("Lesson generation failed. Try again.");
+            setLessonGenerating(false);
+          }
+        } catch {
+          // transient error — keep polling
+        }
+      }, 3000);
+    } catch (err) {
+      setLessonError(err.message || "Failed to start lesson generation.");
+      setLessonGenerating(false);
+    }
+  }
 
   async function markComplete() {
     setCompleting(true);
@@ -558,6 +696,10 @@ export default function ChapterPage() {
   }
 
   const wc = wordCountLabel(chapter.word_count);
+  const hasLesson = !!chapter.lesson_md;
+  const contentMd = viewMode === "lesson" && hasLesson
+    ? chapter.lesson_md
+    : (chapter.body_md || "");
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -666,9 +808,25 @@ export default function ChapterPage() {
         )}
       </header>
 
-      {/* ── Chapter body ── */}
+      {/* ── View toggle + lesson generation controls ── */}
+      {hasLesson ? (
+        <ViewToggle mode={viewMode} onChange={setViewMode} />
+      ) : lessonGenerating ? (
+        <p className="muted" style={{ marginBottom: 20, fontSize: 14 }}>
+          Generating guided lesson… (30–60 s)
+        </p>
+      ) : (
+        <div style={{ marginBottom: 20, display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-start" }}>
+          {lessonError && <ErrorBanner error={lessonError} />}
+          <button onClick={handleGenerateLesson} style={{ margin: 0 }}>
+            {lessonError ? "Retry guided lesson" : "Generate guided lesson"}
+          </button>
+        </div>
+      )}
+
+      {/* ── Chapter body (source or lesson) ── */}
       <article style={{ marginBottom: 48 }}>
-        <Markdown source={chapter.body_md || ""} />
+        <Markdown source={contentMd} />
       </article>
 
       {/* ── Mark complete ── */}
@@ -766,7 +924,19 @@ export default function ChapterPage() {
         ) : <span />}
       </div>
 
-      {/* ── Graded test ── */}
+      {/* ── Study tools ── */}
+      {studyLoading && (
+        <div style={{ marginBottom: 24 }}>
+          <Spinner label="Preparing study tools…" />
+        </div>
+      )}
+      {studyError && (
+        <div style={{ marginBottom: 16 }}>
+          <ErrorBanner error={studyError} />
+        </div>
+      )}
+
+      {/* ── Graded test (quiz populated lazily by ensureStudy) ── */}
       <GradedTest courseId={id} sid={sid} quiz={chapter.quiz || []} />
 
       {/* ── Tutor chat ── */}

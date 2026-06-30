@@ -2,99 +2,22 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { library } from "../lib/api";
 import { Badge, ErrorBanner, Panel } from "../components/ui";
 
 // ---------------------------------------------------------------------------
-// Library upload flow: upload → plan review → approve + generate → poll
+// Library upload flow: upload → ingest → ready (ingest now finishes fast;
+// no plan-review / approve-generate gate anymore).
 // ---------------------------------------------------------------------------
 
-const IMPORTANCE_TONE = { critical: "bad", high: "warn", medium: "ok", low: "muted" };
-
-function PlanItem({ item }) {
-  return (
-    <div className="panel" style={{ marginBottom: 12 }}>
-      <div className="row" style={{ marginBottom: 6 }}>
-        <strong>{item.title}</strong>
-        <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {item.target_words != null && (
-            <span className="muted" style={{ fontSize: 13 }}>
-              ~{item.target_words} words
-            </span>
-          )}
-          {item.importance && (
-            <Badge tone={IMPORTANCE_TONE[item.importance] || "ok"}>{item.importance}</Badge>
-          )}
-        </span>
-      </div>
-      {item.objectives && item.objectives.length > 0 && (
-        <ul style={{ margin: 0, paddingLeft: 18 }}>
-          {item.objectives.map((obj, i) => (
-            <li key={i} className="muted" style={{ fontSize: 13 }}>
-              {obj}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function GenerationProgress({ course, chapters }) {
-  const prog = course.generation_progress || {};
-  const completed = prog.completed ?? 0;
-  const total = prog.total ?? 0;
-  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-
-  return (
-    <div>
-      <div className="row" style={{ marginBottom: 8 }}>
-        <span>
-          Generating… <strong>{completed}/{total}</strong> chapters
-        </span>
-        <Badge tone={course.status === "failed" ? "bad" : "ok"}>{course.status}</Badge>
-      </div>
-      <div
-        style={{
-          height: 6,
-          background: "var(--border, #333)",
-          borderRadius: 3,
-          overflow: "hidden",
-          marginBottom: 12,
-        }}
-      >
-        <div
-          style={{
-            height: "100%",
-            width: `${pct}%`,
-            background: "var(--accent, #7c3aed)",
-            transition: "width 0.4s ease",
-          }}
-        />
-      </div>
-      {chapters && chapters.length > 0 && (
-        <div style={{ fontSize: 13 }}>
-          {chapters.map((ch, i) => (
-            <div key={ch.section_id || i} className="row" style={{ padding: "3px 0" }}>
-              <span className="muted">{ch.title}</span>
-              <Badge tone={ch.status === "ready" ? "ok" : ch.status === "failed" ? "bad" : "muted"}>
-                {ch.status || "pending"}
-              </Badge>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function LibraryUploadFlow() {
-  const [stage, setStage] = useState("idle"); // idle|uploading|reviewing|approving|generating|ready|failed
+  const router = useRouter();
+  const [stage, setStage] = useState("idle"); // idle|uploading|ingesting|ready
   const [libTitle, setLibTitle] = useState("");
   const [libFiles, setLibFiles] = useState(null);
   const [courseId, setCourseId] = useState(null);
-  const [plan, setPlan] = useState(null);
-  const [courseData, setCourseData] = useState(null); // { course, chapters }
+  const [courseData, setCourseData] = useState(null);
   const [libError, setLibError] = useState(null);
   const [sourceKind, setSourceKind] = useState("url");
   const [sourceValue, setSourceValue] = useState("");
@@ -115,25 +38,26 @@ function LibraryUploadFlow() {
     }
   }
 
-  function startIngestPolling(id) {
+  /** Poll getCourse until status==="ready" or "ingest_failed". */
+  function startReadyPolling(id) {
     stopPolling();
     intervalRef.current = setInterval(async () => {
       try {
         const data = await library.getCourse(id);
         setCourseData(data);
         const s = data.course?.status;
-        if (s === "needs_review") {
+        if (s === "ready") {
           stopPolling();
-          const planData = await library.getPlan(id);
-          setPlan(planData);
-          setStage("reviewing");
+          setStage("ready");
+          // Auto-redirect after a short pause so the user sees the success state
+          setTimeout(() => router.push(`/courses/${encodeURIComponent(id)}`), 1200);
         } else if (s === "ingest_failed") {
           stopPolling();
           setLibError(data.course?.generation_last_error || "Ingestion failed.");
           setStage("idle");
         }
-      } catch (pollErr) {
-        // transient error — keep polling
+      } catch {
+        // transient network error — keep polling
       }
     }, 1500);
   }
@@ -152,10 +76,8 @@ function LibraryUploadFlow() {
       const id = result.course_id;
       setCourseId(id);
 
-      // Ingest (extract → outline → plan) runs in the background. Poll the
-      // course status and show progress until the plan is ready for review.
       setStage("ingesting");
-      startIngestPolling(id);
+      startReadyPolling(id);
     } catch (err) {
       setLibError(err.message);
       setStage("idle");
@@ -181,57 +103,23 @@ function LibraryUploadFlow() {
       setCourseId(id);
 
       setStage("ingesting");
-      startIngestPolling(id);
+      startReadyPolling(id);
     } catch (err) {
       setLibError(err.message);
       setStage("idle");
     }
   }
 
-  async function handleApproveAndGenerate() {
-    setLibError(null);
-    setStage("approving");
-
-    try {
-      await library.approvePlan(courseId);
-      await library.generate(courseId);
-      setStage("generating");
-
-      // Start polling
-      intervalRef.current = setInterval(async () => {
-        try {
-          const data = await library.getCourse(courseId);
-          setCourseData(data);
-
-          const s = data.course?.generation_status || data.course?.status;
-          if (s === "ready" || s === "failed") {
-            stopPolling();
-            setStage(s);
-          }
-        } catch (pollErr) {
-          // Don't stop on transient poll errors
-        }
-      }, 2000);
-    } catch (err) {
-      setLibError(err.message);
-      setStage("reviewing"); // fall back so user can retry
-    }
-  }
-
-  const planItems =
-    plan?.plan_items || plan?.items || plan?.chapters || (Array.isArray(plan) ? plan : null);
-
   return (
-    <Panel title="Upload files → Review plan → Generate">
+    <Panel title="Upload & Build Course">
       <p className="muted">
         Upload one or more files (PDF, Word, PowerPoint, text, or Markdown) or add a URL, pasted
-        text, or YouTube link. The system builds an outline and study plan — review it, then approve
-        to generate the full course.
+        text, or YouTube link. Chapters are available to read immediately after ingestion.
       </p>
 
       {libError && <ErrorBanner error={libError} />}
 
-      {/* ── Stage: idle / uploading ── */}
+      {/* ── Stage: idle / uploading — file upload form ── */}
       {(stage === "idle" || stage === "uploading") && (
         <form onSubmit={handleUpload}>
           <label htmlFor="lib-title">Course title (optional)</label>
@@ -265,7 +153,7 @@ function LibraryUploadFlow() {
             type="submit"
             disabled={stage === "uploading" || !libFiles || libFiles.length === 0}
           >
-            {stage === "uploading" ? "Uploading & building plan…" : "Upload & Build Plan"}
+            {stage === "uploading" ? "Uploading…" : "Upload & Build Course"}
           </button>
         </form>
       )}
@@ -322,68 +210,17 @@ function LibraryUploadFlow() {
         </div>
       )}
 
-      {/* ── Stage: ingesting (outline + plan building in background) ── */}
+      {/* ── Stage: ingesting (reading + splitting into chapters) ── */}
       {stage === "ingesting" && (
         <div className="panel">
           <div className="row" style={{ marginBottom: 6 }}>
-            <span>Reading your material and detecting chapters…</span>
+            <span>Reading and splitting into chapters…</span>
             <Badge tone="ok">{courseData?.course?.status || "ingesting"}</Badge>
           </div>
           <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-            Building the outline and study plan. This runs in the background — it
-            stays here until the plan is ready to review.
+            This usually takes a few seconds. You&apos;ll be taken to the course automatically when ready.
           </p>
         </div>
-      )}
-
-      {/* ── Stage: reviewing ── */}
-      {stage === "reviewing" && plan && (
-        <div>
-          <div className="row" style={{ marginBottom: 12 }}>
-            <strong style={{ fontSize: 15 }}>Study Plan</strong>
-            <span className="muted" style={{ fontSize: 13 }}>
-              {planItems?.length ?? 0} items
-            </span>
-          </div>
-
-          {planItems && planItems.length > 0 ? (
-            planItems.map((item, i) => <PlanItem key={item.section_id || i} item={item} />)
-          ) : (
-            <pre className="muted" style={{ fontSize: 12, overflow: "auto" }}>
-              {JSON.stringify(plan, null, 2)}
-            </pre>
-          )}
-
-          <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>
-            <button onClick={handleApproveAndGenerate}>Approve &amp; Generate</button>
-            <button
-              style={{ background: "none", border: "1px solid var(--border,#333)", color: "inherit" }}
-              onClick={() => {
-                setStage("idle");
-                setPlan(null);
-                setCourseId(null);
-              }}
-            >
-              Start over
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Stage: approving (brief) ── */}
-      {stage === "approving" && (
-        <p className="muted">Approving plan and starting generation…</p>
-      )}
-
-      {/* ── Stage: generating ── */}
-      {stage === "generating" && courseData && (
-        <GenerationProgress
-          course={courseData.course || {}}
-          chapters={courseData.chapters || []}
-        />
-      )}
-      {stage === "generating" && !courseData && (
-        <p className="muted">Generation started, waiting for first update…</p>
       )}
 
       {/* ── Stage: ready ── */}
@@ -391,22 +228,10 @@ function LibraryUploadFlow() {
         <div className="panel" style={{ marginTop: 8 }}>
           <div className="row">
             <span>
-              Course <strong>{courseData?.course?.title || courseId}</strong> is ready.
+              ✓ Course <strong>{courseData?.course?.title || courseId}</strong> is ready.
             </span>
             <Link href={`/courses/${encodeURIComponent(courseId)}`}>Open course →</Link>
           </div>
-        </div>
-      )}
-
-      {/* ── Stage: failed ── */}
-      {stage === "failed" && (
-        <div>
-          <p style={{ color: "var(--red, #f87171)" }}>
-            Generation failed. Check the course for details.
-          </p>
-          {courseId && (
-            <Link href={`/courses/${encodeURIComponent(courseId)}`}>View course →</Link>
-          )}
         </div>
       )}
     </Panel>

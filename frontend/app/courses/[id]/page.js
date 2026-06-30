@@ -40,7 +40,6 @@ function statusTone(status) {
 
 function ChapterRow({ chapter, courseId, index }) {
   const sid = chapter.section_id;
-  const isReady = chapter.status === "ready";
 
   return (
     <li
@@ -88,9 +87,9 @@ function ChapterRow({ chapter, courseId, index }) {
           <span
             style={{
               display: "block",
-              fontWeight: isReady ? 500 : 400,
+              fontWeight: 500,
               fontSize: 15,
-              color: isReady ? "var(--text)" : "var(--muted)",
+              color: "var(--text)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -112,7 +111,7 @@ function ChapterRow({ chapter, courseId, index }) {
               done
             </Badge>
           )}
-          {!isReady && chapter.status && (
+          {chapter.status && chapter.status !== "ready" && (
             <Badge tone={statusTone(chapter.status)} dot>
               {chapter.status.replace(/_/g, " ")}
             </Badge>
@@ -481,7 +480,7 @@ export default function CoursePage() {
         </div>
       </div>
 
-      {/* ── Generation in progress banner ── */}
+      {/* ── Ingestion in progress banner ── */}
       {isGenerating && (
         <div style={{
           background: "rgba(210,153,34,0.08)",
@@ -496,7 +495,7 @@ export default function CoursePage() {
           color: "var(--warn)",
         }}>
           <span className="spinner-dot" style={{ borderTopColor: "var(--warn)", borderColor: "rgba(210,153,34,0.3)" }} />
-          Generating chapter content… chapters will become readable as they complete.
+          Preparing course… chapters will be available to read shortly.
         </div>
       )}
 
@@ -572,11 +571,11 @@ export default function CoursePage() {
           <div style={{ padding: "24px 20px" }}>
             {isGenerating ? (
               <p className="muted" style={{ margin: 0 }}>
-                Chapters are being generated — check back shortly.
+                Chapters are being prepared — check back shortly.
               </p>
             ) : (
               <p className="muted" style={{ margin: 0 }}>
-                No chapters yet. Generate course content to populate the table of contents.
+                No chapters found for this course.
               </p>
             )}
           </div>

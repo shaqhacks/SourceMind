@@ -144,4 +144,12 @@ export const library = {
   // Get past course-level test attempts (newest first)
   courseTestAttempts: (id) =>
     getJson(`/library/courses/${encodeURIComponent(id)}/test/attempts`),
+
+  // Lazily generate quiz + cards for a chapter; returns the updated chapter dict
+  ensureStudy: (id, sid) =>
+    postJson(`/library/courses/${encodeURIComponent(id)}/chapters/${encodeURIComponent(sid)}/study`, {}),
+
+  // Start background generation of the verbose guided lesson; returns {lesson_status:"generating"}
+  generateLesson: (id, sid) =>
+    postJson(`/library/courses/${encodeURIComponent(id)}/chapters/${encodeURIComponent(sid)}/lesson`, {}),
 };
