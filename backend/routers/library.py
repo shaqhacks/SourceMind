@@ -547,9 +547,11 @@ def generate_course_endpoint(
 # ─── Chapters ─────────────────────────────────────────────────────────────────
 
 
-@router.get("/courses/{course_id}/chapters/{section_id}")
-def get_chapter(course_id: str, section_id: str) -> dict:
-    """Return the full chapter content for a section."""
+def _get_chapter_dict(course_id: str, section_id: str) -> dict:
+    """Return the full chapter response dict, including lesson fields.
+
+    Raises HTTPException 404 if the course or chapter is not found.
+    """
     with base.get_session() as session:
         if session.get(models.Course, course_id) is None:
             raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
@@ -581,7 +583,15 @@ def get_chapter(course_id: str, section_id: str) -> dict:
             "word_count": chapter.word_count,
             "status": chapter.status,
             "completed": bool(progress and progress.completed),
+            "lesson_md": chapter.lesson_md,
+            "lesson_status": chapter.lesson_status or "none",
         }
+
+
+@router.get("/courses/{course_id}/chapters/{section_id}")
+def get_chapter(course_id: str, section_id: str) -> dict:
+    """Return the full chapter content for a section."""
+    return _get_chapter_dict(course_id, section_id)
 
 
 # ─── Progress ─────────────────────────────────────────────────────────────────
@@ -621,6 +631,70 @@ def update_progress(course_id: str, section_id: str, body: ProgressBody) -> dict
             "completed": prog.completed,
             "last_viewed_at": prog.last_viewed_at,
         }
+
+
+# ─── Lazy study / lesson generation ──────────────────────────────────────────
+
+
+@router.post("/courses/{course_id}/chapters/{section_id}/study")
+def generate_chapter_study(
+    course_id: str,
+    section_id: str,
+    provider=Depends(provider_dependency),
+) -> dict:
+    """Ensure quiz/cards exist for this chapter (lazy, synchronous, idempotent).
+
+    Calls ensure_study which generates study items if not already present.
+    Returns the full chapter dict (same shape as get_chapter).
+    404 if course or chapter not found.
+    """
+    from SourceMind.backend.pipeline.service import ensure_study
+
+    # Verify chapter exists before doing any work.
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is None:
+            raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if chap is None:
+            raise HTTPException(status_code=404, detail=f"Chapter {section_id!r} not found")
+
+    ensure_study(course_id, section_id, provider=provider)
+    return _get_chapter_dict(course_id, section_id)
+
+
+@router.post("/courses/{course_id}/chapters/{section_id}/lesson")
+def generate_chapter_lesson(
+    course_id: str,
+    section_id: str,
+    background_tasks: BackgroundTasks,
+    provider=Depends(provider_dependency),
+) -> dict:
+    """Kick off lesson generation as a background task. Returns immediately.
+
+    The client polls GET /chapters/{section_id} for lesson_status transitions:
+    none → generating → ready|failed
+    404 if course or chapter not found.
+    """
+    from SourceMind.backend.pipeline.service import run_lesson_job
+
+    # Verify chapter exists before scheduling the background job.
+    with base.get_session() as session:
+        if session.get(models.Course, course_id) is None:
+            raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if chap is None:
+            raise HTTPException(status_code=404, detail=f"Chapter {section_id!r} not found")
+
+    background_tasks.add_task(run_lesson_job, course_id, section_id, provider)
+    return {"lesson_status": "generating"}
 
 
 # ─── Chat ─────────────────────────────────────────────────────────────────────
