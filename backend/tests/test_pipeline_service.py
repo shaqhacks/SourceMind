@@ -12,7 +12,9 @@ from SourceMind.backend.db import base, models
 from SourceMind.backend.extract.pdf import ExtractedPage
 from SourceMind.backend.pipeline.service import (
     approve_plan,
+    ensure_study,
     generate_course,
+    generate_lesson,
     get_image_urls,
     get_source_text,
     ingest_pdfs,
@@ -134,6 +136,22 @@ class StubProvider:
                 }
             if "grounded" in schema.get("properties", {}):
                 return {"grounded": True, "unsupported": []}
+            if "quiz" in schema.get("properties", {}):
+                # generate_study_items schema → fixed quiz + cards
+                return {
+                    "quiz": [
+                        {
+                            "q": "What is 2 + 2?",
+                            "options": ["3", "4", "5", "6"],
+                            "answer": "4",
+                            "explain": "Basic arithmetic.",
+                        },
+                    ],
+                    "cards": [
+                        {"q": "What is a variable?", "a": "A named placeholder for a value."},
+                        {"q": "What is a constant?", "a": "A fixed value that does not change."},
+                    ],
+                }
             # Fallback for any schema
             return {}
         # No schema — chapter generation or repair
@@ -204,7 +222,8 @@ def test_ingest_creates_course_and_plan(tmp_path, db_url):
         course = session.get(models.Course, "algebra")
         assert course is not None
         assert course.id == "algebra"
-        assert course.status == "needs_review"
+        # New lazy-ingest flow: course is immediately "ready" (no approve/generate gate)
+        assert course.status == "ready"
         assert course.generation_status == "idle"
 
         plan_items = (
@@ -216,7 +235,10 @@ def test_ingest_creates_course_and_plan(tmp_path, db_url):
             session.query(models.Chapter).filter_by(course_id="algebra").all()
         )
         assert len(chapters) >= 1
-        assert all(ch.status == "pending" for ch in chapters)
+        # Chapters are created "ready" with their real source text in body_md
+        assert all(ch.status == "ready" for ch in chapters)
+        assert all(ch.body_md for ch in chapters)
+        assert all(ch.lesson_status == "none" for ch in chapters)
         assert all(ch.source_pages is not None for ch in chapters)
 
 
@@ -274,7 +296,9 @@ def test_generate_course_persists_quiz_and_cards(tmp_path, db_url):
         for ch in chapters:
             assert ch.quiz is not None and len(ch.quiz) > 0
             assert ch.cards is not None and len(ch.cards) > 0
-            assert ch.word_count is not None and ch.word_count > 0
+            # generate_course now produces the verbose lesson into lesson_md
+            assert ch.lesson_status == "ready"
+            assert ch.lesson_md
 
 
 def test_regenerate_section(tmp_path, db_url):
@@ -420,8 +444,10 @@ def test_generate_course_isolates_section_failure(tmp_path, db_url, monkeypatch)
             session.query(models.Chapter).filter_by(course_id="algebra").all()
         )
 
-        failed_chapters = [ch for ch in chapters if ch.status == "failed"]
-        ready_chapters = [ch for ch in chapters if ch.status == "ready"]
+        # Lazy flow tracks per-section success via lesson_status, not chapter.status
+        # (chapters stay status="ready" since body_md/source text is always present).
+        failed_chapters = [ch for ch in chapters if ch.lesson_status == "failed"]
+        ready_chapters = [ch for ch in chapters if ch.lesson_status == "ready"]
 
         # At least one section failed and at least one continued to succeed
         assert len(failed_chapters) >= 1, "Expected at least one failed chapter"
@@ -594,7 +620,7 @@ def test_ingest_materials_txt(tmp_path, db_url, monkeypatch):
     with base.get_session() as session:
         course = session.get(models.Course, "algebra_txt")
         assert course is not None
-        assert course.status == "needs_review"
+        assert course.status == "ready"
         chapters = session.query(models.Chapter).filter_by(course_id="algebra_txt").all()
         assert len(chapters) >= 1
 
@@ -642,8 +668,8 @@ def test_ingest_materials_mixed_pdf_txt_uses_llm_outline(tmp_path, db_url, monke
     with base.get_session() as session:
         course = session.get(models.Course, "mixed_course")
         assert course is not None
-        assert course.status == "needs_review", (
-            f"Expected needs_review; got {course.status!r}. "
+        assert course.status == "ready", (
+            f"Expected ready; got {course.status!r}. "
             f"error: {course.generation_last_error!r}"
         )
 
@@ -657,3 +683,92 @@ def test_ingest_materials_mixed_pdf_txt_uses_llm_outline(tmp_path, db_url, monke
             f"Expected s1 from LLM outline; got section_ids={section_ids}. "
             "The TOC path should have been suppressed for mixed material sets."
         )
+
+
+# ---------------------------------------------------------------------------
+# Lazy study + lesson generation (new lazy-ingest flow)
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_study_generates_quiz_cards(tmp_path, db_url):
+    """ensure_study fills quiz/cards from body_md, seeds ReviewState, and is idempotent."""
+    stub = StubProvider()
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+
+    # Sanity: chapter exists with source body_md but no quiz yet.
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="s1")
+            .first()
+        )
+        assert chap is not None
+        assert chap.body_md  # real source text from ingest
+        assert not chap.quiz
+
+    ensure_study("algebra", "s1", provider=stub)
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="s1")
+            .first()
+        )
+        assert chap.quiz is not None and len(chap.quiz) == 1
+        assert chap.cards is not None and len(chap.cards) == 2
+
+        review_count = (
+            session.query(models.ReviewState)
+            .filter_by(course_id="algebra", section_id="s1")
+            .count()
+        )
+        # One ReviewState row seeded per card.
+        assert review_count == 2
+
+    # Idempotent: a second call must not duplicate cards or ReviewState rows.
+    ensure_study("algebra", "s1", provider=stub)
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="s1")
+            .first()
+        )
+        assert len(chap.cards) == 2
+        review_count_after = (
+            session.query(models.ReviewState)
+            .filter_by(course_id="algebra", section_id="s1")
+            .count()
+        )
+        assert review_count_after == 2
+
+
+def test_generate_lesson_sets_lesson_md(tmp_path, db_url):
+    """generate_lesson produces a validated lesson: lesson_md + lesson_status + quiz/cards."""
+    stub = StubProvider()
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+
+    # Before: chapter has no lesson yet.
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="s1")
+            .first()
+        )
+        assert chap.lesson_status == "none"
+        assert chap.lesson_md is None
+
+    generate_lesson("algebra", "s1", provider=stub)
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="s1")
+            .first()
+        )
+        assert chap.lesson_status == "ready"
+        assert chap.lesson_md  # non-empty verbose lesson markdown
+        assert chap.quiz is not None and len(chap.quiz) > 0
+        assert chap.cards is not None and len(chap.cards) > 0

@@ -134,6 +134,22 @@ class StubProvider:
                 }
             if "grounded" in props:
                 return {"grounded": True, "unsupported": []}
+            if "quiz" in props:
+                # generate_study_items schema → fixed quiz + cards
+                return {
+                    "quiz": [
+                        {
+                            "q": "What is the core concept?",
+                            "options": ["A", "B", "C", "D"],
+                            "answer": "A",
+                            "explain": "A is the fundamental idea.",
+                        },
+                    ],
+                    "cards": [
+                        {"q": "What is the key concept?", "a": "The fundamental idea."},
+                        {"q": "How do you apply it?", "a": "By following the steps."},
+                    ],
+                }
             # Fallback for any unrecognised schema
             return {}
 
@@ -768,9 +784,9 @@ def test_upload_two_files_same_name(client: TestClient) -> None:
     course = resp.json()["course"]
 
     # After the fix, ingest_materials receives two distinct paths and processes both,
-    # so the course ends in needs_review.  Before the fix it would silently lose one.
-    assert course["status"] == "needs_review", (
-        f"Expected needs_review (both files ingested); got {course['status']!r}. "
+    # so the course ends "ready" (lazy flow).  Before the fix it would silently lose one.
+    assert course["status"] == "ready", (
+        f"Expected ready (both files ingested); got {course['status']!r}. "
         f"error: {course.get('generation_last_error')!r}"
     )
 
@@ -822,7 +838,7 @@ def test_upload_txt_file(client: TestClient, tmp_path: Path, monkeypatch) -> Non
 
     resp = client.get(f"/library/courses/{course_id}")
     assert resp.status_code == 200
-    assert resp.json()["course"]["status"] in ("needs_review", "ingesting")
+    assert resp.json()["course"]["status"] in ("ready", "ingesting")
 
 
 def test_upload_unsupported_extension(client: TestClient, tmp_path: Path) -> None:
@@ -928,3 +944,42 @@ def test_reviews_stats_endpoint(client: TestClient, tmp_path: Path) -> None:
         assert key in data, f"Missing key: {key}"
     assert data["daily_goal"] == 20
     assert data["reviewed_today"] >= 1
+
+
+# ─── Lazy study / lesson endpoints ───────────────────────────────────────────
+
+
+def test_study_endpoint_returns_quiz(client: TestClient, tmp_path: Path) -> None:
+    """POST /chapters/{sid}/study lazily generates and returns quiz + cards (200)."""
+    course_id = _upload(client, tmp_path)
+    resp = client.get(f"/library/courses/{course_id}")
+    section_id = resp.json()["plan"][0]["section_id"]
+
+    resp = client.post(
+        f"/library/courses/{course_id}/chapters/{section_id}/study"
+    )
+    assert resp.status_code == 200, resp.text
+    chapter = resp.json()
+    assert chapter["quiz"] and len(chapter["quiz"]) >= 1
+    assert chapter["cards"] and len(chapter["cards"]) >= 1
+
+
+def test_lesson_endpoint_generates(client: TestClient, tmp_path: Path) -> None:
+    """POST /chapters/{sid}/lesson returns generating; the background task (run
+    synchronously by TestClient) drives lesson_status to ready with lesson_md."""
+    course_id = _upload(client, tmp_path)
+    resp = client.get(f"/library/courses/{course_id}")
+    section_id = resp.json()["plan"][0]["section_id"]
+
+    resp = client.post(
+        f"/library/courses/{course_id}/chapters/{section_id}/lesson"
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["lesson_status"] == "generating"
+
+    # TestClient runs the BackgroundTask before returning, so the lesson is ready.
+    resp = client.get(f"/library/courses/{course_id}/chapters/{section_id}")
+    assert resp.status_code == 200
+    chapter = resp.json()
+    assert chapter["lesson_status"] == "ready", chapter
+    assert chapter["lesson_md"], "lesson_md should be non-empty after generation"
