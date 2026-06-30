@@ -61,6 +61,8 @@ class Chapter(Base):
     cards: Mapped[list | None] = mapped_column(JSON, nullable=True)
     word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str | None] = mapped_column(String, nullable=True)
+    lesson_md: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    lesson_status: Mapped[str | None] = mapped_column(String, nullable=True, default="none")
 
     course: Mapped[Course] = relationship("Course", back_populates="chapters")
 
