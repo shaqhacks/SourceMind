@@ -585,7 +585,7 @@ def ensure_study(
         )
         if chap is None:
             raise ValueError(f"Chapter not found: course={course_id} section={section_id}")
-        if chap.quiz:  # already has quiz — idempotent
+        if chap.quiz:  # non-empty quiz means already generated; empty [] (from failed generation) intentionally retries on next call
             return
         source_text = chap.body_md or ""
 
@@ -643,7 +643,8 @@ def generate_lesson(
             .first()
         )
         if chap is None:
-            raise ValueError(f"Chapter not found: course={course_id} section={section_id}")
+            logger.warning("generate_lesson: chapter not found course=%s section=%s", course_id, section_id)
+            return
         source_pages = chap.source_pages or [0, 0]
         pi = (
             session.query(models.PlanItem)
@@ -731,6 +732,7 @@ def generate_lesson(
             )
             if chap is not None:
                 chap.lesson_status = "failed"
+                chap.lesson_md = None
             course = session.get(models.Course, course_id)
             if course is not None:
                 course.generation_last_error = str(exc)
