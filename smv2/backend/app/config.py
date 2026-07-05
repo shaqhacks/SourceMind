@@ -46,3 +46,16 @@ def api_version() -> str:
 def cors_origins() -> list[str]:
     raw = os.environ.get("SMV2_CORS_ORIGINS", "http://localhost:3000")
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def backups_enabled() -> bool:
+    raw = os.environ.get("SMV2_BACKUPS_ENABLED", "1")
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def backup_retention() -> int:
+    raw = os.environ.get("SMV2_BACKUP_RETENTION", "7")
+    try:
+        return int(raw)
+    except ValueError:
+        return 7

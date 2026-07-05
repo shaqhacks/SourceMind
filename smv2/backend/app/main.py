@@ -10,13 +10,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import api_version, cors_origins, worker_enabled
 from app.db.init import init_db
 from app.jobs.worker import reconcile_interrupted_jobs, worker_loop
-from app.routers import health, jobs
+from app.routers import courses, health, jobs
+from app.services import jobs_service
+from app.services.backup_service import should_run_backup
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await asyncio.to_thread(init_db)
     await asyncio.to_thread(reconcile_interrupted_jobs)
+
+    if await asyncio.to_thread(should_run_backup):
+        await asyncio.to_thread(jobs_service.create_job, "backup", None)
 
     worker_task: asyncio.Task | None = None
     if worker_enabled():
@@ -47,6 +52,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(jobs.router)
+    app.include_router(courses.router)
     return app
 
 

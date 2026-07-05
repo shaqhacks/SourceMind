@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+
+from app.db.engine import get_session
+from app.db.models import (
+    Asset,
+    Card,
+    ChatTurn,
+    Chunk,
+    Course,
+    LlmCall,
+    ProgressState,
+    ReviewLog,
+    ReviewState,
+    Section,
+    TestAttempt,
+)
+from app.services.courses_service import delete_course
+
+
+def test_delete_course_cascades_to_every_fk_bearing_table(client):
+    session = get_session()
+    try:
+        course = Course(id=str(uuid.uuid4()), title="Cascade Course", status="created")
+        session.add(course)
+        session.flush()
+
+        section = Section(
+            id="section-cascade-1",
+            course_id=course.id,
+            order_index=0,
+            title="Intro",
+            body_md="Body text.",
+            content_hash="hash1",
+        )
+        session.add(section)
+        session.flush()
+
+        asset = Asset(
+            id=str(uuid.uuid4()),
+            course_id=course.id,
+            filename="a.pdf",
+            content_type="application/pdf",
+            size_bytes=10,
+            sha256="x",
+            stored_path="/tmp/a.pdf",
+            status="stored",
+        )
+        chunk = Chunk(
+            id=str(uuid.uuid4()),
+            course_id=course.id,
+            section_id=section.id,
+            chunk_index=0,
+            text="chunk text",
+            source_ref=f"{section.id}:p.1",
+        )
+        card = Card(
+            id="card-cascade-1",
+            course_id=course.id,
+            section_id=section.id,
+            front_md="Q",
+            back_md="A",
+            position=0,
+        )
+        session.add_all([asset, chunk, card])
+        session.flush()
+
+        review_state = ReviewState(
+            card_id=card.id,
+            course_id=course.id,
+            due_at=datetime.now(timezone.utc),
+            interval_days=1.0,
+            ease=2.5,
+            reps=0,
+            lapses=0,
+        )
+        review_log = ReviewLog(
+            id=str(uuid.uuid4()),
+            card_id=card.id,
+            course_id=course.id,
+            graded_at=datetime.now(timezone.utc),
+            grade=3,
+        )
+        progress = ProgressState(course_id=course.id, section_id=section.id, scroll_pos=0.5)
+        chat_turn = ChatTurn(id=str(uuid.uuid4()), course_id=course.id, role="user", content="hi")
+        test_attempt = TestAttempt(
+            id=str(uuid.uuid4()), course_id=course.id, section_id=section.id, payload={"q": 1}
+        )
+        llm_call = LlmCall(
+            id=str(uuid.uuid4()),
+            ts=datetime.now(timezone.utc),
+            purpose="lesson",
+            model="test-model",
+            input_tokens=1,
+            output_tokens=1,
+            latency_ms=1,
+            status="ok",
+            course_id=course.id,
+        )
+        session.add_all([review_state, review_log, progress, chat_turn, test_attempt, llm_call])
+        session.commit()
+
+        course_id = course.id
+        llm_call_id = llm_call.id
+    finally:
+        session.close()
+
+    deleted = delete_course(course_id)
+    assert deleted is True
+
+    session = get_session()
+    try:
+        assert session.get(Course, course_id) is None
+        assert session.query(Section).filter_by(course_id=course_id).count() == 0
+        assert session.query(Asset).filter_by(course_id=course_id).count() == 0
+        assert session.query(Chunk).filter_by(course_id=course_id).count() == 0
+        assert session.query(Card).filter_by(course_id=course_id).count() == 0
+        assert session.query(ReviewState).filter_by(course_id=course_id).count() == 0
+        assert session.query(ReviewLog).filter_by(course_id=course_id).count() == 0
+        assert session.query(ProgressState).filter_by(course_id=course_id).count() == 0
+        assert session.query(ChatTurn).filter_by(course_id=course_id).count() == 0
+        assert session.query(TestAttempt).filter_by(course_id=course_id).count() == 0
+
+        surviving_llm_call = session.get(LlmCall, llm_call_id)
+        assert surviving_llm_call is not None
+        assert surviving_llm_call.course_id is None
+    finally:
+        session.close()
+
+
+def test_delete_course_returns_false_for_missing_course(client):
+    assert delete_course("does-not-exist") is False

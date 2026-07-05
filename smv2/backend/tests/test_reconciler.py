@@ -4,19 +4,58 @@ from datetime import datetime, timedelta, timezone
 
 from app.db.engine import get_session
 from app.db.models import Job
-from app.jobs.worker import reconcile_interrupted_jobs
+from app.jobs import registry
+from app.jobs.worker import MAX_ORPHAN_ATTEMPTS, reconcile_interrupted_jobs
 
 
-def test_reconcile_fails_orphaned_running_job(client):
+def _insert_running_job(attempts: int, job_type: str = "noop") -> str:
     session = get_session()
     try:
         past = datetime.now(timezone.utc) - timedelta(minutes=5)
-        running_job = Job(type="noop", status="running", lease_until=past, attempts=1)
-        queued_job = Job(type="noop", status="queued")
-        session.add_all([running_job, queued_job])
+        job = Job(type=job_type, status="running", lease_until=past, attempts=attempts)
+        session.add(job)
         session.commit()
-        running_id = running_job.id
-        queued_id = queued_job.id
+        return job.id
+    finally:
+        session.close()
+
+
+def test_orphaned_job_under_attempt_limit_is_requeued(client):
+    job_id = _insert_running_job(attempts=1)
+
+    reconcile_interrupted_jobs()
+
+    session = get_session()
+    try:
+        job = session.get(Job, job_id)
+        assert job.status == "queued"
+        assert job.lease_until is None
+        assert job.progress is None
+    finally:
+        session.close()
+
+
+def test_orphaned_job_at_attempt_limit_fails_permanently(client):
+    job_id = _insert_running_job(attempts=MAX_ORPHAN_ATTEMPTS)
+
+    reconcile_interrupted_jobs()
+
+    session = get_session()
+    try:
+        job = session.get(Job, job_id)
+        assert job.status == "failed"
+        assert job.error == "orphaned by restart"
+    finally:
+        session.close()
+
+
+def test_queued_job_is_left_untouched_by_reconciler(client):
+    session = get_session()
+    try:
+        job = Job(type="noop", status="queued")
+        session.add(job)
+        session.commit()
+        job_id = job.id
     finally:
         session.close()
 
@@ -24,10 +63,34 @@ def test_reconcile_fails_orphaned_running_job(client):
 
     session = get_session()
     try:
-        refreshed_running = session.get(Job, running_id)
-        refreshed_queued = session.get(Job, queued_id)
-        assert refreshed_running.status == "failed"
-        assert refreshed_running.error == "orphaned by restart"
-        assert refreshed_queued.status == "queued"
+        job = session.get(Job, job_id)
+        assert job.status == "queued"
+    finally:
+        session.close()
+
+
+def test_registered_on_orphan_hook_is_invoked(client, monkeypatch):
+    calls: list[str] = []
+
+    def _custom_hook(session, job) -> None:
+        calls.append(job.id)
+        job.status = "failed"
+        job.error = "custom-hook-handled"
+
+    monkeypatch.setitem(registry.ON_ORPHAN_HOOKS, "custom-orphan-type", _custom_hook)
+    monkeypatch.setitem(
+        registry.JOB_HANDLERS, "custom-orphan-type", lambda session, job: {"ok": True}
+    )
+
+    job_id = _insert_running_job(attempts=1, job_type="custom-orphan-type")
+
+    reconcile_interrupted_jobs()
+
+    assert calls == [job_id]
+    session = get_session()
+    try:
+        job = session.get(Job, job_id)
+        assert job.status == "failed"
+        assert job.error == "custom-hook-handled"
     finally:
         session.close()

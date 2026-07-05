@@ -13,6 +13,8 @@ from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parent.parent / "app"
 CONFIG_FILE = APP_ROOT / "config.py"
+ROUTERS_ROOT = APP_ROOT / "routers"
+_FORBIDDEN_ROUTER_IMPORT_PREFIXES = ("sqlalchemy", "app.db")
 
 
 def _is_os_name(node: ast.expr) -> bool:
@@ -91,3 +93,60 @@ def test_no_threading_or_semaphore_usage_outside_limiter() -> None:
             violations[str(path)] = found
 
     assert not violations, f"disallowed threading/semaphore usage found: {violations}"
+
+
+def _imported_module_names(tree: ast.Module) -> list[tuple[int, str]]:
+    names: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.append((node.lineno, alias.name))
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.append((node.lineno, node.module))
+    return names
+
+
+def test_routers_stay_thin_no_db_layer_imports() -> None:
+    """Routers must delegate to services, never touch SQLAlchemy or the DB
+    layer directly — otherwise "thin router" becomes a suggestion, not a rule.
+    """
+    violations: dict[str, list[str]] = {}
+    for path in sorted(ROUTERS_ROOT.glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        found = [
+            f"line {lineno}: {name}"
+            for lineno, name in _imported_module_names(tree)
+            if name.startswith(_FORBIDDEN_ROUTER_IMPORT_PREFIXES)
+        ]
+        if found:
+            violations[str(path)] = found
+
+    assert not violations, f"routers must delegate to services, not the DB layer: {violations}"
+
+
+def test_derived_tables_registry_covers_all_fk_models() -> None:
+    """Every ORM model with a FK to courses.id or sections.id must be
+    registered in exactly one of REPLACED_ON_REINGEST, REMAPPED_ON_REINGEST,
+    or LEDGER_TABLES — otherwise re-ingest silently orphans or duplicates it.
+    """
+    from app.db.models import Base
+    from app.db.registry import LEDGER_TABLES, REMAPPED_ON_REINGEST, REPLACED_ON_REINGEST
+
+    registered_tablenames = [
+        model.__tablename__
+        for model in (*REPLACED_ON_REINGEST, *REMAPPED_ON_REINGEST, *LEDGER_TABLES)
+    ]
+
+    fk_tables: set[str] = set()
+    for table in Base.metadata.tables.values():
+        for fk in table.foreign_keys:
+            if fk.column.table.name in {"courses", "sections"}:
+                fk_tables.add(table.name)
+
+    unregistered = fk_tables - set(registered_tablenames)
+    assert not unregistered, f"tables with FK to courses/sections not registered: {unregistered}"
+
+    duplicated = {name for name in registered_tablenames if registered_tablenames.count(name) > 1}
+    assert not duplicated, f"tables registered in more than one list: {duplicated}"

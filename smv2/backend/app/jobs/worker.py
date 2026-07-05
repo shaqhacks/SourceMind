@@ -17,7 +17,12 @@ from sqlalchemy.orm import Session
 
 from app.db.engine import get_session
 from app.db.models import Job, ensure_utc, utcnow
-from app.jobs.registry import JOB_HANDLERS
+from app.jobs.registry import (
+    JOB_HANDLERS,
+    MAX_ORPHAN_ATTEMPTS,
+    ON_ORPHAN_HOOKS,
+    default_on_orphan,
+)
 
 LEASE_SECONDS = 60
 POLL_INTERVAL_SECONDS = 0.5
@@ -51,6 +56,20 @@ def claim_next_job(session: Session) -> Job | None:
     if row is None:
         return None
     return session.get(Job, row[0])
+
+
+def job_progress(session: Session, job_id: str, stage: str, pct: float, message: str) -> None:
+    """Heartbeat: handlers call this to report progress and renew their lease.
+
+    Renewing the lease here (not just at claim time) means a legitimately
+    slow-but-alive job doesn't get mistaken for orphaned mid-run.
+    """
+    job = session.get(Job, job_id)
+    if job is None:
+        return
+    job.progress = {"stage": stage, "pct": pct, "message": message}
+    job.lease_until = utcnow() + timedelta(seconds=LEASE_SECONDS)
+    session.commit()
 
 
 def execute_job(session: Session, job: Job) -> None:
@@ -112,10 +131,11 @@ async def worker_loop() -> None:
 
 
 def reconcile_interrupted_jobs() -> int:
-    """Fail over any 'running' job whose lease has expired (e.g. after a restart).
+    """Recover any 'running' job whose lease has expired (e.g. after a restart).
 
-    Phase 1 will add resumption; for Phase 0, fail-over is enough to keep the
-    UI from wedging on a job that will never finish because its worker died.
+    Each job type can register an ON_ORPHAN_HOOKS entry to customize
+    recovery; unregistered types fall back to default_on_orphan, which
+    requeues under MAX_ORPHAN_ATTEMPTS and fails permanently after that.
     """
     session = get_session()
     try:
@@ -125,8 +145,8 @@ def reconcile_interrupted_jobs() -> int:
         for job in running_jobs:
             lease = ensure_utc(job.lease_until)
             if lease is not None and lease < now:
-                job.status = "failed"
-                job.error = "orphaned by restart"
+                hook = ON_ORPHAN_HOOKS.get(job.type, default_on_orphan)
+                hook(session, job)
                 count += 1
         session.commit()
         return count

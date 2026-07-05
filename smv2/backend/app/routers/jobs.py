@@ -1,33 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
-
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
 
+from app.schemas import JobCreate, JobOut
 from app.services import jobs_service
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
-
-
-class JobCreate(BaseModel):
-    type: str
-    payload: dict[str, Any] | None = None
-
-
-class JobOut(BaseModel):
-    id: str
-    type: str
-    status: str
-    payload: dict[str, Any] | None
-    result: dict[str, Any] | None
-    error: str | None
-    attempts: int
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 @router.post("", operation_id="create_job", status_code=202, response_model=JobOut)
@@ -45,6 +24,16 @@ def get_job(job_id: str) -> JobOut:
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return JobOut.model_validate(job)
+
+
+@router.get("/{job_id}/events", operation_id="job_events")
+async def job_events(job_id: str) -> StreamingResponse:
+    job = jobs_service.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    return StreamingResponse(
+        jobs_service.stream_job_events(job_id), media_type="text/event-stream"
+    )
 
 
 @router.get("", operation_id="list_jobs", response_model=list[JobOut])
