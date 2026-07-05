@@ -1,0 +1,18 @@
+# runtime data — never version (brief: Config & environment)
+data/
+
+# python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# node
+frontend/node_modules/
+frontend/.next/
+frontend/coverage/
+frontend/*.tsbuildinfo
+
+# session/tooling state
+.omc/
+.claude/
