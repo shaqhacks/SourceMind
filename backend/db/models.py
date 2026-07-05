@@ -68,6 +68,12 @@ class Chapter(Base):
     status: Mapped[str | None] = mapped_column(String, nullable=True)
     lesson_md: Mapped[str | None] = mapped_column(TEXT, nullable=True)
     lesson_status: Mapped[str | None] = mapped_column(String, nullable=True, default="none")
+    # ADR-010: None/"toc" = title is authoritative (bookmark-derived or preexisting
+    # row, no refinement needed). "placeholder" = deterministic "Pages A-B" title,
+    # not yet refined. "refining"/"refined"/"failed" track the one-shot lazy LLM
+    # title refinement (see pipeline.service.maybe_refine_title); "failed" is
+    # retried on the next claim rather than being a terminal state.
+    title_status: Mapped[str | None] = mapped_column(String, nullable=True)
 
     course: Mapped[Course] = relationship("Course", back_populates="chapters")
 

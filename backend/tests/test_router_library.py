@@ -691,10 +691,10 @@ def test_section_test_submit_persists_attempt(client: TestClient, tmp_path: Path
     client.post(f"/library/courses/{course_id}/plan/approve")
     client.post(f"/library/courses/{course_id}/generate")
 
-    # Chapter section_id is "s1" (from StubProvider outline response)
+    # 1-page PDF, no bookmarks -> single deterministic section "pages0" (ADR-010).
     # All correct answers: [0, 1, 2, 3]
     resp = client.post(
-        f"/library/courses/{course_id}/chapters/s1/test/submit",
+        f"/library/courses/{course_id}/chapters/pages0/test/submit",
         json={"answers": [0, 1, 2, 3]},
     )
     assert resp.status_code == 200
@@ -711,12 +711,12 @@ def test_section_test_submit_persists_attempt(client: TestClient, tmp_path: Path
         attempt = session.get(models.TestAttempt, data["attempt_id"])
         assert attempt is not None
         assert attempt.scope == "section"
-        assert attempt.section_id == "s1"
+        assert attempt.section_id == "pages0"
         assert attempt.correct == 4
         assert attempt.passed is True
 
     # GET attempts returns it
-    attempts_resp = client.get(f"/library/courses/{course_id}/chapters/s1/test/attempts")
+    attempts_resp = client.get(f"/library/courses/{course_id}/chapters/pages0/test/attempts")
     assert attempts_resp.status_code == 200
     attempts = attempts_resp.json()
     assert len(attempts) == 1
@@ -730,10 +730,11 @@ def test_course_test_aggregates(client: TestClient, tmp_path: Path) -> None:
     client.post(f"/library/courses/{course_id}/plan/approve")
     client.post(f"/library/courses/{course_id}/generate")
 
-    # Submit course test with correct answers for section s1 (4 questions: answers 0,1,2,3)
+    # 1-page PDF, no bookmarks -> single deterministic section "pages0" (ADR-010).
+    # Submit course test with correct answers for that section (4 questions: 0,1,2,3)
     resp = client.post(
         f"/library/courses/{course_id}/test/submit",
-        json={"answers": {"s1": [0, 1, 2, 3]}},
+        json={"answers": {"pages0": [0, 1, 2, 3]}},
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -743,7 +744,7 @@ def test_course_test_aggregates(client: TestClient, tmp_path: Path) -> None:
     assert data["passed"] is True
     assert "attempt_id" in data
     assert len(data["sections"]) == 1
-    assert data["sections"][0]["section_id"] == "s1"
+    assert data["sections"][0]["section_id"] == "pages0"
 
     # GET course test attempts
     attempts_resp = client.get(f"/library/courses/{course_id}/test/attempts")
@@ -983,3 +984,36 @@ def test_lesson_endpoint_generates(client: TestClient, tmp_path: Path) -> None:
     chapter = resp.json()
     assert chapter["lesson_status"] == "ready", chapter
     assert chapter["lesson_md"], "lesson_md should be non-empty after generation"
+
+
+def test_get_chapter_lazily_refines_placeholder_title(client: TestClient, tmp_path: Path) -> None:
+    """GET /chapters/{sid} kicks off background placeholder-title refinement
+    (ADR-010) without blocking the read: the response that triggers it still
+    shows the old placeholder title; a subsequent GET shows the refined one."""
+
+    class TitleStub(StubProvider):
+        def complete(self, prompt, *, system="", schema=None, max_tokens=4096):
+            if schema is not None and "title" in schema.get("properties", {}):
+                return {"title": "Introduction to Core Concepts"}
+            return super().complete(prompt, system=system, schema=schema, max_tokens=max_tokens)
+
+    course_id = _upload(client, tmp_path)
+    resp = client.get(f"/library/courses/{course_id}")
+    section_id = resp.json()["plan"][0]["section_id"]
+
+    # Swap in the title-aware stub only for the refinement calls below (the
+    # `client` fixture's default StubProvider doesn't answer the title schema).
+    app.dependency_overrides[provider_dependency] = lambda: TitleStub()
+
+    first = client.get(f"/library/courses/{course_id}/chapters/{section_id}")
+    assert first.status_code == 200
+    assert first.json()["title_status"] == "placeholder"
+    assert first.json()["title"].startswith("Pages ")
+
+    # TestClient already ran the scheduled BackgroundTask by the time the call
+    # above returned; a fresh GET reveals the refined title.
+    second = client.get(f"/library/courses/{course_id}/chapters/{section_id}")
+    assert second.status_code == 200
+    data = second.json()
+    assert data["title"] == "Introduction to Core Concepts"
+    assert data["title_status"] == "refined"

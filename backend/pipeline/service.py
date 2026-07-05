@@ -28,8 +28,17 @@ from SourceMind.backend.pipeline.chunk import chunk_pages
 from SourceMind.backend.extract.pdf import ExtractedPage, extract_pdf, extract_toc
 from SourceMind.backend.extract.material import extract_material
 from SourceMind.backend.llm.provider import LLMProvider, get_provider
-from SourceMind.backend.pipeline.outline import detect_outline, sections_from_toc
-from SourceMind.backend.pipeline.plan import PlanItem as PlanItemDC, generate_plan
+from SourceMind.backend.pipeline.outline import (
+    carve_front_matter,
+    detect_front_matter_pages,
+    sections_from_page_windows,
+    sections_from_toc,
+)
+from SourceMind.backend.pipeline.plan import (
+    PlanItem as PlanItemDC,
+    compute_target_words,
+    default_plan,
+)
 from SourceMind.backend.pipeline.validate import generate_validated
 from SourceMind.backend.services.ingest.security import sanitize_source
 
@@ -290,19 +299,54 @@ def _finish_ingest(
 
     Both ``ingest_pdfs`` and ``ingest_materials`` call this after their
     format-specific extraction loops.  ``toc_entries`` may be empty (non-PDF
-    sources); in that case ``sections_from_toc`` returns [] and the pipeline
-    falls through to ``detect_outline`` as usual.
+    sources, or a mixed PDF+non-PDF set — see ``ingest_materials``'s Finding-3
+    guard); in that case ``sections_from_toc`` returns [] and the pipeline
+    falls through to the deterministic page-window outline.
+
+    ADR-010: ingest makes ZERO LLM calls. ``provider`` is accepted (and passed
+    through by both callers) purely for signature stability with callers/tests
+    that already supply one explicitly — it is not invoked anywhere in this
+    function. Real per-chapter objectives/importance/title metadata is instead
+    filled lazily on first use (``ensure_plan_metadata``, ``maybe_refine_title``).
     """
     # Persist page texts for use by generate_course
     _save_pages(all_pages, assets_dir)
 
-    # --- Outline: prefer embedded TOC (instant, accurate);
-    # fall back to LLM-based detection only when no bookmarks are available. ---
+    # --- Outline: prefer embedded TOC (instant, accurate, deterministic);
+    # fall back to fixed page-range windows when no bookmarks are available.
+    # Neither branch calls an LLM. ---
     sections = sections_from_toc(toc_entries, len(all_pages))
-    if not sections:
-        sections = detect_outline(all_pages, provider)
-    plan_items = generate_plan(sections, all_pages, provider)
+    used_toc = bool(sections)
+    # Never fold title/copyright/dedication/printed-TOC pages into "chapter 1"
+    # — carve them into their own "Front Matter" section instead. Each outline
+    # source has its own natural front-matter boundary: a bookmark outline's
+    # first chapter already tells us exactly where front matter ends (whatever
+    # precedes it, by definition); the page-window fallback's first window
+    # always starts at page 0 regardless of content, so it has no such signal
+    # and needs the deterministic regex/keyword heuristic instead (never the
+    # LLM) — see outline.detect_front_matter_pages.
+    if used_toc:
+        front_matter_pages = sections[0].page_start
+    else:
+        sections = sections_from_page_windows(len(all_pages), config.fallback_pages_per_chapter())
+        front_matter_pages = detect_front_matter_pages(all_pages)
+    sections = carve_front_matter(sections, front_matter_pages)
+    plan_items = default_plan(sections, all_pages)
     section_map = {s.section_id: s for s in sections}
+    # Page-window titles ("Pages A-B") are placeholders needing lazy refinement;
+    # TOC-derived titles and the synthesized "Front Matter" section are
+    # authoritative already (None = no refinement needed).
+    chapter_title_status = None if used_toc else "placeholder"
+
+    for plan_dc in plan_items:
+        if plan_dc.section_id == "front_matter":
+            plan_dc.importance = "peripheral"
+            section = section_map.get(plan_dc.section_id)
+            source_words = (
+                len(get_source_text(all_pages, section.page_start, section.page_end).split())
+                if section else 0
+            )
+            plan_dc.target_words = compute_target_words(source_words, "peripheral")
 
     # Build asset records from extracted image paths BEFORE the DB session so
     # chapter_source_md can look up images without an open session.
@@ -380,6 +424,11 @@ def _finish_ingest(
                 course_id,
             )
 
+            # "Front Matter" is a synthesized, already-correct label regardless
+            # of whether the rest of the outline came from bookmarks or page
+            # windows — never a placeholder needing lazy title refinement.
+            title_status = None if plan_dc.section_id == "front_matter" else chapter_title_status
+
             chapter = models.Chapter(
                 course_id=course_id,
                 section_id=plan_dc.section_id,
@@ -390,6 +439,7 @@ def _finish_ingest(
                 body_md=body,
                 status="ready",
                 lesson_status="none",
+                title_status=title_status,
             )
             session.add(chapter)
 
@@ -550,7 +600,8 @@ def ingest_materials(
     # Finding 3: TOC-based outline is only valid when ALL materials are PDFs.
     # Mixed sets (PDF + non-PDF) produce mis-attributed chapter page ranges because
     # sections_from_toc sets the last section's page_end = total_pages-1, absorbing
-    # the appended non-PDF pages.  Clearing toc_entries forces detect_outline (LLM).
+    # the appended non-PDF pages. Clearing toc_entries forces the deterministic
+    # page-window fallback (still zero-LLM, see _finish_ingest / ADR-010).
     if any((mat.get("kind") or "").strip().lower() != "pdf" for mat in materials):
         toc_entries = []
 
@@ -614,6 +665,9 @@ def reconcile_interrupted_jobs() -> None:
     - ``Course.generation_status`` in :data:`_INTERRUPTED_GENERATION_STATUSES`
       -> ``"failed"``, with ``generation_last_error`` explaining why.
     - ``Chapter.lesson_status == "generating"`` -> ``"failed"``.
+    - ``Chapter.title_status == "refining"`` -> ``"failed"`` (ADR-010 lazy title
+      refinement; "failed" is retried on the next ``maybe_refine_title`` claim,
+      same as a normal in-process failure — see that function's docstring).
 
     Rows already in a terminal or idle state are left untouched.
     """
@@ -635,6 +689,10 @@ def reconcile_interrupted_jobs() -> None:
         session.query(models.Chapter).filter(
             models.Chapter.lesson_status == "generating"
         ).update({"lesson_status": "failed"}, synchronize_session=False)
+
+        session.query(models.Chapter).filter(
+            models.Chapter.title_status == "refining"
+        ).update({"title_status": "failed"}, synchronize_session=False)
 
 
 def generate_study_items(
@@ -709,6 +767,226 @@ def generate_study_items(
         return {"quiz": [], "cards": []}
 
 
+# ---------------------------------------------------------------------------
+# ADR-010: lazy per-chapter plan metadata + placeholder title refinement.
+#
+# Ingest persists deterministic defaults only (default_plan): objectives=[],
+# importance="supporting", prerequisites=[], and — for page-window fallback
+# chapters — a "Pages A-B" placeholder title. The two functions below fill in
+# the real, LLM-derived values on first use, scoped to ONE chapter's own
+# source text rather than the whole book, and are wired into the existing
+# lazy entry points (ensure_study, generate_lesson, and the get_chapter/study
+# routers) so a course that's never opened never triggers an LLM call either.
+# ---------------------------------------------------------------------------
+
+_METADATA_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "objectives": {"type": "array", "items": {"type": "string"}},
+        "importance": {"type": "string", "enum": ["core", "supporting", "peripheral"]},
+    },
+    "required": ["objectives", "importance"],
+}
+
+_METADATA_SYSTEM_PROMPT = (
+    "You are a curriculum design assistant. Read the chapter excerpt below and "
+    "return its learning objectives and its importance (core, supporting, or "
+    "peripheral) within the course. Return ONLY a JSON object matching the "
+    "provided schema — no prose, no markdown fences."
+)
+
+
+def _generate_chapter_metadata(source_text: str, provider: LLMProvider) -> dict | None:
+    """One bounded LLM call: objectives + importance for a SINGLE chapter's text.
+
+    Returns ``None`` on empty input or any provider/parse failure (graceful
+    degradation — the caller leaves ingest-time defaults in place and retries
+    on the next call, mirroring ``generate_study_items``'s failure handling).
+    """
+    import json as _json
+
+    clean_text, _ = sanitize_source(source_text)
+    if not clean_text.strip():
+        return None
+    prompt = f"CHAPTER TEXT:\n{clean_text[:6000]}\n\nReturn its objectives and importance."
+    try:
+        raw = provider.complete(prompt, system=_METADATA_SYSTEM_PROMPT, schema=_METADATA_SCHEMA)
+        data = raw if isinstance(raw, dict) else _json.loads(raw)
+        objectives = [str(o) for o in (data.get("objectives") or [])]
+        importance = data.get("importance") or "supporting"
+        if importance not in ("core", "supporting", "peripheral"):
+            importance = "supporting"
+        return {"objectives": objectives, "importance": importance}
+    except Exception as exc:
+        logger.warning("chapter metadata fill failed: %s", exc)
+        return None
+
+
+def ensure_plan_metadata(
+    course_id: str,
+    section_id: str,
+    provider: LLMProvider | None = None,
+) -> None:
+    """Fill PlanItem/Chapter objectives+importance (+recomputed target_words) lazily.
+
+    Idempotent: a PlanItem with any objectives already set is left untouched
+    (cheap read, no LLM call). This is the lazy replacement for ingest-time
+    ``generate_plan`` (ADR-010): one bounded LLM call scoped to THIS chapter's
+    own source text. Cross-chapter ``prerequisites`` need whole-outline context
+    to infer meaningfully, so they deliberately stay ``[]`` even after this
+    fill — only objectives/importance/target_words are (re)computed.
+    """
+    provider = provider or get_provider()
+
+    with base.get_session() as session:
+        pi = (
+            session.query(models.PlanItem)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if pi is None or pi.objectives:
+            return
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        source_text = chap.body_md if chap else ""
+
+    meta = _generate_chapter_metadata(source_text or "", provider)
+    if meta is None:
+        return
+
+    with base.get_session() as session:
+        pi = (
+            session.query(models.PlanItem)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if pi is None or pi.objectives:  # re-check: another caller may have won the race
+            return
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        source_words = len((chap.body_md or "").split()) if chap else 0
+
+        pi.objectives = meta["objectives"]
+        pi.importance = meta["importance"]
+        pi.target_words = compute_target_words(source_words, meta["importance"])
+
+        if chap is not None:
+            chap.objectives = meta["objectives"]
+            chap.importance = meta["importance"]
+
+
+_TITLE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {"title": {"type": "string"}},
+    "required": ["title"],
+}
+
+_TITLE_SYSTEM_PROMPT = (
+    "You are a textbook editor. Read the excerpt below and produce a short, "
+    "specific chapter title (at most ~8 words) that names its actual topic. "
+    "Return ONLY a JSON object matching the provided schema — no prose, no "
+    "markdown fences."
+)
+
+
+def _generate_chapter_title(source_text: str, provider: LLMProvider) -> str | None:
+    """One bounded LLM call: a real title for a chapter that currently has a
+    "Pages A-B" placeholder. Returns ``None`` on empty input or any
+    provider/parse failure (graceful degradation — the placeholder stays and
+    is retried on the next claim)."""
+    import json as _json
+
+    clean_text, _ = sanitize_source(source_text)
+    if not clean_text.strip():
+        return None
+    prompt = f"SOURCE TEXT:\n{clean_text[:6000]}\n\nReturn the chapter title."
+    try:
+        raw = provider.complete(prompt, system=_TITLE_SYSTEM_PROMPT, schema=_TITLE_SCHEMA)
+        data = raw if isinstance(raw, dict) else _json.loads(raw)
+        new_title = (data.get("title") or "").strip()
+        return new_title or None
+    except Exception as exc:
+        logger.warning("chapter title refinement failed: %s", exc)
+        return None
+
+
+def maybe_refine_title(course_id: str, section_id: str) -> bool:
+    """Claim a placeholder chapter's title for background refinement.
+
+    Idempotent status flip: only chapters whose ``title_status`` is
+    "placeholder" or "failed" are claimed (flipped to "refining") —
+    already-refining/refined/toc-derived (``title_status`` is None) chapters
+    are left untouched. Callers (the ``get_chapter``/``study`` routers) should
+    schedule ``run_title_refinement_job`` as a BackgroundTask only when this
+    returns ``True``, so the read itself never blocks on an LLM call.
+    """
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if chap is None or chap.title_status not in ("placeholder", "failed"):
+            return False
+        chap.title_status = "refining"
+    return True
+
+
+def run_title_refinement_job(
+    course_id: str,
+    section_id: str,
+    provider: LLMProvider | None = None,
+) -> None:
+    """Background job: refine a placeholder chapter title via one bounded LLM call.
+
+    Never raises. On success: title (and the mirrored PlanItem.title) updated,
+    title_status="refined". On failure: title_status="failed" (title left as
+    the "Pages A-B" placeholder), retried on the next ``maybe_refine_title`` claim.
+    Designed to run as a FastAPI BackgroundTask — assumes the caller already
+    called ``maybe_refine_title`` and got ``True`` before scheduling this.
+    """
+    provider = provider or get_provider()
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if chap is None:
+            return
+        source_text = chap.body_md or ""
+
+    new_title = _generate_chapter_title(source_text, provider)
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id=course_id, section_id=section_id)
+            .first()
+        )
+        if chap is None:
+            return
+        if new_title:
+            chap.title = new_title
+            chap.title_status = "refined"
+            pi = (
+                session.query(models.PlanItem)
+                .filter_by(course_id=course_id, section_id=section_id)
+                .first()
+            )
+            if pi is not None:
+                pi.title = new_title
+        else:
+            chap.title_status = "failed"
+
+
 def ensure_study(
     course_id: str,
     section_id: str,
@@ -718,8 +996,11 @@ def ensure_study(
 
     Idempotent: if quiz is already populated, returns immediately.
     Also seeds ReviewState rows for each card (deletes existing first for idempotency).
+    Also lazily fills plan metadata (ADR-010) — see ``ensure_plan_metadata``.
     """
     provider = provider or get_provider()
+
+    ensure_plan_metadata(course_id, section_id, provider)
 
     with base.get_session() as session:
         chap = (
@@ -770,6 +1051,10 @@ def generate_lesson(
     if assets_dir is None:
         assets_dir = _default_assets_dir(course_id)
     assets_dir = Path(assets_dir)
+
+    # Lazy plan-metadata fill (ADR-010) — a no-op once objectives are already
+    # set, so the read below picks up the real objectives/importance/target_words.
+    ensure_plan_metadata(course_id, section_id, provider)
 
     # Load chapter info
     with base.get_session() as session:

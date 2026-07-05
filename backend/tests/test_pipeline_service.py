@@ -12,14 +12,17 @@ from SourceMind.backend.db import base, models
 from SourceMind.backend.extract.pdf import ExtractedPage
 from SourceMind.backend.pipeline.service import (
     approve_plan,
+    ensure_plan_metadata,
     ensure_study,
     generate_course,
     generate_lesson,
     get_image_urls,
     get_source_text,
     ingest_pdfs,
+    maybe_refine_title,
     reconcile_interrupted_jobs,
     regenerate_section,
+    run_title_refinement_job,
 )
 
 # ---------------------------------------------------------------------------
@@ -316,10 +319,12 @@ def test_regenerate_section(tmp_path, db_url):
     approve_plan("algebra")
     generate_course("algebra", provider=stub)
 
+    # 4 pages, no bookmarks, default 15-page fallback window -> single
+    # deterministic section "pages0" (see sections_from_page_windows / ADR-010).
     with base.get_session() as session:
         ch = (
             session.query(models.Chapter)
-            .filter_by(course_id="algebra", section_id="s1")
+            .filter_by(course_id="algebra", section_id="pages0")
             .first()
         )
         assert ch is not None
@@ -329,12 +334,12 @@ def test_regenerate_section(tmp_path, db_url):
         ch.lesson_md = "STALE LESSON CONTENT"
         ch.lesson_status = "failed"
 
-    regenerate_section("algebra", "s1", provider=stub)
+    regenerate_section("algebra", "pages0", provider=stub)
 
     with base.get_session() as session:
         ch = (
             session.query(models.Chapter)
-            .filter_by(course_id="algebra", section_id="s1")
+            .filter_by(course_id="algebra", section_id="pages0")
             .first()
         )
         assert ch is not None
@@ -421,6 +426,10 @@ def test_generate_course_isolates_section_failure(tmp_path, db_url, monkeypatch)
     - generation_progress["failed"] >= 1 and completed+failed == total
     - Course.generation_status == "failed"
     """
+    # Force >=2 page-window sections out of the 4-page PDF (default 15-page
+    # window would produce a single "pages0" section, defeating this isolation
+    # test — see sections_from_page_windows / ADR-010).
+    monkeypatch.setenv("SOURCEMIND_FALLBACK_PAGES_PER_CHAPTER", "2")
     stub = StubProvider()
     pdf_path = _build_four_page_pdf(tmp_path)
     ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
@@ -533,12 +542,13 @@ def test_regenerate_section_marks_failed_on_error(tmp_path, db_url, monkeypatch)
     )
 
     # Must NOT raise — failure is recorded on the chapter/course instead.
-    regenerate_section("algebra", "s1", provider=stub)
+    # 4 pages, no bookmarks -> single deterministic section "pages0" (ADR-010).
+    regenerate_section("algebra", "pages0", provider=stub)
 
     with base.get_session() as session:
         ch = (
             session.query(models.Chapter)
-            .filter_by(course_id="algebra", section_id="s1")
+            .filter_by(course_id="algebra", section_id="pages0")
             .first()
         )
         assert ch is not None
@@ -596,7 +606,8 @@ def test_regenerate_section_does_not_duplicate_review_states(tmp_path, db_url):
         )
     assert count_before > 0
 
-    regenerate_section("algebra", "s1", provider=stub)
+    # 4 pages, no bookmarks -> single deterministic section "pages0" (ADR-010).
+    regenerate_section("algebra", "pages0", provider=stub)
 
     with base.get_session() as session:
         count_after = (
@@ -644,12 +655,14 @@ def test_ingest_materials_txt(tmp_path, db_url, monkeypatch):
     assert pages_file.exists()
 
 
-def test_ingest_materials_mixed_pdf_txt_uses_llm_outline(tmp_path, db_url, monkeypatch):
-    """Mixed PDF+TXT ingest clears toc_entries and falls back to detect_outline (LLM).
+def test_ingest_materials_mixed_pdf_txt_uses_page_window_fallback(tmp_path, db_url, monkeypatch):
+    """Mixed PDF+TXT ingest clears toc_entries and falls back to page windows.
 
-    Without Finding-3 fix, sections_from_toc would absorb the appended TXT pages
-    into the last PDF chapter, mis-attributing content.  With the fix, toc_entries
-    is emptied for mixed sets so the LLM outline path always runs.
+    Without the Finding-3 fix, sections_from_toc would absorb the appended TXT
+    pages into the last PDF chapter, mis-attributing content. With the fix,
+    toc_entries is emptied for mixed sets so the deterministic page-window
+    fallback always runs instead (ADR-010: no LLM outline call exists anymore
+    to fall back to — ingest is zero-LLM end to end).
     """
     from SourceMind.backend.pipeline.service import ingest_materials, course_assets_dir
 
@@ -673,13 +686,22 @@ def test_ingest_materials_mixed_pdf_txt_uses_llm_outline(tmp_path, db_url, monke
     txt_file = tmp_path / "extra.txt"
     txt_file.write_text(("word " * 300).strip())
 
-    stub = StubProvider()
+    call_count = 0
+
+    class CountingStub(StubProvider):
+        def complete(self, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return super().complete(*args, **kwargs)
+
     ingest_materials(
         "mixed_course",
         "Mixed Course",
         [{"kind": "pdf", "path": str(pdf_path)}, {"kind": "txt", "path": str(txt_file)}],
-        provider=stub,
+        provider=CountingStub(),
     )
+
+    assert call_count == 0, "ingest must make zero LLM calls (ADR-010)"
 
     with base.get_session() as session:
         course = session.get(models.Course, "mixed_course")
@@ -692,13 +714,19 @@ def test_ingest_materials_mixed_pdf_txt_uses_llm_outline(tmp_path, db_url, monke
         chapters = session.query(models.Chapter).filter_by(course_id="mixed_course").all()
         assert len(chapters) >= 1
 
-        # StubProvider.detect_outline returns sections with section_ids s1/s2.
-        # Confirm the LLM outline ran (not the TOC path which would give different ids).
+        # 2 PDF pages + 1 TXT page = 3 total, under the 15-page default window
+        # -> single deterministic section "pages0" covering the whole document.
+        # Confirm the TOC path was suppressed (no "toc0"/"toc1" ids, which
+        # would indicate the PDF's own 2-chapter bookmarks mis-absorbed the
+        # appended TXT page into "Chapter B").
         section_ids = {ch.section_id for ch in chapters}
-        assert "s1" in section_ids, (
-            f"Expected s1 from LLM outline; got section_ids={section_ids}. "
+        assert section_ids == {"pages0"}, (
+            f"Expected the page-window fallback (\"pages0\"); got section_ids={section_ids}. "
             "The TOC path should have been suppressed for mixed material sets."
         )
+        chapter = chapters[0]
+        assert chapter.title_status == "placeholder"
+        assert chapter.title.startswith("Pages ")
 
 
 def test_reingest_same_course_id_replaces_not_duplicates(tmp_path, db_url, monkeypatch):
@@ -802,23 +830,24 @@ def test_ensure_study_generates_quiz_cards(tmp_path, db_url):
     pdf_path = _build_four_page_pdf(tmp_path)
     ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
 
+    # 4 pages, no bookmarks -> single deterministic section "pages0" (ADR-010).
     # Sanity: chapter exists with source body_md but no quiz yet.
     with base.get_session() as session:
         chap = (
             session.query(models.Chapter)
-            .filter_by(course_id="algebra", section_id="s1")
+            .filter_by(course_id="algebra", section_id="pages0")
             .first()
         )
         assert chap is not None
         assert chap.body_md  # real source text from ingest
         assert not chap.quiz
 
-    ensure_study("algebra", "s1", provider=stub)
+    ensure_study("algebra", "pages0", provider=stub)
 
     with base.get_session() as session:
         chap = (
             session.query(models.Chapter)
-            .filter_by(course_id="algebra", section_id="s1")
+            .filter_by(course_id="algebra", section_id="pages0")
             .first()
         )
         assert chap.quiz is not None and len(chap.quiz) == 1
@@ -826,25 +855,25 @@ def test_ensure_study_generates_quiz_cards(tmp_path, db_url):
 
         review_count = (
             session.query(models.ReviewState)
-            .filter_by(course_id="algebra", section_id="s1")
+            .filter_by(course_id="algebra", section_id="pages0")
             .count()
         )
         # One ReviewState row seeded per card.
         assert review_count == 2
 
     # Idempotent: a second call must not duplicate cards or ReviewState rows.
-    ensure_study("algebra", "s1", provider=stub)
+    ensure_study("algebra", "pages0", provider=stub)
 
     with base.get_session() as session:
         chap = (
             session.query(models.Chapter)
-            .filter_by(course_id="algebra", section_id="s1")
+            .filter_by(course_id="algebra", section_id="pages0")
             .first()
         )
         assert len(chap.cards) == 2
         review_count_after = (
             session.query(models.ReviewState)
-            .filter_by(course_id="algebra", section_id="s1")
+            .filter_by(course_id="algebra", section_id="pages0")
             .count()
         )
         assert review_count_after == 2
@@ -856,28 +885,367 @@ def test_generate_lesson_sets_lesson_md(tmp_path, db_url):
     pdf_path = _build_four_page_pdf(tmp_path)
     ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
 
+    # 4 pages, no bookmarks -> single deterministic section "pages0" (ADR-010).
     # Before: chapter has no lesson yet.
     with base.get_session() as session:
         chap = (
             session.query(models.Chapter)
-            .filter_by(course_id="algebra", section_id="s1")
+            .filter_by(course_id="algebra", section_id="pages0")
             .first()
         )
         assert chap.lesson_status == "none"
         assert chap.lesson_md is None
 
-    generate_lesson("algebra", "s1", provider=stub)
+    generate_lesson("algebra", "pages0", provider=stub)
 
     with base.get_session() as session:
         chap = (
             session.query(models.Chapter)
-            .filter_by(course_id="algebra", section_id="s1")
+            .filter_by(course_id="algebra", section_id="pages0")
             .first()
         )
         assert chap.lesson_status == "ready"
         assert chap.lesson_md  # non-empty verbose lesson markdown
         assert chap.quiz is not None and len(chap.quiz) > 0
         assert chap.cards is not None and len(chap.cards) > 0
+
+
+# ---------------------------------------------------------------------------
+# ADR-010: zero-LLM ingest + lazy per-chapter plan metadata / title refinement
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_pdfs_makes_zero_provider_calls(tmp_path, db_url):
+    """Ingest must never call the LLM provider — outline and plan are both
+    deterministic now (bookmark-first / page-window, default_plan)."""
+    call_count = 0
+
+    class CountingStub(StubProvider):
+        def complete(self, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return super().complete(*args, **kwargs)
+
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=CountingStub())
+
+    assert call_count == 0, "ingest_pdfs must make zero LLM calls (ADR-010)"
+
+
+def test_ingest_pdfs_no_bookmarks_uses_page_window_fallback(tmp_path, db_url, monkeypatch):
+    """A PDF with no embedded TOC falls back to fixed page-range windows, not
+    an LLM outline call. A small window size forces multiple chapters so the
+    windowing (not just the "one big chapter" case) is exercised."""
+    monkeypatch.setenv("SOURCEMIND_FALLBACK_PAGES_PER_CHAPTER", "2")
+    stub = StubProvider()
+    pdf_path = _build_four_page_pdf(tmp_path)
+
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+
+    with base.get_session() as session:
+        chapters = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra")
+            .order_by(models.Chapter.section_id)
+            .all()
+        )
+        section_ids = sorted(ch.section_id for ch in chapters)
+        assert section_ids == ["pages0", "pages2"]
+        for ch in chapters:
+            assert ch.title.startswith("Pages ")
+            assert ch.title_status == "placeholder"
+
+        plan_items = (
+            session.query(models.PlanItem).filter_by(course_id="algebra").all()
+        )
+        for pi in plan_items:
+            assert pi.objectives == []
+            assert pi.importance == "supporting"
+            assert pi.prerequisites == []
+
+
+def _build_pdf_with_front_matter(tmp_path: Path) -> Path:
+    """Build a 6-page PDF: 2 front-matter-looking pages (copyright + printed
+    TOC) followed by 4 real-content pages — mirrors the real textbook that
+    surfaced this bug (title/copyright/dedication/2 TOC pages before Chapter 0)."""
+    pdf_path = tmp_path / "front_matter_course.pdf"
+    doc = fitz.open()
+    front_matter_texts = [
+        "Copyright 2020, All Rights Reserved.",
+        "Table of Contents\nChapter 1 .......................... 5\nChapter 2 .......................... 12",
+    ]
+    for text in front_matter_texts:
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 72), text)
+    for i in range(4):
+        page = doc.new_page(width=612, height=792)
+        page.insert_text(
+            (72, 72),
+            f"The ability to work comfortably with topic {i} is essential to "
+            f"success in algebra. This page covers real chapter content in depth.",
+        )
+    doc.save(str(pdf_path))
+    doc.close()
+    return pdf_path
+
+
+def test_ingest_pdfs_never_folds_front_matter_into_chapter_one(tmp_path, db_url, monkeypatch):
+    """A no-bookmark PDF whose leading pages look like copyright/printed-TOC
+    front matter gets a separate "Front Matter" chapter — real chapter 1
+    never contains that boilerplate text (regression for the real textbook
+    that surfaced this: title/copyright/dedication/TOC pages were folded into
+    its first page-window "chapter")."""
+    monkeypatch.setenv("SOURCEMIND_FALLBACK_PAGES_PER_CHAPTER", "3")
+    stub = StubProvider()
+    pdf_path = _build_pdf_with_front_matter(tmp_path)
+
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+
+    with base.get_session() as session:
+        chapters = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra")
+            .order_by(models.Chapter.id)
+            .all()
+        )
+        section_ids = [ch.section_id for ch in chapters]
+        assert section_ids[0] == "front_matter"
+
+        front = chapters[0]
+        assert front.title == "Front Matter"
+        assert front.source_pages == [0, 1]
+        assert front.title_status is None
+        assert front.importance == "peripheral"
+        assert "Copyright" in front.body_md
+        assert "Table of Contents" in front.body_md
+
+        # Every other chapter's source starts at or after page 2 and its body
+        # never contains the front-matter boilerplate.
+        for ch in chapters[1:]:
+            assert ch.source_pages[0] >= 2
+            assert "Copyright" not in ch.body_md
+            assert "Table of Contents" not in ch.body_md
+
+
+def test_ensure_study_lazily_fills_plan_metadata(tmp_path, db_url):
+    """First ensure_study call fills objectives/importance/target_words from
+    the chapter's own source text (ADR-010); a second call makes no further
+    LLM call for metadata since it's already filled."""
+
+    class MetadataStub(StubProvider):
+        def complete(self, prompt, *, system="", schema=None, max_tokens=4096):
+            if schema is not None and "objectives" in schema.get("properties", {}):
+                return {"objectives": ["Understand ratios"], "importance": "core"}
+            return super().complete(prompt, system=system, schema=schema, max_tokens=max_tokens)
+
+    stub = MetadataStub()
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+
+    with base.get_session() as session:
+        pi = (
+            session.query(models.PlanItem)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+        )
+        assert pi.objectives == []  # ingest-time deterministic default
+        assert pi.importance == "supporting"
+        source_words = len(
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+            .body_md.split()
+        )
+
+    ensure_study("algebra", "pages0", provider=stub)
+
+    with base.get_session() as session:
+        pi = (
+            session.query(models.PlanItem)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+        )
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+        )
+        assert pi.objectives == ["Understand ratios"]
+        assert pi.importance == "core"
+        # target_words is recomputed for the newly-learned "core" importance,
+        # not left at the ingest-time "supporting" default.
+        from SourceMind.backend.pipeline.plan import compute_target_words
+        assert pi.target_words == compute_target_words(source_words, "core")
+        # Chapter mirrors PlanItem's objectives/importance (get_chapter reads
+        # from Chapter, not PlanItem).
+        assert chap.objectives == ["Understand ratios"]
+        assert chap.importance == "core"
+
+    # Idempotent: calling ensure_plan_metadata again must not re-fill/overwrite.
+    ensure_plan_metadata("algebra", "pages0", stub)
+    with base.get_session() as session:
+        pi = (
+            session.query(models.PlanItem)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+        )
+        assert pi.objectives == ["Understand ratios"]
+
+
+def test_generate_lesson_lazily_fills_plan_metadata(tmp_path, db_url):
+    """generate_lesson also triggers the lazy metadata fill (not just ensure_study)."""
+
+    class MetadataStub(StubProvider):
+        def complete(self, prompt, *, system="", schema=None, max_tokens=4096):
+            if schema is not None and "objectives" in schema.get("properties", {}):
+                return {"objectives": ["Master fractions"], "importance": "peripheral"}
+            return super().complete(prompt, system=system, schema=schema, max_tokens=max_tokens)
+
+    stub = MetadataStub()
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+
+    generate_lesson("algebra", "pages0", provider=stub)
+
+    with base.get_session() as session:
+        pi = (
+            session.query(models.PlanItem)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+        )
+        assert pi.objectives == ["Master fractions"]
+        assert pi.importance == "peripheral"
+
+
+def test_maybe_refine_title_and_job_refine_placeholder_title(tmp_path, db_url):
+    """A page-window placeholder title gets claimed, refined, and mirrored to
+    PlanItem.title; a chapter that isn't a placeholder is never claimed."""
+
+    class TitleStub(StubProvider):
+        def complete(self, prompt, *, system="", schema=None, max_tokens=4096):
+            if schema is not None and "title" in schema.get("properties", {}):
+                return {"title": "Fractions and Ratios"}
+            return super().complete(prompt, system=system, schema=schema, max_tokens=max_tokens)
+
+    stub = TitleStub()
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+        )
+        assert chap.title_status == "placeholder"
+        old_title = chap.title
+
+    claimed = maybe_refine_title("algebra", "pages0")
+    assert claimed is True
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+        )
+        assert chap.title_status == "refining"
+
+    # A second claim attempt while "refining" must be a no-op (avoids
+    # scheduling duplicate LLM calls for the same chapter).
+    assert maybe_refine_title("algebra", "pages0") is False
+
+    run_title_refinement_job("algebra", "pages0", provider=stub)
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+        )
+        pi = (
+            session.query(models.PlanItem)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+        )
+        assert chap.title == "Fractions and Ratios"
+        assert chap.title != old_title
+        assert chap.title_status == "refined"
+        assert pi.title == "Fractions and Ratios"
+
+    # Refined chapters are never re-claimed.
+    assert maybe_refine_title("algebra", "pages0") is False
+
+
+def test_maybe_refine_title_ignores_toc_derived_chapters(tmp_path, db_url, monkeypatch):
+    """A chapter whose title came from real bookmarks (title_status=None) must
+    never be claimed for refinement — it's already authoritative."""
+    from SourceMind.backend.pipeline.service import ingest_materials
+
+    monkeypatch.setattr(
+        "SourceMind.backend.pipeline.service.embed_texts",
+        lambda texts: [[0.0] * 8 for _ in texts],
+    )
+    pdf_path = tmp_path / "toc_book.pdf"
+    doc = fitz.open()
+    for i in range(2):
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 72), f"PDF page {i} algebra content topic section")
+    doc.set_toc([[1, "Chapter A", 1], [1, "Chapter B", 2]])
+    doc.save(str(pdf_path))
+    doc.close()
+
+    ingest_materials("bk", "Book", [{"kind": "pdf", "path": str(pdf_path)}], provider=StubProvider())
+
+    with base.get_session() as session:
+        chap = session.query(models.Chapter).filter_by(course_id="bk", section_id="toc0").first()
+        assert chap.title_status is None
+
+    assert maybe_refine_title("bk", "toc0") is False
+
+
+def test_run_title_refinement_job_failure_stays_retryable(tmp_path, db_url):
+    """If the LLM call/parse fails, title_status becomes "failed" (not stuck in
+    "refining" forever) and the placeholder title is left in place."""
+
+    class FailingTitleStub(StubProvider):
+        def complete(self, prompt, *, system="", schema=None, max_tokens=4096):
+            if schema is not None and "title" in schema.get("properties", {}):
+                raise RuntimeError("simulated failure")
+            return super().complete(prompt, system=system, schema=schema, max_tokens=max_tokens)
+
+    stub = FailingTitleStub()
+    pdf_path = _build_four_page_pdf(tmp_path)
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+
+    assert maybe_refine_title("algebra", "pages0") is True
+    run_title_refinement_job("algebra", "pages0", provider=stub)
+
+    with base.get_session() as session:
+        chap = (
+            session.query(models.Chapter)
+            .filter_by(course_id="algebra", section_id="pages0")
+            .first()
+        )
+        assert chap.title_status == "failed"
+        assert chap.title.startswith("Pages ")  # placeholder left untouched
+
+    # "failed" is retryable on the next claim.
+    assert maybe_refine_title("algebra", "pages0") is True
+
+
+def test_reconcile_interrupted_jobs_fails_over_title_refining(tmp_path, db_url):
+    with base.get_session() as session:
+        session.add(models.Course(id="c1", title="A", status="ready", generation_status="idle"))
+        session.add(models.Chapter(
+            course_id="c1", section_id="pages0", title="Pages 1-15", title_status="refining",
+        ))
+
+    reconcile_interrupted_jobs()
+
+    with base.get_session() as session:
+        chap = session.query(models.Chapter).filter_by(course_id="c1", section_id="pages0").first()
+        assert chap.title_status == "failed"
 
 
 # ---------------------------------------------------------------------------

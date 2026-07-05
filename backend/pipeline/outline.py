@@ -1,7 +1,16 @@
-"""Outline detection — segments a document into titled sections via an LLM."""
+"""Outline detection — segments a document into titled sections.
+
+ADR-010: ingest is zero-LLM. Bookmark-first (``sections_from_toc``) and the
+no-bookmark page-window fallback (``sections_from_page_windows``) are both
+deterministic, as is front-matter carving (``detect_front_matter_pages`` /
+``carve_front_matter``). ``detect_outline`` is the one LLM-based function
+left — no longer called from ingest, kept for its test coverage and as a
+possible building block for a future whole-book reprocessing feature.
+"""
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 from SourceMind.backend.extract.pdf import ExtractedPage
@@ -99,16 +108,42 @@ def _outline_max_tokens() -> int:
         return _DEFAULT_OUTLINE_MAX_TOKENS
 
 
+_MIN_TOC_CHAPTERS = 4
+_MAX_TOC_CHAPTERS = 80
+
+
+def _pick_toc_level(entries: list[tuple[int, str, int]]) -> int:
+    """Pick the bookmark level that yields a sane chapter count.
+
+    Bookmarks often nest (Part > Chapter > Section); using the shallowest level
+    unconditionally can pick a "Part" level with only 2-3 entries when a much
+    more useful "Chapter" level sits one level deeper. Prefers the DEEPEST level
+    whose entry count falls in ``[_MIN_TOC_CHAPTERS, _MAX_TOC_CHAPTERS]`` (finer
+    granularity wins among qualifying levels); levels below/between chosen-level
+    entries are not turned into their own sections — they are effectively
+    merged into their enclosing chapter's page range. Falls back to the
+    shallowest level when no level's count falls in range (best-effort: still
+    LLM-free, just possibly too coarse or too fine).
+    """
+    levels = sorted({lvl for lvl, _, _ in entries})
+    counts = {lvl: sum(1 for l, _, _ in entries if l == lvl) for lvl in levels}
+    qualifying = [lvl for lvl in levels if _MIN_TOC_CHAPTERS <= counts[lvl] <= _MAX_TOC_CHAPTERS]
+    if qualifying:
+        return max(qualifying)
+    return levels[0]
+
+
 def sections_from_toc(
     toc_entries: list[tuple[int, str, int]],
     total_pages: int,
 ) -> list[Section]:
     """Build sections from a PDF's embedded table of contents (bookmarks).
 
-    Uses the shallowest TOC level present as the "chapter" level. Each chapter
-    spans from its own page up to the page before the next chapter (the last one
-    runs to the end of the document). Returns ``[]`` if there is no usable TOC,
-    so callers can fall back to LLM-based outline detection.
+    Picks the bookmark level yielding a sane chapter count (see
+    ``_pick_toc_level``) as the "chapter" level. Each chapter spans from its own
+    page up to the page before the next chapter (the last one runs to the end
+    of the document). Returns ``[]`` if there is no usable TOC, so callers can
+    fall back to a deterministic outline (see ``sections_from_page_windows``).
 
     Args:
         toc_entries: ``(level, title, page_index)`` tuples, page_index 0-based,
@@ -123,9 +158,9 @@ def sections_from_toc(
     if not entries:
         return []
 
-    top_level = min(lvl for lvl, _, _ in entries)
+    chapter_level = _pick_toc_level(entries)
     chapters = sorted(
-        ((lvl, t, pg) for (lvl, t, pg) in entries if lvl == top_level),
+        ((lvl, t, pg) for (lvl, t, pg) in entries if lvl == chapter_level),
         key=lambda e: e[2],
     )
 
@@ -145,6 +180,144 @@ def sections_from_toc(
             page_end=end,
         ))
     return sections
+
+
+def sections_from_page_windows(total_pages: int, pages_per_chapter: int) -> list[Section]:
+    """Deterministic no-bookmark outline: fixed page-range windows (ADR-010).
+
+    Used at ingest when ``sections_from_toc`` finds no usable embedded TOC —
+    keeps ingest entirely LLM-free (see ``config.fallback_pages_per_chapter``
+    for the default window size). Titles are explicit placeholders
+    ("Pages A-B", 1-based for readability) so callers can tell them apart from
+    real chapter titles and lazily refine them on first read (see
+    ``Chapter.title_status`` / ``pipeline.service.maybe_refine_title``).
+
+    Args:
+        total_pages:      Total number of pages in the document.
+        pages_per_chapter: Window size; clamped to at least 1.
+    """
+    if total_pages <= 0:
+        return []
+    pages_per_chapter = max(1, pages_per_chapter)
+
+    sections: list[Section] = []
+    start = 0
+    while start < total_pages:
+        end = min(start + pages_per_chapter - 1, total_pages - 1)
+        sections.append(Section(
+            section_id=f"pages{start}",
+            title=f"Pages {start + 1}–{end + 1}",
+            page_start=start,
+            page_end=end,
+        ))
+        start = end + 1
+    return sections
+
+
+# ─── Front matter (ADR-010 addendum): never fold title/copyright/dedication/
+# printed-TOC pages into "Chapter 1", whether the outline came from bookmarks
+# or the page-window fallback. Detection is a cheap, deterministic regex/
+# keyword heuristic — no LLM — scoped to the LEADING run of pages only, so it
+# can never reach into the middle of the real book. ───────────────────────────
+
+_FRONT_MATTER_KEYWORDS = (
+    "table of contents", "copyright", "all rights reserved", "isbn",
+    "creative commons", "cc-by", "thanks to", "acknowledg", "dedicat",
+    "preface", "foreword",
+)
+# A printed table-of-contents line: some title text, then a dot-leader or run
+# of spaces, then a trailing page number ("1.1 Integers .............. 7").
+_TOC_LINE_RE = re.compile(r"^.{3,}[.\s]{4,}\d{1,4}\s*$")
+_MAX_FRONT_MATTER_PAGES = 30
+
+
+def _looks_like_front_matter(text: str) -> bool:
+    """A page "looks like" front matter if it names itself as boilerplate
+    (copyright/ISBN/Creative Commons/dedication/"Table of Contents") or at
+    least half its non-blank lines are printed-TOC dot-leader lines.
+
+    Deliberately does NOT use a low-word-count/"sparse page" signal: real
+    textbook pages are routinely short too (an image-heavy chapter-opening
+    page, a worked-example page that's mostly a diagram), and a false
+    positive there would swallow real chapter content into "Front Matter" —
+    a worse failure than under-detecting an unusual, keyword-free bare title
+    page. A false negative here just means the (harmless, already-readable)
+    title page stays part of "chapter 1" as before this function existed.
+    """
+    lowered = (text or "").lower()
+    if any(kw in lowered for kw in _FRONT_MATTER_KEYWORDS):
+        return True
+    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return False
+    toc_lines = sum(1 for ln in lines if _TOC_LINE_RE.match(ln.strip()))
+    return toc_lines >= max(2, len(lines) // 2)
+
+
+def detect_front_matter_pages(pages: list[ExtractedPage]) -> int:
+    """Return how many LEADING pages (in document order) look like front matter.
+
+    Stops at the first page that doesn't match (a contiguous run from the
+    start of the document only — this can never misfire on content deep in
+    the book), capped at ``_MAX_FRONT_MATTER_PAGES`` as a safety valve.
+    Returns 0 when the very first page already looks like real content.
+    """
+    count = 0
+    for page in pages[:_MAX_FRONT_MATTER_PAGES]:
+        if not _looks_like_front_matter(page.text):
+            break
+        count += 1
+    return count
+
+
+def carve_front_matter(sections: list[Section], front_matter_pages: int) -> list[Section]:
+    """Materialize a leading "Front Matter" section covering pages
+    ``[0, front_matter_pages - 1]``, never folding those pages into "chapter 1".
+
+    Callers pass the boundary appropriate to their outline source: for a
+    bookmark-derived outline that's simply the first chapter's own
+    ``page_start`` (whatever precedes the first real bookmark is by
+    definition front matter — no heuristic needed); for the page-window
+    fallback (which always starts its first window at page 0, so it has no
+    such natural boundary) that's ``detect_front_matter_pages``'s content-based
+    estimate.
+
+    Any leading sections wholly contained within the front-matter range are
+    dropped (only possible with a page-window size much smaller than the
+    front matter itself); a section straddling the boundary is clipped to
+    start right after it instead. Page-window placeholder titles ("Pages
+    A-B") are regenerated for the clipped range; real bookmark titles are
+    left as-is (clipping a page or two off a real chapter's start doesn't
+    change what it's called).
+    """
+    if front_matter_pages <= 0 or not sections:
+        return sections
+
+    front = Section(
+        section_id="front_matter",
+        title="Front Matter",
+        page_start=0,
+        page_end=front_matter_pages - 1,
+    )
+
+    rest = list(sections)
+    while rest and rest[0].page_end < front_matter_pages:
+        rest.pop(0)  # wholly inside the front matter — drop it
+
+    if rest and rest[0].page_start < front_matter_pages:
+        first = rest[0]
+        new_start = front_matter_pages
+        new_title = first.title
+        if new_title.startswith("Pages "):
+            new_title = f"Pages {new_start + 1}–{first.page_end + 1}"
+        rest[0] = Section(
+            section_id=first.section_id,
+            title=new_title,
+            page_start=new_start,
+            page_end=first.page_end,
+        )
+
+    return [front, *rest]
 
 
 def _chunk_pages(pages: list[ExtractedPage], word_budget: int) -> list[list[ExtractedPage]]:

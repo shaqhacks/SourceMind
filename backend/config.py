@@ -141,3 +141,15 @@ def chunk_target_words() -> int:
 def chunk_overlap_words() -> int:
     """Words shared between consecutive chunk windows (env ``SOURCEMIND_CHUNK_OVERLAP_WORDS``)."""
     return env_int("SOURCEMIND_CHUNK_OVERLAP_WORDS", _DEFAULT_CHUNK_OVERLAP_WORDS)
+
+
+# ─── Ingest outline (ADR-010: zero-LLM ingest) ─────────────────────────────
+
+_DEFAULT_FALLBACK_PAGES_PER_CHAPTER = 15
+
+
+def fallback_pages_per_chapter() -> int:
+    """Page-window size for the deterministic no-bookmark outline fallback
+    (env ``SOURCEMIND_FALLBACK_PAGES_PER_CHAPTER``). Used only when a source has
+    no usable embedded TOC/bookmarks — see ``pipeline.outline.sections_from_page_windows``."""
+    return env_int("SOURCEMIND_FALLBACK_PAGES_PER_CHAPTER", _DEFAULT_FALLBACK_PAGES_PER_CHAPTER)

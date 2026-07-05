@@ -116,6 +116,42 @@ def _extract_metadata(response) -> dict[str, dict]:
     return metadata
 
 
+def default_plan(
+    sections: list[Section],
+    pages: list[ExtractedPage],
+) -> list[PlanItem]:
+    """Zero-LLM plan (ADR-010): deterministic defaults, word-count-derived target_words.
+
+    Ingest never calls an LLM. objectives/prerequisites stay empty and importance
+    defaults to "supporting" (``generate_plan``'s own fallback value), so
+    ``target_words`` uses the same expansion factor either path would produce
+    absent real metadata. Real objectives/importance are filled lazily per
+    chapter on first study/lesson use (see ``ensure_plan_metadata`` in
+    ``pipeline/service.py``), scoped to that chapter's own source text rather
+    than a title-only whole-book prompt like ``generate_plan``'s.
+
+    Args:
+        sections: Ordered list of document sections (TOC-derived or page-window).
+        pages:    All extracted pages (used to count source words per section).
+
+    Returns:
+        One PlanItem per input section, in input order.
+    """
+    plan: list[PlanItem] = []
+    for section in sections:
+        source_words = _source_words_for_section(section, pages)
+        target_words = compute_target_words(source_words, "supporting")
+        plan.append(PlanItem(
+            section_id=section.section_id,
+            title=section.title,
+            objectives=[],
+            importance="supporting",
+            prerequisites=[],
+            target_words=target_words,
+        ))
+    return plan
+
+
 def generate_plan(
     sections: list[Section],
     pages: list[ExtractedPage],
@@ -125,6 +161,14 @@ def generate_plan(
 
     Makes a single LLM call to retrieve objectives, importance, and prerequisites for
     all sections at once. Maps the response back by section_id (tolerates missing keys).
+
+    Not called during ingest as of ADR-010 (ingest uses ``default_plan`` instead,
+    zero LLM calls) — this whole-book, title-only-prompt approach is kept for its
+    existing test coverage and as a building block if a future "reprocess this
+    course's whole outline" admin action needs it; the per-chapter lazy fill uses
+    a different, source-text-scoped prompt (see ``ensure_plan_metadata`` in
+    ``pipeline/service.py``) since a placeholder page-window title carries no
+    topical signal for this function's title-only prompt to work with.
 
     Args:
         sections: Ordered list of document sections.

@@ -539,13 +539,42 @@ def _get_chapter_dict(course_id: str, section_id: str) -> dict:
             "completed": bool(progress and progress.completed),
             "lesson_md": chapter.lesson_md,
             "lesson_status": chapter.lesson_status or "none",
+            "title_status": chapter.title_status,
         }
 
 
+def _maybe_schedule_title_refinement(
+    course_id: str,
+    section_id: str,
+    background_tasks: BackgroundTasks,
+    provider,
+) -> None:
+    """Kick off lazy title refinement (ADR-010) if this chapter still has a
+    placeholder title. Never blocks the caller: ``maybe_refine_title`` does a
+    cheap claim (flips title_status="refining" so concurrent callers don't also
+    schedule it) and only on a successful claim is the actual LLM call
+    scheduled as a background task."""
+    from SourceMind.backend.pipeline.service import maybe_refine_title, run_title_refinement_job
+
+    if maybe_refine_title(course_id, section_id):
+        background_tasks.add_task(run_title_refinement_job, course_id, section_id, provider)
+
+
 @router.get("/courses/{course_id}/chapters/{section_id}")
-def get_chapter(course_id: str, section_id: str) -> dict:
-    """Return the full chapter content for a section."""
-    return _get_chapter_dict(course_id, section_id)
+def get_chapter(
+    course_id: str,
+    section_id: str,
+    background_tasks: BackgroundTasks,
+    provider=Depends(provider_dependency),
+) -> dict:
+    """Return the full chapter content for a section.
+
+    Also opportunistically kicks off lazy placeholder-title refinement
+    (ADR-010) in the background — never blocks this read.
+    """
+    result = _get_chapter_dict(course_id, section_id)
+    _maybe_schedule_title_refinement(course_id, section_id, background_tasks, provider)
+    return result
 
 
 # ─── Progress ─────────────────────────────────────────────────────────────────
@@ -594,13 +623,15 @@ def update_progress(course_id: str, section_id: str, body: ProgressBody) -> dict
 def generate_chapter_study(
     course_id: str,
     section_id: str,
+    background_tasks: BackgroundTasks,
     provider=Depends(provider_dependency),
 ) -> dict:
     """Ensure quiz/cards exist for this chapter (lazy, synchronous, idempotent).
 
-    Calls ensure_study which generates study items if not already present.
-    Returns the full chapter dict (same shape as get_chapter).
-    404 if course or chapter not found.
+    Calls ensure_study which generates study items (and lazily fills plan
+    metadata, ADR-010) if not already present. Also opportunistically kicks off
+    lazy placeholder-title refinement in the background. Returns the full
+    chapter dict (same shape as get_chapter). 404 if course or chapter not found.
     """
     from SourceMind.backend.pipeline.service import ensure_study
 
@@ -617,6 +648,7 @@ def generate_chapter_study(
             raise HTTPException(status_code=404, detail=f"Chapter {section_id!r} not found")
 
     ensure_study(course_id, section_id, provider=provider)
+    _maybe_schedule_title_refinement(course_id, section_id, background_tasks, provider)
     return _get_chapter_dict(course_id, section_id)
 
 

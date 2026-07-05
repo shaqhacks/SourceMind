@@ -5,7 +5,12 @@ import pytest
 
 from SourceMind.backend.extract.pdf import ExtractedPage
 from SourceMind.backend.pipeline.outline import Section
-from SourceMind.backend.pipeline.plan import PlanItem, compute_target_words, generate_plan
+from SourceMind.backend.pipeline.plan import (
+    PlanItem,
+    compute_target_words,
+    default_plan,
+    generate_plan,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -271,3 +276,53 @@ def test_generate_plan_bounded_retry_still_degrades_gracefully():
     assert provider.calls == 2  # bounded — not retried again
     assert result[0].importance == "supporting"  # default
     assert result[0].objectives == []
+
+
+# ---------------------------------------------------------------------------
+# default_plan — zero-LLM ingest-time plan (ADR-010)
+# ---------------------------------------------------------------------------
+
+
+def test_default_plan_makes_no_provider_call():
+    """default_plan takes no provider argument at all — it cannot call an LLM."""
+    import inspect
+
+    assert "provider" not in inspect.signature(default_plan).parameters
+
+
+def test_default_plan_uses_deterministic_defaults():
+    sections = [
+        Section(section_id="s1", title="Intro", page_start=1, page_end=1),
+        Section(section_id="s2", title="Advanced", page_start=2, page_end=2),
+    ]
+    pages = [_make_pages(1, 1000), _make_pages(2, 500)]
+
+    result = default_plan(sections, pages)
+
+    assert [p.section_id for p in result] == ["s1", "s2"]
+    for p in result:
+        assert p.objectives == []
+        assert p.importance == "supporting"
+        assert p.prerequisites == []
+    # target_words uses the same "supporting" expansion factor as generate_plan's
+    # own fallback, computed from each section's real source word count.
+    assert result[0].target_words == compute_target_words(1000, "supporting")
+    assert result[1].target_words == compute_target_words(500, "supporting")
+
+
+def test_default_plan_preserves_section_titles_and_order():
+    """Page-window placeholder titles ("Pages A-B") pass through unchanged —
+    default_plan never rewrites a Section's title."""
+    sections = [
+        Section(section_id="pages0", title="Pages 1–15", page_start=0, page_end=14),
+        Section(section_id="pages15", title="Pages 16–20", page_start=15, page_end=19),
+    ]
+    pages = [_make_pages(i, 100) for i in range(20)]
+
+    result = default_plan(sections, pages)
+
+    assert [p.title for p in result] == ["Pages 1–15", "Pages 16–20"]
+
+
+def test_default_plan_empty_sections():
+    assert default_plan([], []) == []
