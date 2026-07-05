@@ -40,14 +40,20 @@ export default function DueBadge() {
     };
   }, []);
 
-  if (!dueTotal) return null;
-
+  // A stable, always-mounted live region (rather than conditionally
+  // mounting/unmounting the whole badge) is what lets a screen reader
+  // reliably announce the count changing — e.g. right after a grade
+  // settles the review bus and this refetches.
   return (
-    <Link
-      href="/review"
-      className="rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-white"
-    >
-      {dueTotal} due
-    </Link>
+    <div aria-live="polite" aria-atomic="true">
+      {dueTotal ? (
+        <Link
+          href="/review"
+          className="rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-white"
+        >
+          {dueTotal} due
+        </Link>
+      ) : null}
+    </div>
   );
 }

@@ -9,6 +9,8 @@ import ErrorBanner from "@/components/ErrorBanner";
 import UploadFlow from "@/components/upload/UploadFlow";
 import { listCourses, type CourseOut } from "@/lib/api/client";
 import { pickMostRecentCourse } from "@/lib/dashboard/continue";
+import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
+import { useSampleHintDismissed } from "@/lib/hooks/useSampleHint";
 
 interface FetchError {
   status?: number;
@@ -34,6 +36,9 @@ export default function Home() {
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useRouteFocus(headingRef);
+  const { dismissed: sampleHintDismissed, dismiss: dismissSampleHint } = useSampleHintDismissed();
 
   const loadCourses = useCallback(async () => {
     const { data, status } = await listCourses();
@@ -102,6 +107,14 @@ export default function Home() {
 
   const continueCourse = pickMostRecentCourse(courses);
   const isEmpty = loaded && !coursesError && courses.length === 0;
+  // The backend seeds a single "Welcome to SourceMind" sample course on
+  // first launch — this hint only ever applies to that exact moment (one
+  // course, already usable), not to a user's own first upload (which
+  // starts as "draft" before ingest even begins).
+  const showSampleHint =
+    !sampleHintDismissed &&
+    courses.length === 1 &&
+    (courses[0].status === "ingesting" || courses[0].status === "ready");
 
   return (
     <div
@@ -123,7 +136,9 @@ export default function Home() {
       )}
 
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Your courses</h1>
+        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-semibold outline-none">
+          Your courses
+        </h1>
         <div>
           <input
             ref={fileInputRef}
@@ -153,6 +168,23 @@ export default function Home() {
           message={coursesError.message}
           onRetry={loadCourses}
         />
+      )}
+
+      {showSampleHint && (
+        <div
+          role="note"
+          className="flex items-center justify-between gap-3 rounded-md border border-border bg-accent/5 px-4 py-3 text-sm"
+        >
+          <span>This is a sample course — drop any PDF to create your own.</span>
+          <button
+            type="button"
+            onClick={dismissSampleHint}
+            aria-label="Dismiss hint"
+            className="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
 
       {isEmpty ? (

@@ -14,7 +14,12 @@
   --background: #ffffff;
   --foreground: #1a1a1a;
   --muted-foreground: #52525b;
-  --border: #e4e4e7;
+  /* zinc-500 — chosen over the lighter zinc-200 default because many
+     secondary buttons here rely on the border alone (no fill) to convey
+     their clickable boundary; WCAG 1.4.11 needs 3:1 for that, and this
+     clears it in both themes (4.83:1 light, 4.10:1 dark) without needing
+     a separate per-theme override. */
+  --border: #71717a;
   --accent: #2563eb;
 
   /* Reading-column typography defaults (WCAG AA target: 4.5:1+ for body
@@ -45,7 +50,7 @@
     --background: #0a0a0a;
     --foreground: #f2f2f2;
     --muted-foreground: #a1a1aa;
-    --border: #27272a;
+    --border: #71717a;
     --accent: #60a5fa;
   }
 }
@@ -54,7 +59,7 @@
   --background: #ffffff;
   --foreground: #1a1a1a;
   --muted-foreground: #52525b;
-  --border: #e4e4e7;
+  --border: #71717a;
   --accent: #2563eb;
 }
 
@@ -62,7 +67,7 @@
   --background: #0a0a0a;
   --foreground: #f2f2f2;
   --muted-foreground: #a1a1aa;
-  --border: #27272a;
+  --border: #71717a;
   --accent: #60a5fa;
 }
 

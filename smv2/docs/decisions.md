@@ -31,3 +31,56 @@ a separate worker process remains a drop-in change if concurrency ever needs it.
 on every run. Committing them makes API drift visible in diffs and lets the
 frontend build without a running backend. The backend remains the source of
 truth; hand-editing generated files is a bug.
+
+## ADR-005 — Prompt delivery: instructions in system, source in tagged user content (2026-07-05)
+
+Extracted PDF text is untrusted input interpolated into prompts. All
+generation paths send instructions via the provider `system` parameter and
+source material inside `<source_text>`/`<excerpts>` tags in the user message,
+with the prompt instructing the model to treat tagged content strictly as
+material. Structural mitigation, not a guarantee. Prompt files live in
+`backend/prompts/vN/`; restructuring delivery without changing prompt text
+does not bump the version.
+
+## ADR-006 — Spend cap is a safety net with bounded overshoot, not billing enforcement (2026-07-05)
+
+The per-course cap is checked immediately before each provider call and
+re-checked after; overshoot is bounded by `llm_max_concurrency()` in-flight
+calls. Hard atomicity over SQLite for an estimate-based cap was judged not
+worth the locking complexity. The sequential worker makes the batch
+(generate-all) case airtight, which is the realistic overspend scenario.
+
+## ADR-007 — SM-2 bootstrap intervals extended to Hard/Easy (2026-07-05)
+
+Classic SM-2 only defines first-review intervals for Good. A card first
+graded Hard or Easy would otherwise multiply interval 0 forever. First-grade
+bootstraps: Again 10min, Hard 1d, Good 1d, Easy 4d(*ease-adjusted); ease
+changes take effect the following review (standard convention). Full table in
+`test_srs_schedule`.
+
+## ADR-008 — Chat is synchronous; generation is jobs (2026-07-05)
+
+Lesson/cards/quiz generation runs through the durable Job table (long,
+restart-safe, SSE progress). Chat is a synchronous request/response: latency
+budget is one completion, and fast-fail 429 from the limiter plus 504 on
+provider timeout give the client honest, retryable signals. Chat turns
+persist atomically only when the exchange succeeds — a failed reply leaves no
+orphaned user turn.
+
+## ADR-009 — SSRF guard built before any URL-fetch feature exists (2026-07-05)
+
+`app/security/fetch.py` (scheme allowlist, resolve-then-check against
+private/loopback/link-local/metadata ranges, size+timeout caps) is currently
+uncalled by product code. It exists so the blessed path predates the feature,
+and an architecture test confines httpx to `app/llm/` and `app/security/` so
+any future URL fetch must go through it. Known limitation, documented in the
+module: check-then-connect is not IP-pinned; tighten to a pinned transport
+when a real caller lands.
+
+## ADR-010 — Embeddings: Ollama-only, nullable, lazily backfilled (2026-07-05)
+
+Anthropic has no embeddings API, so `AnthropicProvider.embed` raises
+NotSupported and retrieval degrades to deterministic lexical ranking.
+Embeddings backfill lazily (first chat triggers `embed_course`), per-chunk
+failures stay NULL and are always skipped by the vector path. Chat therefore
+works with zero embedding infrastructure, better with Ollama present.

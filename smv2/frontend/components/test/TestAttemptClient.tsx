@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
 import { getTest, submitTest, type SubmitTestOut, type TestAttemptOut } from "@/lib/api/client";
 import { useKeyboardShortcuts, type ShortcutMap } from "@/lib/hooks/useKeyboardShortcuts";
+import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface TestAttemptClientProps {
@@ -52,6 +53,8 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
   const [result, setResult] = useState<SubmitTestOut | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useRouteFocus(headingRef);
 
   // Retry-button callback: no unmount guard needed, only ever runs from a
   // user click on an already-mounted ErrorBanner.
@@ -137,16 +140,16 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
       };
   useKeyboardShortcuts(shortcutMap);
 
+  let mainContent: React.ReactNode;
+
   if (state.kind === "loading") {
-    return (
+    mainContent = (
       <p role="status" className="p-8 text-sm text-muted-foreground">
         Loading quiz…
       </p>
     );
-  }
-
-  if (state.kind === "error") {
-    return (
+  } else if (state.kind === "error") {
+    mainContent = (
       <div className="p-8">
         <ErrorBanner
           status={state.error.status}
@@ -155,14 +158,11 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
         />
       </div>
     );
-  }
-
-  const { attempt } = state;
-
-  if (result) {
-    return (
+  } else if (result) {
+    const { attempt } = state;
+    mainContent = (
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
-        <h1 className="text-lg font-semibold">Score: {Math.round(result.score * 100)}%</h1>
+        <h2 className="text-lg font-semibold">Score: {Math.round(result.score * 100)}%</h2>
         <ul className="flex flex-col gap-6">
           {result.results.map((questionResult, index) => {
             const question = attempt.questions[index];
@@ -199,47 +199,58 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
         </Link>
       </div>
     );
+  } else {
+    const { attempt } = state;
+    const question = attempt.questions[questionIndex];
+    mainContent = (
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
+        <p role="status" className="text-sm text-muted-foreground">
+          {questionIndex + 1} of {questionCount}
+        </p>
+        <h2 className="text-base font-semibold">{question.question}</h2>
+        <fieldset className="flex flex-col gap-2">
+          <legend className="sr-only">Choices</legend>
+          {question.choices.map((choice, index) => (
+            <label
+              key={index}
+              className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
+            >
+              <input
+                type="radio"
+                name={`question-${questionIndex}`}
+                checked={answers[questionIndex] === index}
+                onChange={() => selectAnswer(index)}
+              />
+              {choice}
+            </label>
+          ))}
+        </fieldset>
+        {unanswered && (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            Select an answer before continuing.
+          </p>
+        )}
+        {submitError && <ErrorBanner message={submitError} onRetry={handleSubmit} />}
+        <button
+          type="button"
+          onClick={goNext}
+          disabled={submitting}
+          className="self-start rounded-md bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
+        >
+          {questionIndex + 1 < questionCount ? "Next (Enter)" : "Submit (Enter)"}
+        </button>
+      </div>
+    );
   }
 
-  const question = attempt.questions[questionIndex];
-
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
-      <p className="text-sm text-muted-foreground">
-        {questionIndex + 1} of {questionCount}
-      </p>
-      <h1 className="text-base font-semibold">{question.question}</h1>
-      <fieldset className="flex flex-col gap-2">
-        <legend className="sr-only">Choices</legend>
-        {question.choices.map((choice, index) => (
-          <label
-            key={index}
-            className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
-          >
-            <input
-              type="radio"
-              name={`question-${questionIndex}`}
-              checked={answers[questionIndex] === index}
-              onChange={() => selectAnswer(index)}
-            />
-            {choice}
-          </label>
-        ))}
-      </fieldset>
-      {unanswered && (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          Select an answer before continuing.
-        </p>
-      )}
-      {submitError && <ErrorBanner message={submitError} onRetry={handleSubmit} />}
-      <button
-        type="button"
-        onClick={goNext}
-        disabled={submitting}
-        className="self-start rounded-md bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
-      >
-        {questionIndex + 1 < questionCount ? "Next (Enter)" : "Submit (Enter)"}
-      </button>
-    </div>
+    <>
+      <div className="border-b border-border px-8 py-4">
+        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-semibold outline-none">
+          Quiz
+        </h1>
+      </div>
+      {mainContent}
+    </>
   );
 }

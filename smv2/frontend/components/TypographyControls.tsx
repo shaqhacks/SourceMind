@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import {
   FONT_SIZE_RANGE,
   LINE_HEIGHT_RANGE,
@@ -14,6 +15,7 @@ const PANEL_ID = "typography-controls-panel";
 export default function TypographyControls() {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useDialogFocus<HTMLDivElement>(open, { trap: false });
   const { prefs, setFontSize, setMeasure, setLineHeight } = useTypographyPrefs();
 
   useEffect(() => {
@@ -50,9 +52,11 @@ export default function TypographyControls() {
       </button>
       {open && (
         <div
+          ref={panelRef}
           id={PANEL_ID}
           role="group"
           aria-label="Typography settings"
+          tabIndex={-1}
           className="absolute right-0 z-10 mt-2 w-64 space-y-4 rounded-md border border-border bg-background p-4 text-sm shadow-lg"
         >
           <label className="block">

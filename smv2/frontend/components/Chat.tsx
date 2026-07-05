@@ -148,7 +148,12 @@ export default function Chat({ loadHistory, sendFn, onCitationClick }: ChatProps
         {historyState === "error" && (
           <ErrorBanner message="Could not load the conversation." onRetry={retryLoadHistory} />
         )}
-        {historyState === "ready" && (
+        {historyState === "ready" && turns.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            No messages yet — ask a question below.
+          </p>
+        )}
+        {historyState === "ready" && turns.length > 0 && (
           <ul className="flex flex-col gap-4">
             {turns.map((turn) => (
               <li key={turn.id} className={turn.role === "user" ? "text-right" : "text-left"}>

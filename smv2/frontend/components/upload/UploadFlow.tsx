@@ -15,7 +15,9 @@ import {
   type OutlineOp,
   type SectionOut,
 } from "@/lib/api/client";
+import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 
 export interface UploadFlowProps {
   files: File[];
@@ -63,6 +65,11 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
     kind: "title",
     title: defaultTitleFromFilename(files[0]?.name ?? ""),
   });
+  // This modal is mounted/unmounted by the parent (no internal open/close
+  // toggle), so "open" is just "true" for its whole lifetime — the hook's
+  // close-focus-restore fires naturally on unmount.
+  const dialogRef = useDialogFocus<HTMLDivElement>(true);
+  useKeyboardShortcuts({ escape: onClose });
 
   const activeJobId = step.kind === "ingesting" ? step.jobId : null;
   const { job, error: sseError, done, stalled } = useJobEvents(activeJobId);
@@ -182,7 +189,7 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
               <span className="text-xs text-muted-foreground">Uploading…</span>
             )}
             {item.status === "success" && (
-              <span className="text-xs font-medium text-green-600 dark:text-green-400">Uploaded</span>
+              <span className="text-xs font-medium text-green-700 dark:text-green-400">Uploaded</span>
             )}
             {item.status === "error" && (
               <span className="text-xs font-medium text-red-600 dark:text-red-400">
@@ -217,13 +224,15 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
   }
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Upload course"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-    >
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Upload course"
+        tabIndex={-1}
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-xl"
+      >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold">Add a course</h2>
           <button
@@ -280,7 +289,7 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
         {step.kind === "ingesting" && (
           <div className="flex flex-col gap-3">
             {renderUploadBadges(step.items)}
-            {renderIngestProgress()}
+            <div role="status">{renderIngestProgress()}</div>
           </div>
         )}
 

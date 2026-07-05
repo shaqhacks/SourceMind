@@ -29,12 +29,14 @@ from app.routers import (
 )
 from app.services import jobs_service
 from app.services.backup_service import should_run_backup
+from app.services.sample_service import seed_sample_course_if_first_run
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await asyncio.to_thread(init_db)
     await asyncio.to_thread(reconcile_interrupted_jobs)
+    await seed_sample_course_if_first_run()
 
     if await asyncio.to_thread(should_run_backup):
         await asyncio.to_thread(jobs_service.create_job, "backup", None)

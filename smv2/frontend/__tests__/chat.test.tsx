@@ -24,6 +24,15 @@ describe("Chat", () => {
     expect(screen.getByText("Hi there")).toBeInTheDocument();
   });
 
+  it("names the next action when there's no history yet, instead of a blank panel", async () => {
+    const loadHistory = vi.fn<() => Promise<ChatTurn[]>>().mockResolvedValue([]);
+    const sendFn = vi.fn();
+
+    render(<Chat loadHistory={loadHistory} sendFn={sendFn} />);
+
+    expect(await screen.findByText(/no messages yet/i)).toBeInTheDocument();
+  });
+
   it("shows a retryable error banner on history load failure, and retry recovers", async () => {
     const loadHistory = vi
       .fn<() => Promise<ChatTurn[]>>()

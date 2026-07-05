@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 import {
@@ -125,13 +126,21 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border p-4">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="truncate text-sm font-semibold">{course.title}</h3>
+        <h3 className="truncate text-sm font-semibold">
+          {course.status === "ready" ? (
+            <Link href={`/course/${course.id}`} className="underline-offset-2 hover:underline">
+              {course.title}
+            </Link>
+          ) : (
+            course.title
+          )}
+        </h3>
         {course.status === "ready" && <StatusBadge tone="good">Ready</StatusBadge>}
         {course.status === "draft" && <StatusBadge tone="neutral">Draft</StatusBadge>}
       </div>
 
       {isIngesting && (
-        <div className="text-xs text-muted-foreground">
+        <div role="status" className="text-xs text-muted-foreground">
           {stalled ? (
             <span>Still working — check back shortly.</span>
           ) : job?.progress ? (

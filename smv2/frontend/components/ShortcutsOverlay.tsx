@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-
+import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 
 export interface ShortcutHint {
@@ -15,52 +14,13 @@ export interface ShortcutsOverlayProps {
   shortcuts: ShortcutHint[];
 }
 
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 export default function ShortcutsOverlay({ open, onClose, shortcuts }: ShortcutsOverlayProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const previouslyFocused = useRef<HTMLElement | null>(null);
+  const dialogRef = useDialogFocus<HTMLDivElement>(open);
 
   // Registered even when closed; the hook itself no-ops while `enabled`
   // (i.e. `open`) is false. Being on top of the scope stack while open is
   // what stops the reader shell's own shortcuts from firing underneath.
   useKeyboardShortcuts({ escape: onClose }, open);
-
-  useEffect(() => {
-    if (!open) return undefined;
-
-    previouslyFocused.current = document.activeElement as HTMLElement | null;
-    const dialog = dialogRef.current;
-    const focusables = dialog
-      ? Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-      : [];
-    (focusables[0] ?? dialog)?.focus();
-
-    function handleTab(event: KeyboardEvent) {
-      if (event.key !== "Tab" || !dialog) return;
-      const nodes = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-      if (nodes.length === 0) {
-        event.preventDefault();
-        return;
-      }
-      const first = nodes[0];
-      const last = nodes[nodes.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", handleTab);
-    return () => {
-      document.removeEventListener("keydown", handleTab);
-      previouslyFocused.current?.focus();
-    };
-  }, [open]);
 
   if (!open) return null;
 

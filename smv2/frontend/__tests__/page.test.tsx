@@ -15,6 +15,7 @@ import {
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
+  usePathname: () => "/",
 }));
 
 vi.mock("@/lib/api/client", () => ({
@@ -69,6 +70,7 @@ describe("Home page", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it("shows the empty-state hero when there are no courses", async () => {
@@ -105,6 +107,23 @@ describe("Home page", () => {
     expect(await screen.findByText("Distributed Systems")).toBeInTheDocument();
     expect(screen.getByText("Compilers")).toBeInTheDocument();
     expect(screen.getByText("Draft")).toBeInTheDocument();
+  });
+
+  it("a ready course's title is a real link into its reader (every card must be reachable, not just the Continue one)", async () => {
+    mockedListCourses.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [
+        makeCourse({ id: "a", title: "Distributed Systems" }),
+        makeCourse({ id: "b", title: "Not Ready Yet", status: "draft" }),
+      ],
+    });
+    render(<Home />);
+
+    const link = await screen.findByRole("link", { name: "Distributed Systems" });
+    expect(link).toHaveAttribute("href", "/course/a");
+    // A course with nothing to read yet has no link — just its plain title.
+    expect(screen.queryByRole("link", { name: "Not Ready Yet" })).not.toBeInTheDocument();
   });
 
   it("shows the Continue card for the course with the most recent progress, ahead of the course grid", async () => {
@@ -194,5 +213,77 @@ describe("Home page", () => {
     fireEvent.drop(dropTarget, { dataTransfer: { files: [file], types: ["Files"] } });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  describe("sample course hint", () => {
+    it("shows the hint when exactly one course exists and it's ready", async () => {
+      mockedListCourses.mockResolvedValue({
+        status: 200,
+        ok: true,
+        data: [makeCourse({ id: "a", title: "Welcome to SourceMind", status: "ready" })],
+      });
+
+      render(<Home />);
+
+      expect(
+        await screen.findByText(/this is a sample course — drop any pdf to create your own/i),
+      ).toBeInTheDocument();
+    });
+
+    it("shows the hint while the single course is still ingesting", async () => {
+      mockedListCourses.mockResolvedValue({
+        status: 200,
+        ok: true,
+        data: [makeCourse({ id: "a", status: "ingesting" })],
+      });
+
+      render(<Home />);
+
+      expect(await screen.findByText(/this is a sample course/i)).toBeInTheDocument();
+    });
+
+    it("does not show the hint when more than one course exists", async () => {
+      mockedListCourses.mockResolvedValue({
+        status: 200,
+        ok: true,
+        data: [makeCourse({ id: "a" }), makeCourse({ id: "b", title: "Second course" })],
+      });
+
+      render(<Home />);
+      await screen.findByText("Second course");
+
+      expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+    });
+
+    it("does not show the hint for a draft or failed single course", async () => {
+      mockedListCourses.mockResolvedValue({
+        status: 200,
+        ok: true,
+        data: [makeCourse({ id: "a", status: "draft" })],
+      });
+
+      render(<Home />);
+      await screen.findByText("Distributed Systems");
+
+      expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+    });
+
+    it("dismissing hides it and persists the choice across remounts", async () => {
+      mockedListCourses.mockResolvedValue({
+        status: 200,
+        ok: true,
+        data: [makeCourse({ id: "a", status: "ready" })],
+      });
+      const user = userEvent.setup();
+
+      const { unmount } = render(<Home />);
+      await user.click(await screen.findByRole("button", { name: /dismiss hint/i }));
+      expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+      unmount();
+
+      render(<Home />);
+      await screen.findByText("Distributed Systems");
+      expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+    });
   });
 });

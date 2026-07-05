@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -16,6 +16,7 @@ import {
   type ReviewSummaryOut,
 } from "@/lib/api/client";
 import { useKeyboardShortcuts, type ShortcutMap } from "@/lib/hooks/useKeyboardShortcuts";
+import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 const SHORTCUT_HINTS: ShortcutHint[] = [
@@ -76,6 +77,8 @@ function ReviewPageInner() {
   const [cardShownAt, setCardShownAt] = useState(0);
   const [gradeCounts, setGradeCounts] = useState<Record<number, number>>({});
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useRouteFocus(headingRef);
 
   const loadHub = useCallback(() => {
     setHubState({ kind: "loading" });
@@ -230,7 +233,7 @@ function ReviewPageInner() {
       const { summary } = hubState;
       mainContent = (
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-8">
-          <h1 className="text-lg font-semibold">Review</h1>
+          <h2 className="text-lg font-semibold">Review</h2>
           {summary.backlog_warning && (
             <div
               role="alert"
@@ -291,7 +294,7 @@ function ReviewPageInner() {
 
       mainContent = (
         <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 p-8 text-center">
-          <h1 className="text-lg font-semibold">Ready to review</h1>
+          <h2 className="text-lg font-semibold">Ready to review</h2>
           <p className="text-sm text-muted-foreground">
             {due} due · {newCount} new
           </p>
@@ -336,7 +339,7 @@ function ReviewPageInner() {
   } else if (sessionState.kind === "done") {
     mainContent = (
       <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 p-8 text-center">
-        <h1 className="text-lg font-semibold">Session complete</h1>
+        <h2 className="text-lg font-semibold">Session complete</h2>
         <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
           {[1, 2, 3, 4].map((value) => (
             <li key={value}>
@@ -353,7 +356,7 @@ function ReviewPageInner() {
     const card = cards[cardIndex];
     mainContent = (
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-8">
-        <p className="text-sm text-muted-foreground">
+        <p role="status" className="text-sm text-muted-foreground">
           {cardIndex + 1} of {cards.length}
         </p>
         <div className="rounded-lg border border-border p-6">
@@ -397,6 +400,11 @@ function ReviewPageInner() {
 
   return (
     <>
+      <div className="border-b border-border px-8 py-4">
+        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-semibold outline-none">
+          Review
+        </h1>
+      </div>
       {mainContent}
       <ShortcutsOverlay open={shortcutsOpen} onClose={closeShortcuts} shortcuts={SHORTCUT_HINTS} />
     </>

@@ -9,6 +9,10 @@ import {
   type TestAttemptOut,
 } from "@/lib/api/client";
 
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/course/course-1/test/attempt-1",
+}));
+
 vi.mock("@/lib/api/client", () => ({
   getTest: vi.fn(),
   submitTest: vi.fn(),

@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import { generateTest, listTests, type TestAttemptSummaryOut } from "@/lib/api/client";
+import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
+import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
@@ -41,6 +43,10 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useDialogFocus<HTMLDivElement>(open, { trap: false });
+  const close = useCallback(() => setOpen(false), []);
+  useDismissOnOutsideOrEscape(open, close, containerRef);
 
   const { job, done, stalled } = useJobEvents(jobId);
   const isGenerating = jobId !== null && !done;
@@ -81,7 +87,7 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
   }
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -93,15 +99,18 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
       </button>
       {open && (
         <div
+          ref={panelRef}
           id="quizzes-panel"
           role="dialog"
           aria-label="Quizzes"
+          tabIndex={-1}
           className="absolute right-0 z-10 mt-2 w-72 rounded-md border border-border bg-background p-4 text-sm shadow-lg"
         >
           <button
             type="button"
             onClick={() => void handleGenerate()}
             disabled={starting || isGenerating}
+            aria-live="polite"
             className="mb-3 w-full rounded-md bg-black px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
           >
             {isGenerating
@@ -131,7 +140,9 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
           {listState.kind === "ready" && (
             <ul className="flex flex-col gap-1">
               {listState.attempts.length === 0 ? (
-                <li className="text-xs text-muted-foreground">No quizzes yet.</li>
+                <li className="text-xs text-muted-foreground">
+                  No quizzes yet — generate one above.
+                </li>
               ) : (
                 listState.attempts.map((attempt) => (
                   <li key={attempt.id}>

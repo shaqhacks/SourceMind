@@ -37,16 +37,16 @@ describe("DueBadge", () => {
     vi.clearAllMocks();
   });
 
-  it("renders nothing once loaded with zero due", async () => {
+  it("renders no link once loaded with zero due (but keeps the live region mounted)", async () => {
     mockedGetReviewSummary.mockResolvedValue({
       status: 200,
       ok: true,
       data: makeSummary({ due_total: 0 }),
     });
 
-    const { container } = render(<DueBadge />);
+    render(<DueBadge />);
     await waitFor(() => expect(mockedGetReviewSummary).toHaveBeenCalledTimes(1));
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("shows the due total as a link to /review", async () => {
@@ -88,5 +88,20 @@ describe("DueBadge", () => {
     notifyReviewSettled();
 
     expect(await screen.findByText("1 due")).toBeInTheDocument();
+  });
+
+  it("is a stable aria-live region so a screen reader announces the count changing", async () => {
+    mockedGetReviewSummary.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: makeSummary({ due_total: 4 }),
+    });
+
+    const { container } = render(<DueBadge />);
+    await screen.findByText("4 due");
+
+    const liveRegion = container.querySelector('[aria-live="polite"]');
+    expect(liveRegion).not.toBeNull();
+    expect(liveRegion).toHaveAttribute("aria-atomic", "true");
   });
 });

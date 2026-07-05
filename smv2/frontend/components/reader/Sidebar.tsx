@@ -13,13 +13,19 @@ export interface SidebarProps {
   lessonStatusOverrides?: Record<string, string>;
 }
 
+// Shades picked so each dot clears the WCAG 1.4.11 3:1 non-text contrast
+// minimum against BOTH themes' background with one class (no dark:
+// override needed) — e.g. bg-green-700 is 5.0:1 on white and 4.0:1 on
+// near-black. "none" is deliberately left low-contrast: it represents
+// absence, and the section's own "Generate lesson" CTA is the real,
+// higher-contrast indicator of that state.
 const LESSON_DOT_CONFIG: Record<string, { label: string; className: string }> = {
   none: { label: "No lesson yet", className: "bg-muted-foreground/30" },
-  queued: { label: "Lesson queued", className: "bg-blue-400" },
+  queued: { label: "Lesson queued", className: "bg-blue-600" },
   generating: { label: "Lesson generating", className: "bg-blue-500 animate-pulse" },
-  ready: { label: "Lesson ready", className: "bg-green-500" },
+  ready: { label: "Lesson ready", className: "bg-green-700" },
   failed: { label: "Lesson generation failed", className: "bg-red-500" },
-  stale: { label: "Lesson needs regeneration", className: "bg-amber-500" },
+  stale: { label: "Lesson needs regeneration", className: "bg-amber-700" },
 };
 
 function LessonDot({ status }: { status: string }) {

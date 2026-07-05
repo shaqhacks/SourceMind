@@ -64,14 +64,14 @@ describe("QuizzesPanel", () => {
     expect(screen.getByText("In progress")).toBeInTheDocument();
   });
 
-  it("shows 'No quizzes yet.' when the course has none", async () => {
+  it("names the next action when the course has no quizzes yet", async () => {
     mockedListTests.mockResolvedValue({ status: 200, ok: true, data: [] });
     const user = userEvent.setup();
 
     render(<QuizzesPanel courseId="course-1" />);
     await user.click(screen.getByRole("button", { name: /^quizzes$/i }));
 
-    expect(await screen.findByText(/no quizzes yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no quizzes yet — generate one above/i)).toBeInTheDocument();
   });
 
   it("clicking an attempt navigates to its taking/review page and closes the panel", async () => {

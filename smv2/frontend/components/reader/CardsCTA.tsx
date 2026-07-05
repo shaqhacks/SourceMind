@@ -109,7 +109,7 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
 
   if (isGenerating) {
     return (
-      <p className="text-xs text-muted-foreground">
+      <p role="status" className="text-xs text-muted-foreground">
         {stalled
           ? "Still working — check back shortly."
           : job?.progress

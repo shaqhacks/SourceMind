@@ -13,19 +13,34 @@ from app.main import create_app
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "pdfs"
 
 
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
+def _setup_isolated_env(tmp_path, monkeypatch, *, sample_course_enabled: bool = False) -> None:
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("SMV2_DB_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("SMV2_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SMV2_WORKER_ENABLED", "0")
     monkeypatch.setenv("SMV2_BACKUPS_ENABLED", "0")
+    monkeypatch.setenv("SMV2_SAMPLE_COURSE_ENABLED", "1" if sample_course_enabled else "0")
     dispose_engine()
     init_db()
 
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    _setup_isolated_env(tmp_path, monkeypatch)
     with TestClient(create_app()) as test_client:
         yield test_client
+    dispose_engine()
 
+
+@pytest.fixture()
+def client_with_sample_course(tmp_path, monkeypatch):
+    """Same per-test DB isolation as `client`, but with first-run sample
+    course seeding turned ON — for tests that exercise the full lifespan
+    wiring in app/services/sample_service.py end-to-end.
+    """
+    _setup_isolated_env(tmp_path, monkeypatch, sample_course_enabled=True)
+    with TestClient(create_app()) as test_client:
+        yield test_client
     dispose_engine()
 
 

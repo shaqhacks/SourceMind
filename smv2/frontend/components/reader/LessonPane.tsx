@@ -191,7 +191,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
 
   if (effectiveStatus === "generating") {
     return (
-      <div className="text-sm text-muted-foreground">
+      <div role="status" className="text-sm text-muted-foreground">
         {stalled ? (
           <p>Still working — check back shortly.</p>
         ) : job?.progress ? (
@@ -199,7 +199,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
             {job.progress.stage} — {job.progress.pct}% — {job.progress.message}
           </p>
         ) : (
-          <p role="status">Preparing…</p>
+          <p>Preparing…</p>
         )}
       </div>
     );

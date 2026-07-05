@@ -84,6 +84,7 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
         type="button"
         onClick={() => void handleStart()}
         disabled={starting || inProgress}
+        aria-live="polite"
         className="rounded-md border border-border px-3 py-1.5 text-sm font-medium disabled:opacity-50"
       >
         {inProgress ? `Generating ${settledCount} of ${total}…` : "Generate all lessons"}

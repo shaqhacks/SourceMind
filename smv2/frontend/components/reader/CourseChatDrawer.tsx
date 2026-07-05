@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import Chat, { type ChatCitation, type ChatSendResult, type ChatTurn } from "@/components/Chat";
 import { getChatHistory, sendChat, type ChatTurnOut } from "@/lib/api/client";
+import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 
 export interface CourseChatDrawerProps {
@@ -68,6 +69,10 @@ export default function CourseChatDrawer({ courseId, open, onClose }: CourseChat
   // on top of the reader's arrow/j/k/s scope so those don't fire behind
   // an open drawer.
   useKeyboardShortcuts({ escape: onClose }, open);
+  // Not a hard focus trap (this is a side panel, not a blocking modal —
+  // the reader behind it stays reachable), just moves focus in on open
+  // and restores it to the "Chat" toggle button on close.
+  const drawerRef = useDialogFocus<HTMLDivElement>(open, { trap: false });
 
   const loadHistory = useCallback(async () => {
     const { data } = await getChatHistory(courseId);
@@ -107,8 +112,10 @@ export default function CourseChatDrawer({ courseId, open, onClose }: CourseChat
 
   return (
     <div
+      ref={drawerRef}
       role="complementary"
       aria-label="Course chat"
+      tabIndex={-1}
       className="flex w-96 shrink-0 flex-col border-l border-border"
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
