@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from SourceMind.backend.db import base, models
 from SourceMind.backend.main import app
+from SourceMind.backend.pipeline import chat as chat_service
 from SourceMind.backend.routers import library as library_router
 from SourceMind.backend.routers.library import provider_dependency
 
@@ -233,7 +234,7 @@ def test_course_chat_context_sanitized(client, capturing_provider, monkeypatch):
         session.add(models.Course(id="c2", title="C2", status="ready", generation_status="done"))
 
     canned = [{"source_ref": "p.1", "content": f"A real cited fact. {INJECTION}"}]
-    monkeypatch.setattr(library_router, "retrieve", lambda *a, **k: [dict(r) for r in canned])
+    monkeypatch.setattr(chat_service, "retrieve", lambda *a, **k: [dict(r) for r in canned])
 
     resp = client.post("/library/courses/c2/chat", json={"question": "explain"})
     assert resp.status_code == 200

@@ -1,9 +1,11 @@
 """Pure unit tests for backend/services/grading.py."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from SourceMind.backend.services.grading import PASS_THRESHOLD, grade_quiz
+from SourceMind.backend.services.grading import PASS_THRESHOLD, grade_course_quizzes, grade_quiz
 
 SAMPLE_QUIZ = [
     {"q": "Q1", "options": ["A", "B", "C", "D"], "answer": 0, "explain": "A is right."},
@@ -132,3 +134,52 @@ class TestGradeQuizScoresAndPasses:
         result = grade_quiz(quiz, [])  # your_index = None
         assert result["correct"] == 0
         assert result["results"][0]["correct"] is False
+
+
+def _chapter(section_id: str, title: str, quiz: list):
+    """Duck-typed stand-in for a Chapter ORM row (attribute access only)."""
+    return SimpleNamespace(section_id=section_id, title=title, quiz=quiz)
+
+
+class TestGradeCourseQuizzes:
+    """Test grade_course_quizzes aggregation across multiple chapters."""
+
+    def test_aggregates_across_sections(self):
+        chapters = [
+            _chapter("s1", "Section 1", SAMPLE_QUIZ),
+            _chapter("s2", "Section 2", SAMPLE_QUIZ),
+        ]
+        result = grade_course_quizzes(chapters, {"s1": [0, 1, 2, 3], "s2": [0, 0, 0, 0]})
+        assert result["correct"] == 5  # 4/4 + 1/4
+        assert result["total"] == 8
+        assert result["score"] == pytest.approx(0.625)
+        assert result["passed"] is False
+        assert [s["section_id"] for s in result["sections"]] == ["s1", "s2"]
+        assert result["sections"][0]["correct"] == 4
+        assert result["sections"][1]["correct"] == 1
+
+    def test_skips_chapters_without_quiz(self):
+        chapters = [
+            _chapter("s1", "Section 1", SAMPLE_QUIZ),
+            _chapter("s2", "No Quiz", []),
+        ]
+        result = grade_course_quizzes(chapters, {"s1": [0, 1, 2, 3]})
+        assert result["total"] == 4
+        assert len(result["sections"]) == 1
+        assert result["sections"][0]["section_id"] == "s1"
+
+    def test_missing_section_in_answers_graded_all_wrong(self):
+        chapters = [_chapter("s1", "Section 1", SAMPLE_QUIZ)]
+        result = grade_course_quizzes(chapters, {})
+        assert result["correct"] == 0
+        assert result["total"] == 4
+        assert result["passed"] is False
+
+    def test_no_chapters_have_quiz_returns_zero(self):
+        chapters = [_chapter("s1", "No Quiz", [])]
+        result = grade_course_quizzes(chapters, {"s1": [0]})
+        assert result["correct"] == 0
+        assert result["total"] == 0
+        assert result["score"] == 0.0
+        assert result["passed"] is False
+        assert result["sections"] == []

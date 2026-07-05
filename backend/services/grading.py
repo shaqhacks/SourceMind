@@ -69,3 +69,51 @@ def grade_quiz(quiz: list[dict], answers: list[int]) -> dict:
         "passed": score >= PASS_THRESHOLD,
         "results": results,
     }
+
+
+def grade_course_quizzes(chapters: list, answers: dict[str, list[int]]) -> dict:
+    """Grade a course-level test across every chapter that has a quiz.
+
+    Parameters
+    ----------
+    chapters:
+        Chapter-like objects (ORM rows or any duck-typed equivalent) with
+        ``section_id``, ``title``, and ``quiz`` attributes. Chapters with a
+        falsy ``quiz`` are skipped entirely.
+    answers:
+        ``{section_id: [answer_index, ...]}``. A chapter whose section_id is
+        absent from *answers* is graded with an empty answers list (all wrong).
+
+    Returns
+    -------
+    dict with keys:
+        score, correct, total, passed — aggregated across all graded chapters.
+        sections — list of per-chapter {section_id, title, score, correct,
+                    total, passed}, in the same order as *chapters*.
+    """
+    section_results = []
+    total_correct = 0
+    total_questions = 0
+    for ch in chapters:
+        if not ch.quiz:
+            continue
+        result = grade_quiz(ch.quiz, answers.get(ch.section_id, []))
+        total_correct += result["correct"]
+        total_questions += result["total"]
+        section_results.append({
+            "section_id": ch.section_id,
+            "title": ch.title,
+            "score": result["score"],
+            "correct": result["correct"],
+            "total": result["total"],
+            "passed": result["passed"],
+        })
+
+    agg_score = total_correct / total_questions if total_questions > 0 else 0.0
+    return {
+        "score": agg_score,
+        "correct": total_correct,
+        "total": total_questions,
+        "passed": agg_score >= PASS_THRESHOLD,
+        "sections": section_results,
+    }

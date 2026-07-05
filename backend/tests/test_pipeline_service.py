@@ -704,7 +704,8 @@ def test_ingest_materials_mixed_pdf_txt_uses_llm_outline(tmp_path, db_url, monke
 def test_reingest_same_course_id_replaces_not_duplicates(tmp_path, db_url, monkeypatch):
     """Running _finish_ingest twice for the same course_id (via ingest_pdfs)
     yields exactly one set of PlanItem/Chapter/Asset rows, and clears any
-    stale ReviewState rows left over from a prior generation.
+    stale ReviewState/ProgressState/ChatTurn/TestAttempt rows left over from
+    a prior generation (they may reference section_ids the new outline drops).
     """
     monkeypatch.setattr(
         "SourceMind.backend.pipeline.service.embed_texts",
@@ -723,9 +724,9 @@ def test_reingest_same_course_id_replaces_not_duplicates(tmp_path, db_url, monke
         assert chapter_count_1 >= 1
         assert asset_count_1 >= 1
 
-        # Simulate a leftover ReviewState row from a prior generation/study
-        # session, referencing a section_id that the re-ingested outline may
-        # no longer produce.
+        # Simulate leftover rows from a prior generation/study/chat/test session,
+        # all referencing a section_id that the re-ingested outline may no
+        # longer produce.
         session.add(models.ReviewState(
             course_id="algebra",
             section_id="s1",
@@ -734,6 +735,37 @@ def test_reingest_same_course_id_replaces_not_duplicates(tmp_path, db_url, monke
             interval=0,
             due_at="",
             reps=0,
+        ))
+        session.add(models.ReviewLog(
+            course_id="algebra",
+            section_id="s1",
+            card_index=0,
+            quality=3,
+            created_at="",
+        ))
+        session.add(models.ProgressState(
+            course_id="algebra",
+            section_id="s1",
+            completed=True,
+            last_viewed_at="",
+        ))
+        session.add(models.ChatTurn(
+            course_id="algebra",
+            section_id="s1",
+            role="user",
+            content="stale question",
+            created_at="",
+        ))
+        session.add(models.TestAttempt(
+            course_id="algebra",
+            section_id="s1",
+            scope="section",
+            answers=[0],
+            correct=1,
+            total=1,
+            score=1.0,
+            passed=True,
+            created_at="",
         ))
 
     # Re-ingest the SAME course_id (e.g. the user re-uploads the same file).
@@ -744,11 +776,19 @@ def test_reingest_same_course_id_replaces_not_duplicates(tmp_path, db_url, monke
         chapter_count_2 = session.query(models.Chapter).filter_by(course_id="algebra").count()
         asset_count_2 = session.query(models.Asset).filter_by(course_id="algebra").count()
         review_count_2 = session.query(models.ReviewState).filter_by(course_id="algebra").count()
+        review_log_count_2 = session.query(models.ReviewLog).filter_by(course_id="algebra").count()
+        progress_count_2 = session.query(models.ProgressState).filter_by(course_id="algebra").count()
+        chat_count_2 = session.query(models.ChatTurn).filter_by(course_id="algebra").count()
+        attempt_count_2 = session.query(models.TestAttempt).filter_by(course_id="algebra").count()
 
     assert plan_count_2 == plan_count_1, "PlanItem rows duplicated on re-ingest"
     assert chapter_count_2 == chapter_count_1, "Chapter rows duplicated on re-ingest"
     assert asset_count_2 == asset_count_1, "Asset rows duplicated on re-ingest"
     assert review_count_2 == 0, "stale ReviewState rows must be cleared on re-ingest"
+    assert review_log_count_2 == 0, "stale ReviewLog rows must be cleared on re-ingest"
+    assert progress_count_2 == 0, "stale ProgressState rows must be cleared on re-ingest"
+    assert chat_count_2 == 0, "stale ChatTurn rows must be cleared on re-ingest"
+    assert attempt_count_2 == 0, "stale TestAttempt rows must be cleared on re-ingest"
 
 
 # ---------------------------------------------------------------------------

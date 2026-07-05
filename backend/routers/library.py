@@ -19,11 +19,10 @@ from SourceMind.backend.extract.material import material_title
 from SourceMind.backend.db import base, models
 from SourceMind.backend.llm.provider import get_provider
 from SourceMind.backend.pipeline import service
-from SourceMind.backend.pipeline.retrieve import retrieve
+from SourceMind.backend.pipeline.chat import COURSE_CHAT_SECTION, run_chapter_chat, run_course_chat
 from SourceMind.backend.services import review
 from SourceMind.backend.services.anki_export import build_anki_tsv
-from SourceMind.backend.services.grading import PASS_THRESHOLD, grade_quiz
-from SourceMind.backend.services.ingest.security import sanitize_source
+from SourceMind.backend.services.grading import grade_course_quizzes, grade_quiz
 from SourceMind.backend.services.upload_validation import (
     MAGIC_PREFIX_LEN,
     UploadValidationError,
@@ -31,9 +30,6 @@ from SourceMind.backend.services.upload_validation import (
 )
 
 router = APIRouter(prefix="/library", tags=["library"])
-
-# Sentinel section_id for course-level chat turns (no specific chapter).
-COURSE_CHAT_SECTION = "__course__"
 
 # ─── Hardening config (env-tunable, read per request) ─────────────────────────
 
@@ -678,40 +674,7 @@ def chat_with_chapter(
         if chapter is None:
             raise HTTPException(status_code=404, detail=f"Chapter {section_id!r} not found")
 
-        body_md = chapter.body_md or ""
-
-    # Neutralize prompt-injection imperatives in the document-derived context
-    # (NOT the user's question, which is legitimate user input).
-    clean_body_md, _ = sanitize_source(body_md)
-
-    prompt = (
-        "You are a study assistant. Answer the question using ONLY the following "
-        "chapter content. Do not introduce information not present in the chapter.\n\n"
-        f"=== CHAPTER CONTENT ===\n{clean_body_md}\n\n"
-        f"=== QUESTION ===\n{body.question}"
-    )
-    answer = provider.complete(prompt)
-    if not isinstance(answer, str):
-        answer = str(answer)
-
-    now = datetime.now(timezone.utc).isoformat()
-    with base.get_session() as session:
-        session.add(models.ChatTurn(
-            course_id=course_id,
-            section_id=section_id,
-            role="user",
-            content=body.question,
-            created_at=now,
-        ))
-        session.add(models.ChatTurn(
-            course_id=course_id,
-            section_id=section_id,
-            role="assistant",
-            content=answer,
-            created_at=now,
-        ))
-
-    return {"answer": answer}
+    return run_chapter_chat(course_id, section_id, body.question, provider)
 
 
 @router.post("/courses/{course_id}/chat")
@@ -725,48 +688,7 @@ def chat_with_course(
         if session.get(models.Course, course_id) is None:
             raise HTTPException(status_code=404, detail=f"Course {course_id!r} not found")
 
-        results = retrieve(session, course_id, body.question, k=6)
-
-    # Neutralize prompt-injection imperatives in retrieved (document-derived)
-    # chunk content before it is injected as context for the model.
-    for r in results:
-        r["content"] = sanitize_source(r.get("content") or "")[0]
-
-    citations = [{"source_ref": r["source_ref"], "content": r["content"]} for r in results]
-
-    system = (
-        "Answer ONLY from the numbered sources; cite sources as [1],[2]; "
-        "if they don't contain the answer, say so."
-    )
-    sources_block = "\n".join(
-        f"[{i}] ({r['source_ref']}): {r['content']}" for i, r in enumerate(results, 1)
-    )
-    prompt = f"Sources:\n{sources_block}\n\nQuestion: {body.question}"
-
-    answer = provider.complete(prompt, system=system)
-    if not isinstance(answer, str):
-        answer = str(answer)
-
-    now = datetime.now(timezone.utc).isoformat()
-    with base.get_session() as session:
-        session.add(models.ChatTurn(
-            course_id=course_id,
-            section_id=COURSE_CHAT_SECTION,
-            role="user",
-            content=body.question,
-            citations=None,
-            created_at=now,
-        ))
-        session.add(models.ChatTurn(
-            course_id=course_id,
-            section_id=COURSE_CHAT_SECTION,
-            role="assistant",
-            content=answer,
-            citations=citations,
-            created_at=now,
-        ))
-
-    return {"answer": answer, "citations": citations}
+    return run_course_chat(course_id, body.question, provider)
 
 
 @router.get("/courses/{course_id}/chat/history")
@@ -1061,27 +983,7 @@ def submit_course_test(course_id: str, body: CourseTestBody) -> dict:
             .filter_by(course_id=course_id)
             .all()
         )
-        chapters_with_quiz = [ch for ch in chapters if ch.quiz]
-
-        section_results = []
-        total_correct = 0
-        total_questions = 0
-        for ch in chapters_with_quiz:
-            answers_for_section = body.answers.get(ch.section_id, [])
-            result = grade_quiz(ch.quiz, answers_for_section)
-            total_correct += result["correct"]
-            total_questions += result["total"]
-            section_results.append({
-                "section_id": ch.section_id,
-                "title": ch.title,
-                "score": result["score"],
-                "correct": result["correct"],
-                "total": result["total"],
-                "passed": result["passed"],
-            })
-
-        agg_score = total_correct / total_questions if total_questions > 0 else 0.0
-        agg_passed = agg_score >= PASS_THRESHOLD
+        result = grade_course_quizzes(chapters, body.answers)
 
         now = datetime.now(timezone.utc).isoformat()
         attempt = models.TestAttempt(
@@ -1089,10 +991,10 @@ def submit_course_test(course_id: str, body: CourseTestBody) -> dict:
             section_id=None,
             scope="course",
             answers=body.answers,
-            correct=total_correct,
-            total=total_questions,
-            score=agg_score,
-            passed=agg_passed,
+            correct=result["correct"],
+            total=result["total"],
+            score=result["score"],
+            passed=result["passed"],
             created_at=now,
         )
         session.add(attempt)
@@ -1100,12 +1002,12 @@ def submit_course_test(course_id: str, body: CourseTestBody) -> dict:
         attempt_id = attempt.id
 
     return {
-        "score": agg_score,
-        "correct": total_correct,
-        "total": total_questions,
-        "passed": agg_passed,
+        "score": result["score"],
+        "correct": result["correct"],
+        "total": result["total"],
+        "passed": result["passed"],
         "attempt_id": attempt_id,
-        "sections": section_results,
+        "sections": result["sections"],
     }
 
 

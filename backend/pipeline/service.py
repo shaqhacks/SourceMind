@@ -104,6 +104,53 @@ def _section_page_ranges(course_id: str) -> list[dict]:
     return sections
 
 
+def _plan_record(item: models.PlanItem) -> dict:
+    """Return the plain-dict view of a PlanItem ORM row.
+
+    Shared by ``generate_lesson`` (to build a ``PlanItemDC`` for validated
+    generation) and ``generate_course`` (to enumerate sections to generate).
+    """
+    return {
+        "section_id": item.section_id,
+        "title": item.title or "",
+        "objectives": list(item.objectives or []),
+        "importance": item.importance or "supporting",
+        "prerequisites": list(item.prerequisites or []),
+        "target_words": item.target_words or 0,
+    }
+
+
+def _asset_records(session, course_id: str) -> list[dict]:
+    """Return ``{"path", "source_page"}`` dicts for every Asset row of a course."""
+    return [
+        {"path": a.path, "source_page": a.source_page}
+        for a in session.query(models.Asset).filter_by(course_id=course_id).all()
+    ]
+
+
+def _seed_review_states(session, course_id: str, section_id: str, cards: list) -> None:
+    """Delete existing ReviewState rows for (course_id, section_id) and reseed one per card.
+
+    due_at is seeded to "now" (not "") so newly seeded cards are due
+    immediately while still sorting/comparing correctly against real ISO
+    timestamps.
+    """
+    session.query(models.ReviewState).filter_by(
+        course_id=course_id, section_id=section_id
+    ).delete()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for i, _card in enumerate(cards):
+        session.add(models.ReviewState(
+            course_id=course_id,
+            section_id=section_id,
+            card_index=i,
+            ease=2.5,
+            interval=0,
+            due_at=now_iso,
+            reps=0,
+        ))
+
+
 # ---------------------------------------------------------------------------
 # Public helpers (unit-testable, imported by tests)
 # ---------------------------------------------------------------------------
@@ -280,11 +327,16 @@ def _finish_ingest(
         # Re-ingest safety: a course_id can be ingested more than once (e.g.
         # a user re-uploads the same material). Wipe the previously persisted
         # outline before inserting the freshly extracted one, or every
-        # re-ingest would duplicate PlanItem/Chapter/Asset rows. ReviewState
-        # rows are cleared too since they reference section_ids that may no
-        # longer exist once the outline is regenerated; index_course (called
-        # below) already deletes-then-inserts Chunk rows on its own.
+        # re-ingest would duplicate PlanItem/Chapter/Asset rows. ReviewState,
+        # ReviewLog, ProgressState, ChatTurn, and TestAttempt rows are cleared too since
+        # they all reference section_ids that may no longer exist once the
+        # outline is regenerated; index_course (called below) already
+        # deletes-then-inserts Chunk rows on its own.
         session.query(models.ReviewState).filter_by(course_id=course_id).delete()
+        session.query(models.ReviewLog).filter_by(course_id=course_id).delete()
+        session.query(models.ProgressState).filter_by(course_id=course_id).delete()
+        session.query(models.ChatTurn).filter_by(course_id=course_id).delete()
+        session.query(models.TestAttempt).filter_by(course_id=course_id).delete()
         session.query(models.PlanItem).filter_by(course_id=course_id).delete()
         session.query(models.Chapter).filter_by(course_id=course_id).delete()
         session.query(models.Asset).filter_by(course_id=course_id).delete()
@@ -693,24 +745,7 @@ def ensure_study(
             return
         chap.quiz = result["quiz"]
         chap.cards = result["cards"]
-
-        # Seed ReviewState rows (idempotent — delete first). due_at is seeded to
-        # "now" (not "") so newly seeded cards are due immediately while still
-        # sorting/comparing correctly against real ISO timestamps.
-        session.query(models.ReviewState).filter_by(
-            course_id=course_id, section_id=section_id
-        ).delete()
-        now_iso = datetime.now(timezone.utc).isoformat()
-        for i, _card in enumerate(result["cards"]):
-            session.add(models.ReviewState(
-                course_id=course_id,
-                section_id=section_id,
-                card_index=i,
-                ease=2.5,
-                interval=0,
-                due_at=now_iso,
-                reps=0,
-            ))
+        _seed_review_states(session, course_id, section_id, result["cards"])
 
 
 def generate_lesson(
@@ -752,16 +787,7 @@ def generate_lesson(
             .filter_by(course_id=course_id, section_id=section_id)
             .first()
         )
-        plan_rec = None
-        if pi:
-            plan_rec = {
-                "section_id": pi.section_id,
-                "title": pi.title or "",
-                "objectives": list(pi.objectives or []),
-                "importance": pi.importance or "supporting",
-                "prerequisites": list(pi.prerequisites or []),
-                "target_words": pi.target_words or 0,
-            }
+        plan_rec = _plan_record(pi) if pi else None
         had_quiz = bool(chap.quiz)
 
     if plan_rec is None:
@@ -777,10 +803,8 @@ def generate_lesson(
 
     try:
         pages = _load_pages(assets_dir)
-        asset_records: list[dict] = []
         with base.get_session() as session:
-            for a in session.query(models.Asset).filter_by(course_id=course_id).all():
-                asset_records.append({"path": a.path, "source_page": a.source_page})
+            asset_records = _asset_records(session, course_id)
 
         page_start, page_end = source_pages[0], source_pages[1]
         source_text = get_source_text(pages, page_start, page_end)
@@ -809,21 +833,7 @@ def generate_lesson(
                 if force or not had_quiz:
                     chap.quiz = draft.quiz
                     chap.cards = draft.cards
-                    # Seed ReviewState (due_at="now" so new cards are due immediately)
-                    session.query(models.ReviewState).filter_by(
-                        course_id=course_id, section_id=section_id
-                    ).delete()
-                    now_iso = datetime.now(timezone.utc).isoformat()
-                    for i, _card in enumerate(draft.cards):
-                        session.add(models.ReviewState(
-                            course_id=course_id,
-                            section_id=section_id,
-                            card_index=i,
-                            ease=2.5,
-                            interval=0,
-                            due_at=now_iso,
-                            reps=0,
-                        ))
+                    _seed_review_states(session, course_id, section_id, draft.cards)
     except Exception as exc:
         logger.warning("generate_lesson failed for %s/%s: %s", course_id, section_id, exc)
         with base.get_session() as session:
@@ -890,7 +900,6 @@ def generate_course(
     plan_records: list[dict] = []
     chapter_statuses: dict[str, str] = {}
     lesson_statuses: dict[str, str] = {}
-    asset_records: list[dict] = []
 
     with base.get_session() as session:
         plan_items = (
@@ -900,14 +909,7 @@ def generate_course(
             .all()
         )
         for pi in plan_items:
-            plan_records.append({
-                "section_id": pi.section_id,
-                "title": pi.title,
-                "objectives": list(pi.objectives or []),
-                "importance": pi.importance or "supporting",
-                "prerequisites": list(pi.prerequisites or []),
-                "target_words": pi.target_words or 0,
-            })
+            plan_records.append(_plan_record(pi))
 
         chapters = (
             session.query(models.Chapter).filter_by(course_id=course_id).all()
@@ -916,11 +918,7 @@ def generate_course(
             chapter_statuses[ch.section_id] = ch.status or "pending"
             lesson_statuses[ch.section_id] = ch.lesson_status or "none"
 
-        assets = (
-            session.query(models.Asset).filter_by(course_id=course_id).all()
-        )
-        for a in assets:
-            asset_records.append({"path": a.path, "source_page": a.source_page})
+        asset_records = _asset_records(session, course_id)
 
         total = len(plan_records)
 
