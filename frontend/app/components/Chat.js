@@ -175,7 +175,7 @@ export default function Chat({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const bottomRef = useRef(null);
+  const listRef = useRef(null);
 
   useEffect(() => {
     if (!loadHistory) return;
@@ -189,9 +189,13 @@ export default function Chat({
       });
   }, [loadHistory]);
 
+  // Keep the latest message visible by scrolling the chat's own message list.
+  // Never use scrollIntoView here: it scrolls the document too, which yanked
+  // the whole chapter page down to the chat on initial history load.
   useEffect(() => {
-    if (variant === "card") bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, variant]);
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
 
   const send = useCallback(
     async (e) => {
@@ -233,7 +237,7 @@ export default function Chat({
     return (
       <Panel title={title}>
         {messages.length > 0 && (
-          <div style={panelTranscriptStyle}>
+          <div ref={listRef} style={panelTranscriptStyle}>
             {messages.map((m, i) => {
               const isUser = m.role === "user";
               return (
@@ -294,7 +298,7 @@ export default function Chat({
         {subtitle && <span className="muted" style={{ fontSize: 13 }}>{subtitle}</span>}
       </div>
 
-      <div style={cardMessagesStyle}>
+      <div ref={listRef} style={cardMessagesStyle}>
         {messages.length === 0 && (
           <p className="muted" style={cardEmptyStyle}>
             No messages yet. Ask a question below.
@@ -306,7 +310,6 @@ export default function Chat({
           </div>
         ))}
         {busy && <div style={cardThinkingStyle}>Thinking…</div>}
-        <div ref={bottomRef} />
       </div>
 
       {error && (
