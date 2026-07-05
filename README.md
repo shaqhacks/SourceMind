@@ -71,6 +71,12 @@ The `data/sourcemind.db` file is listed in `.gitignore` and is never committed. 
 
 The original `/courses`, `/subjects`, and competency-decomposition endpoints have been removed — the `/library` flow described above is the only API surface (`backend/routers/library.py`). The `data/subjects/` and `data/courses/` Markdown files from the original workflow are no longer read by the backend; the entire `data/` directory is runtime storage and is not versioned.
 
+## For Contributors (human or agent)
+
+- [`CLAUDE.md`](CLAUDE.md) — working agreements and hard invariants. Read before changing code.
+- [`docs/architecture.md`](docs/architecture.md) — system map, course lifecycle, data contracts, failure model.
+- [`docs/decisions.md`](docs/decisions.md) — decision records with the reasoning; append a new entry when you make a call future maintainers could second-guess.
+
 ## Product Drafts
 
 - [SourceMind first draft](docs/sourcemind-first-draft.md): evidence-backed lesson engine thesis, method rationale, lesson model, and implementation game plan.
