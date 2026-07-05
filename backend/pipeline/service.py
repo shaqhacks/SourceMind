@@ -247,6 +247,18 @@ def _finish_ingest(
         course.status = "ready"
         course.generation_status = "idle"
 
+        # Re-ingest safety: a course_id can be ingested more than once (e.g.
+        # a user re-uploads the same material). Wipe the previously persisted
+        # outline before inserting the freshly extracted one, or every
+        # re-ingest would duplicate PlanItem/Chapter/Asset rows. ReviewState
+        # rows are cleared too since they reference section_ids that may no
+        # longer exist once the outline is regenerated; index_course (called
+        # below) already deletes-then-inserts Chunk rows on its own.
+        session.query(models.ReviewState).filter_by(course_id=course_id).delete()
+        session.query(models.PlanItem).filter_by(course_id=course_id).delete()
+        session.query(models.Chapter).filter_by(course_id=course_id).delete()
+        session.query(models.Asset).filter_by(course_id=course_id).delete()
+
         # Asset rows for every extracted image (non-PDF pages have empty image_paths)
         for page in all_pages:
             for image_path in page.image_paths:
@@ -623,11 +635,17 @@ def generate_lesson(
     section_id: str,
     provider: LLMProvider | None = None,
     assets_dir: Path | None = None,
+    *,
+    force: bool = False,
 ) -> None:
     """Run generate_validated on chapter source, store result in lesson_md.
 
     On success: lesson_md = verbose markdown, lesson_status = "ready".
-    Also populates quiz/cards (from the draft) and seeds ReviewState if quiz was empty.
+    Also populates quiz/cards (from the draft) and seeds ReviewState, either
+    because the chapter had no quiz yet or because ``force=True`` was passed
+    (used by ``regenerate_section`` to force-overwrite a stale/failed lesson
+    and its quiz/cards rather than preserving whatever ``ensure_study`` may
+    have already generated).
     On failure: lesson_status = "failed", error recorded; does not raise.
     """
     provider = provider or get_provider()
@@ -705,7 +723,7 @@ def generate_lesson(
             if chap is not None:
                 chap.lesson_md = draft.body_md
                 chap.lesson_status = "ready"
-                if not had_quiz:
+                if force or not had_quiz:
                     chap.quiz = draft.quiz
                     chap.cards = draft.cards
                     # Seed ReviewState
@@ -757,86 +775,6 @@ def run_lesson_job(
             chap.lesson_status = "generating"
 
     generate_lesson(course_id, section_id, provider=provider)
-
-
-def _generate_one_section(
-    course_id: str,
-    section_id: str,
-    plan_records: list[dict],
-    asset_records: list[dict],
-    pages: list[ExtractedPage],
-    provider: LLMProvider,
-) -> None:
-    """Generate and persist a single chapter section.
-
-    Raises any exception from ``generate_validated`` so the caller can handle
-    per-section failures.
-    """
-    plan_rec = next(
-        (p for p in plan_records if p["section_id"] == section_id), None
-    )
-    if plan_rec is None:
-        raise ValueError(f"No plan record found for section_id={section_id!r}")
-
-    # Load chapter source_pages from DB
-    with base.get_session() as session:
-        chap = (
-            session.query(models.Chapter)
-            .filter_by(course_id=course_id, section_id=section_id)
-            .first()
-        )
-        source_pages = (chap.source_pages or [0, 0]) if chap else [0, 0]
-
-    page_start, page_end = source_pages[0], source_pages[1]
-    source_text = get_source_text(pages, page_start, page_end)
-    image_urls = get_image_urls(asset_records, page_start, page_end, course_id=course_id)
-    had_figures = len(image_urls) > 0
-
-    plan_dc = PlanItemDC(
-        section_id=plan_rec["section_id"],
-        title=plan_rec["title"] or "",
-        objectives=plan_rec["objectives"],
-        importance=plan_rec["importance"],
-        prerequisites=plan_rec["prerequisites"],
-        target_words=plan_rec["target_words"],
-    )
-
-    draft = generate_validated(
-        plan_dc,
-        source_text,
-        image_urls,
-        provider,
-        had_figures=had_figures,
-    )
-
-    with base.get_session() as session:
-        chap = (
-            session.query(models.Chapter)
-            .filter_by(course_id=course_id, section_id=section_id)
-            .first()
-        )
-        if chap is not None:
-            chap.body_md = draft.body_md
-            chap.quiz = draft.quiz
-            chap.cards = draft.cards
-            chap.word_count = draft.word_count
-            chap.status = "ready"
-
-        # Seed ReviewState rows so the SRS queue is immediately populated.
-        # Delete first for idempotency (e.g. regeneration won't duplicate rows).
-        session.query(models.ReviewState).filter_by(
-            course_id=course_id, section_id=section_id
-        ).delete()
-        for i, _card in enumerate(draft.cards):
-            session.add(models.ReviewState(
-                course_id=course_id,
-                section_id=section_id,
-                card_index=i,
-                ease=2.5,
-                interval=0,
-                due_at="",
-                reps=0,
-            ))
 
 
 def generate_course(
@@ -987,7 +925,19 @@ def regenerate_section(
     provider: LLMProvider | None = None,
     assets_dir: Path | None = None,
 ) -> None:
-    """Reset a single chapter section to pending and regenerate it.
+    """Force-regenerate a single chapter's lesson content, quiz, and cards.
+
+    Delegates to ``generate_lesson(force=True)`` so lesson generation has one
+    implementation: the source text in ``chap.body_md`` is left untouched (it
+    is the immutable text extracted from the source material at ingest time,
+    not LLM output), and ``lesson_md``/``lesson_status`` are updated the same
+    way a normal lesson generation would. ``force=True`` is the one
+    intentional behavioral difference — it overwrites any quiz/cards already
+    present (e.g. from a prior ``ensure_study`` call) instead of preserving
+    them.
+
+    Never raises: failures are recorded via ``lesson_status="failed"`` and
+    ``course.generation_last_error`` (see ``generate_lesson``).
 
     Args:
         course_id:  Course containing the section.
@@ -998,11 +948,6 @@ def regenerate_section(
     """
     provider = provider or get_provider()
 
-    if assets_dir is None:
-        assets_dir = _default_assets_dir(course_id)
-    assets_dir = Path(assets_dir)
-
-    # Reset chapter to pending
     with base.get_session() as session:
         chap = (
             session.query(models.Chapter)
@@ -1010,61 +955,6 @@ def regenerate_section(
             .first()
         )
         if chap is not None:
-            chap.status = "pending"
-            chap.body_md = None
-            chap.quiz = None
-            chap.cards = None
+            chap.lesson_status = "generating"
 
-    # Load plan and asset records
-    plan_records: list[dict] = []
-    asset_records: list[dict] = []
-
-    with base.get_session() as session:
-        plan_items = (
-            session.query(models.PlanItem)
-            .filter_by(course_id=course_id)
-            .order_by(models.PlanItem.order)
-            .all()
-        )
-        for pi in plan_items:
-            plan_records.append({
-                "section_id": pi.section_id,
-                "title": pi.title,
-                "objectives": list(pi.objectives or []),
-                "importance": pi.importance or "supporting",
-                "prerequisites": list(pi.prerequisites or []),
-                "target_words": pi.target_words or 0,
-            })
-
-        assets = (
-            session.query(models.Asset).filter_by(course_id=course_id).all()
-        )
-        for a in assets:
-            asset_records.append({"path": a.path, "source_page": a.source_page})
-
-    pages = _load_pages(assets_dir)
-
-    # Mirror generate_course's per-section handling: on failure mark the
-    # chapter "failed" and record the error rather than re-raising, so the
-    # API can poll status instead of seeing the chapter stuck "pending".
-    try:
-        _generate_one_section(
-            course_id,
-            section_id,
-            plan_records,
-            asset_records,
-            pages,
-            provider,
-        )
-    except Exception as exc:
-        with base.get_session() as session:
-            chap = (
-                session.query(models.Chapter)
-                .filter_by(course_id=course_id, section_id=section_id)
-                .first()
-            )
-            if chap is not None:
-                chap.status = "failed"
-            course = session.get(models.Course, course_id)
-            if course is not None:
-                course.generation_last_error = str(exc)
+    generate_lesson(course_id, section_id, provider=provider, assets_dir=assets_dir, force=True)

@@ -302,13 +302,19 @@ def test_generate_course_persists_quiz_and_cards(tmp_path, db_url):
 
 
 def test_regenerate_section(tmp_path, db_url):
+    """regenerate_section leaves body_md (source) intact and updates lesson_md/lesson_status.
+
+    Prior to the fix, regenerate_section wrote the LLM draft into body_md
+    (clobbering the extracted source text) and never touched lesson_md, so a
+    chapter generated via generate_course/generate_lesson and then
+    regenerated would silently diverge back to showing stale lesson content.
+    """
     stub = StubProvider()
     pdf_path = _build_four_page_pdf(tmp_path)
     ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
     approve_plan("algebra")
     generate_course("algebra", provider=stub)
 
-    # Manually reset s1 to simulate a failed/stale chapter
     with base.get_session() as session:
         ch = (
             session.query(models.Chapter)
@@ -316,8 +322,11 @@ def test_regenerate_section(tmp_path, db_url):
             .first()
         )
         assert ch is not None
-        ch.body_md = None
-        ch.status = "failed"
+        original_body_md = ch.body_md
+        assert original_body_md  # real source text, populated at ingest
+        # Simulate a stale/failed lesson that needs regeneration.
+        ch.lesson_md = "STALE LESSON CONTENT"
+        ch.lesson_status = "failed"
 
     regenerate_section("algebra", "s1", provider=stub)
 
@@ -328,8 +337,9 @@ def test_regenerate_section(tmp_path, db_url):
             .first()
         )
         assert ch is not None
-        assert ch.status == "ready"
-        assert ch.body_md
+        assert ch.body_md == original_body_md, "source text must not be touched by regeneration"
+        assert ch.lesson_status == "ready"
+        assert ch.lesson_md and ch.lesson_md != "STALE LESSON CONTENT"
 
 
 def test_source_text_helper():
@@ -501,7 +511,12 @@ def test_ingest_two_pdfs_with_images_no_collision(tmp_path, db_url):
 
 
 def test_regenerate_section_marks_failed_on_error(tmp_path, db_url, monkeypatch):
-    """If regeneration raises, the chapter ends 'failed' and no exception escapes."""
+    """If regeneration raises, the chapter's lesson_status ends 'failed' and no exception escapes.
+
+    regenerate_section now delegates to generate_lesson, which tracks
+    generation outcome via lesson_status (not the source-availability
+    ``status`` field, which is untouched by lesson generation/regeneration).
+    """
     stub = StubProvider()
     pdf_path = _build_four_page_pdf(tmp_path)
     ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
@@ -526,7 +541,7 @@ def test_regenerate_section_marks_failed_on_error(tmp_path, db_url, monkeypatch)
             .first()
         )
         assert ch is not None
-        assert ch.status == "failed"
+        assert ch.lesson_status == "failed"
 
         course = session.get(models.Course, "algebra")
         assert course.generation_last_error, "generation_last_error should be set"
@@ -683,6 +698,56 @@ def test_ingest_materials_mixed_pdf_txt_uses_llm_outline(tmp_path, db_url, monke
             f"Expected s1 from LLM outline; got section_ids={section_ids}. "
             "The TOC path should have been suppressed for mixed material sets."
         )
+
+
+def test_reingest_same_course_id_replaces_not_duplicates(tmp_path, db_url, monkeypatch):
+    """Running _finish_ingest twice for the same course_id (via ingest_pdfs)
+    yields exactly one set of PlanItem/Chapter/Asset rows, and clears any
+    stale ReviewState rows left over from a prior generation.
+    """
+    monkeypatch.setattr(
+        "SourceMind.backend.pipeline.service.embed_texts",
+        lambda texts: [[0.0] * 8 for _ in texts],
+    )
+    stub = StubProvider()
+    pdf_path = _build_one_page_pdf_with_image(tmp_path / "course.pdf", (255, 0, 0))
+
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+
+    with base.get_session() as session:
+        plan_count_1 = session.query(models.PlanItem).filter_by(course_id="algebra").count()
+        chapter_count_1 = session.query(models.Chapter).filter_by(course_id="algebra").count()
+        asset_count_1 = session.query(models.Asset).filter_by(course_id="algebra").count()
+        assert plan_count_1 >= 1
+        assert chapter_count_1 >= 1
+        assert asset_count_1 >= 1
+
+        # Simulate a leftover ReviewState row from a prior generation/study
+        # session, referencing a section_id that the re-ingested outline may
+        # no longer produce.
+        session.add(models.ReviewState(
+            course_id="algebra",
+            section_id="s1",
+            card_index=0,
+            ease=2.5,
+            interval=0,
+            due_at="",
+            reps=0,
+        ))
+
+    # Re-ingest the SAME course_id (e.g. the user re-uploads the same file).
+    ingest_pdfs("algebra", "Algebra", [pdf_path], provider=stub)
+
+    with base.get_session() as session:
+        plan_count_2 = session.query(models.PlanItem).filter_by(course_id="algebra").count()
+        chapter_count_2 = session.query(models.Chapter).filter_by(course_id="algebra").count()
+        asset_count_2 = session.query(models.Asset).filter_by(course_id="algebra").count()
+        review_count_2 = session.query(models.ReviewState).filter_by(course_id="algebra").count()
+
+    assert plan_count_2 == plan_count_1, "PlanItem rows duplicated on re-ingest"
+    assert chapter_count_2 == chapter_count_1, "Chapter rows duplicated on re-ingest"
+    assert asset_count_2 == asset_count_1, "Asset rows duplicated on re-ingest"
+    assert review_count_2 == 0, "stale ReviewState rows must be cleared on re-ingest"
 
 
 # ---------------------------------------------------------------------------
