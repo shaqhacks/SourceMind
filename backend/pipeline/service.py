@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import shutil
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 
+from SourceMind.backend import config
 from SourceMind.backend.db import base, models
 from SourceMind.backend.llm.embed import embed_texts
 from SourceMind.backend.pipeline.chunk import chunk_pages
@@ -46,8 +47,7 @@ def course_assets_dir(course_id: str) -> Path:
     Both the ingest pipeline and the HTTP asset-serving endpoint use this
     single source of truth.
     """
-    base_dir = os.environ.get("SOURCEMIND_ASSETS_DIR", "data")
-    return Path(base_dir) / course_id / "assets"
+    return Path(config.assets_dir()) / course_id / "assets"
 
 
 def _default_assets_dir(course_id: str) -> Path:
@@ -510,6 +510,51 @@ def approve_plan(course_id: str) -> None:
             course.status = "generating"
 
 
+# Course.generation_status values that mean "a background job was actively
+# working on this" at the moment the process died. Only "running" is set
+# anywhere today (see generate_course); "generating"/"queued" are included
+# defensively in case a future caller introduces them.
+_INTERRUPTED_GENERATION_STATUSES = {"generating", "queued", "running"}
+_INTERRUPTED_ERROR = "interrupted by server restart"
+
+
+def reconcile_interrupted_jobs() -> None:
+    """Recover DB rows left mid-job by an unclean server restart.
+
+    Meant to be called once at FastAPI startup, right after ``init_db()``.
+    Background ingest/generation jobs run as FastAPI BackgroundTasks in this
+    process; if the process restarts, whatever it was doing is gone — there
+    is no separate worker that could still be making progress. Any row still
+    recorded as "in progress" at startup can therefore only be stale, so it
+    is flipped to a failed terminal state instead of polling forever:
+
+    - ``Course.status == "ingesting"`` -> ``"failed"`` (title is left as-is).
+    - ``Course.generation_status`` in :data:`_INTERRUPTED_GENERATION_STATUSES`
+      -> ``"failed"``, with ``generation_last_error`` explaining why.
+    - ``Chapter.lesson_status == "generating"`` -> ``"failed"``.
+
+    Rows already in a terminal or idle state are left untouched.
+    """
+    with base.get_session() as session:
+        session.query(models.Course).filter(
+            models.Course.status == "ingesting"
+        ).update({"status": "failed"}, synchronize_session=False)
+
+        session.query(models.Course).filter(
+            models.Course.generation_status.in_(_INTERRUPTED_GENERATION_STATUSES)
+        ).update(
+            {
+                "generation_status": "failed",
+                "generation_last_error": _INTERRUPTED_ERROR,
+            },
+            synchronize_session=False,
+        )
+
+        session.query(models.Chapter).filter(
+            models.Chapter.lesson_status == "generating"
+        ).update({"lesson_status": "failed"}, synchronize_session=False)
+
+
 def generate_study_items(
     source_text: str,
     provider: LLMProvider,
@@ -614,10 +659,13 @@ def ensure_study(
         chap.quiz = result["quiz"]
         chap.cards = result["cards"]
 
-        # Seed ReviewState rows (idempotent — delete first)
+        # Seed ReviewState rows (idempotent — delete first). due_at is seeded to
+        # "now" (not "") so newly seeded cards are due immediately while still
+        # sorting/comparing correctly against real ISO timestamps.
         session.query(models.ReviewState).filter_by(
             course_id=course_id, section_id=section_id
         ).delete()
+        now_iso = datetime.now(timezone.utc).isoformat()
         for i, _card in enumerate(result["cards"]):
             session.add(models.ReviewState(
                 course_id=course_id,
@@ -625,7 +673,7 @@ def ensure_study(
                 card_index=i,
                 ease=2.5,
                 interval=0,
-                due_at="",
+                due_at=now_iso,
                 reps=0,
             ))
 
@@ -726,10 +774,11 @@ def generate_lesson(
                 if force or not had_quiz:
                     chap.quiz = draft.quiz
                     chap.cards = draft.cards
-                    # Seed ReviewState
+                    # Seed ReviewState (due_at="now" so new cards are due immediately)
                     session.query(models.ReviewState).filter_by(
                         course_id=course_id, section_id=section_id
                     ).delete()
+                    now_iso = datetime.now(timezone.utc).isoformat()
                     for i, _card in enumerate(draft.cards):
                         session.add(models.ReviewState(
                             course_id=course_id,
@@ -737,7 +786,7 @@ def generate_lesson(
                             card_index=i,
                             ease=2.5,
                             interval=0,
-                            due_at="",
+                            due_at=now_iso,
                             reps=0,
                         ))
     except Exception as exc:

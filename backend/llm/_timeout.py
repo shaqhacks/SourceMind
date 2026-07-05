@@ -14,23 +14,19 @@ uniform and independently testable with stubbed transports.
 """
 from __future__ import annotations
 
-import os
 import threading
 from typing import Callable, TypeVar
 
+from SourceMind.backend import config
+
 T = TypeVar("T")
 
-_DEFAULT_TIMEOUT = 120.0
 _DEFAULT_ATTEMPTS = 2
 
 
 def llm_timeout() -> float:
     """Per-call wall-clock budget in seconds (env ``SOURCEMIND_LLM_TIMEOUT``)."""
-    try:
-        value = float(os.environ.get("SOURCEMIND_LLM_TIMEOUT", _DEFAULT_TIMEOUT))
-    except (TypeError, ValueError):
-        return _DEFAULT_TIMEOUT
-    return value if value > 0 else _DEFAULT_TIMEOUT
+    return config.llm_timeout()
 
 
 def call_with_timeout_retry(

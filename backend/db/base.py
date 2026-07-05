@@ -1,11 +1,23 @@
 """SQLAlchemy engine, session factory, and declarative base for SourceMind."""
 
-import os
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine
+from alembic import command
+from alembic.config import Config as AlembicConfig
+from sqlalchemy import Engine, create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+from SourceMind.backend import config
+
+# Revision id of the hand-written baseline migration (backend/db/migrations/
+# versions/0001_baseline.py), capturing the schema as it existed before
+# Alembic was introduced. Pre-existing databases (tables present, no
+# alembic_version table) are stamped here before upgrading to head.
+_BASELINE_REVISION = "0001"
+
+_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
+_ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
 
 class Base(DeclarativeBase):
@@ -15,7 +27,7 @@ class Base(DeclarativeBase):
 
 def db_url() -> str:
     """Return the database URL, falling back to the default SQLite path."""
-    return os.environ.get("SOURCEMIND_DB_URL", "sqlite:///data/sourcemind.db")
+    return config.db_url()
 
 
 def make_engine(url: str | None = None) -> Engine:
@@ -90,16 +102,82 @@ def get_session(engine: Engine | None = None):
         session.close()
 
 
-def init_db(eng: Engine | None = None) -> None:
-    """Create all tables defined on Base.metadata against the given engine.
+def _alembic_config() -> AlembicConfig:
+    """Return an Alembic Config pointed at backend/db/migrations.
 
-    If *eng* is None the engine for the current ``db_url()`` is used (fetched
-    from the per-URL cache, creating it if necessary).
+    script_location is always set explicitly (absolute path) so this works
+    regardless of the process's current working directory; alembic.ini itself
+    carries no ``sqlalchemy.url`` (see its comments) since the URL is supplied
+    per-call via a shared connection (see ``_run_alembic``).
+    """
+    cfg = AlembicConfig(str(_ALEMBIC_INI))
+    cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
+    return cfg
+
+
+def _run_alembic(engine: Engine, fn) -> None:
+    """Run an Alembic command against *engine*, sharing a single connection.
+
+    Passing the live connection (rather than a URL string) through
+    ``config.attributes`` is what makes this correct for ``sqlite://:memory:``
+    engines too: a fresh engine built from the URL string would open an
+    unrelated, empty in-memory database.
+    """
+    cfg = _alembic_config()
+    with engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        fn(cfg)
+
+
+def _alembic_stamp(engine: Engine, revision: str) -> None:
+    _run_alembic(engine, lambda cfg: command.stamp(cfg, revision))
+
+
+def _alembic_upgrade(engine: Engine, revision: str = "head") -> None:
+    _run_alembic(engine, lambda cfg: command.upgrade(cfg, revision))
+
+
+def init_db(eng: Engine | None = None) -> None:
+    """Bring the database up to the current schema, via Alembic where needed.
+
+    Two call shapes:
+
+    - ``init_db(eng)`` with an explicit engine (the test-fixture path): always
+      does a fast ``create_all`` + ``stamp head``, skipping state inspection,
+      since callers passing an explicit engine are always working against a
+      brand-new database (a fresh tmp-path SQLite file).
+    - ``init_db()`` with no engine (the production/app-startup path, and any
+      caller relying on the current ``db_url()``): inspects the target
+      database and picks one of three paths so both fresh installs and
+      pre-Alembic databases converge on the same schema:
+
+      1. No tables at all (fresh DB) -> ``create_all`` from the current
+         models, then stamp at ``head`` (create_all already produces the
+         current schema, so there is nothing to actually migrate).
+      2. Tables exist but no ``alembic_version`` table (a database created by
+         a pre-Alembic ``create_all``) -> stamp at the baseline revision (the
+         schema it actually has), then ``upgrade head`` to apply every
+         migration since baseline.
+      3. Already Alembic-managed -> ``upgrade head``.
     """
     if eng is not None:
-        target = eng
+        Base.metadata.create_all(eng)
+        _alembic_stamp(eng, "head")
+        return
+
+    url = db_url()
+    _session_factory_for_url(url)  # ensures URL is in cache
+    target = _engine_cache[url][0]
+
+    existing_tables = set(inspect(target).get_table_names())
+    has_alembic_version = "alembic_version" in existing_tables
+    has_app_tables = bool(existing_tables - {"alembic_version"})
+
+    if not has_app_tables:
+        Base.metadata.create_all(target)
+        _alembic_stamp(target, "head")
+    elif not has_alembic_version:
+        _alembic_stamp(target, _BASELINE_REVISION)
+        _alembic_upgrade(target, "head")
     else:
-        url = db_url()
-        _session_factory_for_url(url)  # ensures URL is in cache
-        target = _engine_cache[url][0]
-    Base.metadata.create_all(target)
+        _alembic_upgrade(target, "head")

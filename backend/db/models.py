@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, TEXT, Boolean, Float, ForeignKey, Integer, String
+from datetime import datetime
+
+from sqlalchemy import JSON, TEXT, Boolean, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from SourceMind.backend.db.base import Base
@@ -17,8 +19,12 @@ class Course(Base):
     generation_status: Mapped[str | None] = mapped_column(String, nullable=True)
     generation_progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     generation_last_error: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[str | None] = mapped_column(String, nullable=True)
-    updated_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime, server_default=func.now(), nullable=True
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=True
+    )
 
     plan_items: Mapped[list[PlanItem]] = relationship("PlanItem", back_populates="course")
     chapters: Mapped[list[Chapter]] = relationship("Chapter", back_populates="course")
@@ -55,7 +61,6 @@ class Chapter(Base):
     objectives: Mapped[list | None] = mapped_column(JSON, nullable=True)
     importance: Mapped[str | None] = mapped_column(String, nullable=True)
     source_pages: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    assets: Mapped[list | None] = mapped_column(JSON, nullable=True)
     body_md: Mapped[str | None] = mapped_column(TEXT, nullable=True)
     quiz: Mapped[list | None] = mapped_column(JSON, nullable=True)
     cards: Mapped[list | None] = mapped_column(JSON, nullable=True)

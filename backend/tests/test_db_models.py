@@ -20,7 +20,7 @@ def test_course_chapter_roundtrip(tmp_path, monkeypatch):
         s.add(models.Chapter(course_id="algebra", section_id="1-2", title="Integers",
                              body_md="# x", quiz=[{"q": "?", "options": ["a"], "answer": 0, "explain": "e"}],
                              cards=[], objectives=["o"], importance="core",
-                             source_pages=[1, 2], assets=[], word_count=3, status="ready"))
+                             source_pages=[1, 2], word_count=3, status="ready"))
     with base.get_session() as s:
         ch = s.query(models.Chapter).filter_by(course_id="algebra").one()
         assert ch.quiz[0]["answer"] == 0

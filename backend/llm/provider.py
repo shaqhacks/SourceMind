@@ -1,8 +1,9 @@
 """Provider Protocol and factory for LLM backends."""
 from __future__ import annotations
 
-import os
 from typing import Protocol, runtime_checkable
+
+from SourceMind.backend import config
 
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 
@@ -21,14 +22,14 @@ class LLMProvider(Protocol):
 
 def get_provider() -> LLMProvider:
     """Factory: reads env vars to select and instantiate the right provider."""
-    provider_name = os.environ.get("SOURCEMIND_LLM_PROVIDER", "claude").lower()
+    provider_name = config.llm_provider()
 
     if provider_name == "ollama":
         from SourceMind.backend.llm.ollama import OllamaProvider
-        model = os.environ.get("SOURCEMIND_LLM_MODEL", "llama3.1")
+        model = config.llm_model("llama3.1")
         return OllamaProvider(model=model)
 
     # Default: Claude
     from SourceMind.backend.llm.claude import ClaudeProvider
-    model = os.environ.get("SOURCEMIND_LLM_MODEL", DEFAULT_CLAUDE_MODEL)
+    model = config.llm_model(DEFAULT_CLAUDE_MODEL)
     return ClaudeProvider(model=model)

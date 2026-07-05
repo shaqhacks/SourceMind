@@ -1,7 +1,6 @@
 """DB-backed library router — Task 11."""
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import tempfile
@@ -16,6 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
+from SourceMind.backend import config
 from SourceMind.backend.extract.material import material_title
 
 from SourceMind.backend.db import base, models
@@ -40,38 +40,18 @@ COURSE_CHAT_SECTION = "__course__"
 # ─── Hardening config (env-tunable, read per request) ─────────────────────────
 
 _UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MiB streaming read granularity
-_DEFAULT_MAX_UPLOAD_MB = 50.0
-_DEFAULT_MAX_TOTAL_MB = 200.0
-_DEFAULT_MAX_TEXT_CHARS = 1_000_000
-_DEFAULT_MAX_CONCURRENT_LLM = 4
-
-
-def _env_float(name: str, default: float) -> float:
-    try:
-        value = float(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
-    return value if value > 0 else default
-
-
-def _env_int(name: str, default: int) -> int:
-    try:
-        value = int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
-    return value if value > 0 else default
 
 
 def _max_upload_bytes() -> int:
-    return int(_env_float("SOURCEMIND_MAX_UPLOAD_MB", _DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024)
+    return config.max_upload_bytes()
 
 
 def _max_total_bytes() -> int:
-    return int(_env_float("SOURCEMIND_MAX_UPLOAD_TOTAL_MB", _DEFAULT_MAX_TOTAL_MB) * 1024 * 1024)
+    return config.max_total_upload_bytes()
 
 
 def _max_text_chars() -> int:
-    return _env_int("SOURCEMIND_MAX_TEXT_CHARS", _DEFAULT_MAX_TEXT_CHARS)
+    return config.max_text_chars()
 
 
 # ─── In-process LLM concurrency guard ─────────────────────────────────────────
@@ -80,9 +60,7 @@ def _max_text_chars() -> int:
 # only. Chat endpoints acquire non-blocking (fast 429 when saturated); the
 # background generation job acquires blocking (it serializes rather than 429,
 # since a background task cannot return a status code).
-_LLM_SEMAPHORE = threading.BoundedSemaphore(
-    _env_int("SOURCEMIND_MAX_CONCURRENT_LLM", _DEFAULT_MAX_CONCURRENT_LLM)
-)
+_LLM_SEMAPHORE = threading.BoundedSemaphore(config.max_concurrent_llm())
 _LLM_BUSY_DETAIL = "Server busy: too many concurrent LLM requests. Please retry shortly."
 
 
@@ -576,7 +554,6 @@ def _get_chapter_dict(course_id: str, section_id: str) -> dict:
             "objectives": chapter.objectives,
             "importance": chapter.importance,
             "source_pages": chapter.source_pages,
-            "assets": chapter.assets,
             "body_md": chapter.body_md,
             "quiz": chapter.quiz,
             "cards": chapter.cards,

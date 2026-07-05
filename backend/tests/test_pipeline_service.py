@@ -18,6 +18,7 @@ from SourceMind.backend.pipeline.service import (
     get_image_urls,
     get_source_text,
     ingest_pdfs,
+    reconcile_interrupted_jobs,
     regenerate_section,
 )
 
@@ -837,3 +838,57 @@ def test_generate_lesson_sets_lesson_md(tmp_path, db_url):
         assert chap.lesson_md  # non-empty verbose lesson markdown
         assert chap.quiz is not None and len(chap.quiz) > 0
         assert chap.cards is not None and len(chap.cards) > 0
+
+
+# ---------------------------------------------------------------------------
+# reconcile_interrupted_jobs
+# ---------------------------------------------------------------------------
+
+def test_reconcile_interrupted_jobs(tmp_path, db_url):
+    """Rows left mid-job by an unclean restart flip to a failed terminal
+    state; rows already idle/terminal are left untouched."""
+    with base.get_session() as session:
+        session.add(models.Course(
+            id="c-ingesting", title="A", status="ingesting", generation_status="idle",
+        ))
+        session.add(models.Course(
+            id="c-running", title="B", status="ready", generation_status="running",
+        ))
+        session.add(models.Course(
+            id="c-ready", title="C", status="ready", generation_status="succeeded",
+        ))
+        session.add(models.Course(
+            id="c-idle", title="D", status="ready", generation_status="idle",
+        ))
+        session.add(models.Chapter(
+            course_id="c-running", section_id="s1", title="Ch1", lesson_status="generating",
+        ))
+        session.add(models.Chapter(
+            course_id="c-ready", section_id="s2", title="Ch2", lesson_status="ready",
+        ))
+
+    reconcile_interrupted_jobs()
+
+    with base.get_session() as session:
+        c_ingesting = session.get(models.Course, "c-ingesting")
+        assert c_ingesting.status == "failed"
+        assert c_ingesting.title == "A"  # title left as-is
+
+        c_running = session.get(models.Course, "c-running")
+        assert c_running.generation_status == "failed"
+        assert c_running.generation_last_error == "interrupted by server restart"
+        assert c_running.status == "ready"  # only status=="ingesting" flips course.status
+
+        c_ready = session.get(models.Course, "c-ready")
+        assert c_ready.status == "ready"
+        assert c_ready.generation_status == "succeeded"  # untouched: terminal already
+
+        c_idle = session.get(models.Course, "c-idle")
+        assert c_idle.status == "ready"
+        assert c_idle.generation_status == "idle"  # untouched: not mid-job
+
+        ch1 = session.query(models.Chapter).filter_by(course_id="c-running").first()
+        assert ch1.lesson_status == "failed"
+
+        ch2 = session.query(models.Chapter).filter_by(course_id="c-ready").first()
+        assert ch2.lesson_status == "ready"  # untouched
