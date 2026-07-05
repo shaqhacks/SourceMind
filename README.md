@@ -67,9 +67,9 @@ The backend auto-creates its SQLite schema on startup (`init_db()` runs via the 
 
 The `data/sourcemind.db` file is listed in `.gitignore` and is never committed. Tests redirect the DB to a temporary path automatically — no stray DB file is written during `uv run pytest`.
 
-## Legacy Endpoints (Deprecated)
+## Legacy Data
 
-The original `/courses`, `/upload`, `/subjects`, and competency-decomposition endpoints remain in place for backwards compatibility but are superseded by the `/library` flow described above. They will be removed in a future cleanup once all consumers are migrated.
+The original `/courses`, `/subjects`, and competency-decomposition endpoints have been removed — the `/library` flow described above is the only API surface (`backend/routers/library.py`). The `data/subjects/` and `data/courses/` Markdown files from the original workflow are no longer read by the backend; the entire `data/` directory is runtime storage and is not versioned.
 
 ## Product Drafts
 

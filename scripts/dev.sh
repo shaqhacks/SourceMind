@@ -11,24 +11,8 @@ FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://${BACKEND_HOST}:${BACKEND_PORT}}"
 SOURCEMIND_CORS_ORIGINS="${SOURCEMIND_CORS_ORIGINS:-http://localhost:${FRONTEND_PORT},http://${FRONTEND_HOST}:${FRONTEND_PORT}}"
 
-UV_DEPS=(
-  --with pydantic
-  --with PyYAML
-  --with fastapi
-  --with 'uvicorn[standard]'
-  --with httpx
-  --with google-auth
-  --with requests
-  --with pypdf
-  --with python-multipart
-  --with python-frontmatter
-  --with ollama
-  --with sqlalchemy
-  --with anthropic
-  --with pymupdf
-  --with python-docx
-  --with python-pptx
-)
+# Single source of truth for backend dependencies
+UV_DEPS=(--with-requirements "$ROOT_DIR/backend/requirements.txt")
 
 BACKEND_PID=""
 FRONTEND_PID=""

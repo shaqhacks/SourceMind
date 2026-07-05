@@ -1,1 +1,0 @@
-Build SourceMind moat-first decomposition (Phase 1). Turn arbitrary uploaded sources into correct competency trees. Source of truth: ~/.gstack/projects/SourceMind/ceo-plans/2026-06-21-moat-first-decomposition.md. Local-first FastAPI + Next.js + Ollama. Build measurement (eval harness) before building on top of it.

@@ -23,12 +23,17 @@ next-env.d.ts
 # OS
 .DS_Store
 
-# SQLite databases (never commit the local DB)
-data/*.db
-data/sourcemind.db
+# Data dir is runtime storage (uploads, extracted assets, generated courses, local DB)
+data/
 
-# OMC runtime state (keep ultragoal plan + ledger, ignore transient state)
-.omc/state/
-.omc/logs/
-.omx/state/
-.omx/logs/
+# Stray documents at repo root (never commit PDFs dropped here)
+/*.pdf
+
+# OMC/OMX runtime state (only .omc/skills is committable)
+.omc/*
+!.omc/skills/
+.omx/
+
+# Tool caches
+.ruff_cache/
+.superpowers/

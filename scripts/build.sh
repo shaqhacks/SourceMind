@@ -4,24 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-UV_DEPS=(
-  --with pytest
-  --with pydantic
-  --with PyYAML
-  --with fastapi
-  --with httpx
-  --with google-auth
-  --with requests
-  --with pypdf
-  --with python-multipart
-  --with python-frontmatter
-  --with ollama
-  --with sqlalchemy
-  --with anthropic
-  --with pymupdf
-  --with python-docx
-  --with python-pptx
-)
+# Single source of truth for backend dependencies
+UV_DEPS=(--with-requirements "$ROOT_DIR/backend/requirements.txt")
 
 run_step() {
   local label="$1"
