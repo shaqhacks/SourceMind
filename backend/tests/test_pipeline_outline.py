@@ -181,3 +181,42 @@ def test_detect_outline_chunks_cover_whole_document(monkeypatch):
     assert "Chapter 7" in titles  # last pages are NOT dropped
     assert len(sections) == 8
     assert len({s.section_id for s in sections}) == 8  # ids unique
+
+
+# ---------------------------------------------------------------------------
+# Bounded retry (empty parse -> one re-call, then degrade)
+# ---------------------------------------------------------------------------
+
+
+class QueuedProvider:
+    """Returns each response from *responses* in order; counts calls."""
+
+    def __init__(self, responses: list[dict]) -> None:
+        self._responses = list(responses)
+        self.calls = 0
+
+    def complete(self, prompt, *, system="", schema=None, max_tokens=4096):
+        self.calls += 1
+        return self._responses[self.calls - 1]
+
+
+def test_detect_outline_retries_once_on_empty_parse():
+    """First response has no usable sections; the retry's response does."""
+    provider = QueuedProvider([{"sections": []}, {"sections": FIXED_SECTIONS}])
+
+    sections = detect_outline(FAKE_PAGES, provider)
+
+    assert provider.calls == 2
+    assert len(sections) == 3
+
+
+def test_detect_outline_bounded_retry_still_degrades_gracefully():
+    """Both the initial call and the retry are empty — bounded to exactly one
+    retry, then falls back to today's graceful degradation (no sections, no
+    crash) instead of retrying indefinitely."""
+    provider = QueuedProvider([{"sections": []}, {"sections": []}])
+
+    sections = detect_outline(FAKE_PAGES, provider)
+
+    assert provider.calls == 2  # bounded — not retried again
+    assert sections == []

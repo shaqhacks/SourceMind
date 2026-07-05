@@ -179,3 +179,64 @@ def test_parse_json_salvages_truncated_array():
 def test_parse_json_normal_still_works():
     from SourceMind.backend.llm.ollama import _parse_json
     assert _parse_json('{"a": 1, "b": [2, 3]}') == {"a": 1, "b": [2, 3]}
+
+
+# ---------------------------------------------------------------------------
+# embed.py — native batch embed()
+# ---------------------------------------------------------------------------
+
+
+def test_embed_texts_uses_native_batch_call(monkeypatch):
+    """embed_texts makes ONE batch call (via ollama.embed's list `input`) for
+    a request that fits within a single batch, not one call per text."""
+    import importlib
+    from SourceMind.backend.llm import embed as embed_mod
+    importlib.reload(embed_mod)
+
+    calls: list[list[str]] = []
+
+    def fake_embed_batch(model, prompts):
+        calls.append(list(prompts))
+        return [[float(len(p)), 0.0] for p in prompts]
+
+    monkeypatch.setattr(embed_mod, "_ollama_embed_batch", fake_embed_batch)
+
+    result = embed_mod.embed_texts(["alpha", "beta", "gamma"])
+
+    assert len(calls) == 1  # one round-trip for the whole (small) batch
+    assert calls[0] == ["alpha", "beta", "gamma"]
+    assert result == [[5.0, 0.0], [4.0, 0.0], [5.0, 0.0]]
+
+
+def test_embed_texts_splits_into_configured_batch_size(monkeypatch):
+    """More texts than the configured batch size -> multiple batch calls."""
+    import importlib
+    from SourceMind.backend.llm import embed as embed_mod
+    importlib.reload(embed_mod)
+
+    monkeypatch.setenv("SOURCEMIND_EMBED_BATCH_SIZE", "2")
+    calls: list[list[str]] = []
+
+    def fake_embed_batch(model, prompts):
+        calls.append(list(prompts))
+        return [[0.0] for _ in prompts]
+
+    monkeypatch.setattr(embed_mod, "_ollama_embed_batch", fake_embed_batch)
+
+    result = embed_mod.embed_texts(["a", "b", "c", "d", "e"])
+
+    assert len(calls) == 3          # ceil(5/2)
+    assert [len(c) for c in calls] == [2, 2, 1]
+    assert len(result) == 5
+
+
+def test_embed_texts_empty_input_makes_no_calls(monkeypatch):
+    import importlib
+    from SourceMind.backend.llm import embed as embed_mod
+    importlib.reload(embed_mod)
+
+    def fake_embed_batch(model, prompts):
+        raise AssertionError("should not be called for empty input")
+
+    monkeypatch.setattr(embed_mod, "_ollama_embed_batch", fake_embed_batch)
+    assert embed_mod.embed_texts([]) == []

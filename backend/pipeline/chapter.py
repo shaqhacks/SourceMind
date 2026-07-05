@@ -7,7 +7,7 @@ from SourceMind.backend.llm.provider import LLMProvider
 from SourceMind.backend.pipeline.plan import PlanItem
 from SourceMind.backend.pipeline.template import (
     PATH_TO_STAFF_TEMPLATE,
-    count_words,
+    count_words_total,
     parse_cards,
     parse_quiz,
 )
@@ -15,6 +15,17 @@ from SourceMind.backend.services.ingest.security import sanitize_source
 
 _MAX_TOKENS_CEILING = 8192
 _TOKENS_PER_WORD = 3
+
+_QUIZ_RETRY_NOTE = """\
+
+
+=== YOUR PREVIOUS RESPONSE WAS MISSING THE QUIZ ===
+Your previous response did not include a valid ```quiz fenced JSON block (or
+it could not be parsed). Return the COMPLETE chapter again, following ALL of
+the instructions above exactly, and this time include the required
+`## 📝 Section Check` section with a ```quiz fenced block containing 4-6
+well-formed items.
+"""
 
 
 @dataclass
@@ -69,11 +80,22 @@ def generate_chapter(
             f"provider.complete must return str without a schema, got {type(body).__name__}"
         )
 
+    quiz = parse_quiz(body)
+    if not quiz:
+        # Bounded retry: the model's markdown omitted (or malformed) the
+        # required ```quiz fenced block entirely. One re-call noting the
+        # failure, before falling back to today's graceful degradation (an
+        # empty quiz — validate()'s repair loop is the backstop if this
+        # retry also comes up empty).
+        retry_body = provider.complete(prompt + _QUIZ_RETRY_NOTE, max_tokens=max_tokens)
+        if isinstance(retry_body, str) and parse_quiz(retry_body):
+            body = retry_body
+
     return ChapterDraft(
         section_id=plan_item.section_id,
         title=plan_item.title,
         body_md=body,
         quiz=parse_quiz(body),
         cards=parse_cards(body),
-        word_count=count_words(body),
+        word_count=count_words_total(body),
     )

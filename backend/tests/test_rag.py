@@ -74,12 +74,136 @@ def test_chunk_pages_overlap():
     assert "pp.1-2" in refs
 
 
+def test_chunk_pages_defaults_come_from_config(monkeypatch):
+    """target_words/overlap_words fall back to config.py env tunables when
+    not passed explicitly."""
+    from SourceMind.backend.extract.pdf import ExtractedPage
+    from SourceMind.backend.pipeline.chunk import chunk_pages
+
+    monkeypatch.setenv("SOURCEMIND_CHUNK_TARGET_WORDS", "100")
+    monkeypatch.setenv("SOURCEMIND_CHUNK_OVERLAP_WORDS", "20")
+
+    page = ExtractedPage(page_number=1, text=" ".join(f"w{i}" for i in range(300)))
+    chunks = chunk_pages([page])  # no explicit target/overlap
+
+    # step = 100 - 20 = 80; windows at 0,80,160,240 -> 4 chunks (last partial).
+    assert len(chunks) == 4
+    for _, content in chunks[:-1]:
+        assert len(content.split()) == 100
+
+
+def test_chunk_pages_section_aware_prefixes_source_ref():
+    """With sections given, a chunk never straddles two chapters, and its
+    source_ref is prefixed with the owning section_id."""
+    from SourceMind.backend.extract.pdf import ExtractedPage
+    from SourceMind.backend.pipeline.chunk import chunk_pages
+
+    pages = [
+        ExtractedPage(page_number=0, text=" ".join(f"a{i}" for i in range(60))),
+        ExtractedPage(page_number=1, text=" ".join(f"b{i}" for i in range(60))),
+        ExtractedPage(page_number=2, text=" ".join(f"c{i}" for i in range(60))),
+        ExtractedPage(page_number=3, text=" ".join(f"d{i}" for i in range(60))),
+    ]
+    sections = [
+        {"section_id": "ch1", "page_start": 0, "page_end": 1},
+        {"section_id": "ch2", "page_start": 2, "page_end": 3},
+    ]
+
+    chunks = chunk_pages(pages, target_words=200, overlap_words=0, sections=sections)
+
+    refs = [sr for sr, _ in chunks]
+    assert all(r.startswith("ch1:") or r.startswith("ch2:") for r in refs)
+    # ch1's chunk(s) only ever contain words from pages 0-1; ch2's only 2-3 —
+    # i.e. no chunk mixes content across the section boundary.
+    for source_ref, content in chunks:
+        words = content.split()
+        if source_ref.startswith("ch1:"):
+            assert all(w.startswith("a") or w.startswith("b") for w in words)
+        else:
+            assert all(w.startswith("c") or w.startswith("d") for w in words)
+
+
+def test_chunk_pages_section_aware_covers_leftover_pages():
+    """Pages outside every section's range still get chunked (whole-document
+    fallback ref format), so content isn't silently dropped."""
+    from SourceMind.backend.extract.pdf import ExtractedPage
+    from SourceMind.backend.pipeline.chunk import chunk_pages
+
+    pages = [
+        ExtractedPage(page_number=0, text="front matter preface text"),
+        ExtractedPage(page_number=1, text=" ".join(f"w{i}" for i in range(60))),
+    ]
+    # Only page 1 belongs to a section; page 0 (front matter) is uncovered.
+    sections = [{"section_id": "ch1", "page_start": 1, "page_end": 1}]
+
+    chunks = chunk_pages(pages, target_words=200, overlap_words=0, sections=sections)
+
+    refs = [sr for sr, _ in chunks]
+    assert any(r.startswith("ch1:") for r in refs)
+    assert any(not r.startswith("ch1:") for r in refs)  # leftover page 0, old-format ref
+    all_content = " ".join(c for _, c in chunks)
+    assert "preface" in all_content  # nothing dropped
+
+
+def test_chunk_pages_no_sections_uses_fallback_format():
+    """Empty/None sections keep the original (non-prefixed) ref format."""
+    from SourceMind.backend.extract.pdf import ExtractedPage
+    from SourceMind.backend.pipeline.chunk import chunk_pages
+
+    page = ExtractedPage(page_number=5, text="hello world")
+    assert chunk_pages([page], sections=None)[0][0] == "p.5"
+    assert chunk_pages([page], sections=[])[0][0] == "p.5"
+
+
 def test_cosine():
     from SourceMind.backend.pipeline.retrieve import cosine
 
     assert cosine([1, 0, 0], [1, 0, 0]) == pytest.approx(1.0)
     assert cosine([1, 0, 0], [0, 1, 0]) == pytest.approx(0.0)
     assert cosine([0, 0, 0], [1, 0, 0]) == 0.0  # zero-norm guard
+
+
+def test_cosine_batch_matches_pure_python_cosine():
+    """The vectorized (numpy) batch scorer must agree with cosine() per-row,
+    including its zero-norm guard for an all-zero embedding."""
+    from SourceMind.backend.pipeline.retrieve import _cosine_batch, cosine
+
+    query = [0.9, 0.1, 0.0]
+    embeddings = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 0]]
+
+    batch_scores = _cosine_batch(query, embeddings)
+    expected = [cosine(query, e) for e in embeddings]
+
+    assert batch_scores == pytest.approx(expected)
+    assert batch_scores[-1] == 0.0  # zero-norm row
+
+
+def test_cosine_batch_falls_back_without_numpy(monkeypatch):
+    """When numpy isn't available, _cosine_batch still scores correctly via
+    the pure-Python per-row path."""
+    from SourceMind.backend.pipeline import retrieve as retrieve_mod
+
+    monkeypatch.setattr(retrieve_mod, "np", None)
+    query = [1, 0, 0]
+    embeddings = [[1, 0, 0], [0, 1, 0]]
+
+    scores = retrieve_mod._cosine_batch(query, embeddings)
+
+    assert scores == pytest.approx([1.0, 0.0])
+
+
+def test_cosine_batch_falls_back_on_ragged_embeddings():
+    """Mismatched embedding dimensions can't be stacked into a rectangular
+    numpy matrix — falls back to the pure-Python per-row path instead of
+    raising."""
+    from SourceMind.backend.pipeline.retrieve import _cosine_batch
+
+    query = [1, 0, 0]
+    embeddings = [[1, 0, 0], [1, 0]]  # second row has the wrong dimension
+
+    scores = _cosine_batch(query, embeddings)
+
+    assert scores[0] == pytest.approx(1.0)
 
 
 def test_retrieve_ranks_by_similarity():

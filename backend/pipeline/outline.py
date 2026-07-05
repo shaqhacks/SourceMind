@@ -29,6 +29,13 @@ OUTLINE_SCHEMA: dict = {
     "required": ["sections"],
 }
 
+_RETRY_NOTE = (
+    "\n\n=== YOUR PREVIOUS RESPONSE WAS EMPTY OR UNUSABLE ===\n"
+    "Your previous response did not parse into any usable section entries. "
+    "Return ONLY a JSON object matching the schema, with a non-empty "
+    "'sections' array — no prose, no markdown code fences."
+)
+
 _SYSTEM_PROMPT = (
     "You are a document analysis assistant that builds a fine-grained outline of "
     "a textbook or document. Create ONE separate entry for EVERY chapter, numbered "
@@ -207,7 +214,17 @@ def detect_outline(pages: list[ExtractedPage], provider: LLMProvider) -> list[Se
         result = provider.complete(
             prompt, system=_SYSTEM_PROMPT, schema=OUTLINE_SCHEMA, max_tokens=max_tokens
         )
-        collected.extend(_parse_sections(result, len(collected)))
+        sections = _parse_sections(result, len(collected))
+        if not sections:
+            # Bounded retry: this chunk produced NOTHING usable — one re-call
+            # noting the failure before falling back to today's graceful
+            # degradation (this chunk simply contributes no sections).
+            result = provider.complete(
+                prompt + _RETRY_NOTE, system=_SYSTEM_PROMPT, schema=OUTLINE_SCHEMA,
+                max_tokens=max_tokens,
+            )
+            sections = _parse_sections(result, len(collected))
+        collected.extend(sections)
 
     # Order by page, drop near-duplicate boundary repeats (same title + start page).
     collected.sort(key=lambda s: (s.page_start, s.page_end))

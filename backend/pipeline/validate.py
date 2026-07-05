@@ -23,11 +23,12 @@ from SourceMind.backend.llm.provider import LLMProvider
 from SourceMind.backend.pipeline.chapter import ChapterDraft, generate_chapter
 from SourceMind.backend.pipeline.plan import PlanItem
 from SourceMind.backend.pipeline.template import (
-    count_words,
+    count_words_total,
     count_worked_examples,
     parse_cards,
     parse_quiz,
 )
+from SourceMind.backend.services.ingest.security import sanitize_source
 
 # ---------------------------------------------------------------------------
 # JSON schema for the grounding-judge response
@@ -120,8 +121,13 @@ class Report:
 
 
 def _build_grounding_prompt(source_text: str, chapter_body: str) -> str:
+    # Defense-in-depth: strip prompt-injection imperatives from the untrusted
+    # source document before it is interpolated into the grounding-judge
+    # prompt (mirrors the same sanitization in chapter.py's generate_chapter —
+    # this was the one boundary that still interpolated raw source_text).
+    clean_source_text, _ = sanitize_source(source_text)
     return _GROUNDING_PROMPT_TEMPLATE.format(
-        source_text=source_text,
+        source_text=clean_source_text,
         chapter_body=chapter_body,
     )
 
@@ -148,6 +154,7 @@ def validate(
     provider: LLMProvider,
     *,
     had_figures: bool,
+    skip_grounding: bool = False,
 ) -> Report:
     """Run all quality checks on *draft*, collecting an Issue for each failure.
 
@@ -160,13 +167,20 @@ def validate(
     4. ``cards``           — if importance == "core", len(cards) >= 1.
     5. ``image``           — if had_figures, body_md must contain ≥1 ``![...](...)``.
     6. ``grounding``       — LLM judge call; fails when returned dict has grounded=False.
+                             Skipped entirely when skip_grounding=True.
 
     Args:
-        draft:       Chapter draft to validate.
-        plan_item:   Metadata for the section (target_words, importance, …).
-        source_text: Raw source text used to generate the chapter (for grounding).
-        provider:    LLM backend (used for the grounding judge call).
-        had_figures: Whether figures were available in the source document.
+        draft:          Chapter draft to validate.
+        plan_item:      Metadata for the section (target_words, importance, …).
+        source_text:    Raw source text used to generate the chapter (for grounding).
+        provider:       LLM backend (used for the grounding judge call).
+        had_figures:    Whether figures were available in the source document.
+        skip_grounding: When True, skip the grounding judge LLM call entirely
+                        and treat grounding as passing. Used by
+                        generate_validated's repair loop to avoid re-running an
+                        expensive, redundant grounding call on a re-validate
+                        round where grounding already passed and only
+                        deterministic checks (word_count, etc.) failed.
 
     Returns:
         Report with ok=True only when zero issues were found.
@@ -223,14 +237,15 @@ def validate(
         ))
 
     # 6. Grounding judge (LLM call with structured schema)
-    g_prompt = _build_grounding_prompt(source_text, draft.body_md)
-    g_result = provider.complete(g_prompt, schema=GROUNDING_SCHEMA)
-    if isinstance(g_result, dict) and not g_result.get("grounded", True):
-        unsupported = g_result.get("unsupported", [])
-        issues.append(Issue(
-            code="grounding",
-            detail=f"chapter contains unsupported claims: {unsupported}",
-        ))
+    if not skip_grounding:
+        g_prompt = _build_grounding_prompt(source_text, draft.body_md)
+        g_result = provider.complete(g_prompt, schema=GROUNDING_SCHEMA)
+        if isinstance(g_result, dict) and not g_result.get("grounded", True):
+            unsupported = g_result.get("unsupported", [])
+            issues.append(Issue(
+                code="grounding",
+                detail=f"chapter contains unsupported claims: {unsupported}",
+            ))
 
     return Report(ok=len(issues) == 0, issues=issues)
 
@@ -267,6 +282,7 @@ def generate_validated(
     """
     draft = generate_chapter(plan_item, source_text, image_urls, provider)
     report = validate(draft, plan_item, source_text, provider, had_figures=had_figures)
+    grounding_ok = not any(issue.code == "grounding" for issue in report.issues)
 
     repairs_remaining = max_rounds - 1
     while not report.ok and repairs_remaining > 0:
@@ -285,8 +301,19 @@ def generate_validated(
             body_md=repaired_body,
             quiz=parse_quiz(repaired_body),
             cards=parse_cards(repaired_body),
-            word_count=count_words(repaired_body),
+            word_count=count_words_total(repaired_body),
         )
-        report = validate(draft, plan_item, source_text, provider, had_figures=had_figures)
+        # Once grounding has passed, the repair prompt targets only the
+        # OTHER listed issues ("fix ONLY the listed issues"), so re-running
+        # the grounding judge call again is redundant cost — skip it and
+        # keep treating grounding as passing. If grounding had failed (or
+        # this is still the first repair round with no signal yet), keep
+        # checking it every round as before.
+        report = validate(
+            draft, plan_item, source_text, provider,
+            had_figures=had_figures, skip_grounding=grounding_ok,
+        )
+        if not grounding_ok:
+            grounding_ok = not any(issue.code == "grounding" for issue in report.issues)
 
     return draft

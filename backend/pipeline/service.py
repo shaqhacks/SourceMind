@@ -18,7 +18,6 @@ import json
 import logging
 import shutil
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +31,7 @@ from SourceMind.backend.llm.provider import LLMProvider, get_provider
 from SourceMind.backend.pipeline.outline import detect_outline, sections_from_toc
 from SourceMind.backend.pipeline.plan import PlanItem as PlanItemDC, generate_plan
 from SourceMind.backend.pipeline.validate import generate_validated
+from SourceMind.backend.services.ingest.security import sanitize_source
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,30 @@ def _load_pages(assets_dir: Path) -> list[ExtractedPage]:
         ExtractedPage(page_number=entry["page_number"], text=entry["text"])
         for entry in raw["pages"]
     ]
+
+
+def _section_page_ranges(course_id: str) -> list[dict]:
+    """Return {section_id, page_start, page_end} for this course's chapters.
+
+    Used by index_course to chunk section-aware (chunk_pages' `sections`
+    param). Chapters without a valid two-element source_pages (not yet
+    persisted, or a source with no detected outline) are skipped — chunk_pages
+    falls back to whole-document windowing for whatever isn't covered.
+    Sorted by page_start so downstream chunk order roughly follows the document.
+    """
+    with base.get_session() as session:
+        chapters = session.query(models.Chapter).filter_by(course_id=course_id).all()
+        sections = [
+            {
+                "section_id": ch.section_id,
+                "page_start": ch.source_pages[0],
+                "page_end": ch.source_pages[1],
+            }
+            for ch in chapters
+            if ch.source_pages and len(ch.source_pages) >= 2
+        ]
+    sections.sort(key=lambda s: s["page_start"])
+    return sections
 
 
 # ---------------------------------------------------------------------------
@@ -172,22 +196,28 @@ def index_course(course_id: str, assets_dir: Path | None = None) -> None:
     assets_dir = Path(assets_dir)
 
     pages = _load_pages(assets_dir)
-    pairs = chunk_pages(pages)
+    sections = _section_page_ranges(course_id)
+    pairs = chunk_pages(pages, sections=sections)
     contents = [content for _, content in pairs]
 
-    # Parallel embed BEFORE any DB write so a failure leaves existing chunks untouched.
-    MAX_EMBED_WORKERS = 6
+    # Batch-embed BEFORE any DB write so a failure leaves existing chunks
+    # untouched. embed_texts already batches internally (config.embed_batch_size());
+    # looping over the same batch size here isolates failures per-batch —
+    # one bad batch nulls only its own chunks' embeddings rather than either
+    # a single unlucky chunk (the old per-chunk-thread granularity) or the
+    # whole course (a single try/except around one big call).
+    batch_size = config.embed_batch_size()
     embeddings: list = [None] * len(contents)
-    with ThreadPoolExecutor(max_workers=MAX_EMBED_WORKERS) as pool:
-        futures = {pool.submit(embed_texts, [c]): i for i, c in enumerate(contents)}
-        for fut in as_completed(futures):
-            idx = futures[fut]
-            try:
-                result = fut.result()
-                embeddings[idx] = result[0] if result else None
-            except Exception as exc:
-                logger.warning("embed failed for chunk %d: %s", idx, exc)
-                embeddings[idx] = None
+    for start in range(0, len(contents), batch_size):
+        batch = contents[start : start + batch_size]
+        try:
+            for offset, embedding in enumerate(embed_texts(batch)):
+                embeddings[start + offset] = embedding
+        except Exception as exc:
+            logger.warning(
+                "embed_texts failed for course %s chunks [%d:%d]: %s",
+                course_id, start, start + len(batch), exc,
+            )
 
     with base.get_session() as session:
         session.query(models.Chunk).filter_by(course_id=course_id).delete()
@@ -601,10 +631,15 @@ def generate_study_items(
         },
         "required": ["quiz", "cards"],
     }
+    # Defense-in-depth: strip prompt-injection imperatives from the untrusted
+    # source document before it is interpolated into the prompt (mirrors the
+    # same sanitization generate_chapter applies — source_text here is a
+    # chapter's raw extracted source markdown, not LLM output).
+    clean_source_text, _ = sanitize_source(source_text)
     prompt = (
         f"You are a study-aid generator. Given the source text below, produce exactly "
         f"{n_quiz} multiple-choice quiz questions and {n_cards} spaced-repetition flashcards.\n\n"
-        f"SOURCE TEXT:\n{source_text[:8000]}\n\n"
+        f"SOURCE TEXT:\n{clean_source_text[:8000]}\n\n"
         f"Return ONLY a JSON object matching the schema. No prose."
     )
     try:

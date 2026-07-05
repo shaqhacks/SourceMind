@@ -223,3 +223,51 @@ def test_planitem_is_dataclass():
     assert dataclasses.is_dataclass(PlanItem)
     fields = {f.name for f in dataclasses.fields(PlanItem)}
     assert fields == {"section_id", "title", "objectives", "importance", "prerequisites", "target_words"}
+
+
+# ---------------------------------------------------------------------------
+# Bounded retry (empty parse -> one re-call, then degrade)
+# ---------------------------------------------------------------------------
+
+
+class QueuedProvider:
+    """Returns each response from *responses* in order; counts calls."""
+
+    def __init__(self, responses: list) -> None:
+        self._responses = list(responses)
+        self.calls = 0
+
+    def complete(self, prompt, *, system="", schema=None, max_tokens=4096):
+        self.calls += 1
+        return self._responses[self.calls - 1]
+
+
+def test_generate_plan_retries_once_on_empty_items():
+    """First response has no usable items; the retry's response does."""
+    sections = [Section(section_id="s1", title="Intro", page_start=1, page_end=1)]
+    pages = [_make_pages(1, 500)]
+    provider = QueuedProvider([
+        {"items": []},
+        {"items": [{"section_id": "s1", "objectives": ["Learn"], "importance": "core", "prerequisites": []}]},
+    ])
+
+    result = generate_plan(sections, pages, provider)
+
+    assert provider.calls == 2
+    assert result[0].importance == "core"
+    assert result[0].objectives == ["Learn"]
+
+
+def test_generate_plan_bounded_retry_still_degrades_gracefully():
+    """Both the initial call and the retry are empty — bounded to exactly one
+    retry, then falls back to today's per-section defaults instead of
+    retrying indefinitely."""
+    sections = [Section(section_id="s1", title="Intro", page_start=1, page_end=1)]
+    pages = [_make_pages(1, 500)]
+    provider = QueuedProvider([{"items": []}, {"items": []}])
+
+    result = generate_plan(sections, pages, provider)
+
+    assert provider.calls == 2  # bounded — not retried again
+    assert result[0].importance == "supporting"  # default
+    assert result[0].objectives == []

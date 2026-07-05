@@ -4,9 +4,7 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
-import threading
 import uuid
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -54,33 +52,16 @@ def _max_text_chars() -> int:
     return config.max_text_chars()
 
 
-# ─── In-process LLM concurrency guard ─────────────────────────────────────────
-# A backstop, not full rate limiting: bound the number of in-flight LLM jobs so
-# a burst of chat/generation requests can't exhaust workers. Single-instance
-# only. Chat endpoints acquire non-blocking (fast 429 when saturated); the
-# background generation job acquires blocking (it serializes rather than 429,
-# since a background task cannot return a status code).
-_LLM_SEMAPHORE = threading.BoundedSemaphore(config.max_concurrent_llm())
-_LLM_BUSY_DETAIL = "Server busy: too many concurrent LLM requests. Please retry shortly."
-
-
-@contextmanager
-def _llm_slot(*, blocking: bool):
-    """Acquire an LLM concurrency slot. Non-blocking acquire raises HTTP 429
-    when saturated; blocking acquire waits for a free slot."""
-    acquired = _LLM_SEMAPHORE.acquire(blocking=blocking)
-    if not acquired:
-        raise HTTPException(status_code=429, detail=_LLM_BUSY_DETAIL)
-    try:
-        yield
-    finally:
-        _LLM_SEMAPHORE.release()
-
-
 def _generate_course_limited(course_id: str, *, provider) -> None:
-    """Background generation wrapper bounded by the LLM concurrency guard."""
-    with _llm_slot(blocking=True):
-        service.generate_course(course_id, provider=provider)
+    """Background generation wrapper.
+
+    The name/wrapper is kept as the background-task entry point for
+    generate_course; the LLM concurrency guard itself now lives in
+    backend/llm/limiter.py, acquired uniformly inside every
+    provider.complete()/embed call (chat, generation, ingest, and lazy
+    lesson alike) rather than only around this one path.
+    """
+    service.generate_course(course_id, provider=provider)
 
 
 def provider_dependency():
@@ -709,8 +690,7 @@ def chat_with_chapter(
         f"=== CHAPTER CONTENT ===\n{clean_body_md}\n\n"
         f"=== QUESTION ===\n{body.question}"
     )
-    with _llm_slot(blocking=False):
-        answer = provider.complete(prompt)
+    answer = provider.complete(prompt)
     if not isinstance(answer, str):
         answer = str(answer)
 
@@ -763,8 +743,7 @@ def chat_with_course(
     )
     prompt = f"Sources:\n{sources_block}\n\nQuestion: {body.question}"
 
-    with _llm_slot(blocking=False):
-        answer = provider.complete(prompt, system=system)
+    answer = provider.complete(prompt, system=system)
     if not isinstance(answer, str):
         answer = str(answer)
 

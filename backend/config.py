@@ -87,6 +87,16 @@ def llm_timeout() -> float:
     return env_float("SOURCEMIND_LLM_TIMEOUT", _DEFAULT_LLM_TIMEOUT)
 
 
+_DEFAULT_LLM_RETRY_BACKOFF_BASE = 0.5
+
+
+def llm_retry_backoff_base() -> float:
+    """Base seconds for exponential backoff between retried LLM calls
+    (env ``SOURCEMIND_LLM_RETRY_BACKOFF_BASE``). Actual delay is
+    ``base * 2**attempt`` plus jitter — see ``llm/_timeout.py``."""
+    return env_float("SOURCEMIND_LLM_RETRY_BACKOFF_BASE", _DEFAULT_LLM_RETRY_BACKOFF_BASE)
+
+
 # ─── Upload / hardening limits (library.py) ────────────────────────────────
 
 _DEFAULT_MAX_UPLOAD_MB = 50.0
@@ -109,3 +119,25 @@ def max_text_chars() -> int:
 
 def max_concurrent_llm() -> int:
     return env_int("SOURCEMIND_MAX_CONCURRENT_LLM", _DEFAULT_MAX_CONCURRENT_LLM)
+
+
+# ─── Embeddings / chunking (RAG pipeline) ──────────────────────────────────
+
+_DEFAULT_EMBED_BATCH_SIZE = 64
+_DEFAULT_CHUNK_TARGET_WORDS = 350
+_DEFAULT_CHUNK_OVERLAP_WORDS = 60
+
+
+def embed_batch_size() -> int:
+    """Max texts per native Ollama ``embed()`` call (env ``SOURCEMIND_EMBED_BATCH_SIZE``)."""
+    return env_int("SOURCEMIND_EMBED_BATCH_SIZE", _DEFAULT_EMBED_BATCH_SIZE)
+
+
+def chunk_target_words() -> int:
+    """Words per chunking window (env ``SOURCEMIND_CHUNK_TARGET_WORDS``)."""
+    return env_int("SOURCEMIND_CHUNK_TARGET_WORDS", _DEFAULT_CHUNK_TARGET_WORDS)
+
+
+def chunk_overlap_words() -> int:
+    """Words shared between consecutive chunk windows (env ``SOURCEMIND_CHUNK_OVERLAP_WORDS``)."""
+    return env_int("SOURCEMIND_CHUNK_OVERLAP_WORDS", _DEFAULT_CHUNK_OVERLAP_WORDS)

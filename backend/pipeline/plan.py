@@ -44,6 +44,13 @@ _SYSTEM_PROMPT = (
     "Return ONLY a JSON object matching the provided schema — no prose, no markdown fences."
 )
 
+_RETRY_NOTE = (
+    "\n\n=== YOUR PREVIOUS RESPONSE WAS EMPTY OR UNUSABLE ===\n"
+    "Your previous response did not parse into any usable items. Return ONLY "
+    "a JSON object matching the schema — a non-empty 'items' array with one "
+    "entry per section_id, no prose, no markdown code fences."
+)
+
 
 @dataclass
 class PlanItem:
@@ -91,6 +98,24 @@ def _build_prompt(sections: list[Section]) -> str:
     return "\n".join(lines)
 
 
+def _extract_metadata(response) -> dict[str, dict]:
+    """Build the section_id -> item lookup from a provider response.
+
+    Returns {} when the response isn't the expected shape, has no 'items', or
+    none of its items carry a usable section_id — the caller uses this
+    emptiness as the signal for a bounded retry.
+    """
+    raw_items: list[dict] = []
+    if isinstance(response, dict):
+        raw_items = response.get("items", [])
+    metadata: dict[str, dict] = {}
+    for item in raw_items:
+        sid = item.get("section_id")
+        if sid:
+            metadata[sid] = item
+    return metadata
+
+
 def generate_plan(
     sections: list[Section],
     pages: list[ExtractedPage],
@@ -111,16 +136,16 @@ def generate_plan(
     """
     prompt = _build_prompt(sections)
     response = provider.complete(prompt, system=_SYSTEM_PROMPT, schema=PLAN_SCHEMA)
+    metadata = _extract_metadata(response)
 
-    # Build lookup by section_id from provider response
-    raw_items: list[dict] = []
-    if isinstance(response, dict):
-        raw_items = response.get("items", [])
-    metadata: dict[str, dict] = {}
-    for item in raw_items:
-        sid = item.get("section_id")
-        if sid:
-            metadata[sid] = item
+    if not metadata and sections:
+        # Bounded retry: the response produced NOTHING usable — one re-call
+        # noting the failure before falling back to today's graceful
+        # degradation (every section gets default metadata below).
+        response = provider.complete(
+            prompt + _RETRY_NOTE, system=_SYSTEM_PROMPT, schema=PLAN_SCHEMA
+        )
+        metadata = _extract_metadata(response)
 
     plan: list[PlanItem] = []
     for section in sections:

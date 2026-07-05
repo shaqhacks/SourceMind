@@ -7,6 +7,7 @@ from SourceMind.backend.pipeline.template import (
     PATH_TO_STAFF_TEMPLATE,
     count_worked_examples,
     count_words,
+    count_words_total,
     parse_cards,
     parse_quiz,
 )
@@ -209,6 +210,27 @@ def test_count_words_empty():
 def test_count_words_only_code():
     md = "```python\ndef foo():\n    return 42\n```\n"
     assert count_words(md) == 0
+
+
+# ---------------------------------------------------------------------------
+# count_words_total
+# ---------------------------------------------------------------------------
+
+
+def test_count_words_total_includes_code_and_quiz():
+    """Unlike count_words, count_words_total counts fenced blocks too."""
+    assert count_words_total(SAMPLE_CHAPTER) == len(SAMPLE_CHAPTER.split())
+    assert count_words_total(SAMPLE_CHAPTER) > count_words(SAMPLE_CHAPTER)
+
+
+def test_count_words_total_only_code():
+    md = "```python\ndef foo():\n    return 42\n```\n"
+    assert count_words_total(md) == len(md.split())
+    assert count_words_total(md) > 0
+
+
+def test_count_words_total_empty():
+    assert count_words_total("") == 0
 
 
 # ---------------------------------------------------------------------------

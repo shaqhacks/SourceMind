@@ -3,8 +3,8 @@
 Covers the four hardenings:
   1. Live upload validation (magic bytes, size caps, text length cap).
   2. Prompt-injection sanitization on the document/chat paths.
-  3. LLM provider timeout + light retry.
-  4. In-process LLM concurrency guard (429 backstop).
+  3. LLM provider timeout + classified retry.
+  4. In-process LLM concurrency guard (backend/llm/limiter.py).
 """
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ import time
 import types
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from SourceMind.backend.db import base, models
@@ -181,6 +180,27 @@ def test_source_text_sanitized():
     assert "variables bind names to objects" in prompt.lower()  # legit prose preserved
 
 
+def test_generate_study_items_sanitizes_source_text():
+    """generate_study_items must strip injection markers from source_text
+    before it reaches the provider prompt — this boundary previously
+    interpolated the raw chapter body_md (untrusted, document-derived)."""
+    from SourceMind.backend.pipeline.service import generate_study_items
+
+    captured: dict[str, str] = {}
+
+    class _P:
+        def complete(self, prompt, *, system="", schema=None, max_tokens=4096):
+            captured["prompt"] = prompt
+            return {"quiz": [], "cards": []}
+
+    source_text = f"Algebra basics explained here. {INJECTION} More real content."
+    generate_study_items(source_text, _P())
+
+    prompt = captured["prompt"]
+    assert "ignore all previous instructions" not in prompt.lower()
+    assert "algebra basics explained here" in prompt.lower()
+
+
 def test_chat_context_sanitized(client, capturing_provider):
     """Per-chapter chat must neutralize injection in body_md, not the question."""
     with base.get_session() as session:
@@ -227,25 +247,50 @@ def test_course_chat_context_sanitized(client, capturing_provider, monkeypatch):
 # ─── 3. Provider timeout + retry ──────────────────────────────────────────────
 
 
-def test_call_with_timeout_retry_retries_once_then_succeeds():
+def test_call_with_timeout_retry_retries_once_then_succeeds(monkeypatch):
+    """A transient (connection-level) error is retried; the retry's success wins.
+
+    Was previously written with a bare RuntimeError, which encoded the old
+    "retry on any exception" behavior. Retries are now classified (see
+    test_call_with_timeout_retry_does_not_retry_nontransient_error below), so
+    this uses ConnectionError — a builtin, backend-agnostic transient error.
+    """
     from SourceMind.backend.llm import _timeout
 
+    monkeypatch.setenv("SOURCEMIND_LLM_RETRY_BACKOFF_BASE", "0.001")  # keep test fast
     calls = {"n": 0}
 
     def flaky():
         calls["n"] += 1
         if calls["n"] == 1:
-            raise RuntimeError("transient")
+            raise ConnectionError("transient")
         return "ok"
 
     assert _timeout.call_with_timeout_retry(flaky) == "ok"
     assert calls["n"] == 2  # retried exactly once
 
 
+def test_call_with_timeout_retry_does_not_retry_nontransient_error():
+    """A non-transient error (e.g. a plain bug) raises immediately — no retry,
+    since retrying a bad-request/auth-style failure would fail identically."""
+    from SourceMind.backend.llm import _timeout
+
+    calls = {"n": 0}
+
+    def broken():
+        calls["n"] += 1
+        raise ValueError("not a transport error")
+
+    with pytest.raises(ValueError):
+        _timeout.call_with_timeout_retry(broken)
+    assert calls["n"] == 1  # NOT retried
+
+
 def test_call_with_timeout_retry_times_out(monkeypatch):
     from SourceMind.backend.llm import _timeout
 
     monkeypatch.setenv("SOURCEMIND_LLM_TIMEOUT", "0.05")
+    monkeypatch.setenv("SOURCEMIND_LLM_RETRY_BACKOFF_BASE", "0.001")  # keep test fast
     calls = {"n": 0}
 
     def hang():
@@ -256,6 +301,61 @@ def test_call_with_timeout_retry_times_out(monkeypatch):
     with pytest.raises(TimeoutError):
         _timeout.call_with_timeout_retry(hang)
     assert calls["n"] == 2  # both attempts started before giving up
+
+
+def test_is_transient_classifies_anthropic_and_httpx_errors():
+    """5xx/connection/timeout errors are transient; 4xx errors are not."""
+    import httpx
+
+    from SourceMind.backend.llm._timeout import _is_transient
+
+    request = httpx.Request("POST", "https://example.invalid")
+    assert _is_transient(httpx.ConnectTimeout("timed out", request=request)) is True
+    assert _is_transient(httpx.ConnectError("refused", request=request)) is True
+    assert (
+        _is_transient(
+            httpx.HTTPStatusError(
+                "server error",
+                request=request,
+                response=httpx.Response(500, request=request),
+            )
+        )
+        is True
+    )
+    assert (
+        _is_transient(
+            httpx.HTTPStatusError(
+                "bad request",
+                request=request,
+                response=httpx.Response(400, request=request),
+            )
+        )
+        is False
+    )
+
+    import anthropic
+
+    assert _is_transient(anthropic.APIConnectionError(request=request)) is True
+    assert (
+        _is_transient(
+            anthropic.InternalServerError(
+                "overloaded",
+                response=httpx.Response(500, request=request),
+                body=None,
+            )
+        )
+        is True
+    )
+    assert (
+        _is_transient(
+            anthropic.BadRequestError(
+                "bad request",
+                response=httpx.Response(400, request=request),
+                body=None,
+            )
+        )
+        is False
+    )
 
 
 def test_timeout_retry_returns_second_attempt_result(monkeypatch):
@@ -279,7 +379,11 @@ def test_timeout_retry_returns_second_attempt_result(monkeypatch):
 
 def test_provider_timeout_and_retry(monkeypatch):
     """Claude provider recovers via retry; Ollama provider raises past timeout."""
-    # (a) Claude: transport raises once, then succeeds -> retry returns success.
+    monkeypatch.setenv("SOURCEMIND_LLM_RETRY_BACKOFF_BASE", "0.001")  # keep test fast
+    # (a) Claude: transport raises a transient (connection) error once, then
+    # succeeds -> retry returns success. (Previously a bare RuntimeError, which
+    # encoded the old "retry on any exception" behavior — retries are now
+    # classified, so a non-transient error like RuntimeError would NOT retry.)
     from SourceMind.backend.llm import claude as claude_mod
 
     importlib.reload(claude_mod)
@@ -295,7 +399,7 @@ def test_provider_timeout_and_retry(monkeypatch):
     def create(**kwargs):
         state["n"] += 1
         if state["n"] == 1:
-            raise RuntimeError("transient overload")
+            raise ConnectionError("transient overload")
         return _Resp()
 
     fake_client = types.SimpleNamespace(messages=types.SimpleNamespace(create=create))
@@ -319,16 +423,69 @@ def test_provider_timeout_and_retry(monkeypatch):
 
 
 # ─── 4. Concurrency guard ─────────────────────────────────────────────────────
+# The guard now lives in backend/llm/limiter.py, acquired uniformly inside
+# every provider.complete()/embed call (chat, generation, ingest, and lazy
+# lesson alike) instead of only around the router's chat/generate_course
+# paths. There is no more caller-visible fast-fail (429): every acquire
+# blocks until a slot frees up, since the acquisition point is now deep
+# enough in the call stack that callers have no opportunity to choose a
+# non-blocking mode. See test_llm_provider.py / test_hardening.py's provider
+# tests for coverage of the call sites that now go through the shared slot.
 
 
-def test_llm_slot_returns_429_when_saturated(monkeypatch):
-    monkeypatch.setattr(library_router, "_LLM_SEMAPHORE", threading.BoundedSemaphore(1))
-    with library_router._llm_slot(blocking=False):
-        # The single slot is held; a second non-blocking acquire must 429.
-        with pytest.raises(HTTPException) as excinfo:
-            with library_router._llm_slot(blocking=False):
-                pass
-        assert excinfo.value.status_code == 429
-    # Slot released on exit; acquiring again succeeds.
-    with library_router._llm_slot(blocking=False):
-        pass
+def test_llm_slot_bounds_concurrency(monkeypatch):
+    from SourceMind.backend.llm import limiter
+
+    monkeypatch.setattr(limiter, "_semaphore", threading.BoundedSemaphore(1))
+    with limiter.llm_slot():
+        # The single slot is held; a second non-blocking acquire must fail.
+        assert limiter._semaphore.acquire(blocking=False) is False
+    # Slot released on exit; acquiring again succeeds (and we release it).
+    assert limiter._semaphore.acquire(blocking=False) is True
+    limiter._semaphore.release()
+
+
+def test_claude_and_ollama_complete_acquire_llm_slot(monkeypatch):
+    """Both providers route their transport call through the shared llm_slot,
+    so a saturated pool blocks any provider's complete() call, not just chat."""
+    from SourceMind.backend.llm import claude as claude_mod
+    from SourceMind.backend.llm import limiter
+    from SourceMind.backend.llm import ollama as ollama_mod
+
+    seen_available = {}
+
+    def _make_probe(name):
+        def _probe(*args, **kwargs):
+            # While inside the transport call, the slot must already be held
+            # (unavailable to a non-blocking peek from the outside).
+            seen_available[name] = limiter._semaphore.acquire(blocking=False)
+            if seen_available[name]:
+                limiter._semaphore.release()
+            return {"message": {"content": "ok"}}
+        return _probe
+
+    monkeypatch.setattr(limiter, "_semaphore", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(ollama_mod, "_ollama_chat", _make_probe("ollama"))
+    assert ollama_mod.OllamaProvider(model="m").complete("hi") == "ok"
+    assert seen_available["ollama"] is False
+
+    import types
+
+    def create(**kwargs):
+        seen_available["claude"] = limiter._semaphore.acquire(blocking=False)
+        if seen_available["claude"]:
+            limiter._semaphore.release()
+
+        class _TextBlock:
+            type = "text"
+            text = "ok"
+
+        class _Resp:
+            content = [_TextBlock()]
+
+        return _Resp()
+
+    fake_client = types.SimpleNamespace(messages=types.SimpleNamespace(create=create))
+    monkeypatch.setattr(claude_mod, "_get_anthropic", lambda: (lambda: fake_client))
+    assert claude_mod.ClaudeProvider(model="m").complete("hi") == "ok"
+    assert seen_available["claude"] is False

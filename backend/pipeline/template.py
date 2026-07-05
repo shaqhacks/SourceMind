@@ -15,6 +15,7 @@ PATH_TO_STAFF_TEMPLATE : str
 parse_quiz(body_md)         -> list[dict]
 parse_cards(body_md)        -> list[dict]
 count_words(body_md)        -> int
+count_words_total(body_md)  -> int
 count_worked_examples(body_md) -> int
 """
 
@@ -257,6 +258,20 @@ def count_words(body_md: str) -> int:
     """
     stripped = _strip_fenced_blocks(body_md)
     return len(stripped.split())
+
+
+def count_words_total(body_md: str) -> int:
+    """Count ALL words in *body_md* — nothing is stripped first.
+
+    Used to populate ``ChapterDraft.word_count`` so it stays comparable to
+    ``plan_item.target_words``, which plan.py computes from the RAW
+    (unstripped) source-page word count. Using the fenced-stripped
+    ``count_words`` there systematically undercounts chapters whose
+    worked-example code or quiz JSON live in fenced blocks (math/code
+    topics), triggering spurious repair rounds in validate()'s word-count
+    check.
+    """
+    return len(body_md.split())
 
 
 def count_worked_examples(body_md: str) -> int:

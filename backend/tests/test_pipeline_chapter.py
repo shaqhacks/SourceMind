@@ -275,3 +275,64 @@ def test_max_tokens_scales_with_target_words(plan_item, provider):
         provider=provider,
     )
     assert provider.last_max_tokens >= plan_item.target_words
+
+
+# ---------------------------------------------------------------------------
+# Bounded quiz-retry (empty ```quiz block -> one re-call, then degrade)
+# ---------------------------------------------------------------------------
+
+
+class QueuedProvider:
+    """Returns each response from *responses* in order; counts calls."""
+
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = list(responses)
+        self.calls = 0
+
+    def complete(self, prompt, *, system="", schema=None, max_tokens=4096):
+        self.calls += 1
+        return self._responses[self.calls - 1]
+
+
+NO_QUIZ_MD = """\
+> *A minimal chapter with no quiz block at all.*
+
+## Main Section
+
+Some prose here, but there is no ```quiz fenced block anywhere in this body.
+"""
+
+
+def test_generate_chapter_retries_once_when_quiz_missing(plan_item):
+    """First response has no quiz block; the retry's response does — the
+    retry's body (with its quiz) is used."""
+    provider = QueuedProvider([NO_QUIZ_MD, SAMPLE_CHAPTER_MD])
+
+    draft = generate_chapter(
+        plan_item=plan_item,
+        source_text="Python variables bind names to objects.",
+        image_urls=[],
+        provider=provider,
+    )
+
+    assert provider.calls == 2
+    assert len(draft.quiz) == 4  # from SAMPLE_CHAPTER_MD
+    assert draft.body_md == SAMPLE_CHAPTER_MD
+
+
+def test_generate_chapter_keeps_original_body_when_quiz_retry_also_fails(plan_item):
+    """Both the initial call and the retry omit the quiz block — bounded to
+    exactly one retry, and the ORIGINAL body/empty-quiz is kept (graceful
+    degradation), not the retry's (also broken) body."""
+    provider = QueuedProvider([NO_QUIZ_MD, NO_QUIZ_MD])
+
+    draft = generate_chapter(
+        plan_item=plan_item,
+        source_text="Python variables bind names to objects.",
+        image_urls=[],
+        provider=provider,
+    )
+
+    assert provider.calls == 2  # bounded — not retried again
+    assert draft.quiz == []
+    assert draft.body_md == NO_QUIZ_MD
