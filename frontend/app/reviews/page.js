@@ -25,12 +25,21 @@ function ReviewsInner() {
   const [grading, setGrading] = useState(false);
   const [error, setError] = useState(null);
   const [stats, setStats] = useState(null);
+  const [statsError, setStatsError] = useState(null);
 
   const isAllMode = !courseId; // "" → All subjects
 
-  // Load stats (non-critical — errors swallowed)
+  // Load stats. Non-blocking for the review session itself, but surface the
+  // failure when we have nothing to show rather than leaving the stats
+  // header silently empty.
   const loadStats = useCallback(() => {
-    library.reviewStats().then(setStats).catch(() => {});
+    library
+      .reviewStats()
+      .then((s) => {
+        setStats(s);
+        setStatsError(null);
+      })
+      .catch((err) => setStatsError(err.message || "Failed to load review stats."));
   }, []);
 
   // Load course list on mount; also load stats on mount
@@ -136,6 +145,10 @@ function ReviewsInner() {
       {/* ── Header + course picker ── */}
       <div style={{ marginBottom: 28 }}>
         <h2 style={{ margin: "0 0 16px" }}>Spaced Review</h2>
+
+        {/* Only show the stats-load error when we have nothing else to display —
+            a later background refresh failing shouldn't blank out working stats. */}
+        {!stats && statsError && <ErrorBanner error={statsError} />}
 
         {/* ── Stats header (non-null guard) ── */}
         {stats && (

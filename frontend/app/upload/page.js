@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { library } from "../lib/api";
+import { usePolling } from "../lib/usePolling";
 import { Badge, ErrorBanner, Panel } from "../components/ui";
 
 // ---------------------------------------------------------------------------
@@ -22,45 +23,28 @@ function LibraryUploadFlow() {
   const [sourceKind, setSourceKind] = useState("url");
   const [sourceValue, setSourceValue] = useState("");
   const [sourceTitle, setSourceTitle] = useState("");
-  const intervalRef = useRef(null);
 
-  // Clear polling on unmount
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, []);
-
-  function stopPolling() {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  }
-
-  /** Poll getCourse until status==="ready" or "ingest_failed". */
-  function startReadyPolling(id) {
-    stopPolling();
-    intervalRef.current = setInterval(async () => {
-      try {
-        const data = await library.getCourse(id);
-        setCourseData(data);
-        const s = data.course?.status;
-        if (s === "ready") {
-          stopPolling();
-          setStage("ready");
-          // Auto-redirect after a short pause so the user sees the success state
-          setTimeout(() => router.push(`/courses/${encodeURIComponent(id)}`), 1200);
-        } else if (s === "ingest_failed") {
-          stopPolling();
-          setLibError(data.course?.generation_last_error || "Ingestion failed.");
-          setStage("idle");
-        }
-      } catch {
-        // transient network error — keep polling
+  // Poll getCourse until status==="ready" or "ingest_failed".
+  usePolling(
+    async () => {
+      const data = await library.getCourse(courseId);
+      setCourseData(data);
+      const s = data.course?.status;
+      if (s === "ready") {
+        setStage("ready");
+        // Auto-redirect after a short pause so the user sees the success state
+        setTimeout(() => router.push(`/courses/${encodeURIComponent(courseId)}`), 1200);
+        return true;
       }
-    }, 1500);
-  }
+      if (s === "ingest_failed") {
+        setLibError(data.course?.generation_last_error || "Ingestion failed.");
+        setStage("idle");
+        return true;
+      }
+      return false;
+    },
+    { interval: 1500, enabled: stage === "ingesting" && !!courseId }
+  );
 
   async function handleUpload(e) {
     e.preventDefault();
@@ -73,11 +57,8 @@ function LibraryUploadFlow() {
       Array.from(libFiles || []).forEach((f) => form.append("files", f));
 
       const result = await library.uploadPdfs(form);
-      const id = result.course_id;
-      setCourseId(id);
-
+      setCourseId(result.course_id);
       setStage("ingesting");
-      startReadyPolling(id);
     } catch (err) {
       setLibError(err.message);
       setStage("idle");
@@ -99,11 +80,8 @@ function LibraryUploadFlow() {
         value: sourceValue.trim(),
         title: sourceTitle.trim(),
       });
-      const id = result.course_id;
-      setCourseId(id);
-
+      setCourseId(result.course_id);
       setStage("ingesting");
-      startReadyPolling(id);
     } catch (err) {
       setLibError(err.message);
       setStage("idle");

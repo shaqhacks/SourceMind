@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { library } from "../lib/api";
+import { usePolling } from "../lib/usePolling";
 
 const SEEN_KEY = "sourcemind:seen_ready";
 const POLL_MS = 10000;
@@ -64,61 +65,60 @@ export default function Notifications() {
   }, []);
 
   // Poll the backend on mount and every POLL_MS.
+  const cancelledRef = useRef(false);
   useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
-      let res;
-      try {
-        res = await library.notifications();
-      } catch {
-        return; // API unavailable — keep last known state, never throw
-      }
-      if (cancelled || !res) return;
-
-      const courses = Array.isArray(res.courses) ? res.courses : [];
-      const readyIds = courses.filter((c) => c && c.status === "ready").map((c) => c.id);
-
-      // Fire a browser notification for genuinely-new ready transitions.
-      try {
-        if (prevReadyRef.current === null) {
-          // First poll establishes the baseline — do not fire for pre-existing ready courses.
-          prevReadyRef.current = new Set(readyIds);
-          readyIds.forEach((id) => firedRef.current.add(id));
-        } else {
-          const prev = prevReadyRef.current;
-          const canNotify = "Notification" in window && Notification.permission === "granted";
-          for (const c of courses) {
-            if (!c || c.status !== "ready") continue;
-            if (prev.has(c.id) || firedRef.current.has(c.id)) continue;
-            firedRef.current.add(c.id); // at most once per newly-ready course
-            if (canNotify) {
-              try {
-                new Notification("SourceMind", { body: `‘${c.title || c.id}’ is ready to study` });
-              } catch {
-                // ignore notification construction errors
-              }
-            }
-          }
-          prevReadyRef.current = new Set(readyIds);
-        }
-      } catch {
-        // never let notification logic break polling
-      }
-
-      setData({
-        due_review_count: typeof res.due_review_count === "number" ? res.due_review_count : 0,
-        courses,
-      });
-    };
-
-    poll();
-    const timer = setInterval(poll, POLL_MS);
+    cancelledRef.current = false;
     return () => {
-      cancelled = true;
-      clearInterval(timer);
+      cancelledRef.current = true;
     };
   }, []);
+
+  const poll = useCallback(async () => {
+    let res;
+    try {
+      res = await library.notifications();
+    } catch {
+      return; // API unavailable — keep last known state, never throw
+    }
+    if (cancelledRef.current || !res) return;
+
+    const courses = Array.isArray(res.courses) ? res.courses : [];
+    const readyIds = courses.filter((c) => c && c.status === "ready").map((c) => c.id);
+
+    // Fire a browser notification for genuinely-new ready transitions.
+    try {
+      if (prevReadyRef.current === null) {
+        // First poll establishes the baseline — do not fire for pre-existing ready courses.
+        prevReadyRef.current = new Set(readyIds);
+        readyIds.forEach((id) => firedRef.current.add(id));
+      } else {
+        const prev = prevReadyRef.current;
+        const canNotify = "Notification" in window && Notification.permission === "granted";
+        for (const c of courses) {
+          if (!c || c.status !== "ready") continue;
+          if (prev.has(c.id) || firedRef.current.has(c.id)) continue;
+          firedRef.current.add(c.id); // at most once per newly-ready course
+          if (canNotify) {
+            try {
+              new Notification("SourceMind", { body: `‘${c.title || c.id}’ is ready to study` });
+            } catch {
+              // ignore notification construction errors
+            }
+          }
+        }
+        prevReadyRef.current = new Set(readyIds);
+      }
+    } catch {
+      // never let notification logic break polling
+    }
+
+    setData({
+      due_review_count: typeof res.due_review_count === "number" ? res.due_review_count : 0,
+      courses,
+    });
+  }, []);
+
+  usePolling(poll, { interval: POLL_MS, immediate: true });
 
   // Build the displayed notification list from current data.
   const notifications = useMemo(() => {
@@ -133,8 +133,6 @@ export default function Notifications() {
           href: `/courses/${encodeURIComponent(c.id)}`,
           isNew: !seen.includes(c.id),
         });
-      } else if (c.status === "needs_review") {
-        list.push({ key: `nr:${c.id}`, text: `‘${label}’ plan is ready to review`, href: "/upload" });
       } else if (c.status === "ingest_failed") {
         list.push({ key: `fail:${c.id}`, text: `‘${label}’ failed to import`, href: "/upload" });
       }

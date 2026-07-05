@@ -1,15 +1,5 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-export async function getText(path) {
-  const res = await fetch(`${API_URL}${path}`, { cache: "no-store" });
-  if (!res.ok) {
-    const err = new Error(res.statusText);
-    err.status = res.status;
-    throw err;
-  }
-  return res.text();
-}
-
 async function asJson(res) {
   const text = await res.text();
   const body = text ? JSON.parse(text) : null;
@@ -78,15 +68,6 @@ export const library = {
   // Delete a course and all its data
   deleteCourse: (id) => deleteJson(`/library/courses/${encodeURIComponent(id)}`),
 
-  // Get the course study plan
-  getPlan: (id) => getJson(`/library/courses/${encodeURIComponent(id)}/plan`),
-
-  // Approve the study plan
-  approvePlan: (id) => postJson(`/library/courses/${encodeURIComponent(id)}/plan/approve`, {}),
-
-  // Trigger content generation
-  generate: (id) => postJson(`/library/courses/${encodeURIComponent(id)}/generate`, {}),
-
   // Get a specific chapter
   getChapter: (id, sid) =>
     getJson(`/library/courses/${encodeURIComponent(id)}/chapters/${encodeURIComponent(sid)}`),
@@ -118,9 +99,6 @@ export const library = {
   // Returns the absolute URL for downloading the Anki TSV file (use as href)
   ankiTsvUrl: (id) => `${API_URL}/library/courses/${encodeURIComponent(id)}/anki.tsv`,
 
-  // Fetches the Anki TSV file content as text
-  getAnkiTsv: (id) => getText(`/library/courses/${encodeURIComponent(id)}/anki.tsv`),
-
   // Course-level grounded chat over all uploaded materials
   courseChat: (id, question) =>
     postJson(`/library/courses/${encodeURIComponent(id)}/chat`, { question }),
@@ -136,14 +114,6 @@ export const library = {
   // Get past section test attempts (newest first)
   sectionTestAttempts: (id, sid) =>
     getJson(`/library/courses/${encodeURIComponent(id)}/chapters/${encodeURIComponent(sid)}/test/attempts`),
-
-  // Submit a graded course-level test
-  submitCourseTest: (id, answers) =>
-    postJson(`/library/courses/${encodeURIComponent(id)}/test/submit`, { answers }),
-
-  // Get past course-level test attempts (newest first)
-  courseTestAttempts: (id) =>
-    getJson(`/library/courses/${encodeURIComponent(id)}/test/attempts`),
 
   // Lazily generate quiz + cards for a chapter; returns the updated chapter dict
   ensureStudy: (id, sid) =>

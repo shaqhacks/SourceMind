@@ -123,7 +123,7 @@ export default function Dashboard() {
       ) : (
         <div className="grid">
           {courses.map((c) => {
-            const courseId = c.id ?? c.course_id;
+            const courseId = c.id;
             const title = c.title || courseId;
             const status = c.status;
             const genStatus = c.generation_status;
