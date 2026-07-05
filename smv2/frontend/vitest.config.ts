@@ -17,6 +17,15 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // jsdom defaults to the opaque "about:blank" origin, which makes it
+    // throw `SecurityError: localStorage is not available for opaque
+    // origins` — several hooks here (useTheme, useTypographyPrefs) persist
+    // to localStorage, so tests need a real origin to run against.
+    environmentOptions: {
+      jsdom: {
+        url: "http://localhost/",
+      },
+    },
     setupFiles: ["./vitest.setup.ts"],
     globals: true,
   },

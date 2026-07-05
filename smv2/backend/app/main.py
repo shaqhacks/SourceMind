@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import api_version, cors_origins, worker_enabled
 from app.db.init import init_db
 from app.jobs.worker import reconcile_interrupted_jobs, worker_loop
-from app.routers import courses, health, jobs
+from app.routers import assets, courses, export, health, ingest, jobs, sections
 from app.services import jobs_service
 from app.services.backup_service import should_run_backup
 
@@ -53,6 +53,11 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(jobs.router)
     app.include_router(courses.router)
+    app.include_router(assets.router)
+    app.include_router(ingest.router)
+    app.include_router(sections.router)
+    app.include_router(sections.section_router)
+    app.include_router(export.router)
     return app
 
 

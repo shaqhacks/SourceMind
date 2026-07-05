@@ -1,0 +1,15 @@
+{
+  "first_40_lines": {
+    "section_0": "Prose page 1\n\n\nThis document has no embedded table of contents, so the\ningest pipeline must fall back to fixed page-window\nsectioning instead of bookmark-derived sections.\n\n\n\n\nProse page 2\n\n\nThis document has no embedded table of contents, so the\ningest pipeline must fall back to fixed page-window\nsectioning instead of bookmark-derived sections.\n\n\n\n\nProse page 3\n\n\nThis document has no embedded table of contents, so the\ningest pipeline must fall back to fixed page-window\nsectioning instead of bookmark-derived sections.\n\n\n\n\nProse page 4\n\n\nThis document has no embedded table of contents, so the\ningest pipeline must fall back to fixed page-window\nsectioning instead of bookmark-derived sections.\n\n\n\n"
+  },
+  "outline": {
+    "section_count": 1,
+    "sections": [
+      {
+        "page_end": 9,
+        "page_start": 0,
+        "title": "Pages 1–10"
+      }
+    ]
+  }
+}

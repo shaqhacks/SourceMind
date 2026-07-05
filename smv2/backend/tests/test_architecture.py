@@ -14,6 +14,7 @@ from pathlib import Path
 APP_ROOT = Path(__file__).resolve().parent.parent / "app"
 CONFIG_FILE = APP_ROOT / "config.py"
 ROUTERS_ROOT = APP_ROOT / "routers"
+PIPELINE_ROOT = APP_ROOT / "pipeline"
 _FORBIDDEN_ROUTER_IMPORT_PREFIXES = ("sqlalchemy", "app.db")
 
 
@@ -150,3 +151,23 @@ def test_derived_tables_registry_covers_all_fk_models() -> None:
 
     duplicated = {name for name in registered_tablenames if registered_tablenames.count(name) > 1}
     assert not duplicated, f"tables registered in more than one list: {duplicated}"
+
+
+def test_pipeline_stays_framework_free() -> None:
+    """app/pipeline/* must not import fastapi — ingest/outline/extraction
+    logic has to be testable and runnable with no web framework in play.
+    """
+    violations: dict[str, list[str]] = {}
+    for path in sorted(PIPELINE_ROOT.glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        found = [
+            f"line {lineno}: {name}"
+            for lineno, name in _imported_module_names(tree)
+            if name == "fastapi" or name.startswith("fastapi.")
+        ]
+        if found:
+            violations[str(path)] = found
+
+    assert not violations, f"app/pipeline/* must not import fastapi: {violations}"

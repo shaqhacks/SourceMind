@@ -1,26 +1,95 @@
 @import "tailwindcss";
 
+/*
+ * Tailwind's default `dark:` variant follows prefers-color-scheme only.
+ * This app supports a manual override (system/light/dark, see
+ * lib/hooks/useTheme.ts) applied as a `data-theme` attribute on <html> by
+ * an inline no-FOUC script in app/layout.tsx. Redefining the variant here
+ * means every existing `dark:` utility class in the app automatically
+ * respects the manual override with no per-component changes.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #1a1a1a;
+  --muted-foreground: #52525b;
+  --border: #e4e4e7;
+  --accent: #2563eb;
+
+  /* Reading-column typography defaults (WCAG AA target: 4.5:1+ for body
+     text). Overridden per-user as inline CSS vars by TypographyControls. */
+  --reading-font-size: 18px;
+  --reading-measure: 70ch;
+  --reading-line-height: 1.6;
+  --font-serif: Charter, Georgia, "Times New Roman", serif;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-serif);
 }
 
+/* Fallback for the brief window before JS runs (or if it's disabled):
+   CSS vars still track the OS preference via the media query. Once the
+   no-FOUC script runs, the attribute rules below (higher specificity)
+   take over and reflect the user's explicit choice. */
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
-    --foreground: #ededed;
+    --foreground: #f2f2f2;
+    --muted-foreground: #a1a1aa;
+    --border: #27272a;
+    --accent: #60a5fa;
   }
+}
+
+:root[data-theme="light"] {
+  --background: #ffffff;
+  --foreground: #1a1a1a;
+  --muted-foreground: #52525b;
+  --border: #e4e4e7;
+  --accent: #2563eb;
+}
+
+:root[data-theme="dark"] {
+  --background: #0a0a0a;
+  --foreground: #f2f2f2;
+  --muted-foreground: #a1a1aa;
+  --border: #27272a;
+  --accent: #60a5fa;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Consumes the --reading-* vars set inline by useTypographyPrefs
+   (lib/hooks/useTypographyPrefs.ts) on the reading column container. */
+.reading-column {
+  font-size: var(--reading-font-size);
+  line-height: var(--reading-line-height);
+}
+
+.reading-column .reading-measure {
+  max-width: var(--reading-measure);
 }

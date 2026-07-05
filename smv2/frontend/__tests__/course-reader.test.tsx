@@ -1,0 +1,335 @@
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import CourseReader from "@/components/reader/CourseReader";
+import { getSection, saveProgress } from "@/lib/api/client";
+import type { ReaderCourse, ReaderProgress } from "@/lib/reader/types";
+
+vi.mock("@/lib/api/client", () => ({
+  getSection: vi.fn(),
+  saveProgress: vi.fn(),
+}));
+
+const mockedGetSection = vi.mocked(getSection);
+const mockedSaveProgress = vi.mocked(saveProgress);
+
+// A small hand-rolled fixture rather than importing lib/reader/mockCourse:
+// that module is documented as page.tsx-only, and a minimal 3-section
+// fixture keeps these assertions about active-chapter bookkeeping
+// (not content) easy to follow.
+const COURSE: ReaderCourse = {
+  id: "course-1",
+  title: "Test Course",
+  sections: [
+    {
+      id: "sec-1",
+      title: "Chapter One",
+      order_index: 0,
+      page_start: 1,
+      page_end: 5,
+      lesson_status: "not_started",
+      has_content: true,
+      word_count: 100,
+    },
+    {
+      id: "sec-2",
+      title: "Chapter Two",
+      order_index: 1,
+      page_start: 6,
+      page_end: 10,
+      lesson_status: "not_started",
+      has_content: true,
+      word_count: 120,
+    },
+    {
+      id: "sec-3",
+      title: "Chapter Three",
+      order_index: 2,
+      page_start: 11,
+      page_end: 15,
+      lesson_status: "not_started",
+      has_content: true,
+      word_count: 90,
+    },
+  ],
+};
+
+const BODIES: Record<string, string> = {
+  "sec-1": "# Chapter One\n\nFirst body.",
+  "sec-2": "# Chapter Two\n\nSecond body.",
+  "sec-3": "# Chapter Three\n\nThird body.",
+};
+
+const NO_PROGRESS: ReaderProgress = { section_id: null, scroll_pos: 0 };
+
+describe("CourseReader", () => {
+  beforeEach(() => {
+    mockedGetSection.mockImplementation((id: string) => {
+      const section = COURSE.sections.find((candidate) => candidate.id === id);
+      if (!section) return Promise.resolve({ status: 404, ok: false });
+      return Promise.resolve({
+        status: 200,
+        ok: true,
+        data: {
+          id: section.id,
+          course_id: COURSE.id,
+          title: section.title,
+          order_index: section.order_index,
+          page_start: section.page_start,
+          page_end: section.page_end,
+          body_md: BODIES[id],
+          content_hash: "hash",
+          lesson_md: null,
+          lesson_status: section.lesson_status,
+          extractor_version: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      });
+    });
+    mockedSaveProgress.mockResolvedValue({ status: 200, ok: true });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("starts on the first chapter with focus on its heading", async () => {
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+
+    expect(screen.getByRole("button", { name: /chapter one/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("heading", { level: 2, name: /chapter one/i })).toHaveFocus();
+
+    await screen.findByText(/first body/i);
+  });
+
+  it("moves to the next chapter on ArrowRight and focuses its heading", async () => {
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    await user.keyboard("{ArrowRight}");
+
+    expect(screen.getByRole("button", { name: /chapter two/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("heading", { level: 2, name: /chapter two/i })).toHaveFocus();
+  });
+
+  it("moves forward with 'j' and back with 'k'", async () => {
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    await user.keyboard("j");
+    await user.keyboard("j");
+    expect(screen.getByRole("button", { name: /chapter three/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+
+    await user.keyboard("k");
+    expect(screen.getByRole("button", { name: /chapter two/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
+  it("clamps at the first and last chapters instead of wrapping", async () => {
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    await user.keyboard("k"); // already first chapter — no-op
+    expect(screen.getByRole("button", { name: /chapter one/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+
+    await user.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}"); // only 2 hops available
+    expect(screen.getByRole("button", { name: /chapter three/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
+  it("selecting a chapter from the sidebar makes it active and focuses its heading", async () => {
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    await user.click(screen.getByRole("button", { name: /chapter three/i }));
+
+    expect(screen.getByRole("heading", { level: 2, name: /chapter three/i })).toHaveFocus();
+  });
+
+  it("opens the shortcuts overlay with '?' and suppresses chapter navigation while it's open", async () => {
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    await user.keyboard("?");
+    expect(screen.getByRole("dialog", { name: /keyboard shortcuts/i })).toBeInTheDocument();
+
+    // The overlay's own "escape" scope sits on top of the reader's
+    // shortcut scope while open, so arrow/j/k must not navigate chapters.
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("button", { name: /chapter one/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("toggles between source and lesson view with 's'", async () => {
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+
+    // Wait for the lazy body fetch to resolve first — its own "Loading
+    // chapter…" state uses role="status" too, which would otherwise
+    // collide with the "not in the document yet" assertion below.
+    await screen.findByText(/first body/i);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    await user.keyboard("s");
+
+    expect(screen.getByRole("status")).toHaveTextContent(/no lesson yet/i);
+  });
+
+  it("applies typography prefs to the reading column as CSS custom properties, live", async () => {
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    const column = screen.getByTestId("reading-column");
+    // Defaults from useTypographyPrefs, applied with no user interaction.
+    expect(column.style.getPropertyValue("--reading-font-size")).toBe("18px");
+    expect(column.style.getPropertyValue("--reading-measure")).toBe("70ch");
+    expect(column.style.getPropertyValue("--reading-line-height")).toBe("1.6");
+
+    await user.click(screen.getByRole("button", { name: /typography settings/i }));
+    fireEvent.change(screen.getByRole("slider", { name: /font size/i }), {
+      target: { value: "22" },
+    });
+
+    // TypographyControls and ReadingColumn share the same
+    // useSyncExternalStore-backed store, so the change is reflected
+    // without any prop drilling or remount.
+    expect(column.style.getPropertyValue("--reading-font-size")).toBe("22px");
+  });
+
+  describe("resume", () => {
+    it("starts on the saved section instead of the first one", async () => {
+      render(
+        <CourseReader
+          course={COURSE}
+          initialProgress={{ section_id: "sec-2", scroll_pos: 0 }}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: /chapter two/i })).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      await screen.findByText(/second body/i);
+    });
+
+    it("falls back to the first chapter when the saved section no longer exists", async () => {
+      render(
+        <CourseReader
+          course={COURSE}
+          initialProgress={{ section_id: "sec-deleted", scroll_pos: 0.5 }}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: /chapter one/i })).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+    });
+
+    it("jumps to the saved scroll position once the resumed chapter's body has loaded, without animating", async () => {
+      render(
+        <CourseReader
+          course={COURSE}
+          initialProgress={{ section_id: "sec-2", scroll_pos: 0.6 }}
+        />,
+      );
+
+      const column = screen.getByTestId("reading-column");
+      Object.defineProperty(column, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(column, "clientHeight", { value: 500, configurable: true });
+
+      await screen.findByText(/second body/i);
+
+      // scrollable = 1000 - 500 = 500; 60% of that = 300.
+      expect(column.scrollTop).toBe(300);
+    });
+  });
+
+  describe("progress sync", () => {
+    it("does not re-save progress for the section it resumed into on mount", async () => {
+      render(
+        <CourseReader
+          course={COURSE}
+          initialProgress={{ section_id: "sec-2", scroll_pos: 0.6 }}
+        />,
+      );
+      await screen.findByText(/second body/i);
+
+      expect(mockedSaveProgress).not.toHaveBeenCalled();
+    });
+
+    it("saves progress immediately (scroll_pos 0) when the active chapter changes", async () => {
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.keyboard("{ArrowRight}");
+
+      expect(mockedSaveProgress).toHaveBeenCalledWith("course-1", {
+        section_id: "sec-2",
+        scroll_pos: 0,
+      });
+    });
+
+    it("saves progress on scroll, debounced by about a second", async () => {
+      vi.useFakeTimers();
+
+      await act(async () => {
+        render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      });
+
+      const column = screen.getByTestId("reading-column");
+      Object.defineProperty(column, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(column, "clientHeight", { value: 500, configurable: true });
+      column.scrollTop = 250;
+
+      act(() => {
+        fireEvent.scroll(column);
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(999);
+      });
+      expect(mockedSaveProgress).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(mockedSaveProgress).toHaveBeenCalledWith("course-1", {
+        section_id: "sec-1",
+        scroll_pos: 0.5,
+      });
+    });
+  });
+});

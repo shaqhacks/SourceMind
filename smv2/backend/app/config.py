@@ -59,3 +59,19 @@ def backup_retention() -> int:
         return int(raw)
     except ValueError:
         return 7
+
+
+def max_upload_bytes() -> int:
+    raw = os.environ.get("SMV2_MAX_UPLOAD_BYTES", str(200 * 1024 * 1024))
+    try:
+        return int(raw)
+    except ValueError:
+        return 200 * 1024 * 1024
+
+
+def pages_per_window() -> int:
+    raw = os.environ.get("SMV2_PAGES_PER_WINDOW", "12")
+    try:
+        return int(raw)
+    except ValueError:
+        return 12

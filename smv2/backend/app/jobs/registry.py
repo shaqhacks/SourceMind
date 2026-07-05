@@ -15,7 +15,8 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Job
+from app.db.models import Course, Job
+from app.pipeline.ingest import run_ingest
 from app.services.backup_service import run_backup
 
 JobHandler = Callable[[Session, Job], dict[str, Any]]
@@ -33,9 +34,18 @@ def _backup_handler(session: Session, job: Job) -> dict[str, Any]:
     return {"path": str(path)}
 
 
+def _ingest_handler(session: Session, job: Job) -> dict[str, Any]:
+    course_id = (job.payload or {}).get("course_id")
+    if not course_id:
+        raise ValueError("ingest job payload missing course_id")
+    run_ingest(session, job, course_id)
+    return {"course_id": course_id}
+
+
 JOB_HANDLERS: dict[str, JobHandler] = {
     "noop": _noop_handler,
     "backup": _backup_handler,
+    "ingest": _ingest_handler,
 }
 
 
@@ -50,6 +60,27 @@ def default_on_orphan(session: Session, job: Job) -> None:
         job.error = "orphaned by restart"
 
 
+def _ingest_on_orphan(session: Session, job: Job) -> None:
+    """Ingest is idempotent (content-addressed section ids make re-running it
+    against the same course produce the same result), so requeuing is safe.
+    Also keeps course.status in sync so the UI doesn't show a stale
+    'ready'/'ingest_failed' while the job is actually still in flight or has
+    been given up on for good.
+    """
+    default_on_orphan(session, job)
+    course_id = (job.payload or {}).get("course_id")
+    if not course_id:
+        return
+    course = session.get(Course, course_id)
+    if course is None:
+        return
+    if job.status == "queued":
+        course.status = "ingesting"
+    elif job.status == "failed":
+        course.status = "ingest_failed"
+
+
 ON_ORPHAN_HOOKS: dict[str, OrphanHook] = {
     "noop": default_on_orphan,
+    "ingest": _ingest_on_orphan,
 }

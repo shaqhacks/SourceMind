@@ -21,10 +21,10 @@ def list_courses() -> list[CourseOut]:
 
 @router.get("/{course_id}", operation_id="get_course", response_model=CourseOut)
 def get_course(course_id: str) -> CourseOut:
-    course = courses_service.get_course(course_id)
-    if course is None:
+    detail = courses_service.get_course_detail(course_id)
+    if detail is None:
         raise HTTPException(status_code=404, detail="course not found")
-    return CourseOut.model_validate(course)
+    return CourseOut.model_validate(detail)
 
 
 @router.delete("/{course_id}", operation_id="delete_course", status_code=204)

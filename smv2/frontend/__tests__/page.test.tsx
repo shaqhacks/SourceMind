@@ -1,216 +1,198 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "@/app/page";
 import {
-  createCourse,
-  createJob,
   deleteCourse,
-  getHealth,
-  getJob,
+  findActiveIngestJob,
+  findLatestIngestJob,
+  listAssets,
   listCourses,
-  listJobs,
+  listSections,
   type CourseOut,
-  type JobOut,
 } from "@/lib/api/client";
 
-import { FakeEventSource } from "./support/fake-event-source";
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
 
 vi.mock("@/lib/api/client", () => ({
   API_BASE: "http://localhost:8000",
-  getHealth: vi.fn(),
-  listJobs: vi.fn(),
-  createJob: vi.fn(),
-  getJob: vi.fn(),
+  TERMINAL_JOB_STATUSES: new Set(["succeeded", "failed"]),
   listCourses: vi.fn(),
-  createCourse: vi.fn(),
   deleteCourse: vi.fn(),
+  exportCourseUrl: (courseId: string) => `http://localhost:8000/api/courses/${courseId}/export`,
+  findActiveIngestJob: vi.fn(),
+  findLatestIngestJob: vi.fn(),
+  listAssets: vi.fn(),
+  startIngest: vi.fn(),
+  listSections: vi.fn(),
+  createCourse: vi.fn(),
+  uploadAsset: vi.fn(),
+  editOutline: vi.fn(),
+  getJob: vi.fn(),
 }));
 
-const mockedGetHealth = vi.mocked(getHealth);
-const mockedListJobs = vi.mocked(listJobs);
-const mockedCreateJob = vi.mocked(createJob);
-const mockedGetJob = vi.mocked(getJob);
 const mockedListCourses = vi.mocked(listCourses);
-const mockedCreateCourse = vi.mocked(createCourse);
 const mockedDeleteCourse = vi.mocked(deleteCourse);
-
-function makeJob(overrides: Partial<JobOut> = {}): JobOut {
-  return {
-    id: "job-1",
-    type: "noop",
-    status: "queued",
-    payload: null,
-    result: null,
-    progress: null,
-    error: null,
-    attempts: 0,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    ...overrides,
-  };
-}
+const mockedFindActiveIngestJob = vi.mocked(findActiveIngestJob);
+const mockedFindLatestIngestJob = vi.mocked(findLatestIngestJob);
+const mockedListAssets = vi.mocked(listAssets);
+const mockedListSections = vi.mocked(listSections);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
     id: "course-1",
-    title: "Intro to Testing",
-    status: "draft",
+    title: "Distributed Systems",
+    status: "ready",
+    section_count: 4,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
+    progress: null,
     ...overrides,
   };
 }
 
-let originalEventSource: typeof EventSource;
+function pdfFile(name: string): File {
+  return new File(["%PDF-1.4 fake"], name, { type: "application/pdf" });
+}
 
 describe("Home page", () => {
   beforeEach(() => {
-    originalEventSource = globalThis.EventSource;
-    FakeEventSource.instances = [];
-    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-
-    mockedGetHealth.mockResolvedValue({ data: { status: "ok", version: "0.1.0" }, status: 200, ok: true });
-    mockedListJobs.mockResolvedValue({ data: [], status: 200, ok: true });
-    mockedListCourses.mockResolvedValue({ data: [], status: 200, ok: true });
+    mockedFindActiveIngestJob.mockResolvedValue(null);
+    mockedFindLatestIngestJob.mockResolvedValue(null);
+    mockedListAssets.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedDeleteCourse.mockResolvedValue({ status: 200, ok: true });
+    mockedListSections.mockResolvedValue({ status: 200, ok: true, data: [] });
   });
 
   afterEach(() => {
-    globalThis.EventSource = originalEventSource;
     vi.clearAllMocks();
   });
 
-  it("shows the API ok state once the health check resolves", async () => {
+  it("shows the empty-state hero when there are no courses", async () => {
+    mockedListCourses.mockResolvedValue({ status: 200, ok: true, data: [] });
     render(<Home />);
 
-    const status = await screen.findByTestId("health-ok");
-    expect(status).toHaveTextContent("API: ok");
-    expect(status).toHaveTextContent("v0.1.0");
+    expect(await screen.findByText(/drop a pdf anywhere to start/i)).toBeInTheDocument();
   });
 
-  it("shows a retryable error banner when the health check fails", async () => {
-    mockedGetHealth.mockResolvedValue({ error: new Error("boom"), ok: false });
+  it("shows a retryable error banner when loading courses fails", async () => {
+    mockedListCourses.mockResolvedValue({ status: 500, ok: false });
     render(<Home />);
 
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/could not reach the api/i);
-    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+    expect(banner).toHaveTextContent(/loading courses failed/i);
+
+    mockedListCourses.mockResolvedValue({ status: 200, ok: true, data: [] });
+    await userEvent.setup().click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(await screen.findByText(/drop a pdf anywhere to start/i)).toBeInTheDocument();
   });
 
-  it("creates a job and reflects live SSE status/progress updates, refreshing the list on completion", async () => {
-    const queuedJob = makeJob({ status: "queued" });
-    mockedCreateJob.mockResolvedValue({ data: queuedJob, status: 202, ok: true });
-
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByTestId("health-ok");
-
-    await user.click(screen.getByRole("button", { name: /run no-op job/i }));
-    await waitFor(() => expect(mockedCreateJob).toHaveBeenCalledWith({ type: "noop" }));
-    expect(screen.getByTestId("current-job")).toHaveTextContent("queued");
-
-    const source = FakeEventSource.instances[0];
-    expect(source.url).toContain("/api/jobs/job-1/events");
-
-    act(() => {
-      source.emit("update", {
-        id: "job-1",
-        status: "running",
-        progress: { stage: "working", pct: 50, message: "halfway there" },
-      });
+  it("renders a course card for each course", async () => {
+    mockedListCourses.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [
+        makeCourse({ id: "a", title: "Distributed Systems" }),
+        makeCourse({ id: "b", title: "Compilers", status: "draft" }),
+      ],
     });
-    expect(screen.getByTestId("current-job")).toHaveTextContent("running");
-    expect(screen.getByTestId("current-job")).toHaveTextContent("working");
-    expect(screen.getByTestId("current-job")).toHaveTextContent("halfway there");
+    render(<Home />);
 
-    const succeededJob = makeJob({ status: "succeeded" });
-    mockedListJobs.mockResolvedValue({ data: [succeededJob], status: 200, ok: true });
+    expect(await screen.findByText("Distributed Systems")).toBeInTheDocument();
+    expect(screen.getByText("Compilers")).toBeInTheDocument();
+    expect(screen.getByText("Draft")).toBeInTheDocument();
+  });
 
-    act(() => {
-      source.emit("update", { id: "job-1", status: "succeeded", progress: null });
+  it("shows the Continue card for the course with the most recent progress, ahead of the course grid", async () => {
+    mockedListCourses.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [
+        makeCourse({
+          id: "a",
+          title: "Older Progress",
+          progress: { section_id: "sec-1", scroll_pos: 0.1, updated_at: "2026-01-01T00:00:00Z" },
+        }),
+        makeCourse({
+          id: "b",
+          title: "Newer Progress",
+          progress: { section_id: "sec-1", scroll_pos: 0.9, updated_at: "2026-01-10T00:00:00Z" },
+        }),
+      ],
     });
+    render(<Home />);
 
-    expect(screen.getByTestId("current-job")).toHaveTextContent("succeeded");
-    expect(source.closed).toBe(true);
-    // Mount + right after createJob (shows "queued" immediately) + the
-    // terminal-event refresh.
-    await waitFor(() => expect(mockedListJobs).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText(/continue reading/i)).toBeInTheDocument();
+    // The Continue card's course title appears twice (once in the card,
+    // once in the grid below) — assert at least one is the right course.
+    expect(screen.getAllByText("Newer Progress").length).toBeGreaterThan(0);
   });
 
-  it("falls back to a one-shot GET (not a reconnect) when the SSE stream errors", async () => {
-    const queuedJob = makeJob({ status: "queued" });
-    mockedCreateJob.mockResolvedValue({ data: queuedJob, status: 202, ok: true });
-    const refreshedJob = makeJob({ status: "running" });
-    mockedGetJob.mockResolvedValue({ data: refreshedJob, status: 200, ok: true });
-
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByTestId("health-ok");
-    await user.click(screen.getByRole("button", { name: /run no-op job/i }));
-    await waitFor(() => expect(screen.getByTestId("current-job")).toHaveTextContent("queued"));
-
-    const source = FakeEventSource.instances[0];
-    act(() => {
-      source.emitError();
+  it("shows no Continue card when no course has saved progress", async () => {
+    mockedListCourses.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [makeCourse({ id: "a", progress: null })],
     });
+    render(<Home />);
 
-    const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/lost connection to the job stream/i);
-
-    await user.click(screen.getByRole("button", { name: /retry/i }));
-
-    await waitFor(() => expect(mockedGetJob).toHaveBeenCalledWith("job-1"));
-    await waitFor(() => expect(screen.getByTestId("current-job")).toHaveTextContent("running"));
-    // No reconnect attempt — still the one EventSource from job creation.
-    expect(FakeEventSource.instances).toHaveLength(1);
+    await screen.findByText("Distributed Systems");
+    expect(screen.queryByText(/continue reading/i)).not.toBeInTheDocument();
   });
 
-  it("creates a course through the form and lists it", async () => {
-    const course = makeCourse({ title: "New Course" });
-    mockedCreateCourse.mockResolvedValue({ data: course, status: 201, ok: true });
-
+  it("deleting a course via its card removes it from the grid", async () => {
+    mockedListCourses.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [makeCourse({ id: "a", title: "Distributed Systems" })],
+    });
     const user = userEvent.setup();
     render(<Home />);
-    await screen.findByTestId("health-ok");
 
-    mockedListCourses.mockResolvedValue({ data: [course], status: 200, ok: true });
+    await screen.findByText("Distributed Systems");
+    await user.click(screen.getByRole("button", { name: /^delete$/i }));
+    await user.click(screen.getByRole("button", { name: /confirm/i }));
 
-    await user.type(screen.getByLabelText(/course title/i), "New Course");
-    await user.click(screen.getByRole("button", { name: /create course/i }));
-
-    await waitFor(() => expect(mockedCreateCourse).toHaveBeenCalledWith({ title: "New Course" }));
-    expect(await screen.findByText("New Course")).toBeInTheDocument();
+    expect(mockedDeleteCourse).toHaveBeenCalledWith("a");
+    await waitFor(() => expect(screen.queryByText("Distributed Systems")).not.toBeInTheDocument());
   });
 
-  it("deletes a course and removes it from the list", async () => {
-    const course = makeCourse();
-    mockedListCourses.mockResolvedValueOnce({ data: [course], status: 200, ok: true });
-    mockedDeleteCourse.mockResolvedValue({ status: 204, ok: true });
-
-    const user = userEvent.setup();
+  it("opens the upload flow after choosing files via the Upload PDF button", async () => {
+    mockedListCourses.mockResolvedValue({ status: 200, ok: true, data: [] });
     render(<Home />);
-    await screen.findByText(course.title);
+    await screen.findByText(/drop a pdf anywhere to start/i);
 
-    mockedListCourses.mockResolvedValue({ data: [], status: 200, ok: true });
-    await user.click(screen.getByRole("button", { name: /delete/i }));
+    const input = screen.getByLabelText(/upload pdf/i) as HTMLInputElement;
+    await userEvent.setup().upload(input, pdfFile("book.pdf"));
 
-    await waitFor(() => expect(mockedDeleteCourse).toHaveBeenCalledWith(course.id));
-    await waitFor(() => expect(screen.queryByText(course.title)).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog", { name: /upload course/i })).toBeInTheDocument();
   });
 
-  it("shows a non-retryable error banner when course creation is rejected", async () => {
-    mockedCreateCourse.mockResolvedValue({ error: new Error("bad title"), status: 422, ok: false });
+  it("opens the upload flow when PDFs are dropped anywhere on the dashboard", async () => {
+    mockedListCourses.mockResolvedValue({ status: 200, ok: true, data: [] });
+    const { container } = render(<Home />);
+    await screen.findByText(/drop a pdf anywhere to start/i);
 
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByTestId("health-ok");
+    const dropTarget = container.firstChild as HTMLElement;
+    const file = pdfFile("dropped.pdf");
+    fireEvent.drop(dropTarget, { dataTransfer: { files: [file], types: ["Files"] } });
 
-    await user.type(screen.getByLabelText(/course title/i), "x");
-    await user.click(screen.getByRole("button", { name: /create course/i }));
+    expect(await screen.findByRole("dialog", { name: /upload course/i })).toBeInTheDocument();
+  });
 
-    const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/creating course failed/i);
-    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+  it("ignores non-PDF files dropped on the dashboard", async () => {
+    mockedListCourses.mockResolvedValue({ status: 200, ok: true, data: [] });
+    const { container } = render(<Home />);
+    await screen.findByText(/drop a pdf anywhere to start/i);
+
+    const dropTarget = container.firstChild as HTMLElement;
+    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+    fireEvent.drop(dropTarget, { dataTransfer: { files: [file], types: ["Files"] } });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

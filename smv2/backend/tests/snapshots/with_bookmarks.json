@@ -1,0 +1,27 @@
+{
+  "first_40_lines": {
+    "section_0": "Chapter 1: Foundations\nPage 1 of the fixture document.\n\n\nThis is deterministic fixture text used for golden-snapshot\ntesting of the zero-LLM ingest pipeline. Lorem ipsum dolor\nsit amet, consectetur adipiscing elit, sed do eiusmod tempor\nincididunt ut labore et dolore magna aliqua.\n\n\n\n\nChapter 1: Foundations\nPage 2 of the fixture document.\n\n\nThis is deterministic fixture text used for golden-snapshot\ntesting of the zero-LLM ingest pipeline. Lorem ipsum dolor\nsit amet, consectetur adipiscing elit, sed do eiusmod tempor\nincididunt ut labore et dolore magna aliqua.\n\n\n\n\nChapter 1: Foundations\nPage 3 of the fixture document.\n\n\nThis is deterministic fixture text used for golden-snapshot\ntesting of the zero-LLM ingest pipeline. Lorem ipsum dolor\nsit amet, consectetur adipiscing elit, sed do eiusmod tempor\nincididunt ut labore et dolore magna aliqua.\n\n\n\n\nChapter 1: Foundations\nPage 4 of the fixture document.\n\n",
+    "section_1": "Chapter 2: Structures\nPage 5 of the fixture document.\n\n\nThis is deterministic fixture text used for golden-snapshot\ntesting of the zero-LLM ingest pipeline. Lorem ipsum dolor\nsit amet, consectetur adipiscing elit, sed do eiusmod tempor\nincididunt ut labore et dolore magna aliqua.\n\n\n\n\nChapter 2: Structures\nPage 6 of the fixture document.\n\n\nThis is deterministic fixture text used for golden-snapshot\ntesting of the zero-LLM ingest pipeline. Lorem ipsum dolor\nsit amet, consectetur adipiscing elit, sed do eiusmod tempor\nincididunt ut labore et dolore magna aliqua.\n\n\n\n\nChapter 2: Structures\nPage 7 of the fixture document.\n\n\nThis is deterministic fixture text used for golden-snapshot\ntesting of the zero-LLM ingest pipeline. Lorem ipsum dolor\nsit amet, consectetur adipiscing elit, sed do eiusmod tempor\nincididunt ut labore et dolore magna aliqua.\n\n\n\n\nChapter 2: Structures\nPage 8 of the fixture document.\n\n",
+    "section_2": "Chapter 3: Applications\nPage 9 of the fixture document.\n\n\nThis is deterministic fixture text used for golden-snapshot\ntesting of the zero-LLM ingest pipeline. Lorem ipsum dolor\nsit amet, consectetur adipiscing elit, sed do eiusmod tempor\nincididunt ut labore et dolore magna aliqua.\n\n\n\n\nChapter 3: Applications\nPage 10 of the fixture document.\n\n\nThis is deterministic fixture text used for golden-snapshot\ntesting of the zero-LLM ingest pipeline. Lorem ipsum dolor\nsit amet, consectetur adipiscing elit, sed do eiusmod tempor\nincididunt ut labore et dolore magna aliqua.\n\n\n\n\nChapter 3: Applications\nPage 11 of the fixture document.\n\n\nThis is deterministic fixture text used for golden-snapshot\ntesting of the zero-LLM ingest pipeline. Lorem ipsum dolor\nsit amet, consectetur adipiscing elit, sed do eiusmod tempor\nincididunt ut labore et dolore magna aliqua.\n\n\n\n\nChapter 3: Applications\nPage 12 of the fixture document.\n\n"
+  },
+  "outline": {
+    "section_count": 3,
+    "sections": [
+      {
+        "page_end": 3,
+        "page_start": 0,
+        "title": "Chapter 1: Foundations"
+      },
+      {
+        "page_end": 7,
+        "page_start": 4,
+        "title": "Chapter 2: Structures"
+      },
+      {
+        "page_end": 11,
+        "page_start": 8,
+        "title": "Chapter 3: Applications"
+      }
+    ]
+  }
+}
