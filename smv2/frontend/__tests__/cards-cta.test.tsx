@@ -1,0 +1,144 @@
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import CardsCTA from "@/components/reader/CardsCTA";
+import {
+  findActiveCardsJob,
+  generateCards,
+  listCards,
+  type CardOut,
+  type JobOut,
+} from "@/lib/api/client";
+
+import { FakeEventSource } from "./support/fake-event-source";
+
+vi.mock("@/lib/api/client", () => ({
+  API_BASE: "http://localhost:8000",
+  TERMINAL_JOB_STATUSES: new Set(["succeeded", "failed"]),
+  listCards: vi.fn(),
+  generateCards: vi.fn(),
+  findActiveCardsJob: vi.fn(),
+}));
+
+const mockedListCards = vi.mocked(listCards);
+const mockedGenerateCards = vi.mocked(generateCards);
+const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
+
+function makeCard(overrides: Partial<CardOut> = {}): CardOut {
+  return {
+    id: "card-1",
+    section_id: "sec-1",
+    front_md: "Front",
+    back_md: "Back",
+    position: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeJob(overrides: Partial<JobOut> = {}): JobOut {
+  return {
+    id: "job-1",
+    type: "generate_cards",
+    status: "running",
+    payload: { section_id: "sec-1" },
+    result: null,
+    progress: null,
+    error: null,
+    attempts: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("CardsCTA", () => {
+  let originalEventSource: typeof EventSource;
+
+  beforeEach(() => {
+    originalEventSource = globalThis.EventSource;
+    FakeEventSource.instances = [];
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    mockedFindActiveCardsJob.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    globalThis.EventSource = originalEventSource;
+  });
+
+  it("shows 'Generate flashcards' with no count when the section has no cards yet", async () => {
+    mockedListCards.mockResolvedValue({ status: 200, ok: true, data: [] });
+
+    render(<CardsCTA sectionId="sec-1" />);
+
+    expect(await screen.findByRole("button", { name: /generate flashcards/i })).toBeInTheDocument();
+    expect(screen.queryByText(/flashcard/i, { selector: "span" })).not.toBeInTheDocument();
+  });
+
+  it("shows the card count and 'Generate more flashcards' when cards already exist", async () => {
+    mockedListCards.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [makeCard({ id: "c1" }), makeCard({ id: "c2" })],
+    });
+
+    render(<CardsCTA sectionId="sec-1" />);
+
+    expect(await screen.findByText("2 flashcards")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /generate more flashcards/i })).toBeInTheDocument();
+  });
+
+  it("clicking Generate flashcards starts the job and renders live SSE progress, then refetches on settle", async () => {
+    mockedListCards
+      .mockResolvedValueOnce({ status: 200, ok: true, data: [] })
+      .mockResolvedValueOnce({ status: 200, ok: true, data: [makeCard()] });
+    mockedGenerateCards.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-1" } });
+
+    const user = userEvent.setup();
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate flashcards/i }));
+    expect(mockedGenerateCards).toHaveBeenCalledWith("sec-1");
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-1",
+        status: "succeeded",
+        progress: { stage: "done", pct: 100, message: "done" },
+      });
+    });
+
+    expect(await screen.findByText("1 flashcard")).toBeInTheDocument();
+  });
+
+  it("rediscovers an in-flight job on mount and shows the generating state without a click", async () => {
+    mockedListCards.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedFindActiveCardsJob.mockResolvedValue(makeJob({ id: "job-existing" }));
+
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: /generate flashcards/i })).not.toBeInTheDocument();
+  });
+
+  it("resyncs to the in-flight job instead of erroring on a 409", async () => {
+    mockedListCards.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedFindActiveCardsJob
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(makeJob({ id: "job-conflict" }));
+    mockedGenerateCards.mockResolvedValue({ status: 409, ok: false });
+
+    const user = userEvent.setup();
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate flashcards/i }));
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    expect(screen.queryByText(/failed/i)).not.toBeInTheDocument();
+  });
+});

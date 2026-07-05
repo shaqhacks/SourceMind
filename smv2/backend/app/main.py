@@ -12,7 +12,21 @@ from app.config import api_version, cors_origins, worker_enabled
 from app.db.init import init_db
 from app.jobs.worker import reconcile_interrupted_jobs, worker_loop
 from app.llm.limiter import LLMBusyError
-from app.routers import assets, courses, export, health, ingest, jobs, lessons, llm_usage, sections
+from app.routers import (
+    assets,
+    cards,
+    chat,
+    courses,
+    export,
+    health,
+    ingest,
+    jobs,
+    lessons,
+    llm_usage,
+    review,
+    sections,
+    tests,
+)
 from app.services import jobs_service
 from app.services.backup_service import should_run_backup
 
@@ -62,6 +76,10 @@ def create_app() -> FastAPI:
     app.include_router(export.router)
     app.include_router(lessons.router)
     app.include_router(llm_usage.router)
+    app.include_router(cards.router)
+    app.include_router(review.router)
+    app.include_router(tests.router)
+    app.include_router(chat.router)
 
     @app.exception_handler(LLMBusyError)
     async def llm_busy_handler(request: Request, exc: LLMBusyError) -> JSONResponse:

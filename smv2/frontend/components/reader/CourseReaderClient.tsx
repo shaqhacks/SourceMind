@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import { getCourse, getProgress, listSections, type ProgressOut } from "@/lib/api/client";
@@ -84,6 +85,11 @@ async function fetchReaderData(courseId: string): Promise<LoadState> {
  */
 export default function CourseReaderClient({ courseId }: CourseReaderClientProps) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  // A citation click (or any other deep link) navigates to
+  // ?section=<id> — takes priority over resume progress, landing at the
+  // top of that section (scroll_pos 0), since "jump to what I clicked" is
+  // a different intent than "continue reading where I left off".
+  const sectionOverride = useSearchParams().get("section");
 
   // Retry-button callback: no unmount guard needed, it only ever runs from
   // a user click on an already-mounted ErrorBanner.
@@ -139,5 +145,9 @@ export default function CourseReaderClient({ courseId }: CourseReaderClientProps
     );
   }
 
-  return <CourseReader course={state.course} initialProgress={state.progress} />;
+  const effectiveProgress = sectionOverride
+    ? { section_id: sectionOverride, scroll_pos: 0 }
+    : state.progress;
+
+  return <CourseReader course={state.course} initialProgress={effectiveProgress} />;
 }

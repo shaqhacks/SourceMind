@@ -89,9 +89,33 @@ def test_get_provider_rejects_unknown_backend(client, monkeypatch):
         get_provider()
 
 
-def test_embed_is_a_working_placeholder(client, stub_provider):
-    result = stub_provider.embed(["a", "b", "c"])
+def test_embed_base_class_default_is_none_per_text(client):
+    """A provider that doesn't override _embed_impl at all (the base
+    class's own default) returns None per text — this is what
+    AnthropicProvider would fall back to if it didn't explicitly raise
+    NotSupportedError instead (see test_anthropic_provider_embed_raises_not_supported).
+    """
+    from app.llm.provider import Provider
+
+    class _NoEmbedProvider(Provider):
+        model_name = "no-embed-stub"
+
+        def _complete_impl(self, messages, *, max_tokens, system=None):
+            raise NotImplementedError
+
+    result = _NoEmbedProvider().embed(["a", "b", "c"])
     assert result == [None, None, None]
+
+
+def test_stub_provider_embed_returns_real_vectors_by_default(client, stub_provider):
+    """StubProvider overrides _embed_impl with a real (fixed) vector per
+    text by default, so Phase 4 tests exercising embed_course/retrieval
+    don't all need to configure embed_responses explicitly.
+    """
+    result = stub_provider.embed(["a", "b", "c"])
+    assert result == [[0.1, 0.2, 0.3], [0.1, 0.2, 0.3], [0.1, 0.2, 0.3]]
+    assert stub_provider.embed_call_count == 1
+    assert stub_provider.received_embed_texts == [["a", "b", "c"]]
 
 
 def test_ledger_write_failure_does_not_destroy_a_successful_completion(client, stub_provider, monkeypatch):

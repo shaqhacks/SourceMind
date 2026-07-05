@@ -2,6 +2,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import TypographyControls from "@/components/TypographyControls";
 
 import GenerateAllLessons from "./GenerateAllLessons";
+import QuizzesPanel from "./QuizzesPanel";
 
 export interface TopBarProps {
   courseId: string;
@@ -9,6 +10,8 @@ export interface TopBarProps {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onLessonSectionSettled: (sectionId: string, status: "ready" | "failed") => void;
+  chatOpen: boolean;
+  onToggleChat: () => void;
 }
 
 export default function TopBar({
@@ -17,6 +20,8 @@ export default function TopBar({
   sidebarCollapsed,
   onToggleSidebar,
   onLessonSectionSettled,
+  chatOpen,
+  onToggleChat,
 }: TopBarProps) {
   return (
     <div className="flex items-center gap-3 border-b border-border px-4 py-3">
@@ -32,6 +37,16 @@ export default function TopBar({
       </button>
       <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">{courseTitle}</h1>
       <GenerateAllLessons courseId={courseId} onSectionSettled={onLessonSectionSettled} />
+      <QuizzesPanel courseId={courseId} />
+      <button
+        type="button"
+        onClick={onToggleChat}
+        aria-pressed={chatOpen}
+        aria-label={chatOpen ? "Close chat" : "Open chat"}
+        className="rounded-md border border-border px-2 py-1 text-sm"
+      >
+        Chat
+      </button>
       <TypographyControls />
       <ThemeToggle />
     </div>

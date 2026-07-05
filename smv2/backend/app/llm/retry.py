@@ -47,3 +47,19 @@ def retry_transient(fn: Callable[[], T]) -> T:
                 raise
             time.sleep(_BACKOFF_SECONDS * attempt)
             attempt += 1
+
+
+def is_timeout(exc: Exception) -> bool:
+    """Lets callers outside app/llm/ (e.g. chat_service, mapping a timeout
+    to an HTTP 504) recognize a provider timeout without themselves
+    importing the anthropic/httpx SDK types directly — those imports stay
+    confined to app/llm/.
+    """
+    try:
+        import anthropic
+
+        if isinstance(exc, anthropic.APITimeoutError):
+            return True
+    except ImportError:
+        pass
+    return isinstance(exc, httpx.TimeoutException)

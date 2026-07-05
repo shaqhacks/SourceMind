@@ -4,13 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CourseReader from "@/components/reader/CourseReader";
 import {
+  findActiveCardsJob,
   findActiveLessonJob,
   getLessonEstimate,
   getLlmUsage,
   getSection,
+  listCards,
   saveProgress,
 } from "@/lib/api/client";
 import type { ReaderCourse, ReaderProgress } from "@/lib/reader/types";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
 
 vi.mock("@/lib/api/client", () => ({
   getSection: vi.fn(),
@@ -19,6 +25,11 @@ vi.mock("@/lib/api/client", () => ({
   findActiveLessonJob: vi.fn(),
   generateLesson: vi.fn(),
   getLlmUsage: vi.fn(),
+  getChatHistory: vi.fn(),
+  sendChat: vi.fn(),
+  listCards: vi.fn(),
+  findActiveCardsJob: vi.fn(),
+  generateCards: vi.fn(),
 }));
 
 const mockedGetSection = vi.mocked(getSection);
@@ -26,6 +37,8 @@ const mockedSaveProgress = vi.mocked(saveProgress);
 const mockedGetLessonEstimate = vi.mocked(getLessonEstimate);
 const mockedFindActiveLessonJob = vi.mocked(findActiveLessonJob);
 const mockedGetLlmUsage = vi.mocked(getLlmUsage);
+const mockedListCards = vi.mocked(listCards);
+const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 
 // A small hand-rolled fixture rather than importing lib/reader/mockCourse:
 // that module is documented as page.tsx-only, and a minimal 3-section
@@ -116,6 +129,8 @@ describe("CourseReader", () => {
       ok: true,
       data: { calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 },
     });
+    mockedListCards.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedFindActiveCardsJob.mockResolvedValue(null);
   });
 
   afterEach(() => {

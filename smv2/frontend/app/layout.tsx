@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
+import DueBadge from "@/components/DueBadge";
 import { THEME_STORAGE_KEY } from "@/lib/hooks/useTheme";
 
 const geistSans = Geist({
@@ -42,8 +43,9 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: noFlashThemeScript }} />
       </head>
       <body className="min-h-full flex flex-col">
-        <header className="border-b border-black/10 px-6 py-4 dark:border-white/10">
+        <header className="flex items-center justify-between border-b border-black/10 px-6 py-4 dark:border-white/10">
           <h1 className="text-lg font-semibold">SourceMind</h1>
+          <DueBadge />
         </header>
         <main className="flex flex-1 flex-col">{children}</main>
       </body>

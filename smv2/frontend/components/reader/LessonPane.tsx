@@ -13,6 +13,7 @@ import {
   type SectionDetailOut,
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export type LessonDisplayStatus = "none" | "queued" | "generating" | "ready" | "failed" | "stale";
 
@@ -142,6 +143,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   useEffect(() => {
     if (!done) return;
     fetchDetail(sectionId).then(setState);
+    notifyReviewSettled();
   }, [done, sectionId]);
 
   const statusRef = useRef<LessonDisplayStatus | null>(null);

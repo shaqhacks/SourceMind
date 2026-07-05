@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 
 import { generateAllLessons, getJob } from "@/lib/api/client";
+import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 import LessonJobWatcher from "./LessonJobWatcher";
 
@@ -72,6 +73,7 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
     (sectionId: string, status: "ready" | "failed") => {
       setSettledCount((count) => count + 1);
       onSectionSettled(sectionId, status);
+      notifyReviewSettled();
     },
     [onSectionSettled],
   );

@@ -10,6 +10,7 @@ import { useProgressSync } from "@/lib/hooks/useProgressSync";
 import { useTypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import type { ReaderCourse, ReaderProgress, SectionBodyState } from "@/lib/reader/types";
 
+import CourseChatDrawer from "./CourseChatDrawer";
 import type { LessonDisplayStatus } from "./LessonPane";
 import ReadingColumn, { type ViewMode } from "./ReadingColumn";
 import Sidebar from "./Sidebar";
@@ -19,6 +20,7 @@ import UsageFooter from "./UsageFooter";
 const SHORTCUT_HINTS: ShortcutHint[] = [
   { keys: "← / → or j / k", description: "Next / previous chapter" },
   { keys: "s", description: "Toggle source / lesson view" },
+  { keys: "c", description: "Toggle chat" },
   { keys: "?", description: "Show this help" },
 ];
 
@@ -47,6 +49,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const [mode, setMode] = useState<ViewMode>("source");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [sectionBodies, setSectionBodies] = useState<Record<string, string>>({});
   const [bodyErrors, setBodyErrors] = useState<Record<string, string>>({});
   const [lessonStatusOverrides, setLessonStatusOverrides] = useState<
@@ -126,6 +129,8 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   }, []);
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
+  const toggleChat = useCallback(() => setChatOpen((value) => !value), []);
+  const closeChat = useCallback(() => setChatOpen(false), []);
 
   // Sidebar shows list_sections' lesson_status, which goes stale the
   // moment a generation (single or part of "generate all") completes for
@@ -150,6 +155,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     arrowleft: goPrevious,
     k: goPrevious,
     s: toggleMode,
+    c: toggleChat,
     "?": openShortcuts,
   });
 
@@ -175,6 +181,8 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         onLessonSectionSettled={patchLessonStatus}
+        chatOpen={chatOpen}
+        onToggleChat={toggleChat}
       />
       <div className="flex min-h-0 flex-1">
         {!sidebarCollapsed && (
@@ -194,6 +202,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
           body={bodyState}
           onLessonStatusChange={patchLessonStatus}
         />
+        <CourseChatDrawer courseId={course.id} open={chatOpen} onClose={closeChat} />
       </div>
       <UsageFooter key={usageRefreshKey} courseId={course.id} />
       <HintRow

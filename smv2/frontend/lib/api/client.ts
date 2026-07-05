@@ -27,6 +27,23 @@ export type GenerateLessonOut = components["schemas"]["GenerateLessonOut"];
 export type LessonEstimateOut = components["schemas"]["LessonEstimateOut"];
 export type GenerateAllLessonsOut = components["schemas"]["GenerateAllLessonsOut"];
 export type LlmUsageOut = components["schemas"]["LlmUsageOut"];
+export type CardOut = components["schemas"]["CardOut"];
+export type GenerateCardsOut = components["schemas"]["GenerateCardsOut"];
+export type ReviewQueueOut = components["schemas"]["ReviewQueueOut"];
+export type ReviewQueueCardOut = components["schemas"]["ReviewQueueCardOut"];
+export type GradeCardIn = components["schemas"]["GradeCardIn"];
+export type GradeCardOut = components["schemas"]["GradeCardOut"];
+export type ReviewSummaryOut = components["schemas"]["ReviewSummaryOut"];
+export type CourseReviewSummaryOut = components["schemas"]["CourseReviewSummaryOut"];
+export type GenerateTestOut = components["schemas"]["GenerateTestOut"];
+export type TestAttemptOut = components["schemas"]["TestAttemptOut"];
+export type TestQuestionOut = components["schemas"]["TestQuestionOut"];
+export type TestAttemptSummaryOut = components["schemas"]["TestAttemptSummaryOut"];
+export type SubmitTestOut = components["schemas"]["SubmitTestOut"];
+export type SubmitTestQuestionResultOut = components["schemas"]["SubmitTestQuestionResultOut"];
+export type ChatOut = components["schemas"]["ChatOut"];
+export type ChatCitationOut = components["schemas"]["ChatCitationOut"];
+export type ChatTurnOut = components["schemas"]["ChatTurnOut"];
 export type OutlineOp =
   | components["schemas"]["RenameOp"]
   | components["schemas"]["ReorderOp"]
@@ -285,5 +302,117 @@ export async function findActiveLessonJob(sectionId: string): Promise<JobOut | n
         !TERMINAL_JOB_STATUSES.has(job.status) &&
         payloadSectionId(job.payload) === sectionId,
     ),
+  );
+}
+
+export function generateCards(sectionId: string) {
+  return request(
+    client.POST("/api/sections/{section_id}/cards", {
+      params: { path: { section_id: sectionId } },
+    }),
+  );
+}
+
+export function listCards(sectionId: string) {
+  return request(
+    client.GET("/api/sections/{section_id}/cards", {
+      params: { path: { section_id: sectionId } },
+    }),
+  );
+}
+
+/** Same rediscovery need as findActiveLessonJob, for card generation. */
+export async function findActiveCardsJob(sectionId: string): Promise<JobOut | null> {
+  const { data } = await listJobs();
+  if (!data) return null;
+  return latestByCreatedAt(
+    data.filter(
+      (job) =>
+        job.type === "generate_cards" &&
+        !TERMINAL_JOB_STATUSES.has(job.status) &&
+        payloadSectionId(job.payload) === sectionId,
+    ),
+  );
+}
+
+export function getReviewQueue(courseId: string, limit?: number) {
+  return request(
+    client.GET("/api/courses/{course_id}/review/queue", {
+      params: { path: { course_id: courseId }, query: limit === undefined ? {} : { limit } },
+    }),
+  );
+}
+
+export function gradeCard(cardId: string, body: GradeCardIn) {
+  return request(
+    client.POST("/api/cards/{card_id}/grade", {
+      params: { path: { card_id: cardId } },
+      body,
+    }),
+  );
+}
+
+export function getReviewSummary() {
+  return request(client.GET("/api/review/summary"));
+}
+
+export function generateTest(courseId: string, sectionIds?: string[]) {
+  return request(
+    client.POST("/api/courses/{course_id}/tests", {
+      params: { path: { course_id: courseId } },
+      body: sectionIds === undefined ? {} : { section_ids: sectionIds },
+    }),
+  );
+}
+
+export function listTests(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/tests", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function getTest(attemptId: string) {
+  return request(
+    client.GET("/api/tests/{attempt_id}", { params: { path: { attempt_id: attemptId } } }),
+  );
+}
+
+export function submitTest(attemptId: string, answers: number[]) {
+  return request(
+    client.POST("/api/tests/{attempt_id}/submit", {
+      params: { path: { attempt_id: attemptId } },
+      body: { answers },
+    }),
+  );
+}
+
+/** Same rediscovery need as findActiveLessonJob, for test generation. */
+export async function findActiveTestJob(courseId: string): Promise<JobOut | null> {
+  const { data } = await listJobs();
+  if (!data) return null;
+  return latestByCreatedAt(
+    data.filter(
+      (job) =>
+        job.type === "generate_test" &&
+        !TERMINAL_JOB_STATUSES.has(job.status) &&
+        payloadCourseId(job.payload) === courseId,
+    ),
+  );
+}
+
+export function sendChat(courseId: string, message: string) {
+  return request(
+    client.POST("/api/courses/{course_id}/chat", {
+      params: { path: { course_id: courseId } },
+      body: { message },
+    }),
+  );
+}
+
+export function getChatHistory(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/chat", { params: { path: { course_id: courseId } } }),
   );
 }

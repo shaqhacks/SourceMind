@@ -1,10 +1,9 @@
 """LLM provider abstraction.
 
-Provider is a template-method base class: complete() handles concurrency
-(llm_slot), transient retry, timing, and the ledger write uniformly, so no
-call path can accidentally skip any of those — concrete providers (and test
-stubs) only implement _complete_impl(). embed() is a working placeholder
-for Phase 3 (returns None per text); real embeddings arrive in Phase 4.
+Provider is a template-method base class: complete()/embed() handle
+concurrency (llm_slot), transient retry, timing, and the ledger write
+uniformly, so no call path can accidentally skip any of those — concrete
+providers (and test stubs) only implement _complete_impl()/_embed_impl().
 """
 
 from __future__ import annotations
@@ -29,6 +28,17 @@ class CompletionResult:
     input_tokens: int
     output_tokens: int
     model: str
+
+
+class NotSupportedError(Exception):
+    """Raised by a provider that has no API for the requested capability
+    (e.g. Anthropic has no embeddings endpoint)."""
+
+
+class ProviderTimeoutError(Exception):
+    """Generic, SDK-agnostic timeout signal — lets callers outside
+    app/llm/ (routers, services) catch a provider timeout and map it to an
+    HTTP status without importing anthropic/httpx types themselves."""
 
 
 class Provider(ABC):
@@ -99,12 +109,53 @@ class Provider(ABC):
         self, messages: list[dict], *, max_tokens: int, system: str | None = None
     ) -> CompletionResult: ...
 
-    def embed(self, texts: list[str]) -> list[list[float] | None]:
-        """Placeholder for Phase 4 — always returns None per text for now,
-        but still goes through the concurrency gate for interface parity.
+    def embed(
+        self, texts: list[str], *, purpose: str = "embed", course_id: str | None = None
+    ) -> list[list[float] | None]:
+        """Same concurrency/ledger discipline as complete(). Unlike
+        complete(), a provider-level failure here (e.g. NotSupportedError)
+        is NOT swallowed — callers (embed_course, retrieval) decide how to
+        degrade (skip embedding entirely, fall back to lexical search).
         """
         with llm_slot():
-            return [None for _ in texts]
+            started = time.monotonic()
+            try:
+                results = self._embed_impl(texts)
+            except Exception as exc:
+                latency_ms = int((time.monotonic() - started) * 1000)
+                self._record_call_safely(
+                    purpose=purpose,
+                    model=self.model_name,
+                    input_tokens=0,
+                    output_tokens=0,
+                    latency_ms=latency_ms,
+                    cost_estimate=None,
+                    prompt_version=None,
+                    status="error",
+                    course_id=course_id,
+                )
+                raise exc
+
+            latency_ms = int((time.monotonic() - started) * 1000)
+            input_tokens_est = sum(len(t) for t in texts) // 4
+            self._record_call_safely(
+                purpose=purpose,
+                model=self.model_name,
+                input_tokens=input_tokens_est,
+                output_tokens=0,
+                latency_ms=latency_ms,
+                cost_estimate=estimate_cost(self.model_name, input_tokens_est, 0),
+                prompt_version=None,
+                status="ok",
+                course_id=course_id,
+            )
+            return results
+
+    def _embed_impl(self, texts: list[str]) -> list[list[float] | None]:
+        """Default: no embedding support. Override in a provider with a
+        real embeddings API (raise NotSupportedError if there truly is
+        none, as AnthropicProvider does)."""
+        return [None for _ in texts]
 
 
 def get_provider() -> Provider:

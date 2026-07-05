@@ -16,8 +16,11 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.db.models import Course, Job, Section
+from app.pipeline.cards_generation import run_card_generation
+from app.pipeline.embedding import run_embed_course
 from app.pipeline.generation import run_lesson_generation
 from app.pipeline.ingest import run_ingest
+from app.pipeline.quiz_generation import run_test_generation
 from app.services.backup_service import run_backup
 
 JobHandler = Callable[[Session, Job], dict[str, Any]]
@@ -51,11 +54,39 @@ def _generate_lesson_handler(session: Session, job: Job) -> dict[str, Any]:
     return {"section_id": section_id, **extra}
 
 
+def _generate_cards_handler(session: Session, job: Job) -> dict[str, Any]:
+    section_id = (job.payload or {}).get("section_id")
+    if not section_id:
+        raise ValueError("generate_cards job payload missing section_id")
+    extra = run_card_generation(session, job, section_id)
+    return {"section_id": section_id, **extra}
+
+
+def _generate_test_handler(session: Session, job: Job) -> dict[str, Any]:
+    payload = job.payload or {}
+    course_id = payload.get("course_id")
+    if not course_id:
+        raise ValueError("generate_test job payload missing course_id")
+    extra = run_test_generation(session, job, course_id, payload.get("section_ids"))
+    return {"course_id": course_id, **extra}
+
+
+def _embed_course_handler(session: Session, job: Job) -> dict[str, Any]:
+    course_id = (job.payload or {}).get("course_id")
+    if not course_id:
+        raise ValueError("embed_course job payload missing course_id")
+    extra = run_embed_course(session, job, course_id)
+    return {"course_id": course_id, **extra}
+
+
 JOB_HANDLERS: dict[str, JobHandler] = {
     "noop": _noop_handler,
     "backup": _backup_handler,
     "ingest": _ingest_handler,
     "generate_lesson": _generate_lesson_handler,
+    "generate_cards": _generate_cards_handler,
+    "generate_test": _generate_test_handler,
+    "embed_course": _embed_course_handler,
 }
 
 

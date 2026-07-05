@@ -178,3 +178,143 @@ class LlmUsageOut(BaseModel):
     input_tokens: int
     output_tokens: int
     est_cost_usd: float
+
+
+# --- Cards -------------------------------------------------------------
+
+
+class GenerateCardsOut(BaseModel):
+    job_id: str
+
+
+class CardOut(BaseModel):
+    id: str
+    section_id: str
+    front_md: str
+    back_md: str
+    position: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# --- Spaced repetition ---------------------------------------------------
+
+
+class ReviewQueueCardOut(BaseModel):
+    id: str
+    section_id: str
+    front_md: str
+    back_md: str
+    due_at: datetime | None
+    is_new: bool
+
+
+class ReviewQueueOut(BaseModel):
+    cards: list[ReviewQueueCardOut]
+    due: int
+    new: int
+    total: int
+
+
+class GradeCardIn(BaseModel):
+    grade: int
+    elapsed_ms: int | None = None
+
+
+class GradeCardOut(BaseModel):
+    next_due_at: datetime
+    remaining_due: int
+
+
+class CourseReviewSummaryOut(BaseModel):
+    course_id: str
+    title: str
+    due_count: int
+    new_count: int
+
+
+class ReviewSummaryOut(BaseModel):
+    courses: list[CourseReviewSummaryOut]
+    due_total: int
+    daily_throughput: float
+    backlog_warning: bool
+
+
+# --- Quizzes -------------------------------------------------------------
+
+
+class GenerateTestIn(BaseModel):
+    section_ids: list[str] | None = None
+
+
+class GenerateTestOut(BaseModel):
+    job_id: str
+
+
+class TestQuestionOut(BaseModel):
+    question: str
+    choices: list[str]
+    correct_index: int | None = None
+    explanation: str | None = None
+
+
+class TestAttemptOut(BaseModel):
+    id: str
+    course_id: str
+    score: float | None
+    questions: list[TestQuestionOut]
+    created_at: datetime
+
+
+class TestAttemptSummaryOut(BaseModel):
+    id: str
+    course_id: str
+    score: float | None
+    question_count: int
+    created_at: datetime
+
+
+class SubmitTestIn(BaseModel):
+    answers: list[int]
+
+
+class SubmitTestQuestionResultOut(BaseModel):
+    correct: bool
+    correct_index: int
+    explanation: str
+    your_answer: int | None
+
+
+class SubmitTestOut(BaseModel):
+    score: float
+    results: list[SubmitTestQuestionResultOut]
+
+
+# --- Chat ------------------------------------------------------------
+
+
+class ChatIn(BaseModel):
+    message: str
+
+
+class ChatCitationOut(BaseModel):
+    n: int
+    section_id: str
+    page: int | None
+    source_ref: str
+
+
+class ChatOut(BaseModel):
+    reply_md: str
+    citations: list[ChatCitationOut]
+
+
+class ChatTurnOut(BaseModel):
+    id: str
+    role: str
+    content: str
+    citations: list[dict[str, Any]] | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

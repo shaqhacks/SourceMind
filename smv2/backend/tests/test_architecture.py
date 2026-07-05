@@ -16,6 +16,7 @@ CONFIG_FILE = APP_ROOT / "config.py"
 ROUTERS_ROOT = APP_ROOT / "routers"
 PIPELINE_ROOT = APP_ROOT / "pipeline"
 LLM_ROOT = APP_ROOT / "llm"
+SECURITY_ROOT = APP_ROOT / "security"
 LIMITER_FILE = LLM_ROOT / "limiter.py"
 PROMPTS_LOADER_FILE = LLM_ROOT / "prompts.py"
 INGEST_FILE = PIPELINE_ROOT / "ingest.py"
@@ -185,10 +186,9 @@ def test_pipeline_stays_framework_free() -> None:
     assert not violations, f"app/pipeline/* must not import fastapi: {violations}"
 
 
-def test_llm_sdk_imports_confined_to_llm_package() -> None:
-    """anthropic and httpx (the Ollama HTTP client) may only be imported
-    under app/llm/ — every other module talks to an LLM through the
-    Provider abstraction, never a raw SDK/HTTP client of its own.
+def test_anthropic_sdk_import_confined_to_llm_package() -> None:
+    """anthropic may only be imported under app/llm/ — every other module
+    talks to an LLM through the Provider abstraction, never the raw SDK.
     """
     violations: dict[str, list[str]] = {}
     for path in _python_files():
@@ -198,12 +198,34 @@ def test_llm_sdk_imports_confined_to_llm_package() -> None:
         found = [
             f"line {lineno}: {name}"
             for lineno, name in _imported_module_names(tree)
-            if name in {"anthropic", "httpx"} or name.startswith(("anthropic.", "httpx."))
+            if name == "anthropic" or name.startswith("anthropic.")
         ]
         if found:
             violations[str(path)] = found
 
-    assert not violations, f"anthropic/httpx imports must live only under app/llm/: {violations}"
+    assert not violations, f"anthropic imports must live only under app/llm/: {violations}"
+
+
+def test_httpx_imports_confined_to_llm_and_security_packages() -> None:
+    """httpx (and requests, if it's ever added) may only be imported under
+    app/llm/ (the Ollama HTTP client) or app/security/ (the guarded outbound
+    fetch) — mechanical enforcement that any future URL-fetching feature
+    goes through the SSRF guard rather than making its own raw HTTP client.
+    """
+    violations: dict[str, list[str]] = {}
+    for path in _python_files():
+        if path.is_relative_to(LLM_ROOT) or path.is_relative_to(SECURITY_ROOT):
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        found = [
+            f"line {lineno}: {name}"
+            for lineno, name in _imported_module_names(tree)
+            if name in {"httpx", "requests"} or name.startswith(("httpx.", "requests."))
+        ]
+        if found:
+            violations[str(path)] = found
+
+    assert not violations, f"httpx/requests imports must live only under app/llm/ or app/security/: {violations}"
 
 
 def _docstring_node_ids(tree: ast.Module) -> set[int]:

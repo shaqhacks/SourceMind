@@ -94,6 +94,159 @@
         "title": "Body_upload_asset",
         "type": "object"
       },
+      "CardOut": {
+        "properties": {
+          "back_md": {
+            "title": "Back Md",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "front_md": {
+            "title": "Front Md",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "section_id",
+          "front_md",
+          "back_md",
+          "position",
+          "created_at"
+        ],
+        "title": "CardOut",
+        "type": "object"
+      },
+      "ChatCitationOut": {
+        "properties": {
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "source_ref": {
+            "title": "Source Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n",
+          "section_id",
+          "page",
+          "source_ref"
+        ],
+        "title": "ChatCitationOut",
+        "type": "object"
+      },
+      "ChatIn": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ChatIn",
+        "type": "object"
+      },
+      "ChatOut": {
+        "properties": {
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/ChatCitationOut"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "reply_md": {
+            "title": "Reply Md",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reply_md",
+          "citations"
+        ],
+        "title": "ChatOut",
+        "type": "object"
+      },
+      "ChatTurnOut": {
+        "properties": {
+          "citations": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citations"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "citations",
+          "created_at"
+        ],
+        "title": "ChatTurnOut",
+        "type": "object"
+      },
       "CourseCreate": {
         "properties": {
           "title": {
@@ -157,6 +310,34 @@
         "title": "CourseOut",
         "type": "object"
       },
+      "CourseReviewSummaryOut": {
+        "properties": {
+          "course_id": {
+            "title": "Course Id",
+            "type": "string"
+          },
+          "due_count": {
+            "title": "Due Count",
+            "type": "integer"
+          },
+          "new_count": {
+            "title": "New Count",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "course_id",
+          "title",
+          "due_count",
+          "new_count"
+        ],
+        "title": "CourseReviewSummaryOut",
+        "type": "object"
+      },
       "DeleteOp": {
         "properties": {
           "section_id": {
@@ -197,6 +378,19 @@
         "title": "GenerateAllLessonsOut",
         "type": "object"
       },
+      "GenerateCardsOut": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "GenerateCardsOut",
+        "type": "object"
+      },
       "GenerateLessonOut": {
         "properties": {
           "job_id": {
@@ -208,6 +402,82 @@
           "job_id"
         ],
         "title": "GenerateLessonOut",
+        "type": "object"
+      },
+      "GenerateTestIn": {
+        "properties": {
+          "section_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Ids"
+          }
+        },
+        "title": "GenerateTestIn",
+        "type": "object"
+      },
+      "GenerateTestOut": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "GenerateTestOut",
+        "type": "object"
+      },
+      "GradeCardIn": {
+        "properties": {
+          "elapsed_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Ms"
+          },
+          "grade": {
+            "title": "Grade",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "grade"
+        ],
+        "title": "GradeCardIn",
+        "type": "object"
+      },
+      "GradeCardOut": {
+        "properties": {
+          "next_due_at": {
+            "format": "date-time",
+            "title": "Next Due At",
+            "type": "string"
+          },
+          "remaining_due": {
+            "title": "Remaining Due",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "next_due_at",
+          "remaining_due"
+        ],
+        "title": "GradeCardOut",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -623,6 +893,114 @@
         "title": "ReorderOp",
         "type": "object"
       },
+      "ReviewQueueCardOut": {
+        "properties": {
+          "back_md": {
+            "title": "Back Md",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "front_md": {
+            "title": "Front Md",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_new": {
+            "title": "Is New",
+            "type": "boolean"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "section_id",
+          "front_md",
+          "back_md",
+          "due_at",
+          "is_new"
+        ],
+        "title": "ReviewQueueCardOut",
+        "type": "object"
+      },
+      "ReviewQueueOut": {
+        "properties": {
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewQueueCardOut"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "due": {
+            "title": "Due",
+            "type": "integer"
+          },
+          "new": {
+            "title": "New",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cards",
+          "due",
+          "new",
+          "total"
+        ],
+        "title": "ReviewQueueOut",
+        "type": "object"
+      },
+      "ReviewSummaryOut": {
+        "properties": {
+          "backlog_warning": {
+            "title": "Backlog Warning",
+            "type": "boolean"
+          },
+          "courses": {
+            "items": {
+              "$ref": "#/components/schemas/CourseReviewSummaryOut"
+            },
+            "title": "Courses",
+            "type": "array"
+          },
+          "daily_throughput": {
+            "title": "Daily Throughput",
+            "type": "number"
+          },
+          "due_total": {
+            "title": "Due Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "courses",
+          "due_total",
+          "daily_throughput",
+          "backlog_warning"
+        ],
+        "title": "ReviewSummaryOut",
+        "type": "object"
+      },
       "SectionDetailOut": {
         "properties": {
           "body_md": {
@@ -842,6 +1220,206 @@
         "title": "SplitOp",
         "type": "object"
       },
+      "SubmitTestIn": {
+        "properties": {
+          "answers": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Answers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "answers"
+        ],
+        "title": "SubmitTestIn",
+        "type": "object"
+      },
+      "SubmitTestOut": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SubmitTestQuestionResultOut"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "score",
+          "results"
+        ],
+        "title": "SubmitTestOut",
+        "type": "object"
+      },
+      "SubmitTestQuestionResultOut": {
+        "properties": {
+          "correct": {
+            "title": "Correct",
+            "type": "boolean"
+          },
+          "correct_index": {
+            "title": "Correct Index",
+            "type": "integer"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "your_answer": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Your Answer"
+          }
+        },
+        "required": [
+          "correct",
+          "correct_index",
+          "explanation",
+          "your_answer"
+        ],
+        "title": "SubmitTestQuestionResultOut",
+        "type": "object"
+      },
+      "TestAttemptOut": {
+        "properties": {
+          "course_id": {
+            "title": "Course Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/TestQuestionOut"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "id",
+          "course_id",
+          "score",
+          "questions",
+          "created_at"
+        ],
+        "title": "TestAttemptOut",
+        "type": "object"
+      },
+      "TestAttemptSummaryOut": {
+        "properties": {
+          "course_id": {
+            "title": "Course Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "question_count": {
+            "title": "Question Count",
+            "type": "integer"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "id",
+          "course_id",
+          "score",
+          "question_count",
+          "created_at"
+        ],
+        "title": "TestAttemptSummaryOut",
+        "type": "object"
+      },
+      "TestQuestionOut": {
+        "properties": {
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "correct_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correct Index"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "choices"
+        ],
+        "title": "TestQuestionOut",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -890,6 +1468,58 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/cards/{card_id}/grade": {
+      "post": {
+        "operationId": "grade_card",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GradeCardIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GradeCardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Grade Card",
+        "tags": [
+          "review"
+        ]
+      }
+    },
     "/api/courses": {
       "get": {
         "operationId": "list_courses",
@@ -1122,6 +1752,102 @@
         "summary": "Upload Asset",
         "tags": [
           "assets"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/chat": {
+      "get": {
+        "operationId": "chat_history",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChatTurnOut"
+                  },
+                  "title": "Response Chat History",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat History",
+        "tags": [
+          "chat"
+        ]
+      },
+      "post": {
+        "operationId": "send_chat",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send Chat",
+        "tags": [
+          "chat"
         ]
       }
     },
@@ -1397,6 +2123,60 @@
         ]
       }
     },
+    "/api/courses/{course_id}/review/queue": {
+      "get": {
+        "operationId": "review_queue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewQueueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Queue",
+        "tags": [
+          "review"
+        ]
+      }
+    },
     "/api/courses/{course_id}/sections": {
       "get": {
         "operationId": "list_sections",
@@ -1440,6 +2220,102 @@
         "summary": "List Sections",
         "tags": [
           "sections"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/tests": {
+      "get": {
+        "operationId": "list_tests",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TestAttemptSummaryOut"
+                  },
+                  "title": "Response List Tests",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tests",
+        "tags": [
+          "tests"
+        ]
+      },
+      "post": {
+        "operationId": "generate_test",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateTestIn",
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateTestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Test",
+        "tags": [
+          "tests"
         ]
       }
     },
@@ -1638,6 +2514,27 @@
         ]
       }
     },
+    "/api/review/summary": {
+      "get": {
+        "operationId": "review_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Review Summary",
+        "tags": [
+          "review"
+        ]
+      }
+    },
     "/api/sections/{section_id}": {
       "get": {
         "operationId": "get_section",
@@ -1677,6 +2574,92 @@
         "summary": "Get Section",
         "tags": [
           "sections"
+        ]
+      }
+    },
+    "/api/sections/{section_id}/cards": {
+      "get": {
+        "operationId": "list_cards",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "section_id",
+            "required": true,
+            "schema": {
+              "title": "Section Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CardOut"
+                  },
+                  "title": "Response List Cards",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Cards",
+        "tags": [
+          "cards"
+        ]
+      },
+      "post": {
+        "operationId": "generate_cards",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "section_id",
+            "required": true,
+            "schema": {
+              "title": "Section Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateCardsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Cards",
+        "tags": [
+          "cards"
         ]
       }
     },
@@ -1771,6 +2754,100 @@
         "summary": "Lesson Estimate",
         "tags": [
           "lessons"
+        ]
+      }
+    },
+    "/api/tests/{attempt_id}": {
+      "get": {
+        "operationId": "get_test",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestAttemptOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Test",
+        "tags": [
+          "tests"
+        ]
+      }
+    },
+    "/api/tests/{attempt_id}/submit": {
+      "post": {
+        "operationId": "submit_test",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitTestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitTestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Test",
+        "tags": [
+          "tests"
         ]
       }
     },

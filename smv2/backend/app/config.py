@@ -105,3 +105,15 @@ def course_spend_cap_usd() -> float | None:
         return float(raw)
     except ValueError:
         return None
+
+
+def embed_model() -> str:
+    return os.environ.get("SMV2_EMBED_MODEL", "nomic-embed-text")
+
+
+def chat_top_k() -> int:
+    raw = os.environ.get("SMV2_CHAT_TOP_K", "6")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 6

@@ -65,13 +65,20 @@ class StubProvider(Provider):
     pop(0)) or leave both empty for a default always-succeeds stub.
     """
 
-    def __init__(self, responses=None, exceptions=None):
+    def __init__(self, responses=None, exceptions=None, embed_responses=None, embed_exception=None):
         self.model_name = "stub-model"
         self.responses = list(responses) if responses else []
         self.exceptions = list(exceptions) if exceptions else []
         self.call_count = 0
         self.received_messages: list[list[dict]] = []
         self.received_systems: list[str | None] = []
+        # embed(): embed_responses, if given, is returned verbatim on every
+        # call; embed_exception, if given, is raised every call (e.g. a
+        # NotSupportedError stand-in). Otherwise a default fixed vector.
+        self.embed_responses = embed_responses
+        self.embed_exception = embed_exception
+        self.embed_call_count = 0
+        self.received_embed_texts: list[list[str]] = []
 
     def _complete_impl(self, messages, *, max_tokens, system=None):
         self.call_count += 1
@@ -87,6 +94,30 @@ class StubProvider(Provider):
             text="stub lesson content", input_tokens=100, output_tokens=200, model=self.model_name
         )
 
+    def _embed_impl(self, texts):
+        self.embed_call_count += 1
+        self.received_embed_texts.append(list(texts))
+        if self.embed_exception is not None:
+            raise self.embed_exception
+        if self.embed_responses is not None:
+            return self.embed_responses
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+
+# Every module that does `from app.llm.provider import get_provider` binds
+# its OWN name for it at import time — patching app.llm.provider.get_provider
+# alone would not affect those already-bound references, so every call site
+# needs its own patch target here.
+_GET_PROVIDER_PATCH_TARGETS = (
+    "app.llm.provider.get_provider",
+    "app.pipeline.generation.get_provider",
+    "app.pipeline.cards_generation.get_provider",
+    "app.pipeline.quiz_generation.get_provider",
+    "app.pipeline.embedding.get_provider",
+    "app.pipeline.retrieval.get_provider",
+    "app.services.chat_service.get_provider",
+)
+
 
 @pytest.fixture()
 def stub_provider(client, monkeypatch):
@@ -94,6 +125,6 @@ def stub_provider(client, monkeypatch):
     by name, so no test ever constructs a real Anthropic/Ollama client.
     """
     provider = StubProvider()
-    monkeypatch.setattr("app.llm.provider.get_provider", lambda: provider)
-    monkeypatch.setattr("app.pipeline.generation.get_provider", lambda: provider)
+    for target in _GET_PROVIDER_PATCH_TARGETS:
+        monkeypatch.setattr(target, lambda: provider)
     return provider

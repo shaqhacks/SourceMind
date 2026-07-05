@@ -8,7 +8,7 @@ from __future__ import annotations
 import anthropic
 
 from app.config import llm_model
-from app.llm.provider import CompletionResult, Provider
+from app.llm.provider import CompletionResult, NotSupportedError, Provider
 
 
 class AnthropicProvider(Provider):
@@ -34,3 +34,6 @@ class AnthropicProvider(Provider):
             output_tokens=response.usage.output_tokens,
             model=response.model,
         )
+
+    def _embed_impl(self, texts: list[str]) -> list[list[float] | None]:
+        raise NotSupportedError("Anthropic has no embeddings API")

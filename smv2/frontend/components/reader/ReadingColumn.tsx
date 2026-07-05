@@ -7,6 +7,7 @@ import Markdown from "@/components/Markdown";
 import { prefsToCssVars, type TypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import type { ReaderSection, SectionBodyState } from "@/lib/reader/types";
 
+import CardsCTA from "./CardsCTA";
 import LessonPane, { type LessonDisplayStatus } from "./LessonPane";
 
 export type ViewMode = "source" | "lesson";
@@ -76,6 +77,9 @@ export default function ReadingColumn({
             onStatusChange={(status) => onLessonStatusChange(section.id, status)}
           />
         )}
+        <div className="mt-8 border-t border-border pt-4">
+          <CardsCTA key={section.id} sectionId={section.id} />
+        </div>
       </article>
     </div>
   );

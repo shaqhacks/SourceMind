@@ -4,16 +4,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CourseReaderClient from "@/components/reader/CourseReaderClient";
 import {
+  findActiveCardsJob,
   getCourse,
   getLlmUsage,
   getProgress,
   getSection,
+  listCards,
   listSections,
   saveProgress,
   type CourseOut,
   type ProgressOut,
   type SectionOut,
 } from "@/lib/api/client";
+
+let mockSearchParams = new URLSearchParams();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => mockSearchParams,
+}));
 
 vi.mock("@/lib/api/client", () => ({
   getCourse: vi.fn(),
@@ -22,6 +31,11 @@ vi.mock("@/lib/api/client", () => ({
   getSection: vi.fn(),
   saveProgress: vi.fn(),
   getLlmUsage: vi.fn(),
+  getChatHistory: vi.fn(),
+  sendChat: vi.fn(),
+  listCards: vi.fn(),
+  findActiveCardsJob: vi.fn(),
+  generateCards: vi.fn(),
 }));
 
 const mockedGetCourse = vi.mocked(getCourse);
@@ -30,6 +44,8 @@ const mockedGetProgress = vi.mocked(getProgress);
 const mockedGetSection = vi.mocked(getSection);
 const mockedSaveProgress = vi.mocked(saveProgress);
 const mockedGetLlmUsage = vi.mocked(getLlmUsage);
+const mockedListCards = vi.mocked(listCards);
+const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
@@ -69,6 +85,7 @@ function makeProgress(overrides: Partial<ProgressOut> = {}): ProgressOut {
 
 describe("CourseReaderClient", () => {
   beforeEach(() => {
+    mockSearchParams = new URLSearchParams();
     mockedGetSection.mockResolvedValue({
       status: 200,
       ok: true,
@@ -97,6 +114,8 @@ describe("CourseReaderClient", () => {
       ok: true,
       data: { calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 },
     });
+    mockedListCards.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedFindActiveCardsJob.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -184,6 +203,58 @@ describe("CourseReaderClient", () => {
       status: 200,
       ok: true,
       data: makeProgress({ section_id: "sec-2", scroll_pos: 0.3 }),
+    });
+    mockedGetSection.mockImplementation((id: string) =>
+      Promise.resolve({
+        status: 200,
+        ok: true,
+        data: {
+          id,
+          course_id: "course-1",
+          title: id === "sec-2" ? "Deep Dive" : "Introduction",
+          order_index: id === "sec-2" ? 1 : 0,
+          page_start: 1,
+          page_end: 5,
+          body_md: `Body for ${id}`,
+          content_hash: "hash",
+          lesson_md: null,
+          lesson_status: "none",
+          lesson_stale: false,
+          lesson_model: null,
+          lesson_prompt_version: null,
+          extractor_version: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
+
+    render(<CourseReaderClient courseId="course-1" />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /deep dive/i })).toHaveAttribute(
+        "aria-current",
+        "true",
+      ),
+    );
+  });
+
+  it("a ?section= query param overrides saved progress (e.g. a chat citation click)", async () => {
+    mockSearchParams = new URLSearchParams({ section: "sec-2" });
+    mockedGetCourse.mockResolvedValue({ status: 200, ok: true, data: makeCourse() });
+    mockedListSections.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [
+        makeSection({ id: "sec-1", title: "Introduction" }),
+        makeSection({ id: "sec-2", title: "Deep Dive", order_index: 1 }),
+      ],
+    });
+    // Saved progress points at sec-1 — the query param must win.
+    mockedGetProgress.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: makeProgress({ section_id: "sec-1", scroll_pos: 0.8 }),
     });
     mockedGetSection.mockImplementation((id: string) =>
       Promise.resolve({
