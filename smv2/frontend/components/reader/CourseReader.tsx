@@ -10,9 +10,11 @@ import { useProgressSync } from "@/lib/hooks/useProgressSync";
 import { useTypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import type { ReaderCourse, ReaderProgress, SectionBodyState } from "@/lib/reader/types";
 
+import type { LessonDisplayStatus } from "./LessonPane";
 import ReadingColumn, { type ViewMode } from "./ReadingColumn";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
+import UsageFooter from "./UsageFooter";
 
 const SHORTCUT_HINTS: ShortcutHint[] = [
   { keys: "← / → or j / k", description: "Next / previous chapter" },
@@ -47,6 +49,13 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [sectionBodies, setSectionBodies] = useState<Record<string, string>>({});
   const [bodyErrors, setBodyErrors] = useState<Record<string, string>>({});
+  const [lessonStatusOverrides, setLessonStatusOverrides] = useState<
+    Record<string, LessonDisplayStatus>
+  >({});
+  // Bumped on every settled generation so UsageFooter (keyed on this)
+  // remounts and refetches — usage numbers only ever change then, so this
+  // is simpler than polling.
+  const [usageRefreshKey, setUsageRefreshKey] = useState(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const columnRef = useRef<HTMLDivElement>(null);
   const sectionBodiesRef = useRef(sectionBodies);
@@ -118,6 +127,23 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
 
+  // Sidebar shows list_sections' lesson_status, which goes stale the
+  // moment a generation (single or part of "generate all") completes for
+  // that section. This overlay is how both LessonPane (the active
+  // section) and GenerateAllLessons (any section in a batch) patch just
+  // the one field that changed, without a full course refetch.
+  const patchLessonStatus = useCallback((sectionId: string, status: LessonDisplayStatus) => {
+    setLessonStatusOverrides((prev) =>
+      prev[sectionId] === status ? prev : { ...prev, [sectionId]: status },
+    );
+    // A settled generation is the only thing that changes usage numbers.
+    // LessonPane/GenerateAllLessons only call this on an actual status
+    // change, so this doesn't fire on every render.
+    if (status === "ready" || status === "failed") {
+      setUsageRefreshKey((key) => key + 1);
+    }
+  }, []);
+
   useKeyboardShortcuts({
     arrowright: goNext,
     j: goNext,
@@ -144,9 +170,11 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <TopBar
+        courseId={course.id}
         courseTitle={course.title}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
+        onLessonSectionSettled={patchLessonStatus}
       />
       <div className="flex min-h-0 flex-1">
         {!sidebarCollapsed && (
@@ -154,6 +182,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
             sections={sections}
             activeSectionId={activeSection.id}
             onSelect={setActiveIndex}
+            lessonStatusOverrides={lessonStatusOverrides}
           />
         )}
         <ReadingColumn
@@ -163,8 +192,10 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
           headingRef={headingRef}
           columnRef={columnRef}
           body={bodyState}
+          onLessonStatusChange={patchLessonStatus}
         />
       </div>
+      <UsageFooter key={usageRefreshKey} courseId={course.id} />
       <HintRow
         hints={SHORTCUT_HINTS.map((hint) => ({ keys: hint.keys, label: hint.description }))}
       />

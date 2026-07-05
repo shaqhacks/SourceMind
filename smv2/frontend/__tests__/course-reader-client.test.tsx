@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CourseReaderClient from "@/components/reader/CourseReaderClient";
 import {
   getCourse,
+  getLlmUsage,
   getProgress,
   getSection,
   listSections,
@@ -20,6 +21,7 @@ vi.mock("@/lib/api/client", () => ({
   getProgress: vi.fn(),
   getSection: vi.fn(),
   saveProgress: vi.fn(),
+  getLlmUsage: vi.fn(),
 }));
 
 const mockedGetCourse = vi.mocked(getCourse);
@@ -27,6 +29,7 @@ const mockedListSections = vi.mocked(listSections);
 const mockedGetProgress = vi.mocked(getProgress);
 const mockedGetSection = vi.mocked(getSection);
 const mockedSaveProgress = vi.mocked(saveProgress);
+const mockedGetLlmUsage = vi.mocked(getLlmUsage);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
@@ -47,7 +50,7 @@ function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
     order_index: 0,
     page_start: 1,
     page_end: 5,
-    lesson_status: "not_started",
+    lesson_status: "none",
     has_content: true,
     word_count: 100,
     ...overrides,
@@ -79,13 +82,21 @@ describe("CourseReaderClient", () => {
         body_md: "# Introduction\n\nBody text.",
         content_hash: "hash",
         lesson_md: null,
-        lesson_status: "not_started",
+        lesson_status: "none",
+        lesson_stale: false,
+        lesson_model: null,
+        lesson_prompt_version: null,
         extractor_version: null,
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-01T00:00:00Z",
       },
     });
     mockedSaveProgress.mockResolvedValue({ status: 200, ok: true });
+    mockedGetLlmUsage.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: { calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 },
+    });
   });
 
   afterEach(() => {
@@ -188,7 +199,10 @@ describe("CourseReaderClient", () => {
           body_md: `Body for ${id}`,
           content_hash: "hash",
           lesson_md: null,
-          lesson_status: "not_started",
+          lesson_status: "none",
+          lesson_stale: false,
+          lesson_model: null,
+          lesson_prompt_version: null,
           extractor_version: null,
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:00Z",

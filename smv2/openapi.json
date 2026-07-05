@@ -176,6 +176,40 @@
         "title": "DeleteOp",
         "type": "object"
       },
+      "GenerateAllLessonsOut": {
+        "properties": {
+          "job_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_ids",
+          "skipped"
+        ],
+        "title": "GenerateAllLessonsOut",
+        "type": "object"
+      },
+      "GenerateLessonOut": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "GenerateLessonOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -316,6 +350,64 @@
           "updated_at"
         ],
         "title": "JobOut",
+        "type": "object"
+      },
+      "LessonEstimateOut": {
+        "properties": {
+          "based_on_calls": {
+            "title": "Based On Calls",
+            "type": "integer"
+          },
+          "est_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cost Usd"
+          },
+          "est_seconds": {
+            "title": "Est Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "est_seconds",
+          "est_cost_usd",
+          "based_on_calls"
+        ],
+        "title": "LessonEstimateOut",
+        "type": "object"
+      },
+      "LlmUsageOut": {
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "est_cost_usd": {
+            "title": "Est Cost Usd",
+            "type": "number"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "calls",
+          "input_tokens",
+          "output_tokens",
+          "est_cost_usd"
+        ],
+        "title": "LlmUsageOut",
         "type": "object"
       },
       "MergeOp": {
@@ -576,6 +668,32 @@
             ],
             "title": "Lesson Md"
           },
+          "lesson_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lesson Model"
+          },
+          "lesson_prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lesson Prompt Version"
+          },
+          "lesson_stale": {
+            "title": "Lesson Stale",
+            "type": "boolean"
+          },
           "lesson_status": {
             "title": "Lesson Status",
             "type": "string"
@@ -627,6 +745,9 @@
           "content_hash",
           "lesson_md",
           "lesson_status",
+          "lesson_stale",
+          "lesson_model",
+          "lesson_prompt_version",
           "extractor_version",
           "created_at",
           "updated_at"
@@ -1086,6 +1207,48 @@
         ]
       }
     },
+    "/api/courses/{course_id}/lessons": {
+      "post": {
+        "operationId": "generate_all_lessons",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateAllLessonsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate All Lessons",
+        "tags": [
+          "lessons"
+        ]
+      }
+    },
     "/api/courses/{course_id}/outline": {
       "patch": {
         "operationId": "edit_outline",
@@ -1426,6 +1589,55 @@
         ]
       }
     },
+    "/api/llm/usage": {
+      "get": {
+        "operationId": "llm_usage",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "course_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Course Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmUsageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Llm Usage",
+        "tags": [
+          "llm"
+        ]
+      }
+    },
     "/api/sections/{section_id}": {
       "get": {
         "operationId": "get_section",
@@ -1465,6 +1677,100 @@
         "summary": "Get Section",
         "tags": [
           "sections"
+        ]
+      }
+    },
+    "/api/sections/{section_id}/lesson": {
+      "post": {
+        "operationId": "generate_lesson",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "section_id",
+            "required": true,
+            "schema": {
+              "title": "Section Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateLessonOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Lesson",
+        "tags": [
+          "lessons"
+        ]
+      }
+    },
+    "/api/sections/{section_id}/lesson/estimate": {
+      "get": {
+        "operationId": "lesson_estimate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "section_id",
+            "required": true,
+            "schema": {
+              "title": "Section Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonEstimateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Lesson Estimate",
+        "tags": [
+          "lessons"
         ]
       }
     },

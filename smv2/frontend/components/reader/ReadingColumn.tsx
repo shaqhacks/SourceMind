@@ -7,6 +7,8 @@ import Markdown from "@/components/Markdown";
 import { prefsToCssVars, type TypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import type { ReaderSection, SectionBodyState } from "@/lib/reader/types";
 
+import LessonPane, { type LessonDisplayStatus } from "./LessonPane";
+
 export type ViewMode = "source" | "lesson";
 
 export interface ReadingColumnProps {
@@ -16,6 +18,7 @@ export interface ReadingColumnProps {
   headingRef: RefObject<HTMLHeadingElement | null>;
   columnRef: RefObject<HTMLDivElement | null>;
   body: SectionBodyState;
+  onLessonStatusChange: (sectionId: string, status: LessonDisplayStatus) => void;
 }
 
 function pageRange(section: ReaderSection): string | null {
@@ -30,6 +33,7 @@ export default function ReadingColumn({
   headingRef,
   columnRef,
   body,
+  onLessonStatusChange,
 }: ReadingColumnProps) {
   const pages = pageRange(section);
 
@@ -63,12 +67,14 @@ export default function ReadingColumn({
             <Markdown>{body.body}</Markdown>
           )
         ) : (
-          <div
-            role="status"
-            className="rounded-md border border-dashed border-border p-6 text-sm text-muted-foreground"
-          >
-            No lesson yet — generation arrives in Phase 3.
-          </div>
+          // Keyed on section id: switching chapters while in lesson view is
+          // a fresh pane, not a state transition — remounting gives it
+          // clean initial state for free instead of a reset-in-effect.
+          <LessonPane
+            key={section.id}
+            sectionId={section.id}
+            onStatusChange={(status) => onLessonStatusChange(section.id, status)}
+          />
         )}
       </article>
     </div>

@@ -92,6 +92,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/lessons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate All Lessons */
+        post: operations["generate_all_lessons"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/outline": {
         parameters: {
             query?: never;
@@ -196,6 +213,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/llm/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Llm Usage */
+        get: operations["llm_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sections/{section_id}": {
         parameters: {
             query?: never;
@@ -205,6 +239,40 @@ export interface paths {
         };
         /** Get Section */
         get: operations["get_section"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sections/{section_id}/lesson": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Lesson */
+        post: operations["generate_lesson"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sections/{section_id}/lesson/estimate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lesson Estimate */
+        get: operations["lesson_estimate"];
         put?: never;
         post?: never;
         delete?: never;
@@ -310,6 +378,18 @@ export interface components {
              */
             type: "delete";
         };
+        /** GenerateAllLessonsOut */
+        GenerateAllLessonsOut: {
+            /** Job Ids */
+            job_ids: string[];
+            /** Skipped */
+            skipped: number;
+        };
+        /** GenerateLessonOut */
+        GenerateLessonOut: {
+            /** Job Id */
+            job_id: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -363,6 +443,26 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** LessonEstimateOut */
+        LessonEstimateOut: {
+            /** Based On Calls */
+            based_on_calls: number;
+            /** Est Cost Usd */
+            est_cost_usd: number | null;
+            /** Est Seconds */
+            est_seconds: number;
+        };
+        /** LlmUsageOut */
+        LlmUsageOut: {
+            /** Calls */
+            calls: number;
+            /** Est Cost Usd */
+            est_cost_usd: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
         };
         /** MergeOp */
         MergeOp: {
@@ -450,6 +550,12 @@ export interface components {
             id: string;
             /** Lesson Md */
             lesson_md: string | null;
+            /** Lesson Model */
+            lesson_model: string | null;
+            /** Lesson Prompt Version */
+            lesson_prompt_version: string | null;
+            /** Lesson Stale */
+            lesson_stale: boolean;
             /** Lesson Status */
             lesson_status: string;
             /** Order Index */
@@ -763,6 +869,37 @@ export interface operations {
             };
         };
     };
+    generate_all_lessons: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateAllLessonsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     edit_outline: {
         parameters: {
             query?: never;
@@ -1010,6 +1147,37 @@ export interface operations {
             };
         };
     };
+    llm_usage: {
+        parameters: {
+            query?: {
+                course_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmUsageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_section: {
         parameters: {
             query?: never;
@@ -1028,6 +1196,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SectionDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_lesson: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateLessonOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lesson_estimate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonEstimateOut"];
                 };
             };
             /** @description Validation Error */

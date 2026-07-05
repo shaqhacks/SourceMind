@@ -12,7 +12,7 @@ function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
     order_index: 0,
     page_start: 1,
     page_end: 10,
-    lesson_status: "not_started",
+    lesson_status: "none",
     has_content: true,
     word_count: 100,
     ...overrides,

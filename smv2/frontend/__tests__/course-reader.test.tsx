@@ -3,16 +3,29 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CourseReader from "@/components/reader/CourseReader";
-import { getSection, saveProgress } from "@/lib/api/client";
+import {
+  findActiveLessonJob,
+  getLessonEstimate,
+  getLlmUsage,
+  getSection,
+  saveProgress,
+} from "@/lib/api/client";
 import type { ReaderCourse, ReaderProgress } from "@/lib/reader/types";
 
 vi.mock("@/lib/api/client", () => ({
   getSection: vi.fn(),
   saveProgress: vi.fn(),
+  getLessonEstimate: vi.fn(),
+  findActiveLessonJob: vi.fn(),
+  generateLesson: vi.fn(),
+  getLlmUsage: vi.fn(),
 }));
 
 const mockedGetSection = vi.mocked(getSection);
 const mockedSaveProgress = vi.mocked(saveProgress);
+const mockedGetLessonEstimate = vi.mocked(getLessonEstimate);
+const mockedFindActiveLessonJob = vi.mocked(findActiveLessonJob);
+const mockedGetLlmUsage = vi.mocked(getLlmUsage);
 
 // A small hand-rolled fixture rather than importing lib/reader/mockCourse:
 // that module is documented as page.tsx-only, and a minimal 3-section
@@ -28,7 +41,7 @@ const COURSE: ReaderCourse = {
       order_index: 0,
       page_start: 1,
       page_end: 5,
-      lesson_status: "not_started",
+      lesson_status: "none",
       has_content: true,
       word_count: 100,
     },
@@ -38,7 +51,7 @@ const COURSE: ReaderCourse = {
       order_index: 1,
       page_start: 6,
       page_end: 10,
-      lesson_status: "not_started",
+      lesson_status: "none",
       has_content: true,
       word_count: 120,
     },
@@ -48,7 +61,7 @@ const COURSE: ReaderCourse = {
       order_index: 2,
       page_start: 11,
       page_end: 15,
-      lesson_status: "not_started",
+      lesson_status: "none",
       has_content: true,
       word_count: 90,
     },
@@ -82,6 +95,9 @@ describe("CourseReader", () => {
           content_hash: "hash",
           lesson_md: null,
           lesson_status: section.lesson_status,
+          lesson_stale: false,
+          lesson_model: null,
+          lesson_prompt_version: null,
           extractor_version: null,
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:00Z",
@@ -89,6 +105,17 @@ describe("CourseReader", () => {
       });
     });
     mockedSaveProgress.mockResolvedValue({ status: 200, ok: true });
+    mockedGetLessonEstimate.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: { est_seconds: 30, est_cost_usd: 0.01, based_on_calls: 0 },
+    });
+    mockedFindActiveLessonJob.mockResolvedValue(null);
+    mockedGetLlmUsage.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: { calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 },
+    });
   });
 
   afterEach(() => {
@@ -202,7 +229,8 @@ describe("CourseReader", () => {
 
     await user.keyboard("s");
 
-    expect(screen.getByRole("status")).toHaveTextContent(/no lesson yet/i);
+    // lesson_status "none" (never generated) renders the CTA card.
+    expect(await screen.findByRole("button", { name: /generate lesson/i })).toBeInTheDocument();
   });
 
   it("applies typography prefs to the reading column as CSS custom properties, live", async () => {

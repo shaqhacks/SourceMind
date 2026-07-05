@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.db.engine import dispose_engine
 from app.db.init import init_db
+from app.llm.provider import CompletionResult, Provider
 from app.main import create_app
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "pdfs"
@@ -54,3 +55,45 @@ def ingest_course(client):
         return course_id, upload_resp, ingest_resp, claimed
 
     return _ingest
+
+
+class StubProvider(Provider):
+    """Test double — never touches the network. A real Provider subclass
+    (not a duck-typed fake), so complete() still goes through the actual
+    concurrency/retry/ledger wrapper; only _complete_impl is faked. Configure
+    canned `responses`/`exceptions` (each a list, consumed in order via
+    pop(0)) or leave both empty for a default always-succeeds stub.
+    """
+
+    def __init__(self, responses=None, exceptions=None):
+        self.model_name = "stub-model"
+        self.responses = list(responses) if responses else []
+        self.exceptions = list(exceptions) if exceptions else []
+        self.call_count = 0
+        self.received_messages: list[list[dict]] = []
+        self.received_systems: list[str | None] = []
+
+    def _complete_impl(self, messages, *, max_tokens, system=None):
+        self.call_count += 1
+        self.received_messages.append(messages)
+        self.received_systems.append(system)
+        if self.exceptions:
+            exc = self.exceptions.pop(0)
+            if exc is not None:
+                raise exc
+        if self.responses:
+            return self.responses.pop(0)
+        return CompletionResult(
+            text="stub lesson content", input_tokens=100, output_tokens=200, model=self.model_name
+        )
+
+
+@pytest.fixture()
+def stub_provider(client, monkeypatch):
+    """Monkeypatches get_provider() everywhere it's already been imported
+    by name, so no test ever constructs a real Anthropic/Ollama client.
+    """
+    provider = StubProvider()
+    monkeypatch.setattr("app.llm.provider.get_provider", lambda: provider)
+    monkeypatch.setattr("app.pipeline.generation.get_provider", lambda: provider)
+    return provider

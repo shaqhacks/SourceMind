@@ -15,7 +15,12 @@ APP_ROOT = Path(__file__).resolve().parent.parent / "app"
 CONFIG_FILE = APP_ROOT / "config.py"
 ROUTERS_ROOT = APP_ROOT / "routers"
 PIPELINE_ROOT = APP_ROOT / "pipeline"
+LLM_ROOT = APP_ROOT / "llm"
+LIMITER_FILE = LLM_ROOT / "limiter.py"
+PROMPTS_LOADER_FILE = LLM_ROOT / "prompts.py"
+INGEST_FILE = PIPELINE_ROOT / "ingest.py"
 _FORBIDDEN_ROUTER_IMPORT_PREFIXES = ("sqlalchemy", "app.db")
+_MAX_STRING_LITERAL_LEN = 300
 
 
 def _is_os_name(node: ast.expr) -> bool:
@@ -75,8 +80,15 @@ def test_no_module_scope_env_reads_outside_config() -> None:
 
 
 def test_no_threading_or_semaphore_usage_outside_limiter() -> None:
+    """app/llm/limiter.py is the one sanctioned exception — it IS the
+    concurrency limiter. Everywhere else, threading/semaphore usage would
+    mean a second, uncoordinated concurrency gate (the double-acquire
+    deadlock class this project has been burned by before).
+    """
     violations: dict[str, list[str]] = {}
     for path in _python_files():
+        if path == LIMITER_FILE:
+            continue
         tree = ast.parse(path.read_text(), filename=str(path))
         found: list[str] = []
         for node in ast.walk(tree):
@@ -171,3 +183,90 @@ def test_pipeline_stays_framework_free() -> None:
             violations[str(path)] = found
 
     assert not violations, f"app/pipeline/* must not import fastapi: {violations}"
+
+
+def test_llm_sdk_imports_confined_to_llm_package() -> None:
+    """anthropic and httpx (the Ollama HTTP client) may only be imported
+    under app/llm/ — every other module talks to an LLM through the
+    Provider abstraction, never a raw SDK/HTTP client of its own.
+    """
+    violations: dict[str, list[str]] = {}
+    for path in _python_files():
+        if path.is_relative_to(LLM_ROOT):
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        found = [
+            f"line {lineno}: {name}"
+            for lineno, name in _imported_module_names(tree)
+            if name in {"anthropic", "httpx"} or name.startswith(("anthropic.", "httpx."))
+        ]
+        if found:
+            violations[str(path)] = found
+
+    assert not violations, f"anthropic/httpx imports must live only under app/llm/: {violations}"
+
+
+def _docstring_node_ids(tree: ast.Module) -> set[int]:
+    """id() of every string-constant node that's a module/class/function
+    docstring (its body's first statement) — these are documentation, not
+    the "prompt baked into code" pattern this check targets, so they're
+    exempt regardless of length.
+    """
+    docstring_ids: set[int] = set()
+
+    def _mark_if_docstring(body: list[ast.stmt]) -> None:
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            docstring_ids.add(id(body[0].value))
+
+    _mark_if_docstring(tree.body)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            _mark_if_docstring(node.body)
+
+    return docstring_ids
+
+
+def test_no_long_string_literals_in_pipeline_or_llm() -> None:
+    """Prompts live as files under backend/prompts/vN/ (loaded via
+    app/llm/prompts.py), never as string literals baked into code — that's
+    what keeps prompt changes reviewable as plain diffs and prompt_version
+    tracking meaningful. Docstrings are exempt (documentation, not prompts).
+    """
+    violations: dict[str, list[str]] = {}
+    for root in (PIPELINE_ROOT, LLM_ROOT):
+        for path in sorted(root.glob("*.py")):
+            if path.name == "__init__.py" or path == PROMPTS_LOADER_FILE:
+                continue
+            tree = ast.parse(path.read_text(), filename=str(path))
+            docstring_ids = _docstring_node_ids(tree)
+            found = [
+                f"line {node.lineno}: string literal of length {len(node.value)}"
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and len(node.value) > _MAX_STRING_LITERAL_LEN
+                and id(node) not in docstring_ids
+            ]
+            if found:
+                violations[str(path)] = found
+
+    assert not violations, f"long string literals belong in prompts/ files, not code: {violations}"
+
+
+def test_ingest_pipeline_never_imports_llm() -> None:
+    """ADR-010: ingest makes ZERO LLM calls. Mechanically enforced — the
+    ingest module (unlike generation.py, which legitimately needs the LLM
+    layer) must never import anything from app.llm.
+    """
+    tree = ast.parse(INGEST_FILE.read_text(), filename=str(INGEST_FILE))
+    found = [
+        f"line {lineno}: {name}"
+        for lineno, name in _imported_module_names(tree)
+        if name == "app.llm" or name.startswith("app.llm.")
+    ]
+    assert not found, f"app/pipeline/ingest.py must never import app.llm: {found}"

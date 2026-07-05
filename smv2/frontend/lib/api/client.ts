@@ -23,6 +23,10 @@ export type ProgressOut = components["schemas"]["ProgressOut"];
 export type ProgressIn = components["schemas"]["ProgressIn"];
 export type AssetOut = components["schemas"]["AssetOut"];
 export type IngestStartOut = components["schemas"]["IngestStartOut"];
+export type GenerateLessonOut = components["schemas"]["GenerateLessonOut"];
+export type LessonEstimateOut = components["schemas"]["LessonEstimateOut"];
+export type GenerateAllLessonsOut = components["schemas"]["GenerateAllLessonsOut"];
+export type LlmUsageOut = components["schemas"]["LlmUsageOut"];
 export type OutlineOp =
   | components["schemas"]["RenameOp"]
   | components["schemas"]["ReorderOp"]
@@ -226,5 +230,60 @@ export async function findLatestIngestJob(courseId: string): Promise<JobOut | nu
   if (!data) return null;
   return latestByCreatedAt(
     data.filter((job) => job.type === "ingest" && payloadCourseId(job.payload) === courseId),
+  );
+}
+
+export function generateLesson(sectionId: string, force = false) {
+  return request(
+    client.POST("/api/sections/{section_id}/lesson", {
+      params: { path: { section_id: sectionId }, query: { force } },
+    }),
+  );
+}
+
+export function generateAllLessons(courseId: string) {
+  return request(
+    client.POST("/api/courses/{course_id}/lessons", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function getLessonEstimate(sectionId: string) {
+  return request(
+    client.GET("/api/sections/{section_id}/lesson/estimate", {
+      params: { path: { section_id: sectionId } },
+    }),
+  );
+}
+
+export function getLlmUsage(courseId?: string) {
+  return request(
+    client.GET("/api/llm/usage", {
+      params: { query: { course_id: courseId } },
+    }),
+  );
+}
+
+function payloadSectionId(payload: { [key: string]: unknown } | null | undefined): string | null {
+  return payload && typeof payload.section_id === "string" ? payload.section_id : null;
+}
+
+/**
+ * Same rediscovery problem as findActiveIngestJob, for lesson generation:
+ * a section's lesson_status can be "queued"/"generating" from a job
+ * started in a prior session (or by generate_all_lessons), with no job_id
+ * carried on the section itself.
+ */
+export async function findActiveLessonJob(sectionId: string): Promise<JobOut | null> {
+  const { data } = await listJobs();
+  if (!data) return null;
+  return latestByCreatedAt(
+    data.filter(
+      (job) =>
+        job.type === "generate_lesson" &&
+        !TERMINAL_JOB_STATUSES.has(job.status) &&
+        payloadSectionId(job.payload) === sectionId,
+    ),
   );
 }

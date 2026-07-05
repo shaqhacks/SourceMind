@@ -75,3 +75,33 @@ def pages_per_window() -> int:
         return int(raw)
     except ValueError:
         return 12
+
+
+def llm_provider() -> str:
+    return os.environ.get("SMV2_LLM_PROVIDER", "anthropic")
+
+
+def llm_model() -> str:
+    return os.environ.get("SMV2_LLM_MODEL", "claude-sonnet-5")
+
+
+def llm_max_concurrency() -> int:
+    raw = os.environ.get("SMV2_LLM_MAX_CONCURRENCY", "2")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 2
+
+
+def ollama_base_url() -> str:
+    return os.environ.get("SMV2_OLLAMA_BASE_URL", "http://localhost:11434")
+
+
+def course_spend_cap_usd() -> float | None:
+    raw = os.environ.get("SMV2_COURSE_SPEND_CAP_USD")
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None

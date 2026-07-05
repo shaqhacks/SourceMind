@@ -101,6 +101,9 @@ class SectionDetailOut(BaseModel):
     content_hash: str
     lesson_md: str | None
     lesson_status: str
+    lesson_stale: bool
+    lesson_model: str | None
+    lesson_prompt_version: str | None
     extractor_version: str | None
     created_at: datetime
     updated_at: datetime
@@ -153,3 +156,25 @@ OutlineOp = Annotated[
 
 class OutlineEditRequest(BaseModel):
     operations: list[OutlineOp]
+
+
+class GenerateLessonOut(BaseModel):
+    job_id: str
+
+
+class GenerateAllLessonsOut(BaseModel):
+    job_ids: list[str]
+    skipped: int
+
+
+class LessonEstimateOut(BaseModel):
+    est_seconds: float
+    est_cost_usd: float | None
+    based_on_calls: int
+
+
+class LlmUsageOut(BaseModel):
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    est_cost_usd: float

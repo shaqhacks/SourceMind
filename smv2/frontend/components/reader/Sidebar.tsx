@@ -4,9 +4,42 @@ export interface SidebarProps {
   sections: ReaderSection[];
   activeSectionId: string;
   onSelect: (index: number) => void;
+  /**
+   * Patches over list_sections' lesson_status for sections whose
+   * generation has settled since the list was fetched (also carries the
+   * synthetic "stale" value, which list_sections doesn't expose at all —
+   * see LessonPane). Keyed by section id.
+   */
+  lessonStatusOverrides?: Record<string, string>;
 }
 
-export default function Sidebar({ sections, activeSectionId, onSelect }: SidebarProps) {
+const LESSON_DOT_CONFIG: Record<string, { label: string; className: string }> = {
+  none: { label: "No lesson yet", className: "bg-muted-foreground/30" },
+  queued: { label: "Lesson queued", className: "bg-blue-400" },
+  generating: { label: "Lesson generating", className: "bg-blue-500 animate-pulse" },
+  ready: { label: "Lesson ready", className: "bg-green-500" },
+  failed: { label: "Lesson generation failed", className: "bg-red-500" },
+  stale: { label: "Lesson needs regeneration", className: "bg-amber-500" },
+};
+
+function LessonDot({ status }: { status: string }) {
+  const config = LESSON_DOT_CONFIG[status] ?? LESSON_DOT_CONFIG.none;
+  return (
+    <span
+      role="img"
+      aria-label={config.label}
+      title={config.label}
+      className={`inline-block h-2 w-2 shrink-0 rounded-full ${config.className}`}
+    />
+  );
+}
+
+export default function Sidebar({
+  sections,
+  activeSectionId,
+  onSelect,
+  lessonStatusOverrides,
+}: SidebarProps) {
   return (
     <nav
       id="reader-sidebar"
@@ -16,6 +49,7 @@ export default function Sidebar({ sections, activeSectionId, onSelect }: Sidebar
       <ul>
         {sections.map((section, index) => {
           const active = section.id === activeSectionId;
+          const lessonDisplayStatus = lessonStatusOverrides?.[section.id] ?? section.lesson_status;
           return (
             <li key={section.id}>
               <button
@@ -28,7 +62,10 @@ export default function Sidebar({ sections, activeSectionId, onSelect }: Sidebar
                     : "hover:bg-muted-foreground/10"
                 }`}
               >
-                <span className="block truncate">{section.title}</span>
+                <span className="flex items-center gap-2">
+                  <LessonDot status={lessonDisplayStatus} />
+                  <span className="truncate">{section.title}</span>
+                </span>
                 {section.page_start !== null && section.page_end !== null ? (
                   <span className="block text-xs text-muted-foreground">
                     p.{section.page_start}–{section.page_end}

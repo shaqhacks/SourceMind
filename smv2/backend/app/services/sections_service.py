@@ -11,6 +11,7 @@ from typing import Any
 
 from app.db.engine import get_session
 from app.db.models import ProgressState, Section, utcnow
+from app.llm.prompts import load_prompt
 
 
 class InvalidSectionForCourseError(ValueError):
@@ -56,6 +57,10 @@ def get_section(section_id: str) -> dict[str, Any] | None:
         s = session.get(Section, section_id)
         if s is None:
             return None
+        _, current_prompt_version = load_prompt("lesson")
+        # No lesson yet -> "stale" isn't a meaningful concept; only flag a
+        # lesson generated under a prompt version older than the current one.
+        lesson_stale = bool(s.lesson_prompt_version) and s.lesson_prompt_version < current_prompt_version
         return {
             "id": s.id,
             "course_id": s.course_id,
@@ -67,6 +72,9 @@ def get_section(section_id: str) -> dict[str, Any] | None:
             "content_hash": s.content_hash,
             "lesson_md": s.lesson_md,
             "lesson_status": s.lesson_status,
+            "lesson_stale": lesson_stale,
+            "lesson_model": s.lesson_model,
+            "lesson_prompt_version": s.lesson_prompt_version,
             "extractor_version": s.extractor_version,
             "created_at": s.created_at,
             "updated_at": s.updated_at,

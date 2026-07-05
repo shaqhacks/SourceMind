@@ -39,6 +39,8 @@ def test_get_section_returns_full_body(client, ingest_course):
     assert body["course_id"] == course_id
     assert "Chapter 1: Foundations" in body["body_md"]
     assert body["lesson_md"] is None
+    assert body["lesson_model"] is None
+    assert body["lesson_prompt_version"] is None
     assert body["extractor_version"].startswith("pymupdf4llm-")
 
 

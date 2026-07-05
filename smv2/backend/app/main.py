@@ -4,13 +4,15 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import api_version, cors_origins, worker_enabled
 from app.db.init import init_db
 from app.jobs.worker import reconcile_interrupted_jobs, worker_loop
-from app.routers import assets, courses, export, health, ingest, jobs, sections
+from app.llm.limiter import LLMBusyError
+from app.routers import assets, courses, export, health, ingest, jobs, lessons, llm_usage, sections
 from app.services import jobs_service
 from app.services.backup_service import should_run_backup
 
@@ -58,6 +60,13 @@ def create_app() -> FastAPI:
     app.include_router(sections.router)
     app.include_router(sections.section_router)
     app.include_router(export.router)
+    app.include_router(lessons.router)
+    app.include_router(llm_usage.router)
+
+    @app.exception_handler(LLMBusyError)
+    async def llm_busy_handler(request: Request, exc: LLMBusyError) -> JSONResponse:
+        return JSONResponse(status_code=429, content={"detail": str(exc)})
+
     return app
 
 

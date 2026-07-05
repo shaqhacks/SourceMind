@@ -1,13 +1,23 @@
 import ThemeToggle from "@/components/ThemeToggle";
 import TypographyControls from "@/components/TypographyControls";
 
+import GenerateAllLessons from "./GenerateAllLessons";
+
 export interface TopBarProps {
+  courseId: string;
   courseTitle: string;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  onLessonSectionSettled: (sectionId: string, status: "ready" | "failed") => void;
 }
 
-export default function TopBar({ courseTitle, sidebarCollapsed, onToggleSidebar }: TopBarProps) {
+export default function TopBar({
+  courseId,
+  courseTitle,
+  sidebarCollapsed,
+  onToggleSidebar,
+  onLessonSectionSettled,
+}: TopBarProps) {
   return (
     <div className="flex items-center gap-3 border-b border-border px-4 py-3">
       <button
@@ -21,6 +31,7 @@ export default function TopBar({ courseTitle, sidebarCollapsed, onToggleSidebar 
         ☰
       </button>
       <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">{courseTitle}</h1>
+      <GenerateAllLessons courseId={courseId} onSectionSettled={onLessonSectionSettled} />
       <TypographyControls />
       <ThemeToggle />
     </div>
