@@ -77,6 +77,20 @@ def env_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def env_bool(name: str, default: bool) -> bool:
+    """Parse env var *name* as a boolean, falling back to *default* if unset or
+    unrecognized. Accepts 1/0, true/false, yes/no, on/off (case-insensitive)."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
 # ─── LLM timeout ────────────────────────────────────────────────────────────
 
 _DEFAULT_LLM_TIMEOUT = 120.0
@@ -153,3 +167,24 @@ def fallback_pages_per_chapter() -> int:
     (env ``SOURCEMIND_FALLBACK_PAGES_PER_CHAPTER``). Used only when a source has
     no usable embedded TOC/bookmarks — see ``pipeline.outline.sections_from_page_windows``."""
     return env_int("SOURCEMIND_FALLBACK_PAGES_PER_CHAPTER", _DEFAULT_FALLBACK_PAGES_PER_CHAPTER)
+
+
+# ─── PDF extraction (ADR-011: layout-aware Markdown) ───────────────────────
+
+_DEFAULT_PDF_MARKDOWN_EXTRACTION = True
+
+
+def pdf_markdown_extraction() -> bool:
+    """Whether PDF pages are extracted as layout-aware Markdown via pymupdf4llm
+    instead of plain text (env ``SOURCEMIND_PDF_MARKDOWN``, default True).
+
+    Markdown wins on reading fidelity for prose-heavy books (real headings,
+    reflowed paragraphs, lists) — see ADR-011. It does have one measured
+    downside: PDFs that lay out fraction/division problems as a stacked
+    numerator/bar/denominator can get spurious ``<u>``/``<sup>`` tags around
+    them. This flag is the escape hatch for a book where that tradeoff
+    doesn't hold — set it false to fall back to plain-text extraction.
+    Conversion failure or missing pymupdf4llm always falls back automatically
+    regardless of this flag (see ``extract.pdf._markdown_pages``).
+    """
+    return env_bool("SOURCEMIND_PDF_MARKDOWN", _DEFAULT_PDF_MARKDOWN_EXTRACTION)

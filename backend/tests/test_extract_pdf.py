@@ -81,3 +81,98 @@ def test_extracted_page_is_dataclass(tmp_path):
     assert hasattr(page, "text")
     assert hasattr(page, "image_paths")
     assert isinstance(page, ExtractedPage)
+
+
+# ---------------------------------------------------------------------------
+# ADR-011: layout-aware Markdown extraction (pymupdf4llm)
+# ---------------------------------------------------------------------------
+
+def _build_heading_pdf(tmp_path: Path) -> Path:
+    """A 1-page PDF with a large-font heading line and a smaller-font body
+    paragraph — enough font-size contrast for pymupdf4llm's heuristic to tell
+    them apart."""
+    pdf_path = tmp_path / "headings.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 72), "Chapter One: Integers", fontsize=24)
+    page.insert_text((72, 110), "This is a regular paragraph of body text.", fontsize=11)
+    doc.save(str(pdf_path))
+    doc.close()
+    return pdf_path
+
+
+def test_extract_pdf_markdown_renders_heading(tmp_path):
+    """A large-font line becomes a markdown heading; body text stays intact."""
+    pdf_path = _build_heading_pdf(tmp_path)
+    assets_dir = tmp_path / "assets"
+    results = extract_pdf(pdf_path, assets_dir)
+    text = results[0].text
+    assert "#" in text, f"Expected a markdown heading marker, got: {text!r}"
+    assert "Chapter One: Integers" in text
+    assert "This is a regular paragraph of body text." in text
+
+
+def test_extract_pdf_strips_spurious_sup_underline_tags(tmp_path, monkeypatch):
+    """pymupdf4llm's baseline-offset heuristic can misread a vertically-stacked
+    fraction (numerator / bar / denominator) as <sup>/<u> spans — confirmed
+    against a real algebra textbook (ADR-011). Since the frontend renders raw
+    HTML in Markdown (rehype-raw), an unstripped tag would show as visibly
+    broken underline/superscript formatting rather than inert text.
+    extract_pdf must strip the tags, keeping their inner text."""
+    import pymupdf4llm
+
+    def _fake_to_markdown(doc, *, page_chunks, **kwargs):
+        return [{"text": "<sup><u>42</u></sup>\n12"} for _ in range(len(doc))]
+
+    monkeypatch.setattr(pymupdf4llm, "to_markdown", _fake_to_markdown)
+
+    pdf_path = _build_sample_pdf(tmp_path)
+    assets_dir = tmp_path / "assets"
+    results = extract_pdf(pdf_path, assets_dir)
+    text = results[0].text
+    assert "<sup>" not in text and "</sup>" not in text
+    assert "<u>" not in text and "</u>" not in text
+    assert "42" in text and "12" in text
+
+
+def test_extract_pdf_markdown_disabled_by_config(tmp_path, monkeypatch):
+    """SOURCEMIND_PDF_MARKDOWN=false skips pymupdf4llm entirely — plain text,
+    same as before ADR-011."""
+    monkeypatch.setenv("SOURCEMIND_PDF_MARKDOWN", "false")
+    pdf_path = _build_heading_pdf(tmp_path)
+    assets_dir = tmp_path / "assets"
+    results = extract_pdf(pdf_path, assets_dir)
+    text = results[0].text
+    assert "#" not in text
+    assert "Chapter One: Integers" in text
+
+
+def test_extract_pdf_falls_back_to_plain_text_on_conversion_failure(tmp_path, monkeypatch):
+    """If pymupdf4llm raises during conversion, extract_pdf must fall back to
+    plain text rather than propagate the failure — ingest must never fail
+    over formatting."""
+    import pymupdf4llm
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated pymupdf4llm failure")
+
+    monkeypatch.setattr(pymupdf4llm, "to_markdown", _boom)
+
+    pdf_path = _build_sample_pdf(tmp_path)
+    assets_dir = tmp_path / "assets"
+    results = extract_pdf(pdf_path, assets_dir)  # must not raise
+    assert "INTEGERS" in results[0].text
+    assert "#" not in results[0].text
+
+
+def test_extract_pdf_falls_back_when_pymupdf4llm_missing(tmp_path, monkeypatch):
+    """If pymupdf4llm can't even be imported, extract_pdf still returns plain
+    text rather than raising."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "pymupdf4llm", None)  # forces ImportError on import
+
+    pdf_path = _build_sample_pdf(tmp_path)
+    assets_dir = tmp_path / "assets"
+    results = extract_pdf(pdf_path, assets_dir)  # must not raise
+    assert "INTEGERS" in results[0].text

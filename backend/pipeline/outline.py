@@ -229,6 +229,12 @@ _FRONT_MATTER_KEYWORDS = (
 # of spaces, then a trailing page number ("1.1 Integers .............. 7").
 _TOC_LINE_RE = re.compile(r"^.{3,}[.\s]{4,}\d{1,4}\s*$")
 _MAX_FRONT_MATTER_PAGES = 30
+# Markdown emphasis markers (pymupdf4llm, ADR-011): a multi-word keyword like
+# "table of contents" would otherwise miss a match if the converter bolds
+# each word separately ("**Table** **of** **Contents**") — verified against a
+# real book that this book's own front matter doesn't hit that case, but
+# stripping the markers is a cheap, safe guard against a book that does.
+_MD_EMPHASIS_RE = re.compile(r"[*_]{1,3}")
 
 
 def _looks_like_front_matter(text: str) -> bool:
@@ -244,7 +250,7 @@ def _looks_like_front_matter(text: str) -> bool:
     page. A false negative here just means the (harmless, already-readable)
     title page stays part of "chapter 1" as before this function existed.
     """
-    lowered = (text or "").lower()
+    lowered = _MD_EMPHASIS_RE.sub("", text or "").lower()
     if any(kw in lowered for kw in _FRONT_MATTER_KEYWORDS):
         return True
     lines = [ln for ln in (text or "").splitlines() if ln.strip()]
