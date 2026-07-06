@@ -220,6 +220,34 @@ describe("CourseReaderClient", () => {
     );
   });
 
+  it("redirects a resumed practice/answers section to the nearest content section instead", async () => {
+    mockedGetCourse.mockResolvedValue(ok(makeCourse()));
+    mockedListSections.mockResolvedValue(
+      ok([
+        makeSection({ id: "sec-1", title: "Introduction", order_index: 0, kind: "content" }),
+        makeSection({ id: "sec-practice", title: "Practice Set", order_index: 1, kind: "practice" }),
+        makeSection({ id: "sec-2", title: "Deep Dive", order_index: 2, kind: "content" }),
+      ]),
+    );
+    // Saved progress points at a section that's since become non-content
+    // (e.g. an outline edit) — the reader must land on the nearest content
+    // section (forward first: sec-2), never on sec-practice itself.
+    mockedGetProgress.mockResolvedValue(
+      ok(makeProgress({ section_id: "sec-practice", scroll_pos: 0.9 })),
+    );
+    mockedGetSection.mockImplementation((id: string) => Promise.resolve(ok(makeSectionDetail(id))));
+
+    render(<CourseReaderClient courseId="course-1" />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /deep dive/i })).toHaveAttribute(
+        "aria-current",
+        "true",
+      ),
+    );
+    expect(screen.queryByRole("button", { name: /practice set/i })).not.toBeInTheDocument();
+  });
+
   it("a ?section= query param overrides saved progress (e.g. a chat citation click)", async () => {
     mockSearchParams = new URLSearchParams({ section: "sec-2" });
     mockedGetCourse.mockResolvedValue(ok(makeCourse()));

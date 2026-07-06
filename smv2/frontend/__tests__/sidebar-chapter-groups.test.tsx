@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -128,7 +128,7 @@ describe("Sidebar chapter grouping", () => {
     expect(document.getElementById(controlsId!)).toContainElement(screen.getByText("Foundations"));
   });
 
-  it("shows a kind chip for practice and answers sections, none for content", () => {
+  it("never lists practice/answers sections as reading rows, even in their expanded group", () => {
     render(
       <Sidebar
         courseId="course-1"
@@ -138,13 +138,12 @@ describe("Sidebar chapter grouping", () => {
       />,
     );
 
-    const contentRow = screen.getByText("Foundations").closest("button")!;
-    const practiceRow = screen.getByText("Practice Set").closest("button")!;
-    const answersRow = screen.getByText("Answer Key").closest("button")!;
-
-    expect(within(contentRow).queryByText(/practice|answers/i)).not.toBeInTheDocument();
-    expect(within(practiceRow).getByText("Practice")).toBeInTheDocument();
-    expect(within(answersRow).getByText("Answers")).toBeInTheDocument();
+    // Chapter 1's group is expanded (it's the active section's group) —
+    // its content row is present, but practice/answers never render here;
+    // their home is the chapter's "Test" link instead.
+    expect(screen.getByText("Foundations")).toBeInTheDocument();
+    expect(screen.queryByText("Practice Set")).not.toBeInTheDocument();
+    expect(screen.queryByText("Answer Key")).not.toBeInTheDocument();
   });
 
   it("onSelect always receives the section's index in the flat (ungrouped) list, not a group-relative index", async () => {
@@ -178,10 +177,29 @@ describe("Sidebar chapter grouping", () => {
       />,
     );
 
-    const testLinks = screen.getAllByRole("link", { name: /^test$/i });
+    // Chapter 1 has a practice section, so its label is "Test · N practice
+    // sheet(s)" rather than bare "Test" (see the next test for that count)
+    // — match on the "Test" prefix rather than an exact string.
+    const testLinks = screen.getAllByRole("link", { name: /^test/i });
     expect(testLinks).toHaveLength(2);
     expect(testLinks[0]).toHaveAttribute("href", "/course/course-1/chapter/Chapter%201/test");
     expect(testLinks[1]).toHaveAttribute("href", "/course/course-1/chapter/Chapter%202/test");
+  });
+
+  it("shows the practice-sheet count on the Test link before any score exists", () => {
+    render(
+      <Sidebar
+        courseId="course-1"
+        sections={SECTIONS}
+        activeSectionId="c1-content"
+        onSelect={vi.fn()}
+      />,
+    );
+
+    // Chapter 1 has one practice section and no test_stats yet.
+    expect(screen.getByRole("link", { name: /test.*1 practice sheet/i })).toBeInTheDocument();
+    // Chapter 2 has no practice sections at all — plain "Test".
+    expect(screen.getByRole("link", { name: /^test$/i })).toBeInTheDocument();
   });
 
   it("shows the best score on the Test link once chapterStats is populated", () => {
@@ -213,6 +231,6 @@ describe("Sidebar chapter grouping", () => {
     );
     expect(screen.getByText("Title Page")).toBeInTheDocument();
     // Only Chapter 1 and Chapter 2 get a Test link — front matter doesn't.
-    expect(screen.getAllByRole("link", { name: /^test$/i })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: /^test/i })).toHaveLength(2);
   });
 });

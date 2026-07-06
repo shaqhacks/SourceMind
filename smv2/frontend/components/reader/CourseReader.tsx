@@ -208,14 +208,26 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
+  // Keyboard nav (j/k/arrows) walks content sections only — practice/answers
+  // sections are reachable by deep link but aren't part of the reading
+  // flow's "next chapter" (their home is the chapter test page). Steps one
+  // index at a time in the given direction until landing on a content
+  // section; if the direction runs off the end without finding one, stays
+  // put rather than landing on a non-content section — the "clamp instead
+  // of wrap" behavior generalizes to "clamp instead of landing off-flow".
   const goToOffset = useCallback(
     (offset: number) => {
+      const direction = offset > 0 ? 1 : -1;
       setActiveIndex((current) => {
-        const next = current + offset;
-        return Math.min(Math.max(next, 0), sections.length - 1);
+        let candidate = current;
+        for (;;) {
+          candidate += direction;
+          if (candidate < 0 || candidate > sections.length - 1) return current;
+          if (sections[candidate].kind === "content") return candidate;
+        }
       });
     },
-    [sections.length],
+    [sections],
   );
 
   const goNext = useCallback(() => goToOffset(1), [goToOffset]);
@@ -299,6 +311,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
           />
         )}
         <ReadingColumn
+          courseId={course.id}
           section={activeSection}
           mode={mode}
           typography={typography.prefs}

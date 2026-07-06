@@ -8,6 +8,7 @@ import { useSearchParams } from "next/navigation";
 import ErrorBanner from "@/components/ErrorBanner";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import { getCourse, getProgress, listSections, type ProgressOut } from "@/lib/api/client";
+import { resolveResumeSectionId } from "@/lib/reader/resumeProgress";
 import type { ReaderCourse } from "@/lib/reader/types";
 
 // The reader is entirely localStorage/keyboard-driven (theme, typography,
@@ -134,9 +135,22 @@ export default function CourseReaderClient({ courseId }: CourseReaderClientProps
     );
   }
 
+  // ?section= is an explicit deep link (e.g. a citation click) — render
+  // exactly what was requested, even a practice/answers section (which
+  // ReadingColumn now surfaces with its own banner rather than blocking).
+  // A *resumed* section_id gets no such pass: it's an implicit "continue
+  // reading" intent, so a saved section that's since become non-content
+  // (outline edit, re-ingest) redirects to the nearest content section —
+  // and scroll_pos resets to 0 since it described a position in a section
+  // we're no longer landing on.
+  const resolvedSectionId = sectionOverride
+    ? sectionOverride
+    : resolveResumeSectionId(state.course.sections, state.progress.section_id);
   const effectiveProgress = sectionOverride
     ? { section_id: sectionOverride, scroll_pos: 0 }
-    : state.progress;
+    : resolvedSectionId === state.progress.section_id
+      ? state.progress
+      : { section_id: resolvedSectionId, scroll_pos: 0 };
 
   return <CourseReader course={state.course} initialProgress={effectiveProgress} />;
 }

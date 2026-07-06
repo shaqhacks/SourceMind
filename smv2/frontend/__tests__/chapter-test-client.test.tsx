@@ -76,6 +76,22 @@ function makeSectionDetail(overrides: Partial<SectionDetailOut> = {}): SectionDe
   };
 }
 
+// getSection is called for both practice and answer section ids (see
+// ChapterTestClient's loadSections) — this keys the mocked response by the
+// requested id so a test that touches both never sees one blank out or
+// duplicate the other's text.
+function mockGetSectionById(id: string) {
+  return Promise.resolve(
+    ok(
+      makeSectionDetail(
+        id === "c1-answers"
+          ? { id, kind: "answers", body_md: "Answer: 4" }
+          : { id },
+      ),
+    ),
+  );
+}
+
 function makeAttempt(overrides: Partial<TestAttemptSummaryOut> = {}): TestAttemptSummaryOut {
   return {
     id: "attempt-1",
@@ -121,7 +137,7 @@ describe("ChapterTestClient", () => {
 
   it("renders the chapter's practice sections in order", async () => {
     mockedListChapters.mockResolvedValue(ok([makeChapter()]));
-    mockedGetSection.mockResolvedValue(ok(makeSectionDetail()));
+    mockedGetSection.mockImplementation(mockGetSectionById);
     mockedListTests.mockResolvedValue(ok([]));
 
     render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
@@ -130,8 +146,29 @@ describe("ChapterTestClient", () => {
     expect(mockedGetSection).toHaveBeenCalledWith("c1-practice");
   });
 
+  it("renders the chapter's answer key in a collapsed disclosure, revealed on click", async () => {
+    mockedListChapters.mockResolvedValue(ok([makeChapter()]));
+    mockedGetSection.mockImplementation(mockGetSectionById);
+    mockedListTests.mockResolvedValue(ok([]));
+
+    const user = userEvent.setup();
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+    await screen.findByText("Practice question: what is 2+2?");
+
+    const summary = screen.getByText("Answer key");
+    const details = summary.closest("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+
+    await user.click(summary);
+    expect(details).toHaveAttribute("open");
+    expect(screen.getByText("Answer: 4")).toBeInTheDocument();
+  });
+
   it("shows the 'no practice sections' empty state when the chapter has none", async () => {
-    mockedListChapters.mockResolvedValue(ok([makeChapter({ practice_section_ids: [] })]));
+    mockedListChapters.mockResolvedValue(
+      ok([makeChapter({ practice_section_ids: [], answers_section_ids: [] })]),
+    );
     mockedListTests.mockResolvedValue(ok([]));
 
     render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
@@ -155,7 +192,7 @@ describe("ChapterTestClient", () => {
     mockedListChapters.mockResolvedValue(
       ok([makeChapter({ test_stats: { attempts: 2, best_score: 0.75, latest_score: 0.5 } })]),
     );
-    mockedGetSection.mockResolvedValue(ok(makeSectionDetail()));
+    mockedGetSection.mockImplementation(mockGetSectionById);
     mockedListTests.mockResolvedValue(ok([makeAttempt()]));
 
     render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
@@ -167,7 +204,7 @@ describe("ChapterTestClient", () => {
 
   it("shows attempt history scoped to this chapter, each linking to its taking/review page", async () => {
     mockedListChapters.mockResolvedValue(ok([makeChapter()]));
-    mockedGetSection.mockResolvedValue(ok(makeSectionDetail()));
+    mockedGetSection.mockImplementation(mockGetSectionById);
     mockedListTests.mockResolvedValue(
       ok([
         makeAttempt({ id: "attempt-1", chapter_label: "Chapter 1", score: 0.75 }),
@@ -184,7 +221,7 @@ describe("ChapterTestClient", () => {
 
   it("generating a test shows live SSE progress, then navigates into the newly created attempt", async () => {
     mockedListChapters.mockResolvedValue(ok([makeChapter()]));
-    mockedGetSection.mockResolvedValue(ok(makeSectionDetail()));
+    mockedGetSection.mockImplementation(mockGetSectionById);
     mockedListTests
       .mockResolvedValueOnce(ok([])) // initial history load: none yet
       .mockResolvedValueOnce(ok([makeAttempt({ id: "brand-new-attempt" })])); // after settle
@@ -215,7 +252,7 @@ describe("ChapterTestClient", () => {
 
   it("shows the job's error text and a retry when generation fails", async () => {
     mockedListChapters.mockResolvedValue(ok([makeChapter()]));
-    mockedGetSection.mockResolvedValue(ok(makeSectionDetail()));
+    mockedGetSection.mockImplementation(mockGetSectionById);
     mockedListTests.mockResolvedValue(ok([]));
     mockedGenerateTest
       .mockResolvedValueOnce(ok({ job_id: "job-1" }, 202))
@@ -244,7 +281,7 @@ describe("ChapterTestClient", () => {
 
   it("shows a retryable error banner when the chapter itself fails to load", async () => {
     mockedListChapters.mockResolvedValueOnce(err(500)).mockResolvedValueOnce(ok([makeChapter()]));
-    mockedGetSection.mockResolvedValue(ok(makeSectionDetail()));
+    mockedGetSection.mockImplementation(mockGetSectionById);
     mockedListTests.mockResolvedValue(ok([]));
 
     const user = userEvent.setup();

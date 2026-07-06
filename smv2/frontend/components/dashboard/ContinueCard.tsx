@@ -19,7 +19,8 @@ interface ChapterInfo {
  * The dashboard's first-priority card: jump straight back into the most
  * recently read course, at its resume point. Needs one extra
  * list_sections call (not carried on CourseOut) to turn the saved
- * section_id into a chapter title + position/section_count percentage.
+ * section_id into a chapter title + position-among-content-sections
+ * percentage.
  */
 export default function ContinueCard({ course }: ContinueCardProps) {
   const [chapter, setChapter] = useState<ChapterInfo | null>(null);
@@ -31,17 +32,27 @@ export default function ContinueCard({ course }: ContinueCardProps) {
     listSections(course.id).then(({ data }) => {
       if (!active || !data) return;
       const section = data.find((candidate) => candidate.id === sectionId);
-      if (section) {
-        setChapter({
-          title: section.title,
-          percent: percentComplete(section.order_index, course.section_count),
-        });
-      }
+      if (!section) return;
+
+      // Percent complete is measured against content sections only —
+      // practice/answers aren't part of the reading flow (see Sidebar/
+      // CourseReader), so counting them here would understate progress.
+      const contentSections = data
+        .filter((candidate) => candidate.kind === "content")
+        .sort((a, b) => a.order_index - b.order_index);
+      const contentIndex = contentSections.findIndex((candidate) => candidate.id === sectionId);
+      setChapter({
+        title: section.title,
+        percent:
+          contentIndex === -1
+            ? percentComplete(section.order_index, data.length)
+            : percentComplete(contentIndex, contentSections.length),
+      });
     });
     return () => {
       active = false;
     };
-  }, [course.id, course.section_count, sectionId]);
+  }, [course.id, sectionId]);
 
   return (
     <Link

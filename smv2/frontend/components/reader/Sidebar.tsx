@@ -51,23 +51,23 @@ function LessonDot({ status }: { status: string }) {
   );
 }
 
-const KIND_CHIP_LABEL: Record<string, string> = {
-  practice: "Practice",
-  answers: "Answers",
-};
-
-function KindChip({ kind }: { kind?: string }) {
-  const label = kind ? KIND_CHIP_LABEL[kind] : undefined;
-  if (!label) return null;
-  return (
-    <span className="shrink-0 rounded-full border border-border px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-      {label}
-    </span>
-  );
-}
-
 function formatScorePercent(score: number | null): string | null {
   return score === null ? null : `${Math.round(score * 100)}%`;
+}
+
+/**
+ * The "Test" affordance's label/tooltip: once a score exists it takes
+ * priority (unchanged); before that, surface how much practice material is
+ * waiting so the link reads as more than a bare, unexplained "Test". Plain
+ * "Test" only when there's neither a score nor any practice sections (a
+ * chapter test can still be generated from lessons/content alone).
+ */
+function testLinkLabel(scoreLabel: string | null, practiceCount: number): string {
+  if (scoreLabel) return `Test · ${scoreLabel}`;
+  if (practiceCount > 0) {
+    return `Test · ${practiceCount} practice sheet${practiceCount === 1 ? "" : "s"}`;
+  }
+  return "Test";
 }
 
 /**
@@ -77,6 +77,12 @@ function formatScorePercent(score: number | null): string | null {
  * original FLAT `sections` prop (see `indexById` below), so CourseReader's
  * own reading-order navigation (j/k/arrows, activeIndex) is completely
  * untouched by how this component chooses to visually group things.
+ *
+ * Practice/answers sections are never listed as reading rows here — their
+ * home is the chapter test page (the group's own "Test" link), not the
+ * primary reading flow. They still count toward `indexById` (a deep link
+ * or resumed session can land directly on one; CourseReader's own nav
+ * skips them, so this doesn't affect keyboard traversal either way).
  */
 export default function Sidebar({
   courseId,
@@ -123,6 +129,9 @@ export default function Sidebar({
           const listId = `chapter-group-${group.key}`;
           const stats = chapterStats?.[group.key];
           const scoreLabel = stats ? formatScorePercent(stats.best_score) : null;
+          const contentSections = group.sections.filter((section) => section.kind === "content");
+          const practiceCount = group.sections.filter((section) => section.kind === "practice").length;
+          const testLabel = testLinkLabel(scoreLabel, practiceCount);
 
           return (
             <li key={group.key} className="border-b border-border">
@@ -140,15 +149,16 @@ export default function Sidebar({
                 {group.label !== null && (
                   <Link
                     href={`/course/${courseId}/chapter/${encodeURIComponent(group.label)}/test`}
+                    title={testLabel}
                     className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium hover:bg-muted-foreground/10"
                   >
-                    {scoreLabel ? `Test · ${scoreLabel}` : "Test"}
+                    {testLabel}
                   </Link>
                 )}
               </div>
               {open && (
                 <ul id={listId}>
-                  {group.sections.map((section) => {
+                  {contentSections.map((section) => {
                     const index = indexById.get(section.id);
                     if (index === undefined) return null;
                     const active = section.id === activeSectionId;
@@ -169,7 +179,6 @@ export default function Sidebar({
                           <span className="flex items-center gap-2">
                             <LessonDot status={lessonDisplayStatus} />
                             <span className="truncate">{section.title}</span>
-                            <KindChip kind={section.kind} />
                           </span>
                           {section.page_start !== null && section.page_end !== null ? (
                             <span className="block text-xs text-muted-foreground">

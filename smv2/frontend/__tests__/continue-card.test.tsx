@@ -64,8 +64,29 @@ describe("ContinueCard", () => {
   it("shows the resumed chapter's title and percent complete once sections load", async () => {
     render(<ContinueCard course={COURSE} />);
 
-    // sec-2 is order_index 1 of 4 sections -> (1+1)/4 = 50%
+    // Both mocked sections are content-kind: sec-2 is content-index 1 of 2 -> (1+1)/2 = 100%.
+    // (course.section_count is no longer consulted — see the content-only test below.)
     expect(await screen.findByText(/time and ordering/i)).toBeInTheDocument();
-    expect(screen.getByText(/50% complete/)).toBeInTheDocument();
+    expect(screen.getByText(/100% complete/)).toBeInTheDocument();
+  });
+
+  it("measures percent complete against content sections only, ignoring practice/answers", async () => {
+    mockedListSections.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [
+        makeSection({ id: "sec-1", title: "Introduction", order_index: 0, kind: "content" }),
+        makeSection({ id: "sec-2", title: "Time and Ordering", order_index: 1, kind: "content" }),
+        makeSection({ id: "sec-practice", title: "Practice", order_index: 2, kind: "practice" }),
+        makeSection({ id: "sec-3", title: "Consensus", order_index: 3, kind: "content" }),
+      ],
+    });
+
+    render(<ContinueCard course={COURSE} />);
+
+    // sec-2 is content-index 1 of 3 content sections -> (1+1)/3 = 67%; a
+    // raw order_index/section_count count (1+1)/4 would understate it at 50%.
+    expect(await screen.findByText(/time and ordering/i)).toBeInTheDocument();
+    expect(screen.getByText(/67% complete/)).toBeInTheDocument();
   });
 });

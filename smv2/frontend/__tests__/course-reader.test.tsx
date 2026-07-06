@@ -514,4 +514,168 @@ describe("CourseReader", () => {
       ).toBeInTheDocument();
     });
   });
+
+  describe("non-content sections (practice/answers)", () => {
+    // A practice section sits between two content chapters — keyboard nav
+    // must step over it entirely, same as it's excluded from Sidebar's
+    // reading list (see sidebar-chapter-groups.test.tsx).
+    const COURSE_WITH_PRACTICE: ReaderCourse = {
+      id: "course-1",
+      title: "Test Course",
+      sections: [
+        {
+          id: "sec-1",
+          title: "Chapter One",
+          order_index: 0,
+          page_start: 1,
+          page_end: 5,
+          lesson_status: "none",
+          has_content: true,
+          word_count: 100,
+          kind: "content",
+          chapter_label: "Chapter 1",
+        },
+        {
+          id: "sec-practice",
+          title: "Practice Set",
+          order_index: 1,
+          page_start: 6,
+          page_end: 6,
+          lesson_status: "none",
+          has_content: true,
+          word_count: 20,
+          kind: "practice",
+          chapter_label: "Chapter 1",
+        },
+        {
+          id: "sec-2",
+          title: "Chapter Two",
+          order_index: 2,
+          page_start: 7,
+          page_end: 10,
+          lesson_status: "none",
+          has_content: true,
+          word_count: 120,
+          kind: "content",
+          chapter_label: "Chapter 2",
+        },
+      ],
+    };
+
+    const PRACTICE_BODIES: Record<string, string> = {
+      "sec-1": "# Chapter One\n\nFirst body.",
+      "sec-practice": "Practice: solve for x.",
+      "sec-2": "# Chapter Two\n\nSecond body.",
+    };
+
+    function mockGetSectionForCourse(course: ReaderCourse, bodies: Record<string, string>) {
+      mockedGetSection.mockImplementation((id: string) => {
+        const section = course.sections.find((candidate) => candidate.id === id);
+        if (!section) return Promise.resolve(err(404));
+        return Promise.resolve(
+          ok({
+            id: section.id,
+            course_id: course.id,
+            title: section.title,
+            order_index: section.order_index,
+            page_start: section.page_start,
+            page_end: section.page_end,
+            kind: section.kind,
+            chapter_label: section.chapter_label,
+            body_md: bodies[id],
+            content_hash: "hash",
+            lesson_md: null,
+            lesson_status: section.lesson_status,
+            lesson_stale: false,
+            lesson_model: null,
+            lesson_prompt_version: null,
+            extractor_version: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          }),
+        );
+      });
+    }
+
+    it("skips a practice section moving forward with ArrowRight/j", async () => {
+      mockGetSectionForCourse(COURSE_WITH_PRACTICE, PRACTICE_BODIES);
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE_WITH_PRACTICE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.keyboard("{ArrowRight}");
+
+      expect(screen.getByRole("heading", { level: 2, name: /chapter two/i })).toHaveFocus();
+      await screen.findByText(/second body/i);
+    });
+
+    it("skips a practice section moving backward with ArrowLeft/k", async () => {
+      mockGetSectionForCourse(COURSE_WITH_PRACTICE, PRACTICE_BODIES);
+      const user = userEvent.setup();
+      render(
+        <CourseReader
+          course={COURSE_WITH_PRACTICE}
+          initialProgress={{ section_id: "sec-2", scroll_pos: 0 }}
+        />,
+      );
+      await screen.findByText(/second body/i);
+
+      await user.keyboard("{ArrowLeft}");
+
+      expect(screen.getByRole("heading", { level: 2, name: /chapter one/i })).toHaveFocus();
+      await screen.findByText(/first body/i);
+    });
+
+    it("does not move at all when only a non-content section lies in the requested direction", async () => {
+      const TRAILING_PRACTICE: ReaderCourse = {
+        ...COURSE_WITH_PRACTICE,
+        sections: [
+          COURSE_WITH_PRACTICE.sections[0],
+          COURSE_WITH_PRACTICE.sections[2],
+          { ...COURSE_WITH_PRACTICE.sections[1], order_index: 2 },
+        ],
+      };
+      mockGetSectionForCourse(TRAILING_PRACTICE, PRACTICE_BODIES);
+      const user = userEvent.setup();
+      render(
+        <CourseReader
+          course={TRAILING_PRACTICE}
+          initialProgress={{ section_id: "sec-2", scroll_pos: 0 }}
+        />,
+      );
+      await screen.findByText(/second body/i);
+
+      await user.keyboard("{ArrowRight}"); // only a trailing practice section follows
+
+      // Still on Chapter Two — no content section to advance into.
+      expect(screen.getByRole("heading", { level: 2, name: /chapter two/i })).toHaveFocus();
+    });
+
+    it("shows a banner with a link to the chapter test when a non-content section is reached directly", async () => {
+      mockGetSectionForCourse(COURSE_WITH_PRACTICE, PRACTICE_BODIES);
+      render(
+        <CourseReader
+          course={COURSE_WITH_PRACTICE}
+          initialProgress={{ section_id: "sec-practice", scroll_pos: 0 }}
+        />,
+      );
+
+      expect(await screen.findByText(/practice: solve for x/i)).toBeInTheDocument();
+      expect(screen.getByRole("note", { name: /reading flow notice/i })).toHaveTextContent(
+        /practice material/i,
+      );
+      expect(screen.getByRole("link", { name: /go to chapter test/i })).toHaveAttribute(
+        "href",
+        "/course/course-1/chapter/Chapter%201/test",
+      );
+    });
+
+    it("shows no banner on an ordinary content section", async () => {
+      mockGetSectionForCourse(COURSE_WITH_PRACTICE, PRACTICE_BODIES);
+      render(<CourseReader course={COURSE_WITH_PRACTICE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      expect(screen.queryByRole("note", { name: /reading flow notice/i })).not.toBeInTheDocument();
+    });
+  });
 });

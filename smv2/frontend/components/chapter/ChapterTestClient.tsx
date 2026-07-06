@@ -35,7 +35,26 @@ type LoadState =
   | { kind: "loading" }
   | { kind: "error"; error: FetchError }
   | { kind: "not-found" }
-  | { kind: "ready"; chapter: ChapterOut; practiceSections: PracticeSection[] };
+  | {
+      kind: "ready";
+      chapter: ChapterOut;
+      practiceSections: PracticeSection[];
+      answerSections: PracticeSection[];
+    };
+
+// Both practice exercises and their answer key are source text (the
+// textbook's own printed material), fetched the same way — this isn't the
+// same thing as an auto-generated TestAttempt's correct_index/explanation
+// redaction (tests_service.get_test), which only applies to quizzes this
+// app generates and grades itself.
+async function loadSections(ids: string[]): Promise<PracticeSection[]> {
+  const results = await Promise.all(ids.map((id) => getSection(id)));
+  const sections: PracticeSection[] = [];
+  results.forEach((result, index) => {
+    if (result.data) sections.push({ id: ids[index], body: result.data.body_md });
+  });
+  return sections;
+}
 
 async function loadChapter(courseId: string, chapterLabel: string): Promise<LoadState> {
   const { data, status } = await listChapters(courseId);
@@ -47,15 +66,12 @@ async function loadChapter(courseId: string, chapterLabel: string): Promise<Load
   // Per-section failure isolation: one bad get_section shouldn't block the
   // rest of the chapter's practice material from rendering, same
   // philosophy as GenerateAllLessons' per-job handling.
-  const results = await Promise.all(chapter.practice_section_ids.map((id) => getSection(id)));
-  const practiceSections: PracticeSection[] = [];
-  results.forEach((result, index) => {
-    if (result.data) {
-      practiceSections.push({ id: chapter.practice_section_ids[index], body: result.data.body_md });
-    }
-  });
+  const [practiceSections, answerSections] = await Promise.all([
+    loadSections(chapter.practice_section_ids),
+    loadSections(chapter.answers_section_ids),
+  ]);
 
-  return { kind: "ready", chapter, practiceSections };
+  return { kind: "ready", chapter, practiceSections, answerSections };
 }
 
 export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTestClientProps) {
@@ -177,7 +193,7 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     );
   }
 
-  const { chapter, practiceSections } = state;
+  const { chapter, practiceSections, answerSections } = state;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -208,6 +224,17 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
             </div>
           )}
         </div>
+
+        {answerSections.length > 0 && (
+          <details className="rounded-lg border border-border p-4">
+            <summary className="cursor-pointer text-base font-semibold">Answer key</summary>
+            <div className="mt-3 flex flex-col gap-6">
+              {answerSections.map((section) => (
+                <Markdown key={section.id}>{section.body}</Markdown>
+              ))}
+            </div>
+          </details>
+        )}
 
         <div className="flex flex-col gap-2">
           {jobFailed && (

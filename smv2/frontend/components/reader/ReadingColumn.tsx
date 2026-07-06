@@ -1,6 +1,7 @@
 "use client";
 
 import type { RefObject } from "react";
+import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
@@ -13,6 +14,7 @@ import LessonPane, { type LessonDisplayStatus } from "./LessonPane";
 export type ViewMode = "source" | "lesson";
 
 export interface ReadingColumnProps {
+  courseId: string;
   section: ReaderSection;
   mode: ViewMode;
   typography: TypographyPrefs;
@@ -27,7 +29,13 @@ function pageRange(section: ReaderSection): string | null {
   return `p.${section.page_start}–${section.page_end}`;
 }
 
+const NON_CONTENT_BANNER_TEXT: Record<"practice" | "answers", string> = {
+  practice: "This is practice material, not regular reading — it belongs on the chapter test page.",
+  answers: "This is an answer key, not regular reading — it belongs on the chapter test page.",
+};
+
 export default function ReadingColumn({
+  courseId,
   section,
   mode,
   typography,
@@ -46,6 +54,27 @@ export default function ReadingColumn({
       style={prefsToCssVars(typography)}
     >
       <article className="reading-measure mx-auto px-6 py-10 font-serif">
+        {/* Reached only via an explicit deep link (Sidebar/keyboard nav
+            never select these, see chapterGroups.ts and CourseReader's
+            goToOffset) — surfaced so it isn't a silent, unexplained
+            dead end rather than blocked outright. */}
+        {section.kind !== "content" && (
+          <div
+            role="note"
+            aria-label="Reading flow notice"
+            className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 text-sm"
+          >
+            <span>{NON_CONTENT_BANNER_TEXT[section.kind]}</span>
+            {section.chapter_label !== null && (
+              <Link
+                href={`/course/${courseId}/chapter/${encodeURIComponent(section.chapter_label)}/test`}
+                className="shrink-0 font-medium text-accent underline"
+              >
+                Go to chapter test
+              </Link>
+            )}
+          </div>
+        )}
         {pages ? <p className="mb-2 font-sans text-sm text-muted-foreground">{pages}</p> : null}
         {/* Explicit heading (not part of the markdown body) so chapter-change
             focus management has a stable, deterministic target regardless of
