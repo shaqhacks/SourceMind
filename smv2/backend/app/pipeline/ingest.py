@@ -48,7 +48,7 @@ from app.pipeline.extract import (
 )
 from app.pipeline.outline_detect import detect_sections, front_matter_bookmark_titles
 
-_EXTRACTOR_ALGO_VERSION = "algo-3"
+_EXTRACTOR_ALGO_VERSION = "algo-4"
 _LOW_TEXT_YIELD_CHARS_PER_PAGE = 20
 # Page-batch granularity for extraction-phase progress heartbeats — bounds
 # the number of report_progress DB writes per asset regardless of document

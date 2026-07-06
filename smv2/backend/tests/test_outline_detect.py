@@ -343,11 +343,13 @@ def test_sections_from_headings_non_boosted_line_needs_the_standard_multiplier()
     assert sections_from_headings(candidates, total_pages=3) == []
 
 
-def test_sections_from_headings_picks_largest_qualifying_tier():
+def test_sections_from_headings_single_oversized_title_fails_its_own_tier():
     """A single huge one-off title (e.g. a book's own cover-page title,
-    stray oversized text) shouldn't win just for being biggest — its tier
-    has only 1 candidate, below _MIN_HEADING_SECTIONS, so the largest tier
-    that actually clears the bar (3+ sections here) wins instead.
+    stray oversized text) doesn't win as its OWN tier -- only 1 candidate,
+    below _MIN_HEADING_SECTIONS -- so the tier with 3+ headings wins
+    instead. The no-drop guard still surfaces the oversized title as the
+    leading section's name (real content, not "Introduction") since it's
+    the longest heading-candidate line sitting on the gap page.
     """
     candidates = [
         (0, "The Book Title Itself", 40.0, True),  # tier of 1 -- disqualified by count
@@ -361,10 +363,12 @@ def test_sections_from_headings_picks_largest_qualifying_tier():
     ]
     sections = sections_from_headings(candidates, total_pages=4)
     assert [s.title for s in sections] == [
+        "The Book Title Itself",
         "Chapter 1: Foundations",
         "Chapter 2: Structures",
         "Chapter 3: Applications",
     ]
+    assert (sections[0].page_start, sections[0].page_end) == (0, 0)
 
 
 def test_sections_from_headings_same_page_collision_bumps_second_to_next_page():
@@ -419,6 +423,12 @@ def test_sections_from_headings_returns_empty_when_coverage_below_60_percent():
 
 
 def test_sections_from_headings_denylist_drops_detected_toc_heading():
+    """The denylisted "Table of Contents" line is dropped as a candidate
+    outright -- unlike the oversized-title case above, it never becomes a
+    section title even via the no-drop guard's fallback, since no OTHER
+    heading candidate survives on that page; the guard falls back to
+    "Introduction" instead of silently dropping the page.
+    """
     candidates = [
         (0, "Table of Contents", _HEAD, True),
         _body_line(0),
@@ -430,6 +440,118 @@ def test_sections_from_headings_denylist_drops_detected_toc_heading():
         _body_line(3),
     ]
     sections = sections_from_headings(candidates, total_pages=4)
+    assert [s.title for s in sections] == [
+        "Introduction",
+        "Chapter 1: Foundations",
+        "Chapter 2: Structures",
+        "Chapter 3: Applications",
+    ]
+    assert (sections[0].page_start, sections[0].page_end) == (0, 0)
+
+
+# --- Round 2 tuning: scaled cap, union split, no-drop guard (real-book fix) -
+
+
+def test_max_heading_sections_uses_base_cap_for_short_documents():
+    from app.pipeline.outline_detect import _max_heading_sections
+
+    assert _max_heading_sections(total_pages=50) == 80  # 50 // 2 = 25, below the base cap
+    assert _max_heading_sections(total_pages=160) == 80  # 160 // 2 = 80, exactly the base cap
+
+
+def test_max_heading_sections_scales_up_for_long_documents():
+    from app.pipeline.outline_detect import _max_heading_sections
+
+    assert _max_heading_sections(total_pages=489) == 244  # the real-world regression case
+    assert _max_heading_sections(total_pages=200) == 100  # 200 // 2 = 100
+
+
+def test_max_heading_sections_never_exceeds_the_hard_cap():
+    from app.pipeline.outline_detect import _max_heading_sections
+
+    assert _max_heading_sections(total_pages=10_000) == 300  # 10000 // 2 = 5000, clamped to 300
+
+
+def test_sections_from_headings_scaled_cap_admits_a_populous_real_tier():
+    """A tier of 100 headings would fail the OLD fixed 80-section cap
+    outright; a 250-page document's scaled cap (max(80, min(300, 125))) =
+    125 admits it.
+    """
+    candidates = []
+    for i in range(100):
+        page = i * 2
+        candidates.append((page, f"{i + 1}.0 Lesson Heading", _HEAD, True))
+        candidates.append(_body_line(page))
+    sections = sections_from_headings(candidates, total_pages=250)
+    assert len(sections) == 100
+
+
+def test_sections_from_headings_prefers_tier_with_most_sections_over_largest_size():
+    """Regression: a sparse tier of larger-font one-off lines must not beat
+    a smaller-font tier with far more headings just because it's larger --
+    this was the real-world bug (a 489-page textbook's 177 real lesson
+    headings at one size lost to 5 unrelated "N.N Practice" sheet headers
+    at a larger size, because the larger tier trivially "qualified" via
+    coverage -- the last section always runs to the document's final page
+    by construction, regardless of how sparse the tier truly is).
+    """
+    dense_smaller = [(p, f"Chapter {i + 1}", _HEAD, True) for i, p in enumerate((0, 3, 6, 9, 12, 15))]
+    sparse_larger = [(p, f"Sparse Marker {i + 1}", _HEAD * 1.3, True) for i, p in enumerate((1, 7, 13))]
+    body_filler = [_body_line(p) for p in range(20)]  # so body size resolves to _BODY, not _HEAD
+    sections = sections_from_headings(dense_smaller + sparse_larger + body_filler, total_pages=20)
+    assert [s.title for s in sections] == [
+        "Chapter 1",
+        "Sparse Marker 1",
+        "Chapter 2",
+        "Chapter 3",
+        "Sparse Marker 2",
+        "Chapter 4",
+        "Chapter 5",
+        "Sparse Marker 3",
+        "Chapter 6",
+    ]
+
+
+def test_sections_from_headings_union_split_includes_larger_tier_too_sparse_to_win_alone():
+    """The winning tier's boundaries are the UNION of its own candidates
+    and every candidate from a strictly larger tier -- even one that, on
+    its own, has too few candidates to ever win the standalone check.
+    """
+    candidates = [
+        (0, "Chapter 1: Foundations", _HEAD, True),
+        _body_line(0),
+        (1, "Chapter 2: Structures", _HEAD, True),
+        _body_line(1),
+        (2, "Chapter 3: Applications", _HEAD, True),
+        _body_line(2),
+        (3, "Chapter 4: Practice", _HEAD, True),
+        _body_line(3),
+        (9, "A Sparse Larger Heading", _HEAD * 1.3, True),  # tier of 1 -- fails the count check alone
+    ]
+    sections = sections_from_headings(candidates, total_pages=10)
+    assert [s.title for s in sections] == [
+        "Chapter 1: Foundations",
+        "Chapter 2: Structures",
+        "Chapter 3: Applications",
+        "Chapter 4: Practice",
+        "A Sparse Larger Heading",
+    ]
+
+
+def test_sections_from_headings_union_split_ignores_smaller_tier():
+    """Symmetric check: a tier SMALLER than the winner is never unioned in
+    -- only strictly larger tiers are.
+    """
+    candidates = [
+        (0, "Chapter 1: Foundations", _HEAD, True),
+        _body_line(0),
+        (1, "Chapter 2: Structures", _HEAD, True),
+        _body_line(1),
+        (2, "Chapter 3: Applications", _HEAD, True),
+        _body_line(2),
+        (5, "A Smaller Sub-Heading", _HEAD * 0.85, True),  # smaller than _HEAD -- never unioned in
+    ]
+    sections = sections_from_headings(candidates, total_pages=6)
     assert [s.title for s in sections] == [
         "Chapter 1: Foundations",
         "Chapter 2: Structures",

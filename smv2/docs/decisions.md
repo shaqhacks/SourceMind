@@ -205,3 +205,57 @@ when bookmarks yield fewer than the usable-section minimum, so a real ToC
 byte-identical after regeneration), and a new `headings_no_bookmarks`
 snapshot fixture (4 chapters, no bookmarks, one same-page collision, one
 punctuation-excluded trap) pins the new tier's own output.
+
+## ADR-016 — Heading tier: scaled cap, union split, no-drop guard (2026-07-06)
+
+Real-world testing against a 489-page textbook (Wallace, *Beginning and
+Intermediate Algebra*) found ADR-015's tier selection picked the wrong
+tier: the book's real structure was a 177-heading tier (chapter/lesson
+titles, e.g. "Pre-Algebra - Integers"), but the fixed 80-section cap
+rejected it outright, and a sparse, unrelated 5-heading tier (larger-font
+"N.N Practice" worksheet headers) won instead — largest-size-first
+iteration reaches the sparse tier before the real one, and it trivially
+"qualifies" on the >=60% coverage check regardless of how little
+structure it represents, because the last section always runs to the
+document's final page by construction. The result: 5 sections, one
+spanning 300 pages, with the book's first 31 pages dropped entirely.
+
+Three changes to `sections_from_headings`, none reversing ADR-015's
+tier-order or candidate-qualification rules, all tuning the
+tier-*selection* step:
+
+1. **Scaled cap.** The upper section-count bound is now
+   `max(80, min(300, total_pages // 2))` instead of a fixed 80 — a
+   489-page book scales to 244, comfortably admitting the real 177-heading
+   tier. Never scales past 300 regardless of document length.
+2. **Selection by section count, not size.** Among every tier whose own
+   candidates independently pass the (3 to scaled-cap sections, >=60%
+   coverage) check, the one with the MOST sections wins — not simply the
+   largest font size. This is the actual fix for the real-book case: the
+   177-heading tier now legitimately outscores the 5-heading one on its
+   own merits, regardless of iteration order.
+3. **Union split.** Once a tier wins, its final boundaries are the union
+   of its own candidates and every candidate from a strictly LARGER tier
+   (even one too sparse to ever win the standalone check) — a document's
+   coarser heading level (chapter markers, or here the "N.N Practice"
+   worksheet headers) still deserves to be a boundary alongside the finer
+   winning tier, not discarded just because it lost the selection.
+   Same-page collisions are resolved across the union exactly as within
+   one tier.
+4. **No-drop guard.** If the winning (unioned) tier's first boundary
+   starts after the front-matter-adjusted first content page, a leading
+   section is prepended covering that gap — titled after the longest
+   heading-candidate line (from any tier, front-matter-denylist-filtered)
+   sitting on the first content page itself, or "Introduction" if none
+   does. Guarantees leading content pages are never silently dropped
+   regardless of which tier wins.
+
+Verified against the real textbook (kept locally, not committed):
+181 sections, first section starts at page 1, largest single section
+spans 8 pages, sample titles read "Pre-Algebra - Integers"-style — all
+within the expected range. All existing fixture snapshots
+(`with_bookmarks`/`no_bookmarks`/`non_english`/`headings_no_bookmarks`)
+are unaffected (byte-identical after regeneration): none of their
+candidate sets have more than one qualifying tier or a first-boundary gap,
+so none of the four rule changes above have anything to act on.
+`_EXTRACTOR_ALGO_VERSION` bumped to `algo-4`.

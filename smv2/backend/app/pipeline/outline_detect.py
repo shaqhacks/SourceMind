@@ -55,7 +55,9 @@ _HEADING_BOOSTED_SIZE_MULTIPLIER = 1.1
 _HEADING_MIN_LEN = 3
 _HEADING_MAX_LEN = 80
 _MIN_HEADING_SECTIONS = 3
-_MAX_HEADING_SECTIONS = 80
+# Base/hard caps for the scaled upper bound — see _max_heading_sections.
+_MAX_HEADING_SECTIONS_CAP = 80
+_MAX_HEADING_SECTIONS_HARD_CAP = 300
 _MIN_HEADING_PAGE_COVERAGE = 0.6
 
 _HEADING_BOOST_RE = re.compile(
@@ -240,9 +242,22 @@ def _sections_from_heading_entries(
     return sections
 
 
-def _heading_tier_qualifies(sections: list[SectionBounds], effective_total_pages: int) -> bool:
+def _max_heading_sections(total_pages: int) -> int:
+    """Upper section-count bound scales with document length: a long real
+    book can legitimately have 100+ lesson-level headings (e.g. a 489-page
+    algebra textbook with 177 section heads). A fixed 80-section cap
+    rejects exactly that tier outright, in favor of whatever smaller,
+    sparser tier happens to qualify instead — never worth it, so the cap
+    grows with the document (never past _MAX_HEADING_SECTIONS_HARD_CAP).
+    """
+    return max(_MAX_HEADING_SECTIONS_CAP, min(_MAX_HEADING_SECTIONS_HARD_CAP, total_pages // 2))
+
+
+def _heading_tier_qualifies(
+    sections: list[SectionBounds], effective_total_pages: int, total_pages: int
+) -> bool:
     count = len(sections)
-    if not (_MIN_HEADING_SECTIONS <= count <= _MAX_HEADING_SECTIONS):
+    if not (_MIN_HEADING_SECTIONS <= count <= _max_heading_sections(total_pages)):
         return False
     if effective_total_pages <= 0:
         return False
@@ -271,17 +286,39 @@ def sections_from_headings(
     isn't mostly digits (excludes bare page numbers).
 
     Qualifying lines are grouped into "tiers" by rounded font size (the
-    different heading LEVELS a document might use); the largest tier that
-    produces a plausible outline (3-80 sections spanning >=60% of the
-    document) wins. Returns [] if no tier qualifies, so callers fall back
-    to sections_from_page_windows exactly as they would with zero
-    candidates at all.
+    different heading LEVELS a document might use). Among every tier whose
+    OWN candidates alone form a plausible outline (3 to _max_heading_sections
+    sections spanning >=60% of the document), the one with the MOST
+    sections wins — not simply the largest font size. A sparse tier of a
+    few oversized one-off lines (a pull-quote-sized "N.N Practice" sheet
+    header, say) can trivially "qualify" on coverage alone, because the
+    last section always runs to the document's final page by construction
+    regardless of how little real structure that tier represents; picking
+    by section count instead prefers whichever tier actually captures the
+    book's real, granular structure. Once a tier wins, its final section
+    boundaries are the UNION of its own candidates and every candidate from
+    a STRICTLY LARGER tier (a document's coarser heading level — chapter
+    markers over lesson headers, say — still deserves to be a boundary
+    even where that coarser level alone is too sparse to pass the
+    standalone check on its own). Same-page collisions are resolved across
+    this union exactly as within a single tier (first wins, second bumped
+    to the next page).
+
+    Returns [] if no tier qualifies, so callers fall back to
+    sections_from_page_windows exactly as they would with zero candidates.
 
     skip_before_page mirrors the page-window fallback's own front-matter
     skip (first_content_page_index) — candidates on skipped leading pages
     never become headings. skip_front_matter also filters detected heading
     TITLES through the same denylist sections_from_toc uses for bookmark
     titles (e.g. a detected "Table of Contents" heading is dropped too).
+
+    No-drop guard: if the winning tier's (unioned) first boundary starts
+    after skip_before_page, a leading section is prepended covering
+    [skip_before_page, first_boundary_page) rather than silently dropping
+    those pages — titled after the longest heading-candidate line (from
+    ANY tier) that lands on skip_before_page itself, or "Introduction" if
+    none does.
     """
     if not candidates or total_pages <= 0:
         return []
@@ -293,7 +330,9 @@ def sections_from_headings(
 
     body_size = _body_font_size(relevant)
 
-    by_bucket: dict[int, list[tuple[int, str]]] = {}
+    # Every qualifying (page, size bucket, cleaned title) triple, denylist
+    # filtered, in original (page) order — not yet grouped into tiers.
+    qualifying: list[tuple[int, int, str]] = []
     for page, text, size, _bold in relevant:
         stripped = text.strip()
         if not _qualifies_as_heading(stripped, size, body_size):
@@ -301,17 +340,50 @@ def sections_from_headings(
         title = _clean_heading_title(stripped)
         if skip_front_matter and _is_front_matter_title(title):
             continue
-        bucket = _round_size(size)
+        qualifying.append((page, _round_size(size), title))
+
+    if not qualifying:
+        return []
+
+    by_bucket: dict[int, list[tuple[int, str]]] = {}
+    for page, bucket, title in qualifying:
         by_bucket.setdefault(bucket, []).append((page, title))
 
     last_page = max(total_pages - 1, 0)
-    for bucket in sorted(by_bucket, reverse=True):
-        entries = sorted(by_bucket[bucket], key=lambda e: e[0])
-        sections = _sections_from_heading_entries(entries, last_page)
-        if _heading_tier_qualifies(sections, effective_total_pages):
-            return sections
 
-    return []
+    winning_bucket: int | None = None
+    winning_sections: list[SectionBounds] = []
+    for bucket, entries in by_bucket.items():
+        sorted_entries = sorted(entries, key=lambda e: e[0])
+        candidate_sections = _sections_from_heading_entries(sorted_entries, last_page)
+        if not _heading_tier_qualifies(candidate_sections, effective_total_pages, total_pages):
+            continue
+        is_better = winning_bucket is None or len(candidate_sections) > len(winning_sections) or (
+            len(candidate_sections) == len(winning_sections) and bucket > winning_bucket
+        )
+        if is_better:
+            winning_bucket, winning_sections = bucket, candidate_sections
+
+    if winning_bucket is None:
+        return []
+
+    union_entries: list[tuple[int, str]] = list(by_bucket[winning_bucket])
+    for bucket, entries in by_bucket.items():
+        if bucket > winning_bucket:
+            union_entries.extend(entries)
+    union_entries.sort(key=lambda e: e[0])
+
+    sections = _sections_from_heading_entries(union_entries, last_page)
+
+    if sections and sections[0].page_start > skip_before_page:
+        same_page_titles = [title for page, _bucket, title in qualifying if page == skip_before_page]
+        leading_title = max(same_page_titles, key=len) if same_page_titles else "Introduction"
+        leading = SectionBounds(
+            title=leading_title, page_start=skip_before_page, page_end=sections[0].page_start - 1
+        )
+        sections = [leading, *sections]
+
+    return sections
 
 
 def sections_from_toc(
