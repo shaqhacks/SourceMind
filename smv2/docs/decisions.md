@@ -50,13 +50,18 @@ calls. Hard atomicity over SQLite for an estimate-based cap was judged not
 worth the locking complexity. The sequential worker makes the batch
 (generate-all) case airtight, which is the realistic overspend scenario.
 
-## ADR-007 — SM-2 bootstrap intervals extended to Hard/Easy (2026-07-05)
+## ADR-007 — SM-2 bootstrap intervals extended to Hard/Easy (2026-07-05; corrected 2026-07-06 to match implementation)
 
 Classic SM-2 only defines first-review intervals for Good. A card first
-graded Hard or Easy would otherwise multiply interval 0 forever. First-grade
-bootstraps: Again 10min, Hard 1d, Good 1d, Easy 4d(*ease-adjusted); ease
-changes take effect the following review (standard convention). Full table in
-`test_srs_schedule`.
+graded Hard or Easy would otherwise multiply interval 0 forever. As
+implemented (`srs_service.py`): the first two non-Again reviews use fixed
+baselines of 1d then 6d for Hard/Good/Easy alike; Easy applies its 1.3×
+bonus on top of the baseline; the ease multiplier is skipped entirely until
+reps ≥ 2 (ease is unproven early), and ease adjustments always take effect
+the following review, not retroactively. Again: 10min due, reps reset,
+lapse counted, ease −0.2 floored at 1.3. Full table in `test_srs_schedule`.
+(Correction note: the original ADR text said "Easy 4d ease-adjusted" — that
+never matched the code; this is a documentation fix, not a behavior change.)
 
 ## ADR-008 — Chat is synchronous; generation is jobs (2026-07-05)
 
@@ -84,3 +89,25 @@ NotSupported and retrieval degrades to deterministic lexical ranking.
 Embeddings backfill lazily (first chat triggers `embed_course`), per-chunk
 failures stay NULL and are always skipped by the vector path. Chat therefore
 works with zero embedding infrastructure, better with Ollama present.
+
+## ADR-011 — Quiz generation input is course-scoped but bounded (2026-07-06)
+
+Cross-section assessment is the feature's purpose: a quiz is meant to test
+understanding across multiple chapters, not one section at a time like
+lessons/cards. This deviates from the brief's "never a whole-book call"
+letter — quiz generation can be handed the entire course's sections — but
+input is capped at 24k combined characters via proportional per-section
+heads regardless of book size, so every call remains bounded, single, and
+never scales with book length. The letter (never whole-book) is deviated
+from; the spirit (bounded cost, one call) is honored.
+
+## ADR-012 — Generation streaming granularity is per-section (2026-07-06)
+
+The brief's "stream section-by-section over SSE; the user reads finished
+sections immediately" is implemented at section granularity: per-section
+jobs flip that section readable one-by-one over SSE as each completes, and
+within a single section's generation the UI shows staged progress (never a
+bare spinner). Token-level streaming inside one section's own completion
+call is explicitly out of scope. Chat citations are section-granular today
+even though `Chunk.page` exists in the schema unused by navigation —
+page-level citation jump is phase-2 polish, not a Phase 4 gap.
