@@ -215,6 +215,46 @@ def test_ingest_scanned_pdf_does_not_crash_and_flags_low_text_yield(client, inge
         session.close()
 
 
+def test_ingest_extraction_phase_emits_incremental_progress_up_to_80(client, monkeypatch):
+    """Regression: a single-asset course used to report pct=0 for the
+    entire extraction phase (the old formula was proportional to
+    asset_idx, which never moves for one asset), then jump straight to
+    'outlining' once the whole (blocking) conversion finished — the bar
+    sat at 0% then jumped to done. Extraction now heartbeats per page-batch
+    with a real, climbing pct.
+    """
+    import app.pipeline.ingest as ingest_module
+
+    extracting_pcts: list[int] = []
+    real_report_progress = ingest_module._report_progress
+
+    def _spy(job_id, stage, pct, message):
+        if stage == "extracting":
+            extracting_pcts.append(pct)
+        real_report_progress(job_id, stage, pct, message)
+
+    monkeypatch.setattr(ingest_module, "_report_progress", _spy)
+
+    resp = client.post("/api/courses", json={"title": "Progress Course"})
+    course_id = resp.json()["id"]
+    upload = _upload(client, course_id, "huge.pdf")
+    assert upload.status_code == 201
+
+    client.post(f"/api/courses/{course_id}/ingest")
+
+    from app.jobs.worker import run_due_jobs_once
+
+    assert run_due_jobs_once() is True
+
+    course = client.get(f"/api/courses/{course_id}").json()
+    assert course["status"] == "ready"
+
+    assert len(extracting_pcts) > 1, "expected multiple extraction heartbeats, not just one"
+    assert all(0 <= p <= 80 for p in extracting_pcts)
+    assert extracting_pcts == sorted(extracting_pcts)  # monotonically non-decreasing
+    assert extracting_pcts[-1] > extracting_pcts[0]  # actually climbed, not flat
+
+
 def test_ingest_huge_pdf_completes_under_30_seconds(client, ingest_course):
     started = time.monotonic()
     course_id, _, _, claimed = ingest_course("huge.pdf")

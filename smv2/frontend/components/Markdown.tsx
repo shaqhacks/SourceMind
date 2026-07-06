@@ -2,6 +2,8 @@
 
 import type { ComponentPropsWithoutRef } from "react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 
@@ -32,6 +34,30 @@ function makeHeading(Tag: HeadingTag) {
   }
   Heading.displayName = `Markdown${Tag.toUpperCase()}`;
   return Heading;
+}
+
+// Inline formatting tags pymupdf4llm emits as literal HTML (stacked
+// fractions/superscripts in math workbooks) plus the ones GFM already
+// produces from `**bold**`/`*em*` syntax. rehype-sanitize's default schema
+// allows a handful of harmless-but-unnecessary attributes (id, title, lang,
+// ...) on every allowed tag via its `'*'` wildcard, and the schema has no
+// per-tag opt-out from that wildcard (a tag-specific `[]` entry still falls
+// back to it — see hast-util-sanitize's `properties()`). Rather than rely on
+// the schema alone for these, they render as bare tags that forward only
+// `children`, so no attribute ever reaches the DOM for them regardless of
+// what the sanitize schema's wildcard would otherwise let through.
+type PlainInlineTag = "u" | "sup" | "sub" | "b" | "i" | "em" | "strong";
+
+function makePlainInline(Tag: PlainInlineTag) {
+  function PlainInline({ children }: ComponentPropsWithoutRef<PlainInlineTag> & ExtraProps) {
+    return <Tag>{children}</Tag>;
+  }
+  PlainInline.displayName = `Markdown${Tag.toUpperCase()}`;
+  return PlainInline;
+}
+
+function Break(_props: ComponentPropsWithoutRef<"br"> & ExtraProps) {
+  return <br />;
 }
 
 // react-markdown always injects a `node` (the hast AST node) into every
@@ -87,6 +113,34 @@ const components: Components = {
       {children}
     </blockquote>
   ),
+  u: makePlainInline("u"),
+  sup: makePlainInline("sup"),
+  sub: makePlainInline("sub"),
+  b: makePlainInline("b"),
+  i: makePlainInline("i"),
+  em: makePlainInline("em"),
+  strong: makePlainInline("strong"),
+  br: Break,
+};
+
+// rehype-sanitize's GitHub-style default schema already allows the GFM
+// elements this app relies on (headings, tables, links, lists, code,
+// del/ins, task-list checkboxes) plus `sup`/`sub`/`b`/`i`/`em`/`strong`/`br`
+// — but not `u`, and it still allows `img`. This app never serves images out
+// of extracted/generated markdown, and `img` is a needless XSS/tracking
+// vector (an attacker-controlled `src` still loads even once `onerror` is
+// stripped), so it's the one tag explicitly removed here; `u` is the one
+// tag explicitly added, for pymupdf4llm's `<u>` (stacked-fraction
+// underlines). `script`/`iframe` are already excluded by the default schema
+// (script's content is dropped too, not just unwrapped) and `javascript:`
+// hrefs are already rejected by the default `protocols.href` allowlist —
+// covered by this component's test suite rather than re-implemented here.
+const schema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []).filter((tagName) => tagName !== "img"), "u"],
+  attributes: Object.fromEntries(
+    Object.entries(defaultSchema.attributes ?? {}).filter(([tagName]) => tagName !== "img"),
+  ),
 };
 
 export interface MarkdownProps {
@@ -94,15 +148,29 @@ export interface MarkdownProps {
 }
 
 /**
- * remark-gfm adds GFM tables/strikethrough/task-lists; rehype-slug adds
- * deep-linkable heading ids. Deliberately NOT using rehype-raw: the source
- * text this renders is extracted from untrusted PDFs, and without
- * rehype-raw, react-markdown treats any literal HTML tags in the markdown
- * as plain escaped text rather than rendering them. Do not add rehype-raw.
+ * remark-gfm adds GFM tables/strikethrough/task-lists. The extracted PDF
+ * text legitimately contains inline HTML pymupdf4llm emits for stacked
+ * fractions/superscripts (`<sup>`, `<sub>`, `<u>`); rehype-raw parses that
+ * literal HTML into the hast tree (without it, react-markdown escapes any
+ * HTML tag to plain text — which used to be this component's only defense,
+ * and is why those tags used to render as literal "<sup><u>...</u></sup>"
+ * text). rehype-sanitize then immediately filters the whole tree down to
+ * `schema` below, so nothing else in that untrusted source (script, iframe,
+ * img, event-handler attributes, javascript: URLs) survives either.
+ * rehype-slug (heading ids for deep links) runs LAST, after sanitize:
+ * sanitize's default schema clobber-prefixes any `id` it processes with
+ * `user-content-` (GitHub's DOM-clobbering guard). Running slug first would
+ * mean sanitize immediately rewrites the ids slug just added
+ * ("hello-world" -> "user-content-hello-world"), breaking the `#hello-world`
+ * anchors `makeHeading` builds from that same `id` prop.
  */
 export default function Markdown({ children }: MarkdownProps) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSlug]} components={components}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeRaw, [rehypeSanitize, schema], rehypeSlug]}
+      components={components}
+    >
       {children}
     </ReactMarkdown>
   );

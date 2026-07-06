@@ -217,6 +217,61 @@ def test_anthropic_provider_omits_system_kwarg_when_not_given(monkeypatch):
     assert "system" not in captured
 
 
+def test_anthropic_provider_missing_credentials_raises_friendly_error(monkeypatch):
+    """As of the installed SDK version, calling messages.create() with no
+    api_key/auth_token/credentials resolved from any source raises a bare
+    TypeError (not an AnthropicError subclass) before any request is sent —
+    this pins that real SDK behavior and asserts _complete_impl translates
+    it into the friendly, actionable ProviderNotConfiguredError rather than
+    letting the raw SDK message reach job.error or a chat response.
+    """
+    import pytest
+
+    from app.llm.anthropic_provider import AnthropicProvider
+    from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, ProviderNotConfiguredError
+
+    monkeypatch.setenv("SMV2_LLM_MODEL", "claude-sonnet-5")
+    provider = AnthropicProvider()
+
+    def _fake_create(**kwargs):
+        raise TypeError(
+            "Could not resolve authentication method. Expected one of api_key, "
+            "auth_token, or credentials to be set."
+        )
+
+    provider._client.messages.create = _fake_create
+
+    with pytest.raises(ProviderNotConfiguredError) as exc_info:
+        provider._complete_impl([{"role": "user", "content": "hi"}], max_tokens=10)
+    assert str(exc_info.value) == PROVIDER_NOT_CONFIGURED_MESSAGE
+
+
+def test_anthropic_provider_authentication_error_raises_friendly_error(monkeypatch):
+    """A real 401 (a key was sent but rejected) must map to the same
+    friendly error as the no-credentials-at-all case above.
+    """
+    import anthropic
+    import httpx
+    import pytest
+
+    from app.llm.anthropic_provider import AnthropicProvider
+    from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, ProviderNotConfiguredError
+
+    monkeypatch.setenv("SMV2_LLM_MODEL", "claude-sonnet-5")
+    provider = AnthropicProvider()
+
+    def _fake_create(**kwargs):
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        response = httpx.Response(401, request=request, json={"error": {"message": "invalid x-api-key"}})
+        raise anthropic.AuthenticationError("invalid x-api-key", response=response, body=None)
+
+    provider._client.messages.create = _fake_create
+
+    with pytest.raises(ProviderNotConfiguredError) as exc_info:
+        provider._complete_impl([{"role": "user", "content": "hi"}], max_tokens=10)
+    assert str(exc_info.value) == PROVIDER_NOT_CONFIGURED_MESSAGE
+
+
 def test_ollama_provider_prepends_system_as_its_own_message(monkeypatch):
     import httpx
 

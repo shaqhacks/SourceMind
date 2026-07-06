@@ -8,7 +8,27 @@ from __future__ import annotations
 import anthropic
 
 from app.config import llm_model
-from app.llm.provider import CompletionResult, NotSupportedError, Provider
+from app.llm.provider import (
+    PROVIDER_NOT_CONFIGURED_MESSAGE,
+    CompletionResult,
+    NotSupportedError,
+    Provider,
+    ProviderNotConfiguredError,
+)
+
+
+def _is_missing_credentials_error(exc: Exception) -> bool:
+    """True for the ways this SDK signals "no usable credentials at all" —
+    both a real 401/403 from the API (a key was sent but rejected) and the
+    client-side failure when no api_key/auth_token/credentials resolve from
+    any source (env, profile, federation) before a request is even sent.
+    That second case is, as of this SDK version, a bare TypeError rather
+    than an AnthropicError subclass — matched narrowly on its message so an
+    unrelated TypeError elsewhere in this call is never misclassified.
+    """
+    if isinstance(exc, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+        return True
+    return isinstance(exc, TypeError) and "authentication method" in str(exc).lower()
 
 
 class AnthropicProvider(Provider):
@@ -28,7 +48,12 @@ class AnthropicProvider(Provider):
         kwargs: dict = {"model": self.model_name, "max_tokens": max_tokens, "messages": messages}
         if system is not None:
             kwargs["system"] = system
-        response = self._client.messages.create(**kwargs)
+        try:
+            response = self._client.messages.create(**kwargs)
+        except Exception as exc:
+            if _is_missing_credentials_error(exc):
+                raise ProviderNotConfiguredError(PROVIDER_NOT_CONFIGURED_MESSAGE) from exc
+            raise
         text = "".join(block.text for block in response.content if block.type == "text")
         return CompletionResult(
             text=text,

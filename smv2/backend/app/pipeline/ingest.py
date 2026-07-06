@@ -33,16 +33,27 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.config import pages_per_window
+from app.config import skip_front_matter as _skip_front_matter_enabled
 from app.db.identity import content_hash_for, normalize_text, section_id_for
 from app.db.models import Asset, ChatTurn, Chunk, Course, Job, Section, TestAttempt
 from app.pipeline._common import report_progress as _report_progress
 from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline.chunking import chunk_pages
-from app.pipeline.extract import PdfExtractionError, extract_markdown_pages, get_toc, open_pdf
-from app.pipeline.outline_detect import detect_sections
+from app.pipeline.extract import (
+    PdfExtractionError,
+    extract_heading_candidates,
+    extract_markdown_pages_in_batches,
+    get_toc,
+    open_pdf,
+)
+from app.pipeline.outline_detect import detect_sections, front_matter_bookmark_titles
 
-_EXTRACTOR_ALGO_VERSION = "algo-1"
+_EXTRACTOR_ALGO_VERSION = "algo-3"
 _LOW_TEXT_YIELD_CHARS_PER_PAGE = 20
+# Page-batch granularity for extraction-phase progress heartbeats — bounds
+# the number of report_progress DB writes per asset regardless of document
+# size (e.g. huge.pdf's 520 pages -> 26 heartbeats, not 520 or 1).
+_EXTRACT_PROGRESS_BATCH_PAGES = 20
 
 
 class IngestAllAssetsFailedError(Exception):
@@ -62,14 +73,33 @@ class _ExtractedAsset:
     asset: Asset
     pages: list[str]  # markdown text per page, 0-based
     toc: list[tuple[int, str, int]]
+    heading_candidates: list[tuple[int, str, float, bool]]
 
 
-def _extract_one_asset(asset: Asset) -> _ExtractedAsset:
+def _asset_page_count(asset: Asset) -> int:
+    """Cheap page-count-only open, used only to size the extraction-phase
+    progress bar up front (app.pipeline.extract.open_pdf parses structure,
+    not text — no markdown conversion happens here). Assets that fail to
+    even open are left out of the total; the real extraction loop below
+    re-attempts opening them and marks them extract_failed on its own, so
+    nothing here needs to duplicate that handling.
+    """
+    doc = open_pdf(Path(asset.stored_path))
+    try:
+        return doc.page_count
+    finally:
+        doc.close()
+
+
+def _extract_one_asset(asset: Asset, *, on_batch=None) -> _ExtractedAsset:
     pdf_path = Path(asset.stored_path)
     doc = open_pdf(pdf_path)
     try:
         toc = get_toc(doc)
-        pages = extract_markdown_pages(doc)
+        heading_candidates = extract_heading_candidates(doc)
+        pages = extract_markdown_pages_in_batches(
+            doc, batch_pages=_EXTRACT_PROGRESS_BATCH_PAGES, on_batch=on_batch
+        )
         page_count = doc.page_count
     finally:
         doc.close()
@@ -87,7 +117,7 @@ def _extract_one_asset(asset: Asset) -> _ExtractedAsset:
     )
     asset.status = "extracted"
 
-    return _ExtractedAsset(asset=asset, pages=pages, toc=toc)
+    return _ExtractedAsset(asset=asset, pages=pages, toc=toc, heading_candidates=heading_candidates)
 
 
 def run_ingest(session: Session, job: Job, course_id: str) -> None:
@@ -130,11 +160,25 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
         raise ValueError("course has no assets to ingest")
 
     window = pages_per_window()
+    skip_fm = _skip_front_matter_enabled()
     version_tag = extractor_version()
 
+    # Sized up front so extraction progress is a real, global 0->80 measure
+    # across every asset's pages, not a per-asset counter that resets (or
+    # sits at 0 for the whole run when there's only one asset — the exact
+    # bug this sizing pass exists to fix: a single-asset course used to
+    # report pct=0 for the entire extraction, then jump straight to the
+    # outlining stage once it finished).
+    total_pages_all_assets = 0
+    for asset in assets:
+        try:
+            total_pages_all_assets += _asset_page_count(asset)
+        except PdfExtractionError:
+            pass
+
     extracted: list[_ExtractedAsset] = []
-    total_assets = len(assets)
-    for asset_idx, asset in enumerate(assets):
+    pages_processed_so_far = 0
+    for asset in assets:
         # Heartbeat BEFORE the (potentially slow) extraction call itself,
         # not just before the outline step after it — a long conversion on
         # a large PDF must not let the lease expire mid-extraction and get
@@ -142,11 +186,22 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
         _report_progress(
             job.id,
             stage="extracting",
-            pct=int(5 * asset_idx / max(1, total_assets)),
+            pct=int(80 * pages_processed_so_far / max(1, total_pages_all_assets)),
             message=f"extracting {asset.filename}",
         )
+
+        def _on_batch(pages_done: int, total_pages: int) -> None:
+            global_done = pages_processed_so_far + pages_done
+            _report_progress(
+                job.id,
+                stage="extracting",
+                pct=int(80 * global_done / max(1, total_pages_all_assets)),
+                message=f"extracting {asset.filename} — page {pages_done} of {total_pages}",
+            )
+
         try:
-            extracted.append(_extract_one_asset(asset))
+            extracted.append(_extract_one_asset(asset, on_batch=_on_batch))
+            pages_processed_so_far += asset.page_count
         except PdfExtractionError as exc:
             asset.status = "extract_failed"
             asset.error = str(exc)
@@ -178,15 +233,35 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     new_sections: list[dict[str, Any]] = []
     order_index = 0
     occurrence_counts: dict[str, int] = {}
-    total_extracted = len(extracted)
-    for asset_idx, item in enumerate(extracted):
+    for item in extracted:
+        # Extraction (the real bottleneck for a large PDF) already carried
+        # the visible bar to 80 above; outlining is fast/deterministic
+        # (no LLM, pure algorithm over already-extracted text), so it stays
+        # flat at 80 rather than claiming its own sub-range — writing
+        # (below) is what resumes the climb from 80 to 100.
         _report_progress(
             job.id,
             stage="outlining",
-            pct=int(10 + 30 * asset_idx / max(1, total_extracted)),
+            pct=80,
             message=f"detecting outline for {item.asset.filename}",
         )
-        bounds_list = detect_sections(item.toc, len(item.pages), window)
+        bounds_list = detect_sections(
+            item.toc,
+            len(item.pages),
+            window,
+            pages=item.pages,
+            heading_candidates=item.heading_candidates,
+            skip_front_matter=skip_fm,
+        )
+        if skip_fm:
+            dropped_titles = front_matter_bookmark_titles(item.toc)
+            if dropped_titles:
+                _report_progress(
+                    job.id,
+                    stage="outlining",
+                    pct=80,
+                    message=f"skipped front matter in {item.asset.filename}: {', '.join(dropped_titles)}",
+                )
 
         for bounds in bounds_list:
             page_slice = [(p, item.pages[p]) for p in range(bounds.page_start, bounds.page_end + 1)]
@@ -247,7 +322,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
         _report_progress_in_session(
             job,
             stage="writing sections",
-            pct=int(40 + 55 * i / max(1, total_new)),
+            pct=int(80 + 19 * i / max(1, total_new)),
             message=f"writing {data['title']}",
         )
         existing = existing_sections.get(data["id"])

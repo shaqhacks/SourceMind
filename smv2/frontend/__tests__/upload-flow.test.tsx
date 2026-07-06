@@ -5,14 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import UploadFlow from "@/components/upload/UploadFlow";
 import {
   createCourse,
-  editOutline,
   getJob,
-  listSections,
   startIngest,
   uploadAsset,
   type CourseOut,
   type JobOut,
-  type SectionOut,
 } from "@/lib/api/client";
 
 import { err, ok } from "./support/api-result";
@@ -30,16 +27,12 @@ vi.mock("@/lib/api/client", () => ({
   createCourse: vi.fn(),
   uploadAsset: vi.fn(),
   startIngest: vi.fn(),
-  listSections: vi.fn(),
-  editOutline: vi.fn(),
   getJob: vi.fn(),
 }));
 
 const mockedCreateCourse = vi.mocked(createCourse);
 const mockedUploadAsset = vi.mocked(uploadAsset);
 const mockedStartIngest = vi.mocked(startIngest);
-const mockedListSections = vi.mocked(listSections);
-const mockedEditOutline = vi.mocked(editOutline);
 const mockedGetJob = vi.mocked(getJob);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
@@ -51,20 +44,6 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     failed_asset_count: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
-    ...overrides,
-  };
-}
-
-function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
-  return {
-    id: "sec-1",
-    title: "Chapter One",
-    order_index: 0,
-    page_start: 1,
-    page_end: 10,
-    lesson_status: "none",
-    has_content: true,
-    word_count: 100,
     ...overrides,
   };
 }
@@ -118,8 +97,6 @@ describe("UploadFlow", () => {
       Promise.resolve(ok(makeAsset(file.name), 201)),
     );
     mockedStartIngest.mockResolvedValue(ok({ job_id: "job-1" }, 202));
-    mockedListSections.mockResolvedValue(ok([makeSection()]));
-    mockedEditOutline.mockResolvedValue(ok([makeSection()]));
   });
 
   afterEach(() => {
@@ -238,7 +215,7 @@ describe("UploadFlow", () => {
     await waitFor(() => expect(mockedStartIngest).toHaveBeenCalledWith("course-1"));
   });
 
-  it("goes straight to the reader on accept with no edits (no PATCH issued)", async () => {
+  it("navigates straight to the reader once ingest succeeds, with no outline confirmation step", async () => {
     const user = userEvent.setup();
     render(<UploadFlow files={[pdfFile("book.pdf")]} onClose={vi.fn()} />);
 
@@ -253,46 +230,8 @@ describe("UploadFlow", () => {
       });
     });
 
-    await screen.findByRole("button", { name: /accept outline/i });
-    await user.click(screen.getByRole("button", { name: /accept outline/i }));
-
-    expect(mockedEditOutline).not.toHaveBeenCalled();
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/course/course-1"));
-  });
-
-  it("applies staged outline edits via one PATCH before navigating to the reader", async () => {
-    const user = userEvent.setup();
-    mockedListSections.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: [makeSection({ id: "sec-1", title: "Chapter One" })],
-    });
-
-    render(<UploadFlow files={[pdfFile("book.pdf")]} onClose={vi.fn()} />);
-
-    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
-    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-
-    act(() => {
-      FakeEventSource.instances[0].emit("update", {
-        id: "job-1",
-        status: "succeeded",
-        progress: { stage: "done", pct: 100, message: "ingest complete" },
-      });
-    });
-
-    await user.click(await screen.findByRole("button", { name: "Chapter One" }));
-    const input = screen.getByRole("textbox", { name: /rename chapter one/i });
-    await user.clear(input);
-    await user.type(input, "Renamed Chapter{Enter}");
-
-    await user.click(screen.getByRole("button", { name: /accept outline/i }));
-
-    await waitFor(() =>
-      expect(mockedEditOutline).toHaveBeenCalledWith("course-1", [
-        { type: "rename", section_id: "sec-1", title: "Renamed Chapter" },
-      ]),
-    );
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/course/course-1"));
+    expect(screen.queryByRole("button", { name: /accept outline/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/confirm chapter outline/i)).not.toBeInTheDocument();
   });
 });

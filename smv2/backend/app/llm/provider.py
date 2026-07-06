@@ -41,6 +41,21 @@ class ProviderTimeoutError(Exception):
     HTTP status without importing anthropic/httpx types themselves."""
 
 
+PROVIDER_NOT_CONFIGURED_MESSAGE = (
+    "LLM provider not configured: set ANTHROPIC_API_KEY, or set "
+    "SMV2_LLM_PROVIDER=ollama with a local Ollama running."
+)
+
+
+class ProviderNotConfiguredError(Exception):
+    """Raised when the configured provider has no usable credentials/
+    connection at all (e.g. ANTHROPIC_API_KEY unset) — generic, SDK-agnostic,
+    same reasoning as ProviderTimeoutError above. Never retried: it isn't one
+    of retry.py's recognized transient types, so it's a single, final
+    failure. Carries a friendly, actionable message instead of letting the
+    raw SDK error reach job.error or a chat response."""
+
+
 class Provider(ABC):
     #: Concrete providers set this in __init__; used for the ledger row on
     #: the error path, where there's no CompletionResult.model to read from.

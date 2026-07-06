@@ -6,6 +6,7 @@ import CardsCTA from "@/components/reader/CardsCTA";
 import {
   findActiveCardsJob,
   generateCards,
+  getJob,
   listCards,
   type CardOut,
   type JobOut,
@@ -20,11 +21,13 @@ vi.mock("@/lib/api/client", () => ({
   listCards: vi.fn(),
   generateCards: vi.fn(),
   findActiveCardsJob: vi.fn(),
+  getJob: vi.fn(),
 }));
 
 const mockedListCards = vi.mocked(listCards);
 const mockedGenerateCards = vi.mocked(generateCards);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
+const mockedGetJob = vi.mocked(getJob);
 
 function makeCard(overrides: Partial<CardOut> = {}): CardOut {
   return {
@@ -135,5 +138,35 @@ describe("CardsCTA", () => {
 
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
     expect(screen.queryByText(/failed/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the job's error text and a retry when generation fails, instead of silently resetting to idle", async () => {
+    mockedListCards.mockResolvedValue(ok([]));
+    mockedGenerateCards
+      .mockResolvedValueOnce(ok({ job_id: "job-1" }, 202))
+      .mockResolvedValueOnce(ok({ job_id: "job-2" }, 202));
+    mockedGetJob.mockResolvedValue(
+      ok(makeJob({ id: "job-1", status: "failed", error: "ANTHROPIC_API_KEY is not configured" })),
+    );
+
+    const user = userEvent.setup();
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate flashcards/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-1",
+        status: "failed",
+        progress: null,
+      });
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/generation failed: anthropic_api_key is not configured/i);
+
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+    expect(mockedGenerateCards).toHaveBeenCalledTimes(2);
   });
 });

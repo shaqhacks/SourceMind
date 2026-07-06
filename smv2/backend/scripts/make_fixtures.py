@@ -20,7 +20,7 @@ from pathlib import Path
 
 import fitz
 
-from app.pipeline.extract import extract_markdown_pages, get_toc, open_pdf
+from app.pipeline.extract import extract_heading_candidates, extract_markdown_pages, get_toc, open_pdf
 from app.pipeline.outline_detect import detect_sections
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -28,7 +28,7 @@ FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures" / "pdfs"
 SNAPSHOTS_DIR = REPO_ROOT / "tests" / "snapshots"
 
 _FIXED_DATE = "D:20250101000000Z"
-_SNAPSHOT_FIXTURES = ("with_bookmarks", "no_bookmarks", "non_english")
+_SNAPSHOT_FIXTURES = ("with_bookmarks", "no_bookmarks", "non_english", "headings_no_bookmarks")
 
 
 def _set_fixed_metadata(doc: fitz.Document, title: str) -> None:
@@ -55,6 +55,22 @@ def _add_text_page(doc: fitz.Document, lines: list[str], fontfile: str | None = 
         else:
             page.insert_text((72, y), line, fontsize=11)
         y += 16
+
+
+def _add_mixed_page(doc: fitz.Document, entries: list[tuple[str, float, bool]]) -> None:
+    """Like _add_text_page, but each line has its own font size and bold
+    flag — needed for headings_no_bookmarks.pdf, where chapter headings
+    must be visibly larger/bolder than body text so the heading-detection
+    tier's font-size signal has something real to key off (unlike every
+    other fixture, which is uniform-size text throughout).
+    """
+    page = doc.new_page(width=612, height=792)  # US Letter
+    y = 72
+    for text, fontsize, bold in entries:
+        fontname = "Helvetica-Bold" if bold else "Helvetica"
+        if text:
+            page.insert_text((72, y), text, fontsize=fontsize, fontname=fontname)
+        y += fontsize + 6
 
 
 # Base14 fonts (PyMuPDF's default when no fontfile is given) are Latin-only,
@@ -228,6 +244,207 @@ def make_non_english() -> Path:
     return out
 
 
+def make_front_matter() -> Path:
+    """Title page + copyright page (ISBN/©) + a bookmarked "Table of
+    Contents" page with dotted page-number lines, then 2 real bookmarked
+    chapters — exercises ADR-013's deterministic front-matter skipping on
+    both the bookmark path (the ToC bookmark itself) and the page-window
+    fallback path (the 3 leading junk pages, when bookmarks are ignored).
+    """
+    doc = fitz.open()
+    _add_text_page(doc, ["Front Matter Fixture", "", "A Testing Handbook"])
+    _add_text_page(
+        doc,
+        [
+            "Copyright © 2025 Fixture Publishing",
+            "All rights reserved.",
+            "ISBN 978-0-000-00000-0",
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Table of Contents",
+            "Chapter 1: Real Content .......... 4",
+            "Chapter 2: More Content .......... 6",
+            "Appendix A .......... 7",
+            "Appendix B .......... 8",
+            "Index .......... 9",
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Chapter 1: Real Content",
+            "",
+            "This is the real first chapter of the fixture book.",
+            "It contains genuine educational content for testing.",
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Chapter 1: Real Content (continued)",
+            "",
+            "More real content continues here for the fixture.",
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Chapter 2: More Content",
+            "",
+            "This is the second real chapter.",
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Chapter 2: More Content (continued)",
+            "",
+            "Additional real content for chapter two.",
+        ],
+    )
+    doc.set_toc(
+        [
+            [1, "Table of Contents", 3],
+            [1, "Chapter 1: Real Content", 4],
+            [1, "Chapter 2: More Content", 6],
+        ]
+    )
+    _set_fixed_metadata(doc, "Front Matter Fixture")
+    out = FIXTURES_DIR / "front_matter.pdf"
+    doc.save(str(out), no_new_id=1)
+    doc.close()
+    return out
+
+
+_HEADING_FONT_SIZE = 20
+_BODY_FONT_SIZE = 11
+
+
+def make_headings_no_bookmarks() -> Path:
+    """No embedded bookmarks at all — chapter boundaries are only signaled
+    by large bold "Chapter N: Title" lines (ADR-015's heading-detection
+    tier). 12 pages, 4 chapters:
+
+    - Chapter 2's and Chapter 3's headings both land on page 4 (0-based) —
+      exercises the same-page-collision rule (first heading claims the
+      page; the second is bumped to start on the next page).
+    - A large-font, otherwise heading-shaped line on page 2 that ends in a
+      period (a "pull-quote") — must be excluded by the trailing-
+      punctuation rule despite its size.
+    - Every other line is ordinary body-size (11pt) prose, so the body-size
+      histogram clearly picks 11pt as the modal size.
+    """
+    doc = fitz.open()
+
+    _add_mixed_page(
+        doc,
+        [
+            ("Chapter 1: Foundations", _HEADING_FONT_SIZE, True),
+            ("", _BODY_FONT_SIZE, False),
+            ("This chapter introduces the foundational ideas the rest of", _BODY_FONT_SIZE, False),
+            ("the book builds on, in plain deterministic fixture prose.", _BODY_FONT_SIZE, False),
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Foundations continue with more ordinary body text on this",
+            "page, long enough to read as genuine prose rather than a",
+            "heading or a table of contents entry of any kind.",
+        ],
+    )
+    _add_mixed_page(
+        doc,
+        [
+            ("More foundations body text lives on this page before the", _BODY_FONT_SIZE, False),
+            ("large pull-quote below, which must NOT be detected as a", _BODY_FONT_SIZE, False),
+            ("heading despite its size, because it ends in a period.", _BODY_FONT_SIZE, False),
+            ("", _BODY_FONT_SIZE, False),
+            ("Deterministic fixtures make regressions visible.", _HEADING_FONT_SIZE, True),
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Foundations closes out here with one more ordinary",
+            "paragraph of body text before chapter 2 begins on the",
+            "next page.",
+        ],
+    )
+    _add_mixed_page(
+        doc,
+        [
+            ("Chapter 2: Structures", _HEADING_FONT_SIZE, True),
+            ("A deliberately short chapter.", _BODY_FONT_SIZE, False),
+            ("Chapter 3: Applications", _HEADING_FONT_SIZE, True),
+            ("Applications begins immediately, sharing this same page", _BODY_FONT_SIZE, False),
+            ("with the end of chapter 2 directly above it.", _BODY_FONT_SIZE, False),
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Applications continues here with plain body text, long",
+            "enough to read as genuine prose rather than a heading",
+            "candidate of any kind.",
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "More applications body text on this page, still well",
+            "under the font-size threshold that would make it look",
+            "like a heading.",
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Applications closes out here with one final ordinary",
+            "paragraph before chapter 4 begins on the next page.",
+        ],
+    )
+    _add_mixed_page(
+        doc,
+        [
+            ("Chapter 4: Practice", _HEADING_FONT_SIZE, True),
+            ("", _BODY_FONT_SIZE, False),
+            ("The final chapter walks through worked practice problems", _BODY_FONT_SIZE, False),
+            ("using plain deterministic prose, same as every chapter.", _BODY_FONT_SIZE, False),
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Practice continues here with more ordinary body text,",
+            "long enough to read as genuine prose for this fixture.",
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Still more practice body text on this page before the",
+            "fixture reaches its final closing page.",
+        ],
+    )
+    _add_text_page(
+        doc,
+        [
+            "Practice closes out the fixture here with one last",
+            "ordinary paragraph of deterministic body text.",
+        ],
+    )
+
+    _set_fixed_metadata(doc, "Headings No Bookmarks Fixture")
+    out = FIXTURES_DIR / "headings_no_bookmarks.pdf"
+    doc.save(str(out), no_new_id=1)
+    doc.close()
+    return out
+
+
 FIXTURE_BUILDERS = {
     "with_bookmarks": make_with_bookmarks,
     "no_bookmarks": make_no_bookmarks,
@@ -236,6 +453,8 @@ FIXTURE_BUILDERS = {
     "encrypted": make_encrypted,
     "malformed": make_malformed,
     "non_english": make_non_english,
+    "front_matter": make_front_matter,
+    "headings_no_bookmarks": make_headings_no_bookmarks,
 }
 
 
@@ -243,12 +462,15 @@ def _snapshot_for(pdf_path: Path) -> dict:
     doc = open_pdf(pdf_path)
     try:
         toc = get_toc(doc)
+        heading_candidates = extract_heading_candidates(doc)
         pages = extract_markdown_pages(doc)
         total_pages = doc.page_count
     finally:
         doc.close()
 
-    sections = detect_sections(toc, total_pages, pages_per_window=12)
+    sections = detect_sections(
+        toc, total_pages, pages_per_window=12, pages=pages, heading_candidates=heading_candidates
+    )
     outline = {
         "section_count": len(sections),
         "sections": [

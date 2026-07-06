@@ -3,7 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import QuizzesPanel from "@/components/reader/QuizzesPanel";
-import { generateTest, listTests, type TestAttemptSummaryOut } from "@/lib/api/client";
+import {
+  generateTest,
+  getJob,
+  listTests,
+  type JobOut,
+  type TestAttemptSummaryOut,
+} from "@/lib/api/client";
 
 import { ok } from "./support/api-result";
 import { FakeEventSource } from "./support/fake-event-source";
@@ -19,10 +25,12 @@ vi.mock("@/lib/api/client", () => ({
   TERMINAL_JOB_STATUSES: new Set(["succeeded", "failed"]),
   listTests: vi.fn(),
   generateTest: vi.fn(),
+  getJob: vi.fn(),
 }));
 
 const mockedListTests = vi.mocked(listTests);
 const mockedGenerateTest = vi.mocked(generateTest);
+const mockedGetJob = vi.mocked(getJob);
 
 function makeAttempt(overrides: Partial<TestAttemptSummaryOut> = {}): TestAttemptSummaryOut {
   return {
@@ -31,6 +39,22 @@ function makeAttempt(overrides: Partial<TestAttemptSummaryOut> = {}): TestAttemp
     score: null,
     question_count: 5,
     created_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeJob(overrides: Partial<JobOut> = {}): JobOut {
+  return {
+    id: "job-1",
+    type: "generate_test",
+    status: "failed",
+    payload: { course_id: "course-1" },
+    result: null,
+    progress: null,
+    error: null,
+    attempts: 1,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
   };
 }
@@ -115,5 +139,37 @@ describe("QuizzesPanel", () => {
     });
 
     expect(await screen.findByText("In progress")).toBeInTheDocument();
+  });
+
+  it("shows the job's error text and a retry when quiz generation fails, instead of silently resetting to idle", async () => {
+    mockedListTests.mockResolvedValue(ok([]));
+    mockedGenerateTest
+      .mockResolvedValueOnce(ok({ job_id: "job-1" }, 202))
+      .mockResolvedValueOnce(ok({ job_id: "job-2" }, 202));
+    mockedGetJob.mockResolvedValue(
+      ok(makeJob({ id: "job-1", error: "ANTHROPIC_API_KEY is not configured" })),
+    );
+    const user = userEvent.setup();
+
+    render(<QuizzesPanel courseId="course-1" />);
+    await user.click(screen.getByRole("button", { name: /^quizzes$/i }));
+    await screen.findByText(/no quizzes yet/i);
+
+    await user.click(screen.getByRole("button", { name: /generate quiz/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-1",
+        status: "failed",
+        progress: null,
+      });
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/generation failed: anthropic_api_key is not configured/i);
+
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+    expect(mockedGenerateTest).toHaveBeenCalledTimes(2);
   });
 });

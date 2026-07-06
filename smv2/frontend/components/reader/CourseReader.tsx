@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import HintRow from "@/components/HintRow";
 import ShortcutsOverlay, { type ShortcutHint } from "@/components/ShortcutsOverlay";
-import { getSection } from "@/lib/api/client";
+import { getSection, type SectionOut } from "@/lib/api/client";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 import { useProgressSync } from "@/lib/hooks/useProgressSync";
 import { useTypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
@@ -12,6 +12,7 @@ import type { ReaderCourse, ReaderProgress, SectionBodyState } from "@/lib/reade
 
 import CourseChatDrawer from "./CourseChatDrawer";
 import type { LessonDisplayStatus } from "./LessonPane";
+import OutlineEditorModal from "./OutlineEditorModal";
 import ReadingColumn, { type ViewMode } from "./ReadingColumn";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
@@ -21,6 +22,7 @@ const SHORTCUT_HINTS: ShortcutHint[] = [
   { keys: "← / → or j / k", description: "Next / previous chapter" },
   { keys: "s", description: "Toggle source / lesson view" },
   { keys: "c", description: "Toggle chat" },
+  { keys: "o", description: "Edit outline" },
   { keys: "?", description: "Show this help" },
 ];
 
@@ -56,9 +58,15 @@ function scrollElementIntoView(el: HTMLElement): void {
 }
 
 export default function CourseReader({ course, initialProgress }: CourseReaderProps) {
+  // Patched wholesale after an outline edit applies (rename/reorder/
+  // delete/merge/split) — editOutline's response is the fresh source of
+  // truth for the whole list, so this replaces rather than merges into
+  // course.sections (a prop, and otherwise immutable for this component's
+  // lifetime).
+  const [sectionsOverride, setSectionsOverride] = useState<SectionOut[] | null>(null);
   const sections = useMemo(
-    () => [...course.sections].sort((a, b) => a.order_index - b.order_index),
-    [course.sections],
+    () => [...(sectionsOverride ?? course.sections)].sort((a, b) => a.order_index - b.order_index),
+    [sectionsOverride, course.sections],
   );
 
   const [activeIndex, setActiveIndex] = useState(() => {
@@ -70,6 +78,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [outlineEditorOpen, setOutlineEditorOpen] = useState(false);
   const [sectionBodies, setSectionBodies] = useState<Record<string, string>>({});
   const [bodyErrors, setBodyErrors] = useState<Record<string, string>>({});
   const [lessonStatusOverrides, setLessonStatusOverrides] = useState<
@@ -87,7 +96,15 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   }, [sectionBodies]);
   const typography = useTypographyPrefs();
 
-  const activeSection = sections[activeIndex];
+  // An outline edit can shrink or reorder the section list out from under
+  // a still-in-range-looking `activeIndex` (a delete/merge near or before
+  // it) — clamped here at read time rather than "corrected" back into
+  // state via an effect, so `sections[safeActiveIndex]` is never
+  // undefined. `activeIndex` itself is left as whatever the user last
+  // navigated to; it self-heals on the next arrow/j/k navigation via
+  // goToOffset's own clamp regardless.
+  const safeActiveIndex = Math.min(activeIndex, Math.max(sections.length - 1, 0));
+  const activeSection = sections[safeActiveIndex];
 
   useProgressSync(course.id, activeSection.id, columnRef);
 
@@ -181,6 +198,11 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
   const toggleChat = useCallback(() => setChatOpen((value) => !value), []);
   const closeChat = useCallback(() => setChatOpen(false), []);
+  const openOutlineEditor = useCallback(() => setOutlineEditorOpen(true), []);
+  const closeOutlineEditor = useCallback(() => setOutlineEditorOpen(false), []);
+  const handleOutlineApplied = useCallback((updated: SectionOut[]) => {
+    setSectionsOverride(updated);
+  }, []);
 
   // Sidebar shows list_sections' lesson_status, which goes stale the
   // moment a generation (single or part of "generate all") completes for
@@ -206,6 +228,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     k: goPrevious,
     s: toggleMode,
     c: toggleChat,
+    o: openOutlineEditor,
     "?": openShortcuts,
   });
 
@@ -233,6 +256,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
         onLessonSectionSettled={patchLessonStatus}
         chatOpen={chatOpen}
         onToggleChat={toggleChat}
+        onOpenOutlineEditor={openOutlineEditor}
       />
       <div className="flex min-h-0 flex-1">
         {!sidebarCollapsed && (
@@ -259,6 +283,12 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
         hints={SHORTCUT_HINTS.map((hint) => ({ keys: hint.keys, label: hint.description }))}
       />
       <ShortcutsOverlay open={shortcutsOpen} onClose={closeShortcuts} shortcuts={SHORTCUT_HINTS} />
+      <OutlineEditorModal
+        courseId={course.id}
+        open={outlineEditorOpen}
+        onClose={closeOutlineEditor}
+        onApplied={handleOutlineApplied}
+      />
     </div>
   );
 }

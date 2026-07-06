@@ -1,15 +1,17 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CourseReader from "@/components/reader/CourseReader";
 import {
+  editOutline,
   findActiveCardsJob,
   findActiveLessonJob,
   getLessonEstimate,
   getLlmUsage,
   getSection,
   listCards,
+  listSections,
   saveProgress,
 } from "@/lib/api/client";
 import type { ReaderCourse, ReaderProgress } from "@/lib/reader/types";
@@ -32,6 +34,8 @@ vi.mock("@/lib/api/client", () => ({
   listCards: vi.fn(),
   findActiveCardsJob: vi.fn(),
   generateCards: vi.fn(),
+  listSections: vi.fn(),
+  editOutline: vi.fn(),
 }));
 
 const mockedGetSection = vi.mocked(getSection);
@@ -41,6 +45,8 @@ const mockedFindActiveLessonJob = vi.mocked(findActiveLessonJob);
 const mockedGetLlmUsage = vi.mocked(getLlmUsage);
 const mockedListCards = vi.mocked(listCards);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
+const mockedListSections = vi.mocked(listSections);
+const mockedEditOutline = vi.mocked(editOutline);
 
 // A minimal 3-section fixture keeps these assertions about
 // active-chapter bookkeeping (not content) easy to follow.
@@ -127,6 +133,8 @@ describe("CourseReader", () => {
     );
     mockedListCards.mockResolvedValue(ok([]));
     mockedFindActiveCardsJob.mockResolvedValue(null);
+    mockedListSections.mockResolvedValue(ok(COURSE.sections));
+    mockedEditOutline.mockResolvedValue(ok(COURSE.sections));
   });
 
   afterEach(() => {
@@ -408,6 +416,90 @@ describe("CourseReader", () => {
         section_id: "sec-1",
         scroll_pos: 0.5,
       });
+    });
+  });
+
+  describe("outline editor", () => {
+    it("opens via the TopBar 'Edit outline' button", async () => {
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.click(screen.getByRole("button", { name: /edit outline/i }));
+
+      expect(await screen.findByRole("dialog", { name: /edit outline/i })).toBeInTheDocument();
+      expect(mockedListSections).toHaveBeenCalledWith("course-1");
+    });
+
+    it("opens via the 'o' shortcut and suppresses chapter navigation underneath while open", async () => {
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.keyboard("o");
+      expect(await screen.findByRole("dialog", { name: /edit outline/i })).toBeInTheDocument();
+
+      await user.keyboard("{ArrowRight}");
+      // Scoped to the sidebar nav: the outline editor's own "Chapter One"
+      // rename-trigger button, once its data loads, shares this same
+      // accessible name.
+      const sidebar = screen.getByRole("navigation", { name: /chapter outline/i });
+      expect(within(sidebar).getByRole("button", { name: /chapter one/i })).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+    });
+
+    it("closes on Escape and restores focus to the triggering button", async () => {
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      const trigger = screen.getByRole("button", { name: /edit outline/i });
+      await user.click(trigger);
+      await screen.findByRole("dialog", { name: /edit outline/i });
+
+      await user.keyboard("{Escape}");
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it("renaming a chapter and saving issues one edit_outline PATCH and refreshes the sidebar", async () => {
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.click(screen.getByRole("button", { name: /edit outline/i }));
+      const dialog = await screen.findByRole("dialog", { name: /edit outline/i });
+
+      mockedEditOutline.mockResolvedValue(
+        ok(
+          COURSE.sections.map((section) =>
+            section.id === "sec-1" ? { ...section, title: "Renamed Chapter" } : section,
+          ),
+        ),
+      );
+
+      await user.click(await within(dialog).findByRole("button", { name: "Chapter One" }));
+      const input = within(dialog).getByRole("textbox", { name: /rename chapter one/i });
+      await user.clear(input);
+      await user.type(input, "Renamed Chapter{Enter}");
+
+      await user.click(within(dialog).getByRole("button", { name: /save changes/i }));
+
+      expect(mockedEditOutline).toHaveBeenCalledWith("course-1", [
+        { type: "rename", section_id: "sec-1", title: "Renamed Chapter" },
+      ]);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      // A sidebar row's accessible name is a concatenation of the lesson
+      // dot's own aria-label, the title, and the page range (see Sidebar.tsx)
+      // — never an exact match, hence the regex (same as every other
+      // sidebar-button query in this file).
+      const sidebar = screen.getByRole("navigation", { name: /chapter outline/i });
+      expect(
+        await within(sidebar).findByRole("button", { name: /renamed chapter/i }),
+      ).toBeInTheDocument();
     });
   });
 });

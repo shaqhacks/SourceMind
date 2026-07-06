@@ -4,18 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
-import OutlineConfirmation from "@/components/upload/OutlineConfirmation";
 import { describeError } from "@/lib/api/errors";
-import {
-  createCourse,
-  editOutline,
-  getJob,
-  listSections,
-  startIngest,
-  uploadAsset,
-  type OutlineOp,
-  type SectionOut,
-} from "@/lib/api/client";
+import { createCourse, getJob, startIngest, uploadAsset } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
@@ -40,15 +30,16 @@ type Step =
   | { kind: "starting-ingest"; courseId: string; items: UploadItem[] }
   | { kind: "ingesting"; courseId: string; jobId: string; items: UploadItem[] }
   | { kind: "ingest-failed"; courseId: string; items: UploadItem[]; message: string }
-  | { kind: "confirming"; courseId: string; sections: SectionOut[] }
-  | { kind: "applying"; courseId: string }
   | { kind: "fatal"; message: string };
 
 /**
  * Modal walking a freshly-selected/dropped batch of PDFs through: create
  * course -> upload each file (independently — one failure doesn't stop the
- * rest) -> start_ingest -> live SSE progress -> outline confirmation ->
- * (optional) one edit_outline PATCH -> navigate into the reader.
+ * rest) -> start_ingest -> live SSE progress -> straight into the reader.
+ * The detected outline is no longer confirmed here (owner decision): outline
+ * editing lives in the reader itself (TopBar "Edit outline" / "o"), reusing
+ * the same OutlineConfirmation editing UI against the live course instead of
+ * gating first sight of the reader behind it.
  */
 export default function UploadFlow({ files, onClose }: UploadFlowProps) {
   const router = useRouter();
@@ -122,19 +113,12 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
     void runUploadsAndIngest(step.courseId);
   }, [step, runUploadsAndIngest]);
 
-  // Ingest job succeeded: fetch the detected outline for review.
+  // Ingest job succeeded: go straight into the reader. Outline editing is
+  // no longer a gate here — see this component's own doc comment.
   useEffect(() => {
     if (!done || !job || job.status !== "succeeded" || step.kind !== "ingesting") return;
-    const courseId = step.courseId;
-    let active = true;
-    listSections(courseId).then(({ data }) => {
-      if (!active) return;
-      setStep({ kind: "confirming", courseId, sections: data ?? [] });
-    });
-    return () => {
-      active = false;
-    };
-  }, [done, job, step]);
+    router.push(`/course/${step.courseId}`);
+  }, [done, job, step, router]);
 
   // Ingest job reported failure (distinct from a dropped SSE connection).
   // The SSE snapshot is just {id, status, progress} — no error text — so
@@ -152,23 +136,6 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
       active = false;
     };
   }, [done, job, step]);
-
-  const handleAcceptOutline = useCallback(
-    async (operations: OutlineOp[]) => {
-      if (step.kind !== "confirming") return;
-      const courseId = step.courseId;
-      if (operations.length > 0) {
-        setStep({ kind: "applying", courseId });
-        const { data } = await editOutline(courseId, operations);
-        if (!data) {
-          setStep({ kind: "fatal", message: "Applying your outline edits failed." });
-          return;
-        }
-      }
-      router.push(`/course/${courseId}`);
-    },
-    [step, router],
-  );
 
   function renderUploadBadges(items: UploadItem[]) {
     return (
@@ -275,14 +242,6 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
             {renderUploadBadges(step.items)}
             <ErrorBanner message={step.message} onRetry={retryIngest} />
           </div>
-        )}
-
-        {step.kind === "confirming" && (
-          <OutlineConfirmation sections={step.sections} onAccept={handleAcceptOutline} />
-        )}
-
-        {step.kind === "applying" && (
-          <p className="text-sm text-muted-foreground">Applying your outline edits…</p>
         )}
 
         {step.kind === "fatal" && <ErrorBanner message={step.message} />}

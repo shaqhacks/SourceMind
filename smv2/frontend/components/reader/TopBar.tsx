@@ -12,6 +12,7 @@ export interface TopBarProps {
   onLessonSectionSettled: (sectionId: string, status: "ready" | "failed") => void;
   chatOpen: boolean;
   onToggleChat: () => void;
+  onOpenOutlineEditor: () => void;
 }
 
 export default function TopBar({
@@ -22,6 +23,7 @@ export default function TopBar({
   onLessonSectionSettled,
   chatOpen,
   onToggleChat,
+  onOpenOutlineEditor,
 }: TopBarProps) {
   return (
     <div className="flex items-center gap-3 border-b border-border px-4 py-3">
@@ -36,6 +38,13 @@ export default function TopBar({
         ☰
       </button>
       <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">{courseTitle}</h1>
+      <button
+        type="button"
+        onClick={onOpenOutlineEditor}
+        className="rounded-md border border-border px-2 py-1 text-sm"
+      >
+        Edit outline
+      </button>
       <GenerateAllLessons courseId={courseId} onSectionSettled={onLessonSectionSettled} />
       <QuizzesPanel courseId={courseId} />
       <button

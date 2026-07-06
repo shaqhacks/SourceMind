@@ -8,6 +8,7 @@ import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   findActiveLessonJob,
   generateLesson,
+  getJob,
   getLessonEstimate,
   getSection,
   type LessonEstimateOut,
@@ -68,6 +69,12 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   const [discoveredJobId, setDiscoveredJobId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmingRegenerate, setConfirmingRegenerate] = useState(false);
+  // Tagged with the jobId it was fetched for (same idiom as useJobEvents'
+  // own internal state) so staleness is a render-time comparison rather
+  // than something an effect has to reset.
+  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
+    null,
+  );
 
   const detail = state.kind === "loaded" ? state.detail : null;
 
@@ -78,6 +85,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   const rawStatus = detail?.lesson_status ?? null;
   const watchedJobId = localJobId ?? discoveredJobId;
   const { job, done, stalled } = useJobEvents(watchedJobId);
+  const failureMessage = failureInfo?.jobId === watchedJobId ? failureInfo.message : null;
 
   // `!done` folds the watched job's own completion into this derivation —
   // once useJobEvents reports done, isInFlight drops on its own (no manual
@@ -136,6 +144,23 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
     notifyReviewSettled();
   }, [done, sectionId]);
 
+  // JobEvent (the SSE snapshot) carries no error text — only {id, status,
+  // progress} — so the actual failure message needs a follow-up plain REST
+  // fetch. Only meaningful for a job watched this session (local or
+  // rediscovered); a `lesson_status: "failed"` surviving from a much
+  // earlier session with no job_id in memory falls back to the generic
+  // message below instead.
+  useEffect(() => {
+    if (!done || job?.status !== "failed" || !watchedJobId) return;
+    let active = true;
+    getJob(watchedJobId).then(({ data }) => {
+      if (active) setFailureInfo({ jobId: watchedJobId, message: data?.error ?? null });
+    });
+    return () => {
+      active = false;
+    };
+  }, [done, job?.status, watchedJobId]);
+
   const statusRef = useRef<LessonDisplayStatus | null>(null);
   useEffect(() => {
     if (statusRef.current === effectiveStatus) return;
@@ -190,7 +215,10 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   if (effectiveStatus === "failed") {
     return (
       <div className="flex flex-col gap-2">
-        <ErrorBanner message="Lesson generation failed." onRetry={() => handleGenerate(true)} />
+        <ErrorBanner
+          message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
+          onRetry={() => handleGenerate(true)}
+        />
         {actionError && <p className="text-xs text-red-600 dark:text-red-400">{actionError}</p>}
       </div>
     );

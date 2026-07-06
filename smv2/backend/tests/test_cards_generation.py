@@ -5,7 +5,7 @@ import json
 from app.db.engine import get_session
 from app.db.models import Card, LlmCall, ReviewState
 from app.jobs.worker import run_due_jobs_once
-from app.llm.provider import CompletionResult
+from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, CompletionResult, ProviderNotConfiguredError
 from conftest import _first_section_id
 
 
@@ -162,6 +162,22 @@ def test_generate_cards_retries_once_on_top_level_parse_failure(client, ingest_c
 
     cards = client.get(f"/api/sections/{section_id}/cards").json()
     assert len(cards) == 1
+
+
+def test_generate_cards_job_reports_friendly_error_when_provider_not_configured(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+    stub_provider.exceptions = [ProviderNotConfiguredError(PROVIDER_NOT_CONFIGURED_MESSAGE)]
+
+    resp = client.post(f"/api/sections/{section_id}/cards")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "failed"
+    assert job["error"] == PROVIDER_NOT_CONFIGURED_MESSAGE
 
 
 def test_generate_cards_fails_after_two_parse_failures(client, ingest_course, stub_provider):

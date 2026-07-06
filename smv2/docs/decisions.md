@@ -111,3 +111,97 @@ bare spinner). Token-level streaming inside one section's own completion
 call is explicitly out of scope. Chat citations are section-granular today
 even though `Chunk.page` exists in the schema unused by navigation —
 page-level citation jump is phase-2 polish, not a Phase 4 gap.
+
+## ADR-013 — Deterministic front-matter skipping in ingest (2026-07-06)
+
+Real-world PDFs ingested chapters that were actually front matter — title
+pages, publisher/copyright pages, tables of contents — because nothing in
+`app/pipeline/outline_detect.py` distinguished them from real chapters. The
+fix stays inside ingest's zero-LLM prime directive: two narrow, deterministic
+signal sets, one per outline path.
+
+Bookmark path: a bookmark title denylist (`^(table of )?contents$`,
+`^copyright( page)?$`, `^title page$`, `^colophon$`, `^dedication$`,
+`^acknowledgm?ents?$`, matched case-insensitively) drops matching bookmark
+entries before section bounds are built; content before the first surviving
+bookmark's page was already excluded by the existing algorithm (bounds start
+at the first chosen entry's own page) and needed no new code. The denylist
+is deliberately narrow — preface, foreword, introduction, and index are
+never dropped, since those routinely contain real, citable content and a
+false positive there is worse than an occasional missed front-matter page.
+
+Page-window fallback: before windowing, scan at most the first 10 pages and
+skip while a page matches any of — a copyright/ISBN signal, a page shaped
+like a table of contents (≥40% of its non-empty lines end in a page number,
+minimum 5 such lines), or near-empty (<120 chars). If the 10-page scan
+window never finds a page that clears all three signals, the skip is 0
+(never blindly consumes the whole scan window) — this is a deliberate
+false-positive guard: several existing fixtures (`huge.pdf`'s 520 tiny
+pages, `non_english.pdf`'s 2 short pages, `scanned.pdf`'s empty pages) would
+otherwise have some or all of their real content skipped.
+
+Both paths are gated by `skip_front_matter()` (`SMV2_SKIP_FRONT_MATTER`,
+default on) for an escape hatch if the heuristics misfire on a real course.
+Dropped bookmark titles are logged via the ingest job's progress message so
+the user can see what was skipped. The outline-confirmation/edit screen
+remains the user's correction point for anything the heuristics get wrong in
+either direction. `_EXTRACTOR_ALGO_VERSION` bumped to `algo-2`; the
+`with_bookmarks`/`no_bookmarks`/`non_english` golden snapshots are
+unaffected (verified byte-identical after regeneration — none of those
+fixtures contain front matter).
+
+## ADR-014 — Outline confirmation screen removed from the upload flow (2026-07-06)
+
+The brief's UX law 1 mandated a skippable outline-confirmation screen between
+ingest and reading. Owner testing found it added friction without value once
+outlines carry real chapter names: verifying page numbers is not a user job.
+Upload now lands directly in the reader (auto-accept). Outline editability —
+the substance of law 1 — is preserved and relocated: the same editor
+(rename/reorder/delete/merge/split, with the review-state-reset warning)
+opens from the reader's TopBar and the "o" shortcut, operating on the live
+outline via the existing edit_outline endpoint. The heading-detection outline
+tier (ADR-013 successor work, algo-3) is what makes auto-accept reasonable:
+detected chapter titles replace page-window ranges as the default outline.
+
+## ADR-015 — Heading-detection middle tier: bookmarks -> headings -> page windows (2026-07-06)
+
+A page-window fallback alone regularly slices mid-chapter for a real book
+with no usable bookmarks — a chapter boundary lands inside a fixed-size
+window instead of at its own page, producing titles like "pages 61-72" that
+actually span 3 chapters. `app/pipeline/outline_detect.py::sections_from_headings`
+adds a deterministic middle tier, still inside ingest's zero-LLM prime
+directive: it detects chapter boundaries from large-font lines read straight
+off the PDF's raw page dict (`app/pipeline/extract.py::extract_heading_candidates`
+— per-line size/bold/text, no pymupdf4llm/markdown involved) before falling
+all the way back to fixed windows.
+
+A line qualifies as a heading candidate if its font size is >= 1.25x the
+document's body size (body = the rounded font-size bucket with the most
+total characters, i.e. modal size weighted by text length) — or >= 1.1x
+when it matches a "Chapter N" / numbered-heading shape — its stripped length
+is 3-80, it doesn't end in `.,:;` (excludes a large-font pull-quote or
+epigraph), and it isn't mostly digits (excludes a running-header page
+number). Qualifying lines are grouped into tiers by rounded font size (a
+document's different heading levels); the largest tier producing a
+plausible outline (3-80 sections spanning >=60% of the document) wins — a
+single oversized one-off (e.g. a cover-page title) doesn't win just for
+being biggest, since its tier has only 1 candidate. When two headings in
+the winning tier share a single page (page granularity can't split any
+finer), the first claims that page as its section start; the second is
+bumped to the very next page rather than dropped, so both still surface as
+distinct, correctly-ordered sections. Detected heading titles are cleaned
+(whitespace collapsed, a trailing dot-leader run stripped) and pass through
+the SAME front-matter denylist as bookmark titles (ADR-013) — a detected
+"Table of Contents" heading is dropped exactly like a ToC bookmark would be.
+ADR-013's leading-front-matter-page skip applies before heading detection
+runs, using the identical `first_content_page_index` signal the page-window
+fallback already used.
+
+Tier order is bookmarks-first, unconditionally: heading detection only runs
+when bookmarks yield fewer than the usable-section minimum, so a real ToC
+(however sparse) is always trusted over inferred font-size boundaries.
+`_EXTRACTOR_ALGO_VERSION` bumped to `algo-3`; the `with_bookmarks`/
+`no_bookmarks`/`non_english` golden snapshots are unaffected (verified
+byte-identical after regeneration), and a new `headings_no_bookmarks`
+snapshot fixture (4 chapters, no bookmarks, one same-page collision, one
+punctuation-excluded trap) pins the new tier's own output.

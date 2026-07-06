@@ -14,6 +14,12 @@ import {
 export interface OutlineConfirmationProps {
   sections: SectionOut[];
   onAccept: (operations: OutlineOp[]) => void;
+  /** Overridable copy so this same editor reads naturally in both of its
+   * homes: the upload flow's first-look confirmation (defaults below) and
+   * the reader's "Edit outline" modal (which passes its own wording). */
+  heading?: string;
+  description?: string;
+  submitLabel?: string;
 }
 
 /**
@@ -22,7 +28,13 @@ export interface OutlineConfirmationProps {
  * which is exactly "accept as-is". Edits are staged locally and only sent
  * as a single edit_outline PATCH on accept.
  */
-export default function OutlineConfirmation({ sections, onAccept }: OutlineConfirmationProps) {
+export default function OutlineConfirmation({
+  sections,
+  onAccept,
+  heading = "Confirm chapter outline",
+  description = "Review the detected chapters, or accept as-is.",
+  submitLabel = "Accept outline",
+}: OutlineConfirmationProps) {
   const [draft, setDraft] = useState<OutlineDraftState>(() => initialDraftState(sections));
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [splitInputs, setSplitInputs] = useState<Record<string, string>>({});
@@ -102,10 +114,8 @@ export default function OutlineConfirmation({ sections, onAccept }: OutlineConfi
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="text-base font-semibold">Confirm chapter outline</h2>
-        <p className="text-sm text-muted-foreground">
-          Review the detected chapters, or accept as-is.
-        </p>
+        <h2 className="text-base font-semibold">{heading}</h2>
+        <p className="text-sm text-muted-foreground">{description}</p>
       </div>
 
       <ul className="divide-y divide-border rounded-md border border-border">
@@ -243,7 +253,7 @@ export default function OutlineConfirmation({ sections, onAccept }: OutlineConfi
           onClick={handleAccept}
           className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
         >
-          Accept outline
+          {submitLabel}
         </button>
       </div>
     </div>

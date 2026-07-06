@@ -29,3 +29,13 @@ def test_pages_per_window_is_read_lazily(monkeypatch):
 
     monkeypatch.setenv("SMV2_PAGES_PER_WINDOW", "not-a-number")
     assert config.pages_per_window() == 12
+
+
+def test_skip_front_matter_is_read_lazily(monkeypatch):
+    assert config.skip_front_matter() is True
+
+    monkeypatch.setenv("SMV2_SKIP_FRONT_MATTER", "0")
+    assert config.skip_front_matter() is False
+
+    monkeypatch.setenv("SMV2_SKIP_FRONT_MATTER", "1")
+    assert config.skip_front_matter() is True

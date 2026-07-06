@@ -5,7 +5,7 @@ import httpx
 from app.db.engine import get_session
 from app.db.models import ChatTurn, Chunk
 from app.llm.limiter import LLMBusyError
-from app.llm.provider import CompletionResult
+from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, CompletionResult, ProviderNotConfiguredError
 
 
 def test_send_chat_happy_path_with_citations(client, ingest_course, stub_provider):
@@ -164,6 +164,15 @@ def test_send_chat_provider_timeout_maps_to_504(client, ingest_course, stub_prov
 
     resp = client.post(f"/api/courses/{course_id}/chat", json={"message": "hi"})
     assert resp.status_code == 504
+
+
+def test_send_chat_provider_not_configured_maps_to_503(client, ingest_course, stub_provider):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    stub_provider.exceptions = [ProviderNotConfiguredError(PROVIDER_NOT_CONFIGURED_MESSAGE)]
+
+    resp = client.post(f"/api/courses/{course_id}/chat", json={"message": "hi"})
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == PROVIDER_NOT_CONFIGURED_MESSAGE
 
 
 def test_send_chat_triggers_embed_course_job_when_no_embeddings_yet(client, ingest_course, stub_provider):

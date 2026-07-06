@@ -6,8 +6,10 @@ import LessonPane from "@/components/reader/LessonPane";
 import {
   findActiveLessonJob,
   generateLesson,
+  getJob,
   getLessonEstimate,
   getSection,
+  type JobOut,
   type SectionDetailOut,
 } from "@/lib/api/client";
 
@@ -21,12 +23,14 @@ vi.mock("@/lib/api/client", () => ({
   getLessonEstimate: vi.fn(),
   generateLesson: vi.fn(),
   findActiveLessonJob: vi.fn(),
+  getJob: vi.fn(),
 }));
 
 const mockedGetSection = vi.mocked(getSection);
 const mockedGetLessonEstimate = vi.mocked(getLessonEstimate);
 const mockedGenerateLesson = vi.mocked(generateLesson);
 const mockedFindActiveLessonJob = vi.mocked(findActiveLessonJob);
+const mockedGetJob = vi.mocked(getJob);
 
 function makeDetail(overrides: Partial<SectionDetailOut> = {}): SectionDetailOut {
   return {
@@ -44,6 +48,22 @@ function makeDetail(overrides: Partial<SectionDetailOut> = {}): SectionDetailOut
     lesson_model: null,
     lesson_prompt_version: null,
     extractor_version: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeJob(overrides: Partial<JobOut> = {}): JobOut {
+  return {
+    id: "job-1",
+    type: "generate_lesson",
+    status: "failed",
+    payload: { section_id: "sec-1" },
+    result: null,
+    progress: null,
+    error: null,
+    attempts: 1,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -244,10 +264,40 @@ describe("LessonPane", () => {
     render(<LessonPane sectionId="sec-1" />);
 
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/lesson generation failed/i);
+    expect(banner).toHaveTextContent(/generation failed\./i);
 
     await user.click(screen.getByRole("button", { name: /retry/i }));
     expect(mockedGenerateLesson).toHaveBeenCalledWith("sec-1", true);
+  });
+
+  it("shows the job's error text verbatim when a freshly-started generation job fails", async () => {
+    mockedGetSection
+      .mockResolvedValueOnce(ok(makeDetail({ lesson_status: "none" })))
+      .mockResolvedValueOnce(ok(makeDetail({ lesson_status: "failed" })));
+    mockedGetLessonEstimate.mockResolvedValue(
+      ok({ est_seconds: 30, est_cost_usd: 0.01, based_on_calls: 1 }),
+    );
+    mockedGenerateLesson.mockResolvedValue(ok({ job_id: "job-9" }, 202));
+    mockedGetJob.mockResolvedValue(
+      ok(makeJob({ id: "job-9", error: "ANTHROPIC_API_KEY is not configured" })),
+    );
+
+    const user = userEvent.setup();
+    render(<LessonPane sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate lesson/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-9",
+        status: "failed",
+        progress: null,
+      });
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/generation failed: anthropic_api_key is not configured/i);
   });
 
   it("bubbles the effective status up via onStatusChange", async () => {

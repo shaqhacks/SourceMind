@@ -77,6 +77,11 @@ def pages_per_window() -> int:
         return 12
 
 
+def skip_front_matter() -> bool:
+    raw = os.environ.get("SMV2_SKIP_FRONT_MATTER", "1")
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
 def llm_provider() -> str:
     return os.environ.get("SMV2_LLM_PROVIDER", "anthropic")
 
