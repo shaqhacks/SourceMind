@@ -14,8 +14,14 @@ from pathlib import Path
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
-def _version_key(version_dir_name: str) -> int:
-    return int(version_dir_name.lstrip("v"))
+def parse_prompt_version(version: str) -> int:
+    """Parses a 'vN' prompt-version string into its integer N, so version
+    comparisons are numeric ('v10' > 'v9') rather than lexicographic — as
+    plain strings, 'v10' < 'v9' (the '1' in "v10" sorts before the '9' in
+    "v9"), which silently broke lesson staleness at v10. Use this anywhere
+    two 'vN' strings need comparing, not just here.
+    """
+    return int(version.lstrip("v"))
 
 
 def load_prompt(name: str) -> tuple[str, str]:
@@ -28,7 +34,7 @@ def load_prompt(name: str) -> tuple[str, str]:
     prompts_root = _BACKEND_ROOT / "prompts"
     versions = sorted(
         (d for d in prompts_root.iterdir() if d.is_dir() and d.name.startswith("v")),
-        key=lambda d: _version_key(d.name),
+        key=lambda d: parse_prompt_version(d.name),
     )
     if not versions:
         raise FileNotFoundError(f"no prompt versions found under {prompts_root}")

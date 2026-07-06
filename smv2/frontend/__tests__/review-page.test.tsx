@@ -68,6 +68,7 @@ describe("ReviewPage", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it("hub: shows the backlog warning and course list from review_summary", async () => {
@@ -203,5 +204,121 @@ describe("ReviewPage", () => {
     fireEvent.keyDown(window, { key: "?" });
 
     expect(await screen.findByRole("dialog", { name: /keyboard shortcuts/i })).toBeInTheDocument();
+  });
+
+  describe("session resume", () => {
+    const STORAGE_KEY = "smv2.review.session";
+
+    function fiveCards() {
+      return [1, 2, 3, 4, 5].map((n) =>
+        makeQueueCard({ id: `card-${n}`, front_md: `Q${n}`, back_md: `A${n}` }),
+      );
+    }
+
+    it("grading 2 of 5, unmounting, and remounting resumes at card 3 with the tally intact", async () => {
+      mockSearchParams = new URLSearchParams({ course: "course-1" });
+      const allFive = fiveCards();
+      mockedGetReviewQueue
+        .mockResolvedValueOnce(ok(makeQueue({ total: 5, due: 5 }))) // chooser
+        .mockResolvedValueOnce(ok(makeQueue({ total: 5, cards: allFive }))); // session start
+
+      const { unmount } = render(<ReviewPage />);
+      await userEvent.setup().click(await screen.findByRole("button", { name: /review all \(5\)/i }));
+
+      await screen.findByText("1 of 5");
+      fireEvent.keyDown(window, { key: " " });
+      fireEvent.keyDown(window, { key: "3" }); // grade card 1: Good
+      await screen.findByText("2 of 5");
+      fireEvent.keyDown(window, { key: " " });
+      fireEvent.keyDown(window, { key: "2" }); // grade card 2: Hard
+
+      await screen.findByText("3 of 5");
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
+      expect(stored).toMatchObject({
+        courseId: "course-1",
+        chosenSize: 5,
+        remainingCardIds: ["card-3", "card-4", "card-5"],
+        gradedTally: { 3: 1, 2: 1 },
+      });
+
+      unmount();
+
+      // Backend has already dropped the two graded cards from the due queue.
+      mockedGetReviewQueue.mockResolvedValueOnce(
+        ok(makeQueue({ total: 3, cards: allFive.slice(2) })),
+      );
+
+      render(<ReviewPage />);
+
+      expect(await screen.findByText(/resumed session — 3 left/i)).toBeInTheDocument();
+      expect(await screen.findByText("1 of 3")).toBeInTheDocument();
+      expect(screen.getByText("Q3")).toBeInTheDocument();
+
+      fireEvent.keyDown(window, { key: " " });
+      fireEvent.keyDown(window, { key: "1" }); // grade card 3: Again
+
+      const storedAfterResumeGrade = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
+      expect(storedAfterResumeGrade).toMatchObject({
+        remainingCardIds: ["card-4", "card-5"],
+        gradedTally: { 3: 1, 2: 1, 1: 1 },
+      });
+    });
+
+    it("completing a session clears the stored session", async () => {
+      mockSearchParams = new URLSearchParams({ course: "course-1" });
+      mockedGetReviewQueue
+        .mockResolvedValueOnce(ok(makeQueue({ total: 2, due: 2 })))
+        .mockResolvedValueOnce(
+          ok(
+            makeQueue({
+              total: 2,
+              cards: [
+                makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" }),
+                makeQueueCard({ id: "card-2", front_md: "Q2", back_md: "A2" }),
+              ],
+            }),
+          ),
+        );
+
+      render(<ReviewPage />);
+      await userEvent.setup().click(await screen.findByRole("button", { name: /review all \(2\)/i }));
+
+      await screen.findByText("1 of 2");
+      fireEvent.keyDown(window, { key: " " });
+      fireEvent.keyDown(window, { key: "3" });
+      await screen.findByText("2 of 2");
+      expect(localStorage.getItem(STORAGE_KEY)).not.toBeNull();
+
+      fireEvent.keyDown(window, { key: " " });
+      fireEvent.keyDown(window, { key: "3" });
+
+      await screen.findByText("Session complete");
+      expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    });
+
+    it("discarding a resumed session clears storage and returns to the chooser", async () => {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          courseId: "course-1",
+          chosenSize: 5,
+          remainingCardIds: ["card-3", "card-4", "card-5"],
+          gradedTally: { 3: 1, 2: 1 },
+          startedAt: Date.now(),
+        }),
+      );
+      mockedGetReviewQueue
+        .mockResolvedValueOnce(ok(makeQueue({ total: 3, cards: fiveCards().slice(2) }))) // reconcile
+        .mockResolvedValueOnce(ok(makeQueue({ total: 3, due: 3 }))); // chooser, after discard
+
+      render(<ReviewPage />);
+
+      expect(await screen.findByText(/resumed session — 3 left/i)).toBeInTheDocument();
+      await userEvent.setup().click(screen.getByRole("button", { name: /discard/i }));
+
+      expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+      expect(await screen.findByText(/ready to review/i)).toBeInTheDocument();
+      expect(screen.queryByText(/resumed session/i)).not.toBeInTheDocument();
+    });
   });
 });

@@ -11,9 +11,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.config import chat_top_k
+from app.config import chat_history_turns, chat_top_k
 from app.db.engine import get_session
 from app.db.models import ChatTurn, Chunk, Course, Job
+from app.llm.ledger import ensure_spend_cap
 from app.llm.prompts import load_prompt
 from app.llm.provider import ProviderTimeoutError, get_provider
 from app.llm.retry import is_timeout
@@ -38,11 +39,17 @@ def _has_any_embeddings(session, course_id: str) -> bool:
     )
 
 
-def _maybe_trigger_embed_course(session, course_id: str) -> None:
+def _maybe_trigger_embed_course(session, course_id: str, provider) -> None:
     """Lazy, non-blocking: if this course has zero embedded chunks, enqueue
     an embed_course job (unless one is already in flight) so future chat
     turns get better retrieval — THIS turn still answers lexically.
+
+    Skips entirely if the configured provider can't embed at all
+    (AnthropicProvider) — otherwise every chat turn against a
+    zero-embedding course would keep enqueueing a job doomed to no-op.
     """
+    if not provider.supports_embeddings:
+        return
     if _has_any_embeddings(session, course_id):
         return
 
@@ -62,6 +69,25 @@ def _build_excerpts_block(ranked) -> str:
     return "\n\n".join(lines)
 
 
+def _build_history_messages(session, course_id: str, limit: int) -> list[dict]:
+    """The last `limit` PRIOR turns as proper role messages, oldest first —
+    prepended before the current turn's excerpts+question message so the
+    model actually sees the conversation as multi-turn, matching what the
+    UI already presents, instead of only ever the newest message in
+    isolation.
+    """
+    if limit <= 0:
+        return []
+    turns = (
+        session.query(ChatTurn)
+        .filter(ChatTurn.course_id == course_id)
+        .order_by(ChatTurn.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [{"role": t.role, "content": t.content} for t in reversed(turns)]
+
+
 def send_chat(course_id: str, message: str) -> dict[str, Any]:
     session = get_session()
     try:
@@ -69,21 +95,28 @@ def send_chat(course_id: str, message: str) -> dict[str, Any]:
         if course is None:
             raise CourseNotFoundError(f"course not found: {course_id}")
 
-        _maybe_trigger_embed_course(session, course_id)
+        provider = get_provider()
+        _maybe_trigger_embed_course(session, course_id, provider)
 
         ranked = rank_chunks(session, course_id, message, k=chat_top_k())
         excerpts_block = _build_excerpts_block(ranked)
 
         system_prompt, prompt_version = load_prompt("chat")
+        history_messages = _build_history_messages(session, course_id, chat_history_turns())
         user_content = f"<excerpts>\n{excerpts_block}\n</excerpts>\n\n<question>\n{message}\n</question>"
-        messages = [{"role": "user", "content": user_content}]
+        messages = [*history_messages, {"role": "user", "content": user_content}]
+
+        # Same cap discipline as generation (app/llm/ledger.ensure_spend_cap):
+        # checked immediately before the call, no yield points in between.
+        # Raises SpendCapExceededError, which the router maps to a 429
+        # distinct from the busy-limiter one.
+        ensure_spend_cap(course_id)
 
         # Persist NEITHER turn until the provider call actually succeeds —
         # committing the user turn early would leave it orphaned (with no
         # matching assistant reply) every time the provider errors or times
         # out, corrupting the transcript. Both rows land together in one
         # commit, only on success.
-        provider = get_provider()
         try:
             result = provider.complete(
                 messages,

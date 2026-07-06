@@ -132,3 +132,31 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
 
 def test_delete_course_returns_false_for_missing_course(client):
     assert delete_course("does-not-exist") is False
+
+
+def test_delete_course_removes_asset_files_from_disk(client, ingest_course):
+    """DB delete alone doesn't touch the filesystem — the uploaded PDFs
+    under data_dir()/assets/{course_id} used to be left behind forever.
+    """
+    from app.config import data_dir
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    assets_dir = data_dir() / "assets" / course_id
+    assert assets_dir.exists()
+    assert any(assets_dir.iterdir())
+
+    resp = client.delete(f"/api/courses/{course_id}")
+    assert resp.status_code == 204
+    assert not assets_dir.exists()
+
+
+def test_delete_course_tolerates_missing_asset_dir(client):
+    """A course with no uploaded assets has no assets dir at all — deleting
+    it must not raise over a directory that was never created.
+    """
+    resp = client.post("/api/courses", json={"title": "No Assets"})
+    course_id = resp.json()["id"]
+
+    resp = client.delete(f"/api/courses/{course_id}")
+    assert resp.status_code == 204

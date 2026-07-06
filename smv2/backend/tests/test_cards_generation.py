@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from app.db.engine import get_session
-from app.db.models import ReviewState
+from app.db.models import Card, LlmCall, ReviewState
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from conftest import _first_section_id
@@ -37,6 +37,30 @@ def test_generate_cards_happy_path(client, ingest_course, stub_provider):
     cards = client.get(f"/api/sections/{section_id}/cards").json()
     assert len(cards) == 2
     assert {c["front_md"] for c in cards} == {"What is X?", "What is Z?"}
+
+
+def test_generate_cards_records_prompt_version_on_each_card(client, ingest_course, stub_provider):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(
+            text=json.dumps([{"front": "What is X?", "back": "X is Y."}]),
+            input_tokens=1,
+            output_tokens=1,
+            model="stub-model",
+        )
+    ]
+    client.post(f"/api/sections/{section_id}/cards")
+    assert run_due_jobs_once() is True
+
+    cards = client.get(f"/api/sections/{section_id}/cards").json()
+    session = get_session()
+    try:
+        card = session.get(Card, cards[0]["id"])
+        assert card.prompt_version == "v1"
+    finally:
+        session.close()
 
 
 def test_generate_cards_scoped_to_this_section_only(client, ingest_course, stub_provider):
@@ -156,6 +180,33 @@ def test_generate_cards_fails_after_two_parse_failures(client, ingest_course, st
     job = client.get(f"/api/jobs/{job_id}").json()
     assert job["status"] == "failed"
     assert stub_provider.call_count == 2
+
+
+def test_generate_cards_fails_after_two_parse_failures_records_parse_failure_ledger_row(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(text="not json", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(text="still not json", input_tokens=1, output_tokens=1, model="stub-model"),
+    ]
+
+    client.post(f"/api/sections/{section_id}/cards")
+    assert run_due_jobs_once() is True
+
+    session = get_session()
+    try:
+        calls = session.query(LlmCall).filter(LlmCall.purpose == "cards").order_by(LlmCall.ts).all()
+    finally:
+        session.close()
+
+    assert [c.status for c in calls] == ["ok", "ok", "parse_failure"]
+    parse_failure_row = calls[-1]
+    assert parse_failure_row.cost_estimate is None
+    assert parse_failure_row.prompt_version == "v1"
+    assert parse_failure_row.course_id == course_id
 
 
 def test_regenerate_cards_preserves_review_state_for_unchanged_cards(client, ingest_course, stub_provider):

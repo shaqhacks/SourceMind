@@ -43,8 +43,11 @@ class LessonAlreadyInProgressError(ValueError):
 
 
 def start_lesson_generation(section_id: str, force: bool = False) -> str:
-    """Atomically claims the section (lesson_status -> 'queued') and
-    enqueues its generate_lesson job.
+    """Atomically claims the section (lesson_status -> 'queued') AND
+    enqueues its generate_lesson job in ONE transaction/commit — claiming
+    and job-creation used to be two separate commits, so a crash in
+    between left lesson_status='queued' wedged forever with no job that
+    would ever clear it. Now either both land together or neither does.
 
     Raises SectionNotFoundError if the section doesn't exist, or
     LessonAlreadyInProgressError if it's already queued/generating and
@@ -54,7 +57,6 @@ def start_lesson_generation(section_id: str, force: bool = False) -> str:
     try:
         result = session.execute(_CLAIM_LESSON_SQL, {"section_id": section_id, "force": force})
         claimed = result.first() is not None
-        session.commit()
 
         if not claimed:
             section = session.get(Section, section_id)
@@ -63,14 +65,22 @@ def start_lesson_generation(section_id: str, force: bool = False) -> str:
             raise LessonAlreadyInProgressError(
                 f"lesson generation already in progress for section {section_id}"
             )
+
+        job = jobs_service.create_job_in_session(session, "generate_lesson", {"section_id": section_id})
+        session.commit()
+        return job.id
     finally:
         session.close()
 
-    job = jobs_service.create_job("generate_lesson", {"section_id": section_id})
-    return job.id
-
 
 def start_all_lesson_generations(course_id: str) -> tuple[list[str], int]:
+    """Claims every eligible section AND creates every one of their jobs in
+    ONE transaction — previously the status updates committed first and
+    each job was created in its own separate commit after, so a crash
+    partway through the job-creation loop left some sections queued with a
+    job and others queued with none, wedged forever. Now it's all-or-nothing
+    for the whole batch.
+    """
     session = get_session()
     try:
         all_sections = (
@@ -82,14 +92,20 @@ def start_all_lesson_generations(course_id: str) -> tuple[list[str], int]:
         to_generate = [s for s in all_sections if s.lesson_status in ("none", "failed")]
         for s in to_generate:
             s.lesson_status = "queued"
-        section_ids = [s.id for s in to_generate]
         skipped = len(all_sections) - len(to_generate)
+
+        jobs = [
+            jobs_service.create_job_in_session(session, "generate_lesson", {"section_id": s.id})
+            for s in to_generate
+        ]
+        # Job.id's default is Python-side (applied on flush, not on add()) —
+        # flush before reading .id, well before the final commit.
+        session.flush()
+        job_ids = [j.id for j in jobs]
         session.commit()
+        return job_ids, skipped
     finally:
         session.close()
-
-    job_ids = [jobs_service.create_job("generate_lesson", {"section_id": sid}).id for sid in section_ids]
-    return job_ids, skipped
 
 
 def estimate_lesson(section_id: str) -> dict[str, Any] | None:

@@ -20,17 +20,14 @@ from sqlalchemy.orm import Session
 
 from app.config import course_spend_cap_usd
 from app.db.models import Job, Section
-from app.llm.ledger import course_spend_so_far
+from app.llm.ledger import SpendCapExceededError, course_spend_so_far, ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
+from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 
 _MAX_TOKENS = 4096
-
-
-class SpendCapExceededError(Exception):
-    pass
 
 
 def _is_degenerate(text: str) -> bool:
@@ -79,9 +76,7 @@ def _generate(session: Session, job: Job, section_id: str) -> dict[str, Any]:
     section = session.get(Section, section_id)
     assert section is not None  # already validated by run_lesson_generation
 
-    _report_progress(
-        session, job, stage="generating", pct=10, message=f"generating lesson for {section.title}"
-    )
+    _report_progress(job.id, stage="generating", pct=10, message=f"generating lesson for {section.title}")
 
     system_prompt, messages = _build_messages(section)
     _, prompt_version = load_prompt("lesson")
@@ -97,11 +92,16 @@ def _generate(session: Session, job: Job, section_id: str) -> dict[str, Any]:
     # single worker fully completes one job (including its ledger commit)
     # before claiming the next, so this check is airtight for that case.
     cap = course_spend_cap_usd()
-    if cap is not None and course_spend_so_far(section.course_id) >= cap:
+    try:
+        ensure_spend_cap(section.course_id)
+    except SpendCapExceededError:
         section.lesson_status = "failed"
         session.commit()
-        raise SpendCapExceededError("spend cap exceeded")
+        raise
 
+    # wait_for_slot=True: this is a durable job, not an interactive request —
+    # it should wait out a busy limiter (bounded) rather than fail the whole
+    # job over transient chat traffic saturating the same slots.
     result = provider.complete(
         messages,
         max_tokens=_MAX_TOKENS,
@@ -109,15 +109,14 @@ def _generate(session: Session, job: Job, section_id: str) -> dict[str, Any]:
         course_id=section.course_id,
         prompt_version=prompt_version,
         system=system_prompt,
+        wait_for_slot=True,
     )
     text = _strip_leading_fence(result.text)
 
     if _is_degenerate(text):
         # Bounded: exactly one retry on degenerate output, then give up —
         # no "ask the model to fix it" loop.
-        _report_progress(
-            session, job, stage="retrying", pct=50, message="retrying degenerate output"
-        )
+        _report_progress(job.id, stage="retrying", pct=50, message="retrying degenerate output")
         result = provider.complete(
             messages,
             max_tokens=_MAX_TOKENS,
@@ -125,19 +124,39 @@ def _generate(session: Session, job: Job, section_id: str) -> dict[str, Any]:
             course_id=section.course_id,
             prompt_version=prompt_version,
             system=system_prompt,
+            wait_for_slot=True,
         )
         text = _strip_leading_fence(result.text)
 
     if _is_degenerate(text):
         section.lesson_status = "failed"
         session.commit()
+        # The provider wrapper already recorded this same call as
+        # status='ok' (the completion succeeded at the transport level);
+        # this is the semantic layer recording that its CONTENT was unusable.
+        # cost_estimate stays None — that spend was already counted by the
+        # 'ok' row, and double-recording it here would double-count against
+        # course_spend_so_far().
+        record_llm_call(
+            purpose="lesson",
+            model=result.model,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            latency_ms=0,
+            cost_estimate=None,
+            prompt_version=prompt_version,
+            status="parse_failure",
+            course_id=section.course_id,
+        )
         raise ValueError("lesson generation produced degenerate output after one retry")
 
     section.lesson_md = text
     section.lesson_status = "ready"
     section.lesson_model = result.model
     section.lesson_prompt_version = prompt_version
-    _report_progress(session, job, stage="done", pct=100, message="lesson ready")
+    # In-session (not report_progress): the section fields above are already
+    # pending on this session — see report_progress_in_session's docstring.
+    _report_progress_in_session(job, stage="done", pct=100, message="lesson ready")
     session.commit()
 
     # Re-check after completion: THIS call may have just pushed spend over

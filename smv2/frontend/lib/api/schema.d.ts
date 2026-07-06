@@ -548,6 +548,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Failed Asset Count
+             * @default 0
+             */
+            failed_asset_count: number;
             /** Id */
             id: string;
             progress?: components["schemas"]["ProgressSummary"] | null;

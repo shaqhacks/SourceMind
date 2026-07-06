@@ -52,6 +52,7 @@ class CourseOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     section_count: int = 0
+    failed_asset_count: int = 0
     progress: ProgressSummary | None = None
 
     model_config = {"from_attributes": True}

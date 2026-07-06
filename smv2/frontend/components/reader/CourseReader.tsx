@@ -35,6 +35,26 @@ function describeBodyError(status: number | undefined): string {
     : `Loading chapter failed (HTTP ${status}).`;
 }
 
+// getElementById (not querySelector(hash)) deliberately — rehype-slug ids
+// can start with a digit (a heading like "1. Introduction" slugifies to
+// "1-introduction"), which is a syntax error as a CSS id selector unless
+// escaped. contains() scopes the match to this section's own content, not
+// some unrelated element elsewhere on the page that happens to share the
+// id.
+function findHashTarget(container: HTMLElement, hash: string): HTMLElement | null {
+  const id = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (!id) return null;
+  const target = document.getElementById(id);
+  return target && container.contains(target) ? target : null;
+}
+
+function scrollElementIntoView(el: HTMLElement): void {
+  const reducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+}
+
 export default function CourseReader({ course, initialProgress }: CourseReaderProps) {
   const sections = useMemo(
     () => [...course.sections].sort((a, b) => a.order_index - b.order_index),
@@ -98,7 +118,11 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   // Resume: jump to the saved scroll position once, instantly, as soon as
   // the resumed section's body has actually rendered (scrollHeight isn't
   // meaningful before that). Never smooth-scrolled — restoring "you are
-  // here" is a snap-into-place, not a moment worth animating.
+  // here" is a snap-into-place, not a moment worth animating. A deep-link
+  // hash in the URL (e.g. from a shared link, landing before the target
+  // heading even exists in the DOM) takes priority over the saved
+  // position — same one-time guard either way, so the two never both
+  // fire for the same mount.
   const hasRestoredScroll = useRef(false);
   useEffect(() => {
     if (hasRestoredScroll.current) return;
@@ -106,11 +130,37 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     if (!el) return;
     if (sectionBodies[activeSection.id] === undefined) return;
     hasRestoredScroll.current = true;
+
+    const hash = window.location.hash;
+    const hashTarget = hash ? findHashTarget(el, hash) : null;
+    if (hashTarget) {
+      scrollElementIntoView(hashTarget);
+      return;
+    }
+
     const scrollable = el.scrollHeight - el.clientHeight;
     if (scrollable > 0) {
       el.scrollTo({ top: scrollable * initialProgress.scroll_pos, behavior: "auto" });
     }
   }, [sectionBodies, activeSection.id, initialProgress.scroll_pos]);
+
+  // Anchor-link clicks within the column (e.g. a heading's "#" permalink)
+  // change location.hash without a route change. The browser's own
+  // hash-navigation scroll doesn't reliably reach into a nested
+  // overflow-y-auto container in every browser, so handle it explicitly
+  // — this is the general, always-on counterpart to the one-time
+  // deep-link check above.
+  useEffect(() => {
+    function handleHashChange() {
+      const el = columnRef.current;
+      const hash = window.location.hash;
+      if (!el || !hash) return;
+      const target = findHashTarget(el, hash);
+      if (target) scrollElementIntoView(target);
+    }
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   const goToOffset = useCallback(
     (offset: number) => {

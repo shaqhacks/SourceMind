@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import timedelta
 
 from sqlalchemy import DateTime, bindparam, text
@@ -27,6 +28,13 @@ from app.jobs.registry import (
 LEASE_SECONDS = 60
 POLL_INTERVAL_SECONDS = 0.5
 ERROR_BACKOFF_SECONDS = 2.0
+# reconcile_interrupted_jobs() used to run only once, at app startup. A fast
+# restart within a job's lease window meant the claim SQL (status='queued'
+# only) could never see that lease-expired 'running' row again — it would
+# sit wedged forever until someone restarted the process a second time.
+# Running the reconciler periodically from the live loop, not just at
+# startup, means a job can also recover without any restart at all.
+RECONCILE_INTERVAL_SECONDS = 30.0
 
 logger = logging.getLogger(__name__)
 
@@ -112,11 +120,16 @@ def run_due_jobs_once() -> bool:
 
 
 async def worker_loop() -> None:
-    """Background task: claim+execute one job at a time, forever.
+    """Background task: claim+execute one job at a time, forever, and
+    periodically re-run reconcile_interrupted_jobs() so a job whose lease
+    expires while this process is still alive (e.g. it restarted quickly
+    within the lease window) recovers without needing a second restart —
+    the one-shot startup reconcile alone can't catch that case.
 
     Intended to run as an asyncio task started from the app lifespan and
     stopped via task.cancel() on shutdown.
     """
+    last_reconcile = time.monotonic()
     while True:
         try:
             claimed = await asyncio.to_thread(run_due_jobs_once)
@@ -126,6 +139,15 @@ async def worker_loop() -> None:
             logger.exception("worker: job tick failed; backing off")
             await asyncio.sleep(ERROR_BACKOFF_SECONDS)
             continue
+
+        now = time.monotonic()
+        if now - last_reconcile >= RECONCILE_INTERVAL_SECONDS:
+            try:
+                await asyncio.to_thread(reconcile_interrupted_jobs)
+            except Exception:
+                logger.exception("worker: periodic reconcile failed; backing off")
+            last_reconcile = now
+
         if not claimed:
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
 

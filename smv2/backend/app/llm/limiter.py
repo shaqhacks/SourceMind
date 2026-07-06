@@ -1,8 +1,13 @@
 """The one sanctioned concurrency primitive in this codebase (hard
 invariant — see CLAUDE.md and test_no_threading_or_semaphore_usage's
-limiter exception). llm_slot() is a non-blocking gate: when saturated it
-raises immediately rather than queuing, so a caller (a router) can turn
-that straight into a fast 429 instead of hanging a request thread.
+limiter exception). llm_slot() defaults to a non-blocking gate: when
+saturated it raises immediately rather than queuing, so an interactive
+caller (chat, a router) can turn that straight into a fast 429 instead of
+hanging a request thread. Pass wait=True for a bounded blocking acquire
+instead — durable job-context callers (lesson/cards/quiz/embed pipelines)
+would rather wait out a busy patch than fail a whole job over transient
+chat traffic saturating the same slots; interactive callers keep the
+default fast-fail.
 
 The semaphore is a lazily-built, cached singleton (mirrors
 app.db.engine.get_engine()/dispose_engine()) rather than a module-scope
@@ -20,6 +25,7 @@ from typing import Iterator
 from app.config import llm_max_concurrency
 
 _semaphore: threading.BoundedSemaphore | None = None
+_BLOCKING_ACQUIRE_TIMEOUT_SECONDS = 120.0
 
 
 class LLMBusyError(Exception):
@@ -39,9 +45,13 @@ def reset_limiter() -> None:
 
 
 @contextmanager
-def llm_slot() -> Iterator[None]:
+def llm_slot(*, wait: bool = False) -> Iterator[None]:
     semaphore = _get_semaphore()
-    if not semaphore.acquire(blocking=False):
+    if wait:
+        acquired = semaphore.acquire(blocking=True, timeout=_BLOCKING_ACQUIRE_TIMEOUT_SECONDS)
+    else:
+        acquired = semaphore.acquire(blocking=False)
+    if not acquired:
         raise LLMBusyError("LLM concurrency limit reached")
     try:
         yield

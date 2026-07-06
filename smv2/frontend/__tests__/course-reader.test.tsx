@@ -133,6 +133,7 @@ describe("CourseReader", () => {
     cleanup();
     vi.clearAllMocks();
     vi.useRealTimers();
+    window.location.hash = "";
   });
 
   it("starts on the first chapter with focus on its heading", async () => {
@@ -312,6 +313,44 @@ describe("CourseReader", () => {
 
       // scrollable = 1000 - 500 = 500; 60% of that = 300.
       expect(column.scrollTop).toBe(300);
+    });
+  });
+
+  describe("hash deep-links", () => {
+    it("scrolls a heading matching location.hash into view once the body renders, taking priority over the saved scroll position", async () => {
+      window.location.hash = "#chapter-two";
+      const scrollIntoViewSpy = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+
+      render(
+        <CourseReader
+          course={COURSE}
+          initialProgress={{ section_id: "sec-2", scroll_pos: 0.6 }}
+        />,
+      );
+
+      await screen.findByText(/second body/i);
+
+      const heading = screen.getByRole("heading", { name: /chapter two/i, level: 1 });
+      expect(heading).toHaveAttribute("id", "chapter-two");
+      expect(scrollIntoViewSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ block: "start" }),
+      );
+      expect(scrollIntoViewSpy.mock.instances[0]).toBe(heading);
+    });
+
+    it("scrolls to a heading when the hash changes via an in-page anchor click", async () => {
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      const scrollIntoViewSpy = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
+      window.location.hash = "#chapter-one";
+      act(() => {
+        window.dispatchEvent(new Event("hashchange"));
+      });
+
+      const heading = screen.getByRole("heading", { name: /chapter one/i, level: 1 });
+      expect(scrollIntoViewSpy).toHaveBeenCalled();
+      expect(scrollIntoViewSpy.mock.instances[0]).toBe(heading);
     });
   });
 

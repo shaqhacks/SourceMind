@@ -7,8 +7,13 @@ from __future__ import annotations
 
 from sqlalchemy import func
 
+from app.config import course_spend_cap_usd
 from app.db.engine import get_session
 from app.db.models import LlmCall, utcnow
+
+
+class SpendCapExceededError(Exception):
+    pass
 
 
 def record_llm_call(
@@ -55,3 +60,19 @@ def course_spend_so_far(course_id: str) -> float:
         return total or 0.0
     finally:
         session.close()
+
+
+def ensure_spend_cap(course_id: str) -> None:
+    """Raises SpendCapExceededError if course_id has already spent at or
+    beyond its configured cap (course_spend_cap_usd(), None = uncapped).
+
+    Call this immediately before every provider.complete()/embed() call that
+    should respect the cap, with no yield points (DB commits, file/network
+    I/O) in between the check and the call — a safety net bounded by
+    llm_max_concurrency() overshoot, not exact billing enforcement (see
+    ADR-006). Shared by every generation path (lesson, cards, quiz, chat) so
+    the cap can't quietly apply to only one of them.
+    """
+    cap = course_spend_cap_usd()
+    if cap is not None and course_spend_so_far(course_id) >= cap:
+        raise SpendCapExceededError("course spend cap exceeded")

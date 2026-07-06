@@ -84,6 +84,10 @@ class StubProvider(Provider):
     pop(0)) or leave both empty for a default always-succeeds stub.
     """
 
+    #: Settable per-instance (stub_provider.supports_embeddings = False) to
+    #: exercise callers that check this before triggering embed work.
+    supports_embeddings = True
+
     def __init__(self, responses=None, exceptions=None, embed_responses=None, embed_exception=None):
         self.model_name = "stub-model"
         self.responses = list(responses) if responses else []

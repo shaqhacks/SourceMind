@@ -48,6 +48,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     title: "Book One",
     status: "draft",
     section_count: 0,
+    failed_asset_count: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,

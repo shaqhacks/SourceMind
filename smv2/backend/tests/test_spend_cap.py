@@ -50,6 +50,78 @@ def test_spend_cap_blocks_generation_when_exceeded(client, ingest_course, stub_p
     assert stub_provider.call_count == 0
 
 
+def test_spend_cap_blocks_card_generation_when_exceeded(client, ingest_course, stub_provider, monkeypatch):
+    """The cap used to be enforced only for lessons — cards/quiz/chat could
+    all keep spending past it. Same guard, same pre-call short-circuit.
+    """
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    monkeypatch.setenv("SMV2_COURSE_SPEND_CAP_USD", "0.0001")
+
+    session = get_session()
+    try:
+        session.add(
+            LlmCall(
+                ts=utcnow(),
+                purpose="lesson",
+                model="claude-sonnet-5",
+                input_tokens=1000,
+                output_tokens=1000,
+                latency_ms=100,
+                cost_estimate=0.01,
+                status="ok",
+                course_id=course_id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    resp = client.post(f"/api/sections/{section_id}/cards")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "failed"
+    assert "spend cap exceeded" in job["error"]
+    assert stub_provider.call_count == 0  # never reached the provider
+
+
+def test_spend_cap_blocks_quiz_generation_when_exceeded(client, ingest_course, stub_provider, monkeypatch):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    monkeypatch.setenv("SMV2_COURSE_SPEND_CAP_USD", "0.0001")
+
+    session = get_session()
+    try:
+        session.add(
+            LlmCall(
+                ts=utcnow(),
+                purpose="lesson",
+                model="claude-sonnet-5",
+                input_tokens=1000,
+                output_tokens=1000,
+                latency_ms=100,
+                cost_estimate=0.01,
+                status="ok",
+                course_id=course_id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    resp = client.post(f"/api/courses/{course_id}/tests")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "failed"
+    assert "spend cap exceeded" in job["error"]
+    assert stub_provider.call_count == 0
+
+
 def test_spend_cap_unlimited_by_default(client, ingest_course, stub_provider, monkeypatch):
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     section_id = _first_section_id(client, course_id)

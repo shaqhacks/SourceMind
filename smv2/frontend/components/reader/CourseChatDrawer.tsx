@@ -65,10 +65,12 @@ function describeSendError(status: number | undefined): { message: string; retry
 export default function CourseChatDrawer({ courseId, open, onClose }: CourseChatDrawerProps) {
   const router = useRouter();
 
-  // Own "escape" scope while open, same pattern as ShortcutsOverlay: sits
-  // on top of the reader's arrow/j/k/s scope so those don't fire behind
-  // an open drawer.
-  useKeyboardShortcuts({ escape: onClose }, open);
+  // Own scope while open, same pattern as ShortcutsOverlay: sits on top of
+  // the reader's arrow/j/k/s/c scope so those don't fire behind an open
+  // drawer. Maps "c" to onClose too (not just escape) — the topmost scope
+  // shadows the reader's own "c" binding while this is open, so without
+  // this, "c" would only ever open the drawer, never close it.
+  useKeyboardShortcuts({ escape: onClose, c: onClose }, open);
   // Not a hard focus trap (this is a side panel, not a blocking modal —
   // the reader behind it stays reachable), just moves focus in on open
   // and restores it to the "Chat" toggle button on close.

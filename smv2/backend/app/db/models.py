@@ -170,6 +170,7 @@ class Card(Base):
     front_md: Mapped[str] = mapped_column(Text, nullable=False)
     back_md: Mapped[str] = mapped_column(Text, nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
+    prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
@@ -256,6 +257,7 @@ class TestAttempt(Base):
     )
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 

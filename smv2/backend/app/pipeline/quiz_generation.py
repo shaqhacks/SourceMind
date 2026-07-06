@@ -13,9 +13,11 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.db.models import Course, Job, Section, TestAttempt
+from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
+from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 
 logger = logging.getLogger(__name__)
@@ -100,13 +102,21 @@ def run_test_generation(
     if not sections:
         raise ValueError("no sections available to build a test from")
 
-    _report_progress(session, job, stage="generating", pct=10, message="generating quiz")
+    _report_progress(job.id, stage="generating", pct=10, message="generating quiz")
 
     scoped_text = _build_scoped_text(sections)
     system_prompt, prompt_version = load_prompt("quiz")
     messages = [{"role": "user", "content": f"<source_text>\n{scoped_text}\n</source_text>"}]
 
     provider = get_provider()
+
+    # Same cap discipline as lesson generation (app/llm/ledger.ensure_spend_cap):
+    # checked immediately before the call, no yield points in between.
+    ensure_spend_cap(course_id)
+
+    # wait_for_slot=True: durable job, not an interactive request — wait out
+    # a busy limiter (bounded) rather than fail the job over transient chat
+    # traffic saturating the same slots.
     result = provider.complete(
         messages,
         max_tokens=_MAX_TOKENS,
@@ -114,12 +124,13 @@ def run_test_generation(
         course_id=course_id,
         prompt_version=prompt_version,
         system=system_prompt,
+        wait_for_slot=True,
     )
 
     try:
         questions = _parse_questions(result.text)
     except (json.JSONDecodeError, ValueError):
-        _report_progress(session, job, stage="retrying", pct=50, message="retrying malformed response")
+        _report_progress(job.id, stage="retrying", pct=50, message="retrying malformed response")
         result = provider.complete(
             messages,
             max_tokens=_MAX_TOKENS,
@@ -127,10 +138,28 @@ def run_test_generation(
             course_id=course_id,
             prompt_version=prompt_version,
             system=system_prompt,
+            wait_for_slot=True,
         )
         try:
             questions = _parse_questions(result.text)
         except (json.JSONDecodeError, ValueError) as exc:
+            # The provider wrapper already recorded this same call as
+            # status='ok' (the completion succeeded at the transport level);
+            # this is the semantic layer recording that its CONTENT was
+            # unusable. cost_estimate stays None — that spend was already
+            # counted by the 'ok' row, and double-recording it here would
+            # double-count against course_spend_so_far().
+            record_llm_call(
+                purpose="quiz",
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                latency_ms=0,
+                cost_estimate=None,
+                prompt_version=prompt_version,
+                status="parse_failure",
+                course_id=course_id,
+            )
             raise ValueError(f"quiz generation produced unparseable output after one retry: {exc}") from exc
 
     if not questions:
@@ -142,9 +171,13 @@ def run_test_generation(
         section_id=section_ids[0] if section_ids and len(section_ids) == 1 else None,
         payload={"questions": questions},
         score=None,
+        prompt_version=prompt_version,
     )
     session.add(attempt)
-    _report_progress(session, job, stage="done", pct=100, message="quiz ready")
+    # In-session (not report_progress): the TestAttempt insert above is
+    # already pending on this session — see report_progress_in_session's
+    # docstring.
+    _report_progress_in_session(job, stage="done", pct=100, message="quiz ready")
     session.commit()
 
     return {"attempt_id": attempt.id, "question_count": len(questions)}

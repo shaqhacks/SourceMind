@@ -17,9 +17,11 @@ from sqlalchemy.orm import Session
 
 from app.db.identity import card_id_for
 from app.db.models import Card, Job, Section
+from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
+from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 
 logger = logging.getLogger(__name__)
@@ -62,14 +64,19 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
     if section is None:
         raise ValueError(f"section not found: {section_id}")
 
-    _report_progress(
-        session, job, stage="generating", pct=10, message=f"generating cards for {section.title}"
-    )
+    _report_progress(job.id, stage="generating", pct=10, message=f"generating cards for {section.title}")
 
     system_prompt, messages = _build_messages(section)
     _, prompt_version = load_prompt("cards")
     provider = get_provider()
 
+    # Same cap discipline as lesson generation (app/llm/ledger.ensure_spend_cap):
+    # checked immediately before the call, no yield points in between.
+    ensure_spend_cap(section.course_id)
+
+    # wait_for_slot=True: durable job, not an interactive request — wait out
+    # a busy limiter (bounded) rather than fail the job over transient chat
+    # traffic saturating the same slots.
     result = provider.complete(
         messages,
         max_tokens=_MAX_TOKENS,
@@ -77,13 +84,14 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
         course_id=section.course_id,
         prompt_version=prompt_version,
         system=system_prompt,
+        wait_for_slot=True,
     )
 
     try:
         cards_data = _parse_cards(result.text)
     except (json.JSONDecodeError, ValueError):
         # Bounded: one retry on a whole-response parse failure, then give up.
-        _report_progress(session, job, stage="retrying", pct=50, message="retrying malformed response")
+        _report_progress(job.id, stage="retrying", pct=50, message="retrying malformed response")
         result = provider.complete(
             messages,
             max_tokens=_MAX_TOKENS,
@@ -91,10 +99,28 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
             course_id=section.course_id,
             prompt_version=prompt_version,
             system=system_prompt,
+            wait_for_slot=True,
         )
         try:
             cards_data = _parse_cards(result.text)
         except (json.JSONDecodeError, ValueError) as exc:
+            # The provider wrapper already recorded this same call as
+            # status='ok' (the completion succeeded at the transport level);
+            # this is the semantic layer recording that its CONTENT was
+            # unusable. cost_estimate stays None — that spend was already
+            # counted by the 'ok' row, and double-recording it here would
+            # double-count against course_spend_so_far().
+            record_llm_call(
+                purpose="cards",
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                latency_ms=0,
+                cost_estimate=None,
+                prompt_version=prompt_version,
+                status="parse_failure",
+                course_id=section.course_id,
+            )
             raise ValueError(f"card generation produced unparseable output after one retry: {exc}") from exc
 
     if not cards_data:
@@ -128,6 +154,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
         existing = existing_cards.get(data["id"])
         if existing is not None:
             existing.position = data["position"]
+            existing.prompt_version = prompt_version
         else:
             session.add(
                 Card(
@@ -137,10 +164,14 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
                     front_md=data["front"],
                     back_md=data["back"],
                     position=data["position"],
+                    prompt_version=prompt_version,
                 )
             )
 
-    _report_progress(session, job, stage="done", pct=100, message="cards ready")
+    # In-session (not report_progress): the card diff (deletes/inserts) is
+    # already pending on this session — see report_progress_in_session's
+    # docstring.
+    _report_progress_in_session(job, stage="done", pct=100, message="cards ready")
     session.commit()
 
     return {"card_count": len(new_cards_by_id)}

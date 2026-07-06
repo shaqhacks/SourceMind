@@ -119,6 +119,14 @@ def chat_top_k() -> int:
         return 6
 
 
+def chat_history_turns() -> int:
+    raw = os.environ.get("SMV2_CHAT_HISTORY_TURNS", "8")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 8
+
+
 def sample_course_enabled() -> bool:
     raw = os.environ.get("SMV2_SAMPLE_COURSE_ENABLED", "1")
     return raw.strip().lower() not in {"0", "false", "no", "off"}

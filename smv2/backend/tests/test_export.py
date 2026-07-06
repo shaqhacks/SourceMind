@@ -53,3 +53,61 @@ def test_export_zip_is_a_valid_zip_readable_via_bytesio(client, ingest_course):
 def test_export_404_for_missing_course(client):
     resp = client.get("/api/courses/does-not-exist/export")
     assert resp.status_code == 404
+
+
+def test_export_includes_lesson_file_and_manifest_entry_when_ready(client, ingest_course, stub_provider):
+    """Lessons are paid-for, generated content — omitting them from the
+    export silently held the reader's content hostage to the app, contrary
+    to the brief's law that a user can always get their own content out.
+    """
+    from app.jobs.worker import run_due_jobs_once
+    from app.llm.provider import CompletionResult
+    from conftest import _first_section_id
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(text="A real lesson.", input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+    client.post(f"/api/sections/{section_id}/lesson")
+    assert run_due_jobs_once() is True
+
+    resp = client.get(f"/api/courses/{course_id}/export")
+    assert resp.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        names = zf.namelist()
+        lesson_files = [n for n in names if n.startswith("lessons/") and n.endswith(".lesson.md")]
+        assert len(lesson_files) == 1
+
+        content = zf.read(lesson_files[0]).decode("utf-8")
+        assert "stub-model" in content
+        assert "v1" in content
+        assert "A real lesson." in content
+
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        section_entry = next(s for s in manifest["sections"] if s["id"] == section_id)
+        assert section_entry["lesson"]["status"] == "ready"
+        assert section_entry["lesson"]["model"] == "stub-model"
+        assert section_entry["lesson"]["prompt_version"] == "v1"
+        assert section_entry["lesson"]["file"] == lesson_files[0]
+
+        # Sections with no lesson yet must have a null manifest entry, not a
+        # missing key or a stale/wrong status.
+        other_entries = [s for s in manifest["sections"] if s["id"] != section_id]
+        assert all(s["lesson"] is None for s in other_entries)
+
+
+def test_export_unchanged_for_course_with_no_lessons(client, ingest_course):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    resp = client.get(f"/api/courses/{course_id}/export")
+    assert resp.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        names = zf.namelist()
+        assert not any(n.startswith("lessons/") for n in names)
+
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        assert all(s["lesson"] is None for s in manifest["sections"])

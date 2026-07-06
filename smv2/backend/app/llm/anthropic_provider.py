@@ -12,6 +12,8 @@ from app.llm.provider import CompletionResult, NotSupportedError, Provider
 
 
 class AnthropicProvider(Provider):
+    supports_embeddings = False  # explicit: matches the base default, but this is the provider that actually raises
+
     def __init__(self) -> None:
         self.model_name = llm_model()
         # max_retries=0: the SDK defaults to retrying transient errors itself,

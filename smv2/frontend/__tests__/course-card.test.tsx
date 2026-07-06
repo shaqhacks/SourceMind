@@ -57,6 +57,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     title: "Distributed Systems",
     status: "ready",
     section_count: 4,
+    failed_asset_count: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     progress: null,
@@ -229,5 +230,43 @@ describe("CourseCard", () => {
     expect(mockedDeleteCourse).not.toHaveBeenCalled();
     expect(screen.queryByText(/delete this course/i)).not.toBeInTheDocument();
     expect(onDeleted).not.toHaveBeenCalled();
+  });
+
+  it("a ready course with failed_asset_count > 0 shows a badge, and expanding it lazy-loads the per-asset detail", async () => {
+    mockedListAssets.mockResolvedValue(
+      ok([
+        makeAsset({ id: "a1", filename: "chapter3.pdf", status: "extract_failed", error: "password protected" }),
+      ]),
+    );
+    const user = userEvent.setup();
+    render(
+      <CourseCard
+        course={makeCourse({ failed_asset_count: 1 })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    const badge = screen.getByRole("button", { name: /1 file failed extraction/i });
+    expect(badge).toHaveAttribute("aria-expanded", "false");
+    expect(mockedListAssets).not.toHaveBeenCalled();
+
+    await user.click(badge);
+
+    expect(badge).toHaveAttribute("aria-expanded", "true");
+    expect(mockedListAssets).toHaveBeenCalledWith("course-1");
+    expect(await screen.findByText(/chapter3\.pdf: password protected/i)).toBeInTheDocument();
+  });
+
+  it("does not show the failed-extraction badge when failed_asset_count is 0", () => {
+    render(
+      <CourseCard
+        course={makeCourse({ failed_asset_count: 0 })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/failed extraction/i)).not.toBeInTheDocument();
   });
 });

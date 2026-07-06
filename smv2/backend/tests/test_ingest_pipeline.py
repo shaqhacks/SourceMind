@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.db.engine import get_session
 from app.db.models import Asset, Section
+from conftest import _first_section_id
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "pdfs"
 
@@ -69,6 +70,9 @@ def test_ingest_per_asset_isolation_continues_after_bad_asset(client):
     course = client.get(f"/api/courses/{course_id}").json()
     assert course["status"] == "ready"
     assert course["section_count"] == 3  # only the good asset's sections
+    # A silently-dropped asset must still be visible once the course is
+    # ready, not just discoverable by cross-referencing individual assets.
+    assert course["failed_asset_count"] == 1
 
     session = get_session()
     try:
@@ -90,6 +94,7 @@ def test_ingest_all_assets_failing_marks_course_ingest_failed(client):
 
     ingest_resp = client.post(f"/api/courses/{course_id}/ingest")
     assert ingest_resp.status_code == 202
+    job_id = ingest_resp.json()["job_id"]
 
     from app.jobs.worker import run_due_jobs_once
 
@@ -98,6 +103,97 @@ def test_ingest_all_assets_failing_marks_course_ingest_failed(client):
     course = client.get(f"/api/courses/{course_id}").json()
     assert course["status"] == "ingest_failed"
     assert course["section_count"] == 0
+
+    # The job itself must fail too, not silently 'succeed' while the course
+    # sits in ingest_failed — a dead end with no visible failure signal.
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "failed"
+    assert "all" in job["error"] and "failed extraction" in job["error"]
+
+
+def test_reingest_mid_write_failure_rolls_back_fully_intact(client, ingest_course, monkeypatch):
+    """A crash partway through the destructive write phase (after old
+    ChatTurn/TestAttempt rows and stale sections are staged for deletion,
+    mid-way through re-writing sections/chunks) must roll back to the
+    PRIOR, fully-intact state — not leave old content destroyed with new
+    content half-written. Cards/review-state hanging off an unchanged
+    section (same content-addressed id) must survive too.
+    """
+    import app.pipeline.ingest as ingest_module
+    from app.db.models import Card, ReviewState
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")  # 3 sections
+    section_id = _first_section_id(client, course_id)
+
+    # Create referencing state that must survive an aborted re-ingest:
+    # reading progress, plus a card + graded review state on the first section.
+    progress_resp = client.put(
+        f"/api/courses/{course_id}/progress", json={"section_id": section_id, "scroll_pos": 0.5}
+    )
+    assert progress_resp.status_code == 200
+
+    session = get_session()
+    try:
+        section = session.get(Section, section_id)
+        card = Card(
+            id="fixed-test-card-id",
+            course_id=course_id,
+            section_id=section_id,
+            front_md="Q",
+            back_md="A",
+            position=0,
+        )
+        session.add(card)
+        session.commit()
+    finally:
+        session.close()
+    assert client.post(f"/api/cards/{card.id}/grade", json={"grade": 3}).status_code == 200
+
+    original_sections = client.get(f"/api/courses/{course_id}/sections").json()
+    assert len(original_sections) == 3
+
+    # Fail on the SECOND section written (of 3) — mid-phase, not at the
+    # very start or very end.
+    call_count = {"n": 0}
+    real_chunk_pages = ingest_module.chunk_pages
+
+    def _flaky_chunk_pages(pages):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("simulated mid-write crash")
+        return real_chunk_pages(pages)
+
+    monkeypatch.setattr(ingest_module, "chunk_pages", _flaky_chunk_pages)
+
+    from app.jobs.worker import run_due_jobs_once
+
+    ingest_resp = client.post(f"/api/courses/{course_id}/ingest")
+    job_id = ingest_resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "failed"
+    assert "simulated mid-write crash" in job["error"]
+
+    course = client.get(f"/api/courses/{course_id}").json()
+    assert course["status"] == "ingest_failed"
+
+    # Old sections fully intact — not partially destroyed/rewritten.
+    sections_after = client.get(f"/api/courses/{course_id}/sections").json()
+    assert sections_after == original_sections
+
+    # Referencing state (progress, card + its review state) survived the
+    # rolled-back re-ingest attempt untouched.
+    progress = client.get(f"/api/courses/{course_id}/progress").json()
+    assert progress["section_id"] == section_id
+    assert progress["scroll_pos"] == 0.5
+
+    session = get_session()
+    try:
+        assert session.get(Card, card.id) is not None
+        assert session.get(ReviewState, card.id) is not None
+    finally:
+        session.close()
 
 
 def test_ingest_scanned_pdf_does_not_crash_and_flags_low_text_yield(client, ingest_course):

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from app.db.engine import get_session
+from app.db.models import LlmCall, TestAttempt
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from app.pipeline.quiz_generation import _build_scoped_text
@@ -43,6 +45,25 @@ def test_generate_test_happy_path(client, ingest_course, stub_provider):
     # Answers hidden while ungraded.
     assert all("correct_index" not in q or q.get("correct_index") is None for q in detail["questions"])
     assert all("explanation" not in q or q.get("explanation") is None for q in detail["questions"])
+
+
+def test_generate_test_records_prompt_version_on_test_attempt(client, ingest_course, stub_provider):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(_make_questions()), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+    resp = client.post(f"/api/courses/{course_id}/tests")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+    attempt_id = client.get(f"/api/jobs/{job_id}").json()["result"]["attempt_id"]
+
+    session = get_session()
+    try:
+        attempt = session.get(TestAttempt, attempt_id)
+        assert attempt.prompt_version == "v1"
+    finally:
+        session.close()
 
 
 def test_generate_test_with_specific_sections(client, ingest_course, stub_provider):
@@ -107,6 +128,37 @@ def test_generate_test_retries_once_on_parse_failure(client, ingest_course, stub
     job = client.get(f"/api/jobs/{job_id}").json()
     assert job["status"] == "succeeded"
     assert stub_provider.call_count == 2
+
+
+def test_generate_test_fails_after_two_parse_failures_records_parse_failure_ledger_row(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    stub_provider.responses = [
+        CompletionResult(text="not json", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(text="still not json", input_tokens=1, output_tokens=1, model="stub-model"),
+    ]
+
+    resp = client.post(f"/api/courses/{course_id}/tests")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "failed"
+    assert stub_provider.call_count == 2
+
+    session = get_session()
+    try:
+        calls = session.query(LlmCall).filter(LlmCall.purpose == "quiz").order_by(LlmCall.ts).all()
+    finally:
+        session.close()
+
+    assert [c.status for c in calls] == ["ok", "ok", "parse_failure"]
+    parse_failure_row = calls[-1]
+    assert parse_failure_row.cost_estimate is None
+    assert parse_failure_row.prompt_version == "v1"
+    assert parse_failure_row.course_id == course_id
 
 
 def test_submit_test_grades_deterministically(client, ingest_course, stub_provider):

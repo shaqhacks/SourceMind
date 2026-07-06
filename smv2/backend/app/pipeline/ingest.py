@@ -13,6 +13,14 @@ text changed or that no longer exist are deleted (cascade cleans their
 chunks/cards; ON DELETE SET NULL clears any progress_state pointing at
 them); new sections are inserted. This is why the 'ingest' ON_ORPHAN hook
 (app/jobs/registry.py) can safely just requeue instead of failing outright.
+
+The destructive diff/write phase (ChatTurn/TestAttempt clear, old-section
+delete, new-section/chunk insert, course.status) is ONE all-or-nothing
+transaction: nothing in that phase commits until the final line. report_progress
+heartbeats during this phase use their OWN session precisely so they can
+never accidentally commit it early — a mid-run failure must roll back to the
+prior, fully-intact state, never leave old content destroyed with new
+content half-written.
 """
 
 from __future__ import annotations
@@ -28,12 +36,17 @@ from app.config import pages_per_window
 from app.db.identity import content_hash_for, normalize_text, section_id_for
 from app.db.models import Asset, ChatTurn, Chunk, Course, Job, Section, TestAttempt
 from app.pipeline._common import report_progress as _report_progress
+from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline.chunking import chunk_pages
 from app.pipeline.extract import PdfExtractionError, extract_markdown_pages, get_toc, open_pdf
 from app.pipeline.outline_detect import detect_sections
 
 _EXTRACTOR_ALGO_VERSION = "algo-1"
 _LOW_TEXT_YIELD_CHARS_PER_PAGE = 20
+
+
+class IngestAllAssetsFailedError(Exception):
+    pass
 
 
 def extractor_version() -> str:
@@ -127,8 +140,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
         # a large PDF must not let the lease expire mid-extraction and get
         # the job requeued/double-run by the reconciler.
         _report_progress(
-            session,
-            job,
+            job.id,
             stage="extracting",
             pct=int(5 * asset_idx / max(1, total_assets)),
             message=f"extracting {asset.filename}",
@@ -138,12 +150,23 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
         except PdfExtractionError as exc:
             asset.status = "extract_failed"
             asset.error = str(exc)
+        # Per-asset commit is safe/desired here: these are non-destructive
+        # updates to THIS asset's own bookkeeping fields (never touches
+        # existing sections/cards/review-state), and are idempotent — a
+        # re-run recomputes the same result. This is deliberately the ONLY
+        # commit before the final one below; see run_ingest's docstring for
+        # why the destructive diff/write phase must be one all-or-nothing
+        # transaction.
         session.commit()
 
     if not extracted:
-        course.status = "ingest_failed"
-        session.commit()
-        return
+        # Raise (not return) so the standard run_ingest failure wrapper marks
+        # the course ingest_failed AND fails the job with a clear error —
+        # returning normally here used to leave the job 'succeeded' while the
+        # course sat in 'ingest_failed', a dead end with no visible failure.
+        # Each failed asset's status/error is already committed above, so
+        # nothing informative is lost by this raise rolling back further.
+        raise IngestAllAssetsFailedError(f"all {len(assets)} assets failed extraction")
 
     # Build the full new section set up front (global order_index spans
     # every asset, sections sequential within each asset). occurrence_counts
@@ -158,8 +181,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     total_extracted = len(extracted)
     for asset_idx, item in enumerate(extracted):
         _report_progress(
-            session,
-            job,
+            job.id,
             stage="outlining",
             pct=int(10 + 30 * asset_idx / max(1, total_extracted)),
             message=f"detecting outline for {item.asset.filename}",
@@ -189,6 +211,13 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
             )
             order_index += 1
 
+    # From here on, EVERYTHING (deletes, inserts, course.status) is one
+    # all-or-nothing transaction — no commit happens until the very end.
+    # report_progress no longer touches this session (it uses its own), so
+    # nothing below can accidentally persist a partial destructive write;
+    # if anything raises, run_ingest's except-clause rolls the whole
+    # destructive phase back and old content survives untouched.
+
     # Diff against existing sections by content-addressed id.
     existing_sections = {
         s.id: s for s in session.query(Section).filter(Section.course_id == course_id).all()
@@ -210,8 +239,12 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
 
     total_new = len(new_sections)
     for i, data in enumerate(new_sections):
-        _report_progress(
-            session,
+        # In-session (not report_progress): destructive deletes are already
+        # pending on this session by this point — a second session trying to
+        # commit here would contend for SQLite's single writer lock against
+        # this session's still-open transaction. See report_progress_in_session's
+        # docstring.
+        _report_progress_in_session(
             job,
             stage="writing sections",
             pct=int(40 + 55 * i / max(1, total_new)),
@@ -260,5 +293,5 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
 
     any_extracted_ok = any(a.status == "extracted" for a in assets)
     course.status = "ready" if any_extracted_ok else "ingest_failed"
-    _report_progress(session, job, stage="done", pct=100, message="ingest complete")
+    _report_progress_in_session(job, stage="done", pct=100, message="ingest complete")
     session.commit()

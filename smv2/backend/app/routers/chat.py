@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from app.llm.ledger import SpendCapExceededError
 from app.llm.provider import ProviderTimeoutError
 from app.schemas import ChatIn, ChatOut, ChatTurnOut
 from app.services import chat_service, courses_service
@@ -17,6 +18,11 @@ def send_chat(course_id: str, body: ChatIn) -> ChatOut:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ProviderTimeoutError as exc:
         raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except SpendCapExceededError as exc:
+        # Distinct 429 detail from LLMBusyError's ("LLM concurrency limit
+        # reached") global handler — the client needs to tell "busy, retry"
+        # apart from "this course is out of budget."
+        raise HTTPException(status_code=429, detail="course spend cap exceeded") from exc
     return ChatOut.model_validate(result)
 
 

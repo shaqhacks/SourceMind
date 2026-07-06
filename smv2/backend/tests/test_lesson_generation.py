@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.db.engine import get_session
-from app.db.models import Section
+from app.db.models import LlmCall, Section
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from conftest import _first_section_id
@@ -152,6 +152,73 @@ def test_generate_lesson_404_for_missing_section(client):
     assert resp.status_code == 404
 
 
+def test_start_lesson_generation_rolls_back_status_if_job_creation_fails(
+    client, ingest_course, monkeypatch
+):
+    """The claim (lesson_status -> 'queued') and the job creation must land
+    in ONE commit — previously they were two separate commits, so a crash
+    between them wedged lesson_status='queued' forever with no job that
+    would ever clear it.
+    """
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    from app.services import lessons_service
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("simulated crash creating job")
+
+    monkeypatch.setattr("app.services.lessons_service.jobs_service.create_job_in_session", _raise)
+
+    with pytest.raises(RuntimeError):
+        lessons_service.start_lesson_generation(section_id)
+
+    session = get_session()
+    try:
+        section = session.get(Section, section_id)
+        assert section.lesson_status == "none"  # rolled back, not stuck on 'queued'
+    finally:
+        session.close()
+
+
+def test_start_all_lesson_generations_rolls_back_all_statuses_if_any_job_creation_fails(
+    client, ingest_course, monkeypatch
+):
+    """Same atomicity for the batch path: if job-creation fails partway
+    through the list, NONE of the batch's lesson_status updates may
+    persist — previously each job committed separately, so a partial
+    failure left some sections queued with a job and others queued with
+    none, wedged forever.
+    """
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    sections_before = client.get(f"/api/courses/{course_id}/sections").json()
+    assert len(sections_before) == 3
+
+    from app.services import lessons_service
+
+    call_count = {"n": 0}
+    real_create = lessons_service.jobs_service.create_job_in_session
+
+    def _flaky_create(session, job_type, payload=None):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("simulated crash creating job")
+        return real_create(session, job_type, payload)
+
+    monkeypatch.setattr("app.services.lessons_service.jobs_service.create_job_in_session", _flaky_create)
+
+    with pytest.raises(RuntimeError):
+        lessons_service.start_all_lesson_generations(course_id)
+
+    session = get_session()
+    try:
+        for s in sections_before:
+            section = session.get(Section, s["id"])
+            assert section.lesson_status == "none"  # every section rolled back, none left 'queued'
+    finally:
+        session.close()
+
+
 def test_generate_lesson_degenerate_output_retries_once_then_fails(client, ingest_course, stub_provider):
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     section_id = _first_section_id(client, course_id)
@@ -168,6 +235,37 @@ def test_generate_lesson_degenerate_output_retries_once_then_fails(client, inges
     assert section["lesson_status"] == "failed"
     assert section["lesson_md"] is None
     assert stub_provider.call_count == 2  # one retry, then give up
+
+
+def test_generate_lesson_degenerate_output_records_parse_failure_ledger_row(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(text="   ", input_tokens=5, output_tokens=0, model="stub-model"),
+        CompletionResult(text="", input_tokens=5, output_tokens=0, model="stub-model"),
+    ]
+
+    client.post(f"/api/sections/{section_id}/lesson")
+    assert run_due_jobs_once() is True
+
+    session = get_session()
+    try:
+        calls = session.query(LlmCall).filter(LlmCall.purpose == "lesson").order_by(LlmCall.ts).all()
+    finally:
+        session.close()
+
+    # Both provider.complete() calls succeeded at the transport level (2
+    # 'ok' rows from the provider wrapper) alongside ONE additional semantic
+    # 'parse_failure' row recorded by the pipeline once the retry's output
+    # was still degenerate.
+    assert [c.status for c in calls] == ["ok", "ok", "parse_failure"]
+    parse_failure_row = calls[-1]
+    assert parse_failure_row.cost_estimate is None  # spend already counted by the 'ok' row
+    assert parse_failure_row.prompt_version == "v1"
+    assert parse_failure_row.course_id == course_id
 
 
 def test_generate_lesson_succeeds_after_one_degenerate_retry(client, ingest_course, stub_provider):

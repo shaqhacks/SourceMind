@@ -1,6 +1,11 @@
 """Build a course export as a zip: outline.md (table of contents), one
-order-prefixed .md per section, manifest.json (course meta + section
-ids/hashes/extractor version), and the original PDFs under assets/.
+order-prefixed .md per section, one lessons/NN-title.lesson.md per section
+with a ready lesson, manifest.json (course meta + section ids/hashes/
+extractor version/lesson metadata), and the original PDFs under assets/.
+
+Lessons are paid-for, generated content — the brief's "the reader's content
+must never be hostage to the app" applies to them just as much as to the
+source text, so they must not be silently absent from the export.
 
 Framework-free — returns an open SpooledTemporaryFile (small exports stay
 in memory, large ones spill to disk automatically) rather than raw bytes,
@@ -30,6 +35,14 @@ def _slugify(title: str) -> str:
 
 def _section_filename(section: Section, width: int) -> str:
     return f"{section.order_index:0{width}d}-{_slugify(section.title)}.md"
+
+
+def _lesson_filename(section: Section, width: int) -> str:
+    return f"lessons/{section.order_index:0{width}d}-{_slugify(section.title)}.lesson.md"
+
+
+def _has_ready_lesson(section: Section) -> bool:
+    return section.lesson_status == "ready" and bool(section.lesson_md)
 
 
 def build_export_zip(course_id: str) -> tuple[tempfile.SpooledTemporaryFile, str] | None:
@@ -68,6 +81,16 @@ def build_export_zip(course_id: str) -> tuple[tempfile.SpooledTemporaryFile, str
                         "order_index": s.order_index,
                         "content_hash": s.content_hash,
                         "extractor_version": s.extractor_version,
+                        "lesson": (
+                            {
+                                "status": s.lesson_status,
+                                "model": s.lesson_model,
+                                "prompt_version": s.lesson_prompt_version,
+                                "file": _lesson_filename(s, width),
+                            }
+                            if _has_ready_lesson(s)
+                            else None
+                        ),
                     }
                     for s in sections
                 ],
@@ -76,6 +99,11 @@ def build_export_zip(course_id: str) -> tuple[tempfile.SpooledTemporaryFile, str
 
             for s in sections:
                 zf.writestr(_section_filename(s, width), s.body_md or "")
+
+            for s in sections:
+                if _has_ready_lesson(s):
+                    front_matter = f"<!-- model: {s.lesson_model}; prompt_version: {s.lesson_prompt_version} -->\n\n"
+                    zf.writestr(_lesson_filename(s, width), front_matter + s.lesson_md)
 
             for asset in assets:
                 asset_path = Path(asset.stored_path)

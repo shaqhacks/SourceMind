@@ -23,13 +23,21 @@ export interface CourseCardProps {
   onNeedsRefresh: () => void;
 }
 
-function StatusBadge({ children, tone }: { children: ReactNode; tone: "neutral" | "good" | "bad" }) {
+function StatusBadge({
+  children,
+  tone,
+}: {
+  children: ReactNode;
+  tone: "neutral" | "good" | "bad" | "warning";
+}) {
   const toneClass =
     tone === "good"
       ? "text-green-700 dark:text-green-400"
       : tone === "bad"
         ? "text-red-700 dark:text-red-400"
-        : "text-muted-foreground";
+        : tone === "warning"
+          ? "text-amber-700 dark:text-amber-400"
+          : "text-muted-foreground";
   return <span className={`text-xs font-medium ${toneClass}`}>{children}</span>;
 }
 
@@ -47,6 +55,8 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [readyFailuresExpanded, setReadyFailuresExpanded] = useState(false);
+  const [readyFailedAssets, setReadyFailedAssets] = useState<AssetOut[] | null>(null);
 
   // A local retry always wins over the (possibly stale) `course.status`
   // prop — startIngest's own response already tells us a new job exists,
@@ -102,6 +112,22 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
     };
   }, [course.id, course.status]);
 
+  // A "ready" course can still have per-item extraction failures (ingest
+  // succeeds overall; a subset of assets don't). The count comes for free
+  // on CourseOut, so no fetch is needed just to show the badge — the
+  // per-asset detail is lazy, fetched only once the user expands it.
+  useEffect(() => {
+    if (!readyFailuresExpanded || readyFailedAssets !== null) return undefined;
+    let active = true;
+    listAssets(course.id).then(({ data }) => {
+      if (!active || !data) return;
+      setReadyFailedAssets(data.filter((asset) => asset.status === "extract_failed"));
+    });
+    return () => {
+      active = false;
+    };
+  }, [readyFailuresExpanded, readyFailedAssets, course.id]);
+
   // Once the job we're watching (rediscovered or freshly retried) reaches
   // a terminal status, this card's `course` prop is stale (status/
   // section_count changed server-side) — ask the parent to refetch rather
@@ -143,6 +169,37 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
       {isIngesting && (
         <div role="status" className="text-xs text-muted-foreground">
           <span>{formatJobProgress(job, stalled)}</span>
+        </div>
+      )}
+
+      {course.status === "ready" && course.failed_asset_count > 0 && (
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={() => setReadyFailuresExpanded((value) => !value)}
+            aria-expanded={readyFailuresExpanded}
+            className="self-start"
+          >
+            <StatusBadge tone="warning">
+              {course.failed_asset_count} file{course.failed_asset_count === 1 ? "" : "s"} failed
+              extraction
+            </StatusBadge>
+          </button>
+          {readyFailuresExpanded &&
+            (readyFailedAssets === null ? (
+              <p className="text-xs text-muted-foreground">Loading…</p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {readyFailedAssets.map((asset) => (
+                  <li key={asset.id}>
+                    <StatusBadge tone="bad">
+                      {asset.filename}
+                      {asset.error ? `: ${asset.error}` : ""}
+                    </StatusBadge>
+                  </li>
+                ))}
+              </ul>
+            ))}
         </div>
       )}
 

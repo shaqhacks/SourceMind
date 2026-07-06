@@ -30,7 +30,10 @@ def run_embed_course(session: Session, job: Job, course_id: str) -> dict[str, An
 
     provider = get_provider()
     try:
-        embeddings = provider.embed([c.text for c in chunks], course_id=course_id)
+        # wait_for_slot=True: durable job, not an interactive request — wait
+        # out a busy limiter (bounded) rather than fail the job over
+        # transient chat traffic saturating the same slots.
+        embeddings = provider.embed([c.text for c in chunks], course_id=course_id, wait_for_slot=True)
     except NotSupportedError:
         # This provider has no embeddings API at all — every chunk stays
         # null; nothing more to do here.

@@ -95,3 +95,12 @@ if (typeof Element.prototype.scrollTo !== "function") {
     }
   };
 }
+
+// jsdom doesn't implement Element.scrollIntoView at all (undefined, not
+// even a no-op) — the reader's hash-deep-link scroll calls it. A no-op
+// stub is enough for jsdom (no layout engine to actually scroll against);
+// tests assert on the call itself via vi.spyOn rather than a resulting
+// scroll position.
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+}

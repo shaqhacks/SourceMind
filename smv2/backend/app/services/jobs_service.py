@@ -9,6 +9,8 @@ import json
 import time
 from typing import Any, AsyncIterator
 
+from sqlalchemy.orm import Session
+
 from app.db.engine import get_session
 from app.db.models import Job
 from app.jobs.registry import JOB_HANDLERS
@@ -18,14 +20,25 @@ SSE_MAX_SECONDS = 600
 TERMINAL_JOB_STATUSES = {"succeeded", "failed"}
 
 
-def create_job(job_type: str, payload: dict[str, Any] | None = None) -> Job:
+def create_job_in_session(session: Session, job_type: str, payload: dict[str, Any] | None = None) -> Job:
+    """Same as create_job, but adds the Job row to the CALLER's session
+    instead of opening its own — for callers that need the job creation to
+    land in the SAME commit as another state change (e.g. a lesson_status
+    claim), so a crash between "claim committed" and "job created" can
+    never wedge that state with no job that will ever clear it. The caller
+    is responsible for committing.
+    """
     if job_type not in JOB_HANDLERS:
         raise ValueError(f"unknown job type: {job_type}")
+    job = Job(type=job_type, status="queued", payload=payload)
+    session.add(job)
+    return job
 
+
+def create_job(job_type: str, payload: dict[str, Any] | None = None) -> Job:
     session = get_session()
     try:
-        job = Job(type=job_type, status="queued", payload=payload)
-        session.add(job)
+        job = create_job_in_session(session, job_type, payload)
         session.commit()
         return job
     finally:

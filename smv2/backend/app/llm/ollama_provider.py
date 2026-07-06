@@ -19,6 +19,8 @@ _REQUEST_TIMEOUT_SECONDS = 120.0
 
 
 class OllamaProvider(Provider):
+    supports_embeddings = True
+
     def __init__(self) -> None:
         self.model_name = llm_model()
         self.base_url = ollama_base_url()

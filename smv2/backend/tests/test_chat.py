@@ -210,3 +210,115 @@ def test_send_chat_does_not_duplicate_embed_course_job_across_turns(client, inge
         assert len(jobs) == 1  # still queued from the first turn -> not re-enqueued
     finally:
         session.close()
+
+
+def test_send_chat_skips_embed_trigger_when_provider_does_not_support_embeddings(
+    client, ingest_course, stub_provider
+):
+    """A provider with no embeddings API at all (e.g. Anthropic) must not
+    get a doomed embed_course job enqueued on every single chat turn
+    against a zero-embedding course.
+    """
+    from app.db.models import Job
+
+    stub_provider.supports_embeddings = False
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    stub_provider.responses = [
+        CompletionResult(text="Reply.", input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+
+    resp = client.post(f"/api/courses/{course_id}/chat", json={"message": "hi"})
+    assert resp.status_code == 200
+
+    session = get_session()
+    try:
+        jobs = session.query(Job).filter(Job.type == "embed_course").all()
+        assert jobs == []
+    finally:
+        session.close()
+
+
+def test_send_chat_includes_prior_turns_as_messages(client, ingest_course, stub_provider):
+    """The model used to only ever see the newest message in isolation,
+    even though the UI presents a multi-turn conversation. Prior turns must
+    now be included as proper role messages before the current one.
+    """
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    stub_provider.responses = [
+        CompletionResult(text="First reply.", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(text="Second reply.", input_tokens=1, output_tokens=1, model="stub-model"),
+    ]
+
+    client.post(f"/api/courses/{course_id}/chat", json={"message": "first question"})
+    client.post(f"/api/courses/{course_id}/chat", json={"message": "second question"})
+
+    assert stub_provider.call_count == 2
+    second_call_messages = stub_provider.received_messages[1]
+
+    assert second_call_messages[0] == {"role": "user", "content": "first question"}
+    assert second_call_messages[1] == {"role": "assistant", "content": "First reply."}
+    assert second_call_messages[-1]["role"] == "user"
+    assert "second question" in second_call_messages[-1]["content"]
+
+    # The FIRST call must NOT have had any history prepended (there was none yet).
+    first_call_messages = stub_provider.received_messages[0]
+    assert len(first_call_messages) == 1
+    assert "first question" in first_call_messages[0]["content"]
+
+
+def test_send_chat_history_window_respects_chat_history_turns_config(
+    client, ingest_course, stub_provider, monkeypatch
+):
+    monkeypatch.setenv("SMV2_CHAT_HISTORY_TURNS", "0")
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    stub_provider.responses = [
+        CompletionResult(text="First reply.", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(text="Second reply.", input_tokens=1, output_tokens=1, model="stub-model"),
+    ]
+
+    client.post(f"/api/courses/{course_id}/chat", json={"message": "first question"})
+    client.post(f"/api/courses/{course_id}/chat", json={"message": "second question"})
+
+    # With history turns disabled, the second call must be JUST the current
+    # question — no prior exchange prepended.
+    second_call_messages = stub_provider.received_messages[1]
+    assert len(second_call_messages) == 1
+    assert "second question" in second_call_messages[0]["content"]
+
+
+def test_send_chat_spend_cap_exceeded_returns_429_with_distinct_detail(
+    client, ingest_course, stub_provider, monkeypatch
+):
+    """Chat's 429 for a blown spend cap must be distinguishable from the
+    limiter's 429 ("LLM concurrency limit reached") — a different detail
+    message so the client can tell "busy, retry" apart from "out of budget."
+    """
+    from app.db.models import LlmCall, utcnow
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    monkeypatch.setenv("SMV2_COURSE_SPEND_CAP_USD", "0.0001")
+
+    session = get_session()
+    try:
+        session.add(
+            LlmCall(
+                ts=utcnow(),
+                purpose="lesson",
+                model="claude-sonnet-5",
+                input_tokens=1000,
+                output_tokens=1000,
+                latency_ms=100,
+                cost_estimate=0.01,
+                status="ok",
+                course_id=course_id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    resp = client.post(f"/api/courses/{course_id}/chat", json={"message": "hi"})
+    assert resp.status_code == 429
+    assert resp.json()["detail"] == "course spend cap exceeded"
+    assert stub_provider.call_count == 0  # never reached the provider

@@ -45,6 +45,11 @@ class Provider(ABC):
     #: Concrete providers set this in __init__; used for the ledger row on
     #: the error path, where there's no CompletionResult.model to read from.
     model_name: str = "unknown"
+    #: False by default (matches the base _embed_impl's no-op). Callers that
+    #: only want to embed when it will actually work (e.g. chat's lazy
+    #: embed_course trigger) should check this rather than enqueue a job
+    #: doomed to no-op against a provider with no embeddings API at all.
+    supports_embeddings: bool = False
 
     def complete(
         self,
@@ -55,8 +60,16 @@ class Provider(ABC):
         course_id: str | None = None,
         prompt_version: str | None = None,
         system: str | None = None,
+        wait_for_slot: bool = False,
     ) -> CompletionResult:
-        with llm_slot():
+        """wait_for_slot=True makes a saturated limiter block (bounded) for a
+        slot instead of fast-failing — durable job-context callers (lesson/
+        cards/quiz generation) would rather wait out a busy patch than fail
+        an entire job over transient interactive (chat) traffic. Interactive
+        callers keep the default fast-fail so a busy limiter turns into an
+        immediate, honest 429 rather than a hung request.
+        """
+        with llm_slot(wait=wait_for_slot):
             started = time.monotonic()
             try:
                 result = retry_transient(
@@ -110,14 +123,21 @@ class Provider(ABC):
     ) -> CompletionResult: ...
 
     def embed(
-        self, texts: list[str], *, purpose: str = "embed", course_id: str | None = None
+        self,
+        texts: list[str],
+        *,
+        purpose: str = "embed",
+        course_id: str | None = None,
+        wait_for_slot: bool = False,
     ) -> list[list[float] | None]:
         """Same concurrency/ledger discipline as complete(). Unlike
         complete(), a provider-level failure here (e.g. NotSupportedError)
         is NOT swallowed — callers (embed_course, retrieval) decide how to
         degrade (skip embedding entirely, fall back to lexical search).
+        wait_for_slot=True: see complete()'s docstring — the durable
+        embed_course job passes True, interactive retrieval keeps fast-fail.
         """
-        with llm_slot():
+        with llm_slot(wait=wait_for_slot):
             started = time.monotonic()
             try:
                 results = self._embed_impl(texts)
