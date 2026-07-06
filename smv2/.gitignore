@@ -1,6 +1,11 @@
 # runtime data — never version (brief: Config & environment)
 data/
 
+# API keys (data/secrets.toml) -- already covered by data/ above, listed
+# explicitly too as defense in depth against SMV2_DATA_DIR ever pointing
+# somewhere other than data/
+secrets.toml
+
 # python
 backend/.venv/
 __pycache__/

@@ -11,6 +11,12 @@
  * this type.
  */
 
+/** Content sections carry the source text; practice/answers sections hold
+ * end-of-chapter exercises and their solutions, split out during ingest so
+ * they can be surfaced separately (chapter testing page) instead of
+ * interleaved into normal reading. */
+export type SectionKind = "content" | "practice" | "answers";
+
 export interface ReaderSection {
   id: string;
   title: string;
@@ -20,6 +26,8 @@ export interface ReaderSection {
   lesson_status: string;
   has_content: boolean;
   word_count: number;
+  kind: SectionKind;
+  chapter_label: string | null;
 }
 
 export interface ReaderCourse {
@@ -39,3 +47,13 @@ export type SectionBodyState =
   | { kind: "loading" }
   | { kind: "error"; message: string }
   | { kind: "ready"; body: string };
+
+/** Per-chapter test aggregate — the pinned shape of list_chapters' own
+ * `test_stats` field (null when a chapter has no attempts yet). Shared by
+ * Sidebar's "Test" affordance and the chapter mastery bar so both read the
+ * same field names once the real endpoint is wired up. */
+export interface ChapterTestStats {
+  attempts: number;
+  best_score: number | null;
+  latest_score: number | null;
+}

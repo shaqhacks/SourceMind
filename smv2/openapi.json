@@ -133,6 +133,98 @@
         "title": "CardOut",
         "type": "object"
       },
+      "ChapterOut": {
+        "properties": {
+          "answers_section_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Answers Section Ids",
+            "type": "array"
+          },
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
+          "practice_section_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Practice Section Ids",
+            "type": "array"
+          },
+          "section_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Section Ids",
+            "type": "array"
+          },
+          "test_stats": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChapterTestStatsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "chapter_label",
+          "section_ids",
+          "practice_section_ids",
+          "answers_section_ids",
+          "test_stats"
+        ],
+        "title": "ChapterOut",
+        "type": "object"
+      },
+      "ChapterTestStatsOut": {
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "best_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Score"
+          },
+          "latest_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Score"
+          }
+        },
+        "required": [
+          "attempts",
+          "best_score",
+          "latest_score"
+        ],
+        "title": "ChapterTestStatsOut",
+        "type": "object"
+      },
       "ChatCitationOut": {
         "properties": {
           "n": {
@@ -411,6 +503,17 @@
       },
       "GenerateTestIn": {
         "properties": {
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
           "section_ids": {
             "anyOf": [
               {
@@ -1012,6 +1115,17 @@
             "title": "Body Md",
             "type": "string"
           },
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
           "content_hash": {
             "title": "Content Hash",
             "type": "string"
@@ -1038,6 +1152,15 @@
           },
           "id": {
             "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "content",
+              "practice",
+              "answers"
+            ],
+            "title": "Kind",
             "type": "string"
           },
           "lesson_md": {
@@ -1132,6 +1255,8 @@
           "lesson_model",
           "lesson_prompt_version",
           "extractor_version",
+          "kind",
+          "chapter_label",
           "created_at",
           "updated_at"
         ],
@@ -1141,12 +1266,32 @@
       "SectionOut": {
         "description": "Reader list view \u2014 no body_md (can be large); use get_section for that.",
         "properties": {
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
           "has_content": {
             "title": "Has Content",
             "type": "boolean"
           },
           "id": {
             "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "content",
+              "practice",
+              "answers"
+            ],
+            "title": "Kind",
             "type": "string"
           },
           "lesson_status": {
@@ -1196,7 +1341,9 @@
           "page_end",
           "lesson_status",
           "has_content",
-          "word_count"
+          "word_count",
+          "kind",
+          "chapter_label"
         ],
         "title": "SectionOut",
         "type": "object"
@@ -1243,6 +1390,13 @@
       },
       "SubmitTestOut": {
         "properties": {
+          "added_card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added Card Ids",
+            "type": "array"
+          },
           "results": {
             "items": {
               "$ref": "#/components/schemas/SubmitTestQuestionResultOut"
@@ -1257,7 +1411,8 @@
         },
         "required": [
           "score",
-          "results"
+          "results",
+          "added_card_ids"
         ],
         "title": "SubmitTestOut",
         "type": "object"
@@ -1299,6 +1454,17 @@
       },
       "TestAttemptOut": {
         "properties": {
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
           "course_id": {
             "title": "Course Id",
             "type": "string"
@@ -1335,6 +1501,7 @@
           "id",
           "course_id",
           "score",
+          "chapter_label",
           "questions",
           "created_at"
         ],
@@ -1343,6 +1510,17 @@
       },
       "TestAttemptSummaryOut": {
         "properties": {
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
           "course_id": {
             "title": "Course Id",
             "type": "string"
@@ -1376,6 +1554,7 @@
           "id",
           "course_id",
           "score",
+          "chapter_label",
           "question_count",
           "created_at"
         ],
@@ -1760,6 +1939,52 @@
         ]
       }
     },
+    "/api/courses/{course_id}/chapters": {
+      "get": {
+        "operationId": "list_chapters",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ChapterOut"
+                  },
+                  "title": "Response List Chapters",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Chapters",
+        "tags": [
+          "chapters"
+        ]
+      }
+    },
     "/api/courses/{course_id}/chat": {
       "get": {
         "operationId": "chat_history",
@@ -1893,6 +2118,55 @@
         "summary": "Export Course",
         "tags": [
           "export"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/images/{filename}": {
+      "get": {
+        "operationId": "get_course_image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Course Image",
+        "tags": [
+          "images"
         ]
       }
     },

@@ -23,8 +23,10 @@ router = APIRouter(tags=["tests"])
 )
 def generate_test(course_id: str, body: GenerateTestIn = GenerateTestIn()) -> GenerateTestOut:
     try:
-        job_id = tests_service.start_test_generation(course_id, body.section_ids)
+        job_id = tests_service.start_test_generation(course_id, body.section_ids, body.chapter_label)
     except tests_service.CourseNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except tests_service.ChapterNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return GenerateTestOut(job_id=job_id)
 

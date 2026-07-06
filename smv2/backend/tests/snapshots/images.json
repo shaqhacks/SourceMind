@@ -1,0 +1,17 @@
+{
+  "first_40_lines": {
+    "section_0": "Images Fixture\n\n\nThis page has ordinary body text before the embedded\nraster image below, for testing deterministic image\nextraction and markdown-ref rewriting during ingest.\n\n\n\n![](/api/courses/snapshot-course-id/images/images-0-0.png)\n\n\nThis second page has no image of its own, just ordinary\nbody text, to confirm image extraction doesn't affect\npages that have none.\n\n"
+  },
+  "outline": {
+    "section_count": 1,
+    "sections": [
+      {
+        "chapter_label": null,
+        "kind": "content",
+        "page_end": 1,
+        "page_start": 0,
+        "title": "Pages 1–2"
+      }
+    ]
+  }
+}

@@ -9,11 +9,25 @@ flag on the Asset rather than treat as a hard failure.
 
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 from typing import Callable
 
 import fitz
 import pymupdf4llm
+
+# Internal (unexported) pymupdf4llm class — not part of its public API, but
+# the only way to avoid recomputing the whole-document font-size histogram
+# on every single to_markdown() call once image extraction forces per-page
+# granularity (see extract_markdown_pages_in_batches). Verified empirically:
+# reusing one instance drops per-page extraction of a 520-page document from
+# ~14.7s to ~0.8s. If a future pymupdf4llm version moves/renames this class,
+# this import breaks loudly (ImportError) rather than silently regressing
+# performance — acceptable given the size of the win.
+from pymupdf4llm.helpers.pymupdf_rag import IdentifyHeaders
+
+logger = logging.getLogger(__name__)
 
 
 class PdfExtractionError(Exception):
@@ -126,6 +140,8 @@ def extract_markdown_pages_in_batches(
     *,
     batch_pages: int,
     on_batch: Callable[[int, int], None] | None = None,
+    image_dir: Path | None = None,
+    image_filename: str | None = None,
 ) -> list[str]:
     """Same conversion as extract_markdown_pages, but processes `batch_pages`
     pages at a time and calls on_batch(pages_done, total_pages) after each
@@ -138,30 +154,107 @@ def extract_markdown_pages_in_batches(
     requested subset) to build its header/font-size classification
     (IdentifyHeaders), independent of which pages a given call requests —
     verified empirically to produce byte-identical per-page output to a
-    single whole-document call.
+    single whole-document call. That histogram is computed exactly ONCE
+    here (`hdr_info`) and reused for every to_markdown() call below,
+    batched or per-page, rather than left to pymupdf4llm's own default of
+    recomputing it fresh on every call.
+
+    image_dir/image_filename (both required together, or both omitted):
+    when given, embedded raster images are written to image_dir with
+    deterministic names ("{image_filename}-{page}-{index}.{ext}", pymupdf4llm's
+    own convention — no random component) and the returned markdown gets
+    "![](<local filesystem path>)" refs pymupdf4llm inserts inline (the
+    caller, e.g. ingest.py, is responsible for rewriting those into
+    servable API paths — see rewrite_image_refs_to_api_path). Image
+    extraction runs at PAGE granularity regardless of batch_pages, with
+    per-page failure isolation: if writing a page's image(s) raises for any
+    reason (corrupt image data, an unsupported color space, disk I/O...),
+    that one page is re-extracted with images disabled so its TEXT still
+    makes it into the result, rather than losing the whole batch over one
+    bad image.
     """
     total_pages = doc.page_count
     if total_pages == 0:
         return []
     batch_pages = max(1, batch_pages)
     pymupdf4llm.use_layout(False)
+    hdr_info = IdentifyHeaders(doc)
+    write_images = image_dir is not None
+
+    if write_images:
+        image_dir.mkdir(parents=True, exist_ok=True)
+
+    def _convert_one_page(page_index: int) -> str:
+        try:
+            chunks = pymupdf4llm.to_markdown(
+                doc,
+                pages=[page_index],
+                page_chunks=True,
+                write_images=True,
+                image_path=str(image_dir),
+                filename=image_filename,
+                table_strategy=None,
+                hdr_info=hdr_info,
+            )
+        except Exception:
+            logger.warning(
+                "image extraction failed for page %d; keeping text only", page_index, exc_info=True
+            )
+            chunks = pymupdf4llm.to_markdown(
+                doc, pages=[page_index], page_chunks=True, write_images=False,
+                table_strategy=None, hdr_info=hdr_info,
+            )
+        if len(chunks) != 1:
+            raise PdfExtractionError(
+                f"pymupdf4llm returned {len(chunks)} chunks for page {page_index}"
+            )
+        return chunks[0].get("text", "") or ""
 
     pages_text: list[str] = []
     for start in range(0, total_pages, batch_pages):
         end = min(start + batch_pages, total_pages)
         page_indices = list(range(start, end))
-        try:
-            chunks = pymupdf4llm.to_markdown(
-                doc, pages=page_indices, page_chunks=True, write_images=False, table_strategy=None
-            )
-        except Exception as exc:
-            raise PdfExtractionError(f"markdown conversion failed: {exc}") from exc
 
-        if len(chunks) != len(page_indices):
-            raise PdfExtractionError(
-                f"pymupdf4llm returned {len(chunks)} chunks for {len(page_indices)} requested pages"
-            )
-        pages_text.extend(chunk.get("text", "") or "" for chunk in chunks)
+        if write_images:
+            for page_index in page_indices:
+                pages_text.append(_convert_one_page(page_index))
+        else:
+            try:
+                chunks = pymupdf4llm.to_markdown(
+                    doc, pages=page_indices, page_chunks=True, write_images=False,
+                    table_strategy=None, hdr_info=hdr_info,
+                )
+            except Exception as exc:
+                raise PdfExtractionError(f"markdown conversion failed: {exc}") from exc
+
+            if len(chunks) != len(page_indices):
+                raise PdfExtractionError(
+                    f"pymupdf4llm returned {len(chunks)} chunks for {len(page_indices)} requested pages"
+                )
+            pages_text.extend(chunk.get("text", "") or "" for chunk in chunks)
+
         if on_batch is not None:
             on_batch(end, total_pages)
     return pages_text
+
+
+_IMAGE_REF_RE = re.compile(r"!\[\]\(([^)]*)\)")
+
+
+def rewrite_image_refs_to_api_path(markdown_text: str, course_id: str) -> str:
+    """Rewrites every "![](<local filesystem path>)" ref pymupdf4llm wrote
+    (see extract_markdown_pages_in_batches' image_dir) into the servable
+    API path "/api/courses/{course_id}/images/{basename}" — the local path
+    is discarded entirely, keeping only the (deterministic, collision-free
+    within this course) filename. Pure string transform; lives here rather
+    than in ingest.py only because it's tightly coupled to pymupdf4llm's
+    own "![](...)" output format, the same reason get_toc/extract_heading_candidates
+    live alongside the extraction calls they interpret.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        raw_path = match.group(1)
+        basename = raw_path.replace("\\", "/").rsplit("/", 1)[-1]
+        return f"![](/api/courses/{course_id}/images/{basename})"
+
+    return _IMAGE_REF_RE.sub(_replace, markdown_text)

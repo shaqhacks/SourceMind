@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import anthropic
 
-from app.config import llm_model
+from app.config import anthropic_api_key, llm_model
 from app.llm.provider import (
     PROVIDER_NOT_CONFIGURED_MESSAGE,
     CompletionResult,
@@ -40,7 +40,14 @@ class AnthropicProvider(Provider):
         # which would compound with app.llm.retry's own retry_transient() and
         # violate "one retry mechanism, never double-retry" — retry.py is the
         # sole retry authority for every provider.
-        self._client = anthropic.Anthropic(max_retries=0)
+        #
+        # anthropic_api_key() already resolves ANTHROPIC_API_KEY > secrets.toml
+        # > None; passing api_key=None here is not a special case worth
+        # branching on — the SDK's own default for this parameter is None,
+        # and it does the identical os.environ.get("ANTHROPIC_API_KEY")
+        # fallback internally when it sees one, so precedence is preserved
+        # either way (verified against the installed SDK's __init__ source).
+        self._client = anthropic.Anthropic(api_key=anthropic_api_key(), max_retries=0)
 
     def _complete_impl(
         self, messages: list[dict], *, max_tokens: int, system: str | None = None

@@ -246,6 +246,34 @@ def test_anthropic_provider_missing_credentials_raises_friendly_error(monkeypatc
     assert str(exc_info.value) == PROVIDER_NOT_CONFIGURED_MESSAGE
 
 
+def test_anthropic_provider_uses_key_from_secrets_toml_when_env_absent(tmp_path, monkeypatch):
+    """No ANTHROPIC_API_KEY in the environment at all -- the provider must
+    still pick up a key from data/secrets.toml rather than constructing an
+    unconfigured client.
+    """
+    from app.llm.anthropic_provider import AnthropicProvider
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("SMV2_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SMV2_LLM_MODEL", "claude-sonnet-5")
+    (tmp_path / "secrets.toml").write_text('anthropic_api_key = "sk-from-secrets-file"\n')
+
+    provider = AnthropicProvider()
+    assert provider._client.api_key == "sk-from-secrets-file"
+
+
+def test_anthropic_provider_env_key_wins_over_secrets_toml(tmp_path, monkeypatch):
+    from app.llm.anthropic_provider import AnthropicProvider
+
+    monkeypatch.setenv("SMV2_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SMV2_LLM_MODEL", "claude-sonnet-5")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
+    (tmp_path / "secrets.toml").write_text('anthropic_api_key = "sk-from-secrets-file"\n')
+
+    provider = AnthropicProvider()
+    assert provider._client.api_key == "sk-from-env"
+
+
 def test_anthropic_provider_authentication_error_raises_friendly_error(monkeypatch):
     """A real 401 (a key was sent but rejected) must map to the same
     friendly error as the no-credentials-at-all case above.

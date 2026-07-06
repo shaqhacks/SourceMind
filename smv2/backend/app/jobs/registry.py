@@ -67,7 +67,9 @@ def _generate_test_handler(session: Session, job: Job) -> dict[str, Any]:
     course_id = payload.get("course_id")
     if not course_id:
         raise ValueError("generate_test job payload missing course_id")
-    extra = run_test_generation(session, job, course_id, payload.get("section_ids"))
+    extra = run_test_generation(
+        session, job, course_id, payload.get("section_ids"), payload.get("chapter_label")
+    )
     return {"course_id": course_id, **extra}
 
 

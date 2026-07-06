@@ -20,6 +20,8 @@ function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
     lesson_status: "none",
     has_content: true,
     word_count: 100,
+    kind: "content",
+    chapter_label: null,
     ...overrides,
   };
 }

@@ -34,6 +34,7 @@ const mockedGetJob = vi.mocked(getJob);
 
 function makeAttempt(overrides: Partial<TestAttemptSummaryOut> = {}): TestAttemptSummaryOut {
   return {
+    chapter_label: null,
     id: "attempt-1",
     course_id: "course-1",
     score: null,

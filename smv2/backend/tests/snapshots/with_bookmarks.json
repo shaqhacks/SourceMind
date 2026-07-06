@@ -8,16 +8,22 @@
     "section_count": 3,
     "sections": [
       {
+        "chapter_label": "Chapter 1: Foundations",
+        "kind": "content",
         "page_end": 3,
         "page_start": 0,
         "title": "Chapter 1: Foundations"
       },
       {
+        "chapter_label": "Chapter 2: Structures",
+        "kind": "content",
         "page_end": 7,
         "page_start": 4,
         "title": "Chapter 2: Structures"
       },
       {
+        "chapter_label": "Chapter 3: Applications",
+        "kind": "content",
         "page_end": 11,
         "page_start": 8,
         "title": "Chapter 3: Applications"

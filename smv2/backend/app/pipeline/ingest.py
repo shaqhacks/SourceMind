@@ -25,6 +25,7 @@ content half-written.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
@@ -32,7 +33,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.config import pages_per_window
+from app.config import data_dir, pages_per_window
 from app.config import skip_front_matter as _skip_front_matter_enabled
 from app.db.identity import content_hash_for, normalize_text, section_id_for
 from app.db.models import Asset, ChatTurn, Chunk, Course, Job, Section, TestAttempt
@@ -45,10 +46,16 @@ from app.pipeline.extract import (
     extract_markdown_pages_in_batches,
     get_toc,
     open_pdf,
+    rewrite_image_refs_to_api_path,
 )
-from app.pipeline.outline_detect import detect_sections, front_matter_bookmark_titles
+from app.pipeline.outline_detect import (
+    assign_chapter_labels,
+    classify_section_kind,
+    detect_sections,
+    front_matter_bookmark_titles,
+)
 
-_EXTRACTOR_ALGO_VERSION = "algo-4"
+_EXTRACTOR_ALGO_VERSION = "algo-6"
 _LOW_TEXT_YIELD_CHARS_PER_PAGE = 20
 # Page-batch granularity for extraction-phase progress heartbeats — bounds
 # the number of report_progress DB writes per asset regardless of document
@@ -76,6 +83,10 @@ class _ExtractedAsset:
     heading_candidates: list[tuple[int, str, float, bool]]
 
 
+def _images_dir(course_id: str) -> Path:
+    return data_dir() / "assets" / course_id / "images"
+
+
 def _asset_page_count(asset: Asset) -> int:
     """Cheap page-count-only open, used only to size the extraction-phase
     progress bar up front (app.pipeline.extract.open_pdf parses structure,
@@ -98,7 +109,11 @@ def _extract_one_asset(asset: Asset, *, on_batch=None) -> _ExtractedAsset:
         toc = get_toc(doc)
         heading_candidates = extract_heading_candidates(doc)
         pages = extract_markdown_pages_in_batches(
-            doc, batch_pages=_EXTRACT_PROGRESS_BATCH_PAGES, on_batch=on_batch
+            doc,
+            batch_pages=_EXTRACT_PROGRESS_BATCH_PAGES,
+            on_batch=on_batch,
+            image_dir=_images_dir(asset.course_id),
+            image_filename=asset.id,
         )
         page_count = doc.page_count
     finally:
@@ -158,6 +173,19 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     )
     if not assets:
         raise ValueError("course has no assets to ingest")
+
+    # REPLACED bucket semantics, same reasoning as REPLACED_ON_REINGEST
+    # (app/db/registry.py): images are wholly regenerated every ingest, so
+    # any image orphaned by a removed/changed asset (or by a page's image
+    # count shrinking) never lingers. This is a non-transactional filesystem
+    # side effect done up front, same risk tolerance already accepted for
+    # per-asset bookkeeping commits below (see the loop's own comment) — if
+    # a LATER stage of this ingest fails, the course ends up in
+    # 'ingest_failed' regardless, a state the user must already recognize
+    # and retry, which repopulates images fully again.
+    images_dir = _images_dir(course_id)
+    if images_dir.exists():
+        shutil.rmtree(images_dir)
 
     window = pages_per_window()
     skip_fm = _skip_front_matter_enabled()
@@ -263,9 +291,24 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                     message=f"skipped front matter in {item.asset.filename}: {', '.join(dropped_titles)}",
                 )
 
-        for bounds in bounds_list:
+        # Kind/chapter grouping (ADR-017) is computed per-asset, over this
+        # asset's own title sequence only — chapter markers are a per-book
+        # concept, so a multi-asset course must never let one asset's
+        # chapter numbering leak into another's front sections.
+        asset_titles = [b.title for b in bounds_list]
+        asset_chapter_labels = assign_chapter_labels(asset_titles)
+
+        for idx, bounds in enumerate(bounds_list):
             page_slice = [(p, item.pages[p]) for p in range(bounds.page_start, bounds.page_end + 1)]
             body_md = "\n\n".join(text for _, text in page_slice if text and text.strip())
+            # Rewrite pymupdf4llm's local-filesystem image refs into servable
+            # API paths BEFORE normalizing/hashing — body_md is immutable
+            # once a section is persisted (see Section.body_md), so this is
+            # the only chance to bake the real reference in; a re-ingest of
+            # the same course/asset reproduces the identical rewritten text
+            # (same course_id, same deterministic image filenames), so
+            # content-addressed identity (section_id_for) is unaffected.
+            body_md = rewrite_image_refs_to_api_path(body_md, course_id)
             normalized = normalize_text(body_md)
 
             occurrence = occurrence_counts.get(normalized, 0)
@@ -281,6 +324,8 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                     "page_end": bounds.page_end,
                     "body_md": normalized,
                     "content_hash": content_hash_for(normalized),
+                    "kind": classify_section_kind(bounds.title),
+                    "chapter_label": asset_chapter_labels[idx],
                     "pages": page_slice,
                 }
             )
@@ -336,6 +381,8 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
             existing.page_start = data["page_start"]
             existing.page_end = data["page_end"]
             existing.extractor_version = version_tag
+            existing.kind = data["kind"]
+            existing.chapter_label = data["chapter_label"]
             section_row = existing
             session.query(Chunk).filter(Chunk.section_id == section_row.id).delete()
         else:
@@ -350,6 +397,8 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                 content_hash=data["content_hash"],
                 lesson_status="none",
                 extractor_version=version_tag,
+                kind=data["kind"],
+                chapter_label=data["chapter_label"],
             )
             session.add(section_row)
         session.flush()

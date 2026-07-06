@@ -88,7 +88,11 @@ def _parse_questions(text: str) -> list[dict[str, Any]]:
 
 
 def run_test_generation(
-    session: Session, job: Job, course_id: str, section_ids: list[str] | None
+    session: Session,
+    job: Job,
+    course_id: str,
+    section_ids: list[str] | None,
+    chapter_label: str | None = None,
 ) -> dict[str, Any]:
     course = session.get(Course, course_id)
     if course is None:
@@ -96,7 +100,15 @@ def run_test_generation(
 
     query = session.query(Section).filter(Section.course_id == course_id)
     if section_ids:
+        # Explicit scope (caller-chosen sections, including chapter_label's
+        # own resolution in tests_service.py, which already excludes
+        # answer-key sections itself) — honored as-is, unchanged from before.
         query = query.filter(Section.id.in_(section_ids))
+    else:
+        # Whole-course fallback: the system, not the caller, is choosing
+        # scope here, so a printed answer key must never end up in the
+        # prompt — same reasoning chapter_label resolution uses.
+        query = query.filter(Section.kind != "answers")
     sections = query.order_by(Section.order_index).all()
 
     if not sections:
@@ -172,6 +184,7 @@ def run_test_generation(
         payload={"questions": questions},
         score=None,
         prompt_version=prompt_version,
+        chapter_label=chapter_label,
     )
     session.add(attempt)
     # In-session (not report_progress): the TestAttempt insert above is

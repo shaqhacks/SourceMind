@@ -8,8 +8,12 @@ those overrides. Keep it that way.
 
 from __future__ import annotations
 
+import logging
 import os
+import tomllib
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # backend/app/config.py -> backend/app -> backend -> smv2 (repo root for this app)
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -24,6 +28,26 @@ def data_dir() -> Path:
     if override:
         return Path(override)
     return _REPO_ROOT / "data"
+
+
+def _read_secrets() -> dict:
+    """Reads data_dir()/secrets.toml fresh on every call — no caching, so a
+    monkeypatched data dir in tests (or a live-edited file on a real
+    deployment) always takes effect immediately, and this stays cheap next
+    to the cost of any actual LLM call it gates. Missing file is the
+    common, unremarkable case (env-var-only setups) and returns {}
+    silently; a malformed file logs a warning and also returns {} rather
+    than crashing the app over a config typo.
+    """
+    path = data_dir() / "secrets.toml"
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("rb") as f:
+            return tomllib.load(f)
+    except Exception:
+        logger.warning("could not parse %s as TOML; ignoring", path, exc_info=True)
+        return {}
 
 
 def db_url() -> str:
@@ -99,7 +123,26 @@ def llm_max_concurrency() -> int:
 
 
 def ollama_base_url() -> str:
-    return os.environ.get("SMV2_OLLAMA_BASE_URL", "http://localhost:11434")
+    env = os.environ.get("SMV2_OLLAMA_BASE_URL")
+    if env:
+        return env
+    from_secrets = _read_secrets().get("ollama_base_url")
+    if isinstance(from_secrets, str) and from_secrets:
+        return from_secrets
+    return "http://localhost:11434"
+
+
+def anthropic_api_key() -> str | None:
+    """Precedence: ANTHROPIC_API_KEY env var > secrets.toml > None (the SDK's
+    own env-based resolution still applies when this returns None — see
+    AnthropicProvider.__init__, which only passes api_key= explicitly when
+    this is non-None, so the env-var path is unchanged either way).
+    """
+    env = os.environ.get("ANTHROPIC_API_KEY")
+    if env:
+        return env
+    from_secrets = _read_secrets().get("anthropic_api_key")
+    return from_secrets if isinstance(from_secrets, str) and from_secrets else None
 
 
 def course_spend_cap_usd() -> float | None:

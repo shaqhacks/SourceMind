@@ -75,6 +75,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/chapters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Chapters */
+        get: operations["list_chapters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/chat": {
         parameters: {
             query?: never;
@@ -102,6 +119,23 @@ export interface paths {
         };
         /** Export Course */
         get: operations["export_course"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/{course_id}/images/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Course Image */
+        get: operations["get_course_image"];
         put?: never;
         post?: never;
         delete?: never;
@@ -495,6 +529,27 @@ export interface components {
             /** Section Id */
             section_id: string;
         };
+        /** ChapterOut */
+        ChapterOut: {
+            /** Answers Section Ids */
+            answers_section_ids: string[];
+            /** Chapter Label */
+            chapter_label: string | null;
+            /** Practice Section Ids */
+            practice_section_ids: string[];
+            /** Section Ids */
+            section_ids: string[];
+            test_stats: components["schemas"]["ChapterTestStatsOut"] | null;
+        };
+        /** ChapterTestStatsOut */
+        ChapterTestStatsOut: {
+            /** Attempts */
+            attempts: number;
+            /** Best Score */
+            best_score: number | null;
+            /** Latest Score */
+            latest_score: number | null;
+        };
         /** ChatCitationOut */
         ChatCitationOut: {
             /** N */
@@ -611,6 +666,8 @@ export interface components {
         };
         /** GenerateTestIn */
         GenerateTestIn: {
+            /** Chapter Label */
+            chapter_label?: string | null;
             /** Section Ids */
             section_ids?: string[] | null;
         };
@@ -818,6 +875,8 @@ export interface components {
         SectionDetailOut: {
             /** Body Md */
             body_md: string;
+            /** Chapter Label */
+            chapter_label: string | null;
             /** Content Hash */
             content_hash: string;
             /** Course Id */
@@ -831,6 +890,11 @@ export interface components {
             extractor_version: string | null;
             /** Id */
             id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "content" | "practice" | "answers";
             /** Lesson Md */
             lesson_md: string | null;
             /** Lesson Model */
@@ -860,10 +924,17 @@ export interface components {
          * @description Reader list view — no body_md (can be large); use get_section for that.
          */
         SectionOut: {
+            /** Chapter Label */
+            chapter_label: string | null;
             /** Has Content */
             has_content: boolean;
             /** Id */
             id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "content" | "practice" | "answers";
             /** Lesson Status */
             lesson_status: string;
             /** Order Index */
@@ -896,6 +967,8 @@ export interface components {
         };
         /** SubmitTestOut */
         SubmitTestOut: {
+            /** Added Card Ids */
+            added_card_ids: string[];
             /** Results */
             results: components["schemas"]["SubmitTestQuestionResultOut"][];
             /** Score */
@@ -914,6 +987,8 @@ export interface components {
         };
         /** TestAttemptOut */
         TestAttemptOut: {
+            /** Chapter Label */
+            chapter_label: string | null;
             /** Course Id */
             course_id: string;
             /**
@@ -930,6 +1005,8 @@ export interface components {
         };
         /** TestAttemptSummaryOut */
         TestAttemptSummaryOut: {
+            /** Chapter Label */
+            chapter_label: string | null;
             /** Course Id */
             course_id: string;
             /**
@@ -1191,6 +1268,37 @@ export interface operations {
             };
         };
     };
+    list_chapters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     chat_history: {
         parameters: {
             query?: never;
@@ -1263,6 +1371,38 @@ export interface operations {
             header?: never;
             path: {
                 course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_course_image: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+                filename: string;
             };
             cookie?: never;
         };

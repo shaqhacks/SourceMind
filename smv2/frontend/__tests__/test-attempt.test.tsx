@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import TestAttemptClient from "@/components/test/TestAttemptClient";
@@ -8,6 +8,7 @@ import {
   type SubmitTestOut,
   type TestAttemptOut,
 } from "@/lib/api/client";
+import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 import { err, ok } from "./support/api-result";
 
@@ -20,13 +21,19 @@ vi.mock("@/lib/api/client", () => ({
   submitTest: vi.fn(),
 }));
 
+vi.mock("@/lib/review/reviewBus", () => ({
+  notifyReviewSettled: vi.fn(),
+}));
+
 const mockedGetTest = vi.mocked(getTest);
 const mockedSubmitTest = vi.mocked(submitTest);
+const mockedNotifyReviewSettled = vi.mocked(notifyReviewSettled);
 
 function makeAttempt(overrides: Partial<TestAttemptOut> = {}): TestAttemptOut {
   return {
     id: "attempt-1",
     course_id: "course-1",
+    chapter_label: null,
     score: null,
     questions: [
       { question: "2+2=?", choices: ["3", "4", "5", "6"], correct_index: null, explanation: null },
@@ -45,6 +52,7 @@ function makeAttempt(overrides: Partial<TestAttemptOut> = {}): TestAttemptOut {
 function makeSubmitResult(overrides: Partial<SubmitTestOut> = {}): SubmitTestOut {
   return {
     score: 0.5,
+    added_card_ids: [],
     results: [
       { correct: true, correct_index: 1, explanation: "4 is correct because 2+2=4.", your_answer: 1 },
       { correct: false, correct_index: 1, explanation: "Paris is the capital of France.", your_answer: 0 },
@@ -125,5 +133,68 @@ describe("TestAttemptClient", () => {
     expect(screen.getByText(/paris is the capital of france/i)).toBeInTheDocument();
     expect(screen.getByText(/your answer: berlin/i)).toBeInTheDocument();
     expect(screen.getByText(/correct answer: paris/i)).toBeInTheDocument();
+  });
+
+  it("shows a missed-concepts banner linking to /review when added_card_ids is non-empty, and fires notifyReviewSettled", async () => {
+    mockedGetTest.mockResolvedValue(ok(makeAttempt()));
+    mockedSubmitTest.mockResolvedValue(
+      ok(makeSubmitResult({ added_card_ids: ["card-1", "card-2"] })),
+    );
+
+    render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
+    await screen.findByText("2+2=?");
+
+    fireEvent.keyDown(window, { key: "2" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await screen.findByText("Capital of France?");
+    fireEvent.keyDown(window, { key: "1" });
+    fireEvent.keyDown(window, { key: "Enter" });
+
+    // Wait for a piece of text unique to the post-submit view first — the
+    // in-progress "N of 2" indicator also has role="status", so querying
+    // for the banner by role alone races the async submit and can match
+    // that stale element before the real banner ever renders.
+    await screen.findByText(/score: 50%/i);
+    const banner = screen.getByRole("status");
+    expect(banner).toHaveTextContent(/2 missed concepts added to your reviews/i);
+    expect(within(banner).getByRole("link", { name: /go to review/i })).toHaveAttribute(
+      "href",
+      "/review",
+    );
+    expect(mockedNotifyReviewSettled).toHaveBeenCalled();
+  });
+
+  it("uses singular 'concept' for exactly one missed card", async () => {
+    mockedGetTest.mockResolvedValue(ok(makeAttempt()));
+    mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult({ added_card_ids: ["card-1"] })));
+
+    render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
+    await screen.findByText("2+2=?");
+
+    fireEvent.keyDown(window, { key: "2" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await screen.findByText("Capital of France?");
+    fireEvent.keyDown(window, { key: "1" });
+    fireEvent.keyDown(window, { key: "Enter" });
+
+    expect(await screen.findByText(/1 missed concept added to your reviews/i)).toBeInTheDocument();
+  });
+
+  it("shows no banner when added_card_ids is absent or empty", async () => {
+    mockedGetTest.mockResolvedValue(ok(makeAttempt()));
+    mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult({ added_card_ids: [] })));
+
+    render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
+    await screen.findByText("2+2=?");
+
+    fireEvent.keyDown(window, { key: "2" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await screen.findByText("Capital of France?");
+    fireEvent.keyDown(window, { key: "1" });
+    fireEvent.keyDown(window, { key: "Enter" });
+
+    await screen.findByText(/score: 50%/i);
+    expect(screen.queryByText(/missed concept/i)).not.toBeInTheDocument();
+    expect(mockedNotifyReviewSettled).toHaveBeenCalled();
   });
 });

@@ -83,14 +83,14 @@ def test_export_includes_lesson_file_and_manifest_entry_when_ready(client, inges
 
         content = zf.read(lesson_files[0]).decode("utf-8")
         assert "stub-model" in content
-        assert "v1" in content
+        assert "v2" in content
         assert "A real lesson." in content
 
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
         section_entry = next(s for s in manifest["sections"] if s["id"] == section_id)
         assert section_entry["lesson"]["status"] == "ready"
         assert section_entry["lesson"]["model"] == "stub-model"
-        assert section_entry["lesson"]["prompt_version"] == "v1"
+        assert section_entry["lesson"]["prompt_version"] == "v2"
         assert section_entry["lesson"]["file"] == lesson_files[0]
 
         # Sections with no lesson yet must have a null manifest entry, not a

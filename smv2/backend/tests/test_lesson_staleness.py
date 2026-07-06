@@ -37,7 +37,7 @@ def test_lesson_stale_true_when_prompt_version_is_older(client, ingest_course):
         section = session.get(Section, section_id)
         section.lesson_md = "An old lesson from an earlier prompt."
         section.lesson_status = "ready"
-        section.lesson_prompt_version = "v0"  # lexicographically older than "v1"
+        section.lesson_prompt_version = "v0"  # lexicographically and numerically older than the current version
         session.commit()
     finally:
         session.close()

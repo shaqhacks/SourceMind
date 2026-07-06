@@ -123,6 +123,13 @@ class Section(Base):
     lesson_model: Mapped[str | None] = mapped_column(String, nullable=True)
     lesson_prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
     extractor_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 'content' | 'practice' | 'answers' — deterministic, title-only
+    # classification (ADR-017). chapter_label is the exact title of the
+    # chapter-marker section this section is grouped under, or NULL if the
+    # course has no detected chapter markers at all ("Front matter" group,
+    # client-side label).
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="content")
+    chapter_label: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, onupdate=utcnow
@@ -258,6 +265,9 @@ class TestAttempt(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Set only for a chapter-scoped test (POST .../tests with chapter_label);
+    # NULL for the pre-existing explicit-section_ids / whole-course modes.
+    chapter_label: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 

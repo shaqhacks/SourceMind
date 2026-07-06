@@ -42,6 +42,8 @@ def edit_outline(course_id: str, operations: list[Any]) -> list[dict[str, Any]]:
                 "lesson_status": s.lesson_status,
                 "has_content": bool((s.body_md or "").strip()),
                 "word_count": len((s.body_md or "").split()),
+                "kind": s.kind,
+                "chapter_label": s.chapter_label,
             }
             for s in sections
         ]

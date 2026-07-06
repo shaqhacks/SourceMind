@@ -6,6 +6,8 @@
     "section_count": 1,
     "sections": [
       {
+        "chapter_label": null,
+        "kind": "content",
         "page_end": 1,
         "page_start": 0,
         "title": "Pages 1–2"

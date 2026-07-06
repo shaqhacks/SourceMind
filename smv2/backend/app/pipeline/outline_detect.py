@@ -14,6 +14,13 @@ sections_from_headings detects chapter boundaries from large-font lines
 (read from the PDF's raw page dict — see
 app/pipeline/extract.py::extract_heading_candidates) before falling all
 the way back to page windows. See smv2/docs/decisions.md ADR-015.
+
+ADR-017: section kind + chapter grouping. classify_section_kind and
+assign_chapter_labels classify each already-detected section by title text
+alone (practice sheet / answer key / ordinary content) and group every
+section under the chapter marker it belongs to, so a course's practice
+sections and answer keys can be surfaced as one testing/review surface per
+chapter. See smv2/docs/decisions.md ADR-017.
 """
 
 from __future__ import annotations
@@ -72,6 +79,21 @@ _TRAILING_DISQUALIFYING_PUNCT_RE = re.compile(r"[.,:;]$")
 # be part of a real title ("Chapter 2"). Narrow on purpose, same reasoning
 # as the front-matter denylist above.
 _TRAILING_DOT_LEADER_RE = re.compile(r"(?:\.\s*){2,}\d*\s*$")
+
+# --- Section kind + chapter grouping (ADR-017) ------------------------------
+# Deliberately narrow: bare "problems" used to match, misfiling ordinary
+# lesson titles like "Age Problems"/"Word Problems" as practice sheets — a
+# lesson misfiled as practice is worse than a worksheet shown as content, so
+# "problems" only counts as part of "problem set(s)", never alone.
+_PRACTICE_TITLE_RE = re.compile(
+    r"\bpractice\b|\bexercises?\b|\bproblem sets?\b|\breview questions\b|\bworksheets?\b", re.IGNORECASE
+)
+_ANSWERS_TITLE_RE = re.compile(r"^answers?\b|\banswer key\b", re.IGNORECASE)
+# Anchored: a section's OWN title IS a chapter marker.
+_CHAPTER_MARKER_RE = re.compile(r"^chapter\s+([0-9ivxlc]+)\b", re.IGNORECASE)
+# Unanchored: a chapter reference appearing anywhere in a title (e.g. an
+# answer key naming the chapter it belongs to, "Answers - Chapter 8").
+_CHAPTER_REFERENCE_RE = re.compile(r"chapter\s+([0-9ivxlc]+)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -496,3 +518,68 @@ def detect_sections(
             SectionBounds(title=f"Pages {abs_start + 1}–{abs_end + 1}", page_start=abs_start, page_end=abs_end)
         )
     return shifted
+
+
+def classify_section_kind(title: str) -> str:
+    """'practice' if the title names a practice sheet (practice/exercise(s)/
+    problem set(s)/review questions/worksheet(s)), 'answers' if it names an
+    answer key (starts with "answer(s)" or contains "answer key"), else
+    'content'. Deterministic, title-only — no LLM, no body text inspection.
+    """
+    if _PRACTICE_TITLE_RE.search(title):
+        return "practice"
+    if _ANSWERS_TITLE_RE.search(title):
+        return "answers"
+    return "content"
+
+
+def assign_chapter_labels(titles: list[str]) -> list[str | None]:
+    """titles: section titles in course order (order_index). Returns one
+    chapter_label per title, same order — the exact title text of the
+    chapter-marker section (one matching ^chapter N) each section belongs
+    under, grouping a book's practice sheets and answer keys with the
+    chapter they belong to.
+
+    Primary rule: a section's label is the nearest PRECEDING section whose
+    own title is itself a chapter marker — a marker section's label is its
+    own title (it's the first member of its own group), not looked up
+    further back. Sections before the very first chapter marker in the
+    whole title list backfill to that first marker's title, so front
+    matter/preamble content joins the chapter it introduces rather than
+    being left ungrouped. If the title list has no chapter marker at all,
+    every label is None (grouped client-side as "Front matter").
+
+    Answer-key override: when a section's OWN title embeds a chapter
+    reference anywhere (e.g. "Answers - Chapter 8"), that reference wins
+    over the position-based label — answer keys typically cluster at a
+    book's end and would otherwise all inherit the LAST chapter's label
+    regardless of which chapter they actually answer. Falls back to a
+    synthesized "Chapter N" if no marker section with that exact number
+    exists.
+    """
+    labels: list[str | None] = [None] * len(titles)
+    marker_title_by_id: dict[str, str] = {}
+    current_label: str | None = None
+    first_marker_label: str | None = None
+
+    for i, title in enumerate(titles):
+        marker_match = _CHAPTER_MARKER_RE.match(title)
+        if marker_match is not None:
+            current_label = title
+            marker_id = marker_match.group(1).lower()
+            marker_title_by_id.setdefault(marker_id, title)
+            if first_marker_label is None:
+                first_marker_label = title
+        labels[i] = current_label
+
+    if first_marker_label is not None:
+        labels = [label if label is not None else first_marker_label for label in labels]
+
+    for i, title in enumerate(titles):
+        ref_match = _CHAPTER_REFERENCE_RE.search(title)
+        if ref_match is None:
+            continue
+        ref_id = ref_match.group(1).lower()
+        labels[i] = marker_title_by_id.get(ref_id, f"Chapter {ref_match.group(1)}")
+
+    return labels

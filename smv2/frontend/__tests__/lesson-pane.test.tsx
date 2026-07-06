@@ -40,6 +40,8 @@ function makeDetail(overrides: Partial<SectionDetailOut> = {}): SectionDetailOut
     order_index: 0,
     page_start: 1,
     page_end: 10,
+    kind: "content",
+    chapter_label: null,
     body_md: "# Consensus\n\nSource text.",
     content_hash: "hash",
     lesson_md: null,

@@ -42,8 +42,9 @@ class ProviderTimeoutError(Exception):
 
 
 PROVIDER_NOT_CONFIGURED_MESSAGE = (
-    "LLM provider not configured: set ANTHROPIC_API_KEY, or set "
-    "SMV2_LLM_PROVIDER=ollama with a local Ollama running."
+    "LLM provider not configured: add anthropic_api_key to data/secrets.toml, "
+    "set ANTHROPIC_API_KEY, or set SMV2_LLM_PROVIDER=ollama with a local "
+    "Ollama running."
 )
 
 

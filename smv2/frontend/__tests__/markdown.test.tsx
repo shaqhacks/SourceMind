@@ -124,4 +124,86 @@ describe("Markdown", () => {
       expect(safe).toHaveAttribute("href", "https://example.com/page");
     });
   });
+
+  describe("KaTeX math (prompts v2 generated content)", () => {
+    it("renders inline $...$ math as a real .katex element, not literal dollar text", () => {
+      const { container } = render(<Markdown>{"The area is $\\pi r^2$ exactly."}</Markdown>);
+
+      const katex = container.querySelector(".katex");
+      expect(katex).not.toBeNull();
+      expect(document.body.textContent).not.toContain("$\\pi r^2$");
+    });
+
+    it("renders display $$...$$ math as a centered .katex-display block", () => {
+      const { container } = render(<Markdown>{"$$\nx = \\frac{1}{2}\n$$"}</Markdown>);
+
+      expect(container.querySelector(".katex-display")).not.toBeNull();
+      expect(container.querySelector(".katex")).not.toBeNull();
+    });
+
+    it("does not box a display equation in the regular fenced-code-block chrome", () => {
+      const { container } = render(<Markdown>{"$$\nx = 1\n$$"}</Markdown>);
+
+      // The math container must not pick up the code-block styling (which
+      // would visually clash with a typeset equation) — no bordered <pre>
+      // wrapping it, even though remark-math's own hast output nests the
+      // math inside a <code> that a <pre> would normally wrap.
+      const pre = container.querySelector("pre");
+      expect(pre).toBeNull();
+    });
+
+    it("with trust:false, a malicious \\href never becomes a real (or javascript:) link", () => {
+      render(<Markdown>{"$\\href{javascript:window.__pwned=true}{click}$"}</Markdown>);
+
+      expect(document.querySelector('a[href^="javascript:"]')).not.toBeInTheDocument();
+      expect((window as unknown as { __pwned?: boolean }).__pwned).toBeUndefined();
+    });
+
+    it("keeps the rest of the sanitize suite green alongside math", () => {
+      render(
+        <Markdown>
+          {"$x$\n\nbefore <script>window.__pwned = true;</script> after"}
+        </Markdown>,
+      );
+
+      expect(document.querySelector(".katex")).not.toBeNull();
+      expect(document.querySelector("script")).not.toBeInTheDocument();
+      expect((window as unknown as { __pwned?: boolean }).__pwned).toBeUndefined();
+    });
+  });
+
+  describe("extracted images (backend-served, gated by src pattern)", () => {
+    it("renders a valid /api/courses/{id}/images/{file} reference with an API_BASE-prefixed, lazy-loaded <img>", () => {
+      render(<Markdown>{"![Figure 1](/api/courses/course-1/images/fig1.png)"}</Markdown>);
+
+      const img = screen.getByRole("img", { name: "Figure 1" });
+      expect(img).toHaveAttribute("src", "http://localhost:8000/api/courses/course-1/images/fig1.png");
+      expect(img).toHaveAttribute("loading", "lazy");
+    });
+
+    it("refuses an external http(s) image", () => {
+      render(<Markdown>{"![evil](https://evil.example/tracker.png)"}</Markdown>);
+
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    });
+
+    it("refuses a data: URI image", () => {
+      render(<Markdown>{"![evil](data:image/png;base64,aaaa)"}</Markdown>);
+
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    });
+
+    it("refuses a protocol-relative image", () => {
+      render(<Markdown>{"![evil](//evil.example/tracker.png)"}</Markdown>);
+
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    });
+
+    it("refuses a raw-HTML <img> even when onerror is stripped, unless its src matches the pattern", () => {
+      render(<Markdown>{'before <img src="/not/our/pattern.png" onerror="window.__pwned=true"> after'}</Markdown>);
+
+      expect(screen.queryByRole("img")).not.toBeInTheDocument();
+      expect((window as unknown as { __pwned?: boolean }).__pwned).toBeUndefined();
+    });
+  });
 });

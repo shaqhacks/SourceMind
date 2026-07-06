@@ -4,11 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import HintRow from "@/components/HintRow";
 import ShortcutsOverlay, { type ShortcutHint } from "@/components/ShortcutsOverlay";
-import { getSection, type SectionOut } from "@/lib/api/client";
+import { getSection, listChapters, type SectionOut } from "@/lib/api/client";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 import { useProgressSync } from "@/lib/hooks/useProgressSync";
 import { useTypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
-import type { ReaderCourse, ReaderProgress, SectionBodyState } from "@/lib/reader/types";
+import { chapterGroupKey } from "@/lib/reader/chapterGroups";
+import type {
+  ChapterTestStats,
+  ReaderCourse,
+  ReaderProgress,
+  SectionBodyState,
+} from "@/lib/reader/types";
 
 import CourseChatDrawer from "./CourseChatDrawer";
 import type { LessonDisplayStatus } from "./LessonPane";
@@ -79,6 +85,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [outlineEditorOpen, setOutlineEditorOpen] = useState(false);
+  const [chapterStats, setChapterStats] = useState<Record<string, ChapterTestStats>>({});
   const [sectionBodies, setSectionBodies] = useState<Record<string, string>>({});
   const [bodyErrors, setBodyErrors] = useState<Record<string, string>>({});
   const [lessonStatusOverrides, setLessonStatusOverrides] = useState<
@@ -131,6 +138,28 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
       active = false;
     };
   }, [activeSection.id]);
+
+  // Feeds Sidebar's per-chapter "Test" score. Mount-only: an outline edit
+  // (rename/merge/split) already refreshes `sections` via its own
+  // onApplied callback, and taking a chapter test navigates away to a
+  // different route entirely — this component remounts fresh either way,
+  // so there's no in-place staleness window this needs to react to.
+  useEffect(() => {
+    let active = true;
+    listChapters(course.id).then(({ data }) => {
+      if (!active || !data) return;
+      const stats: Record<string, ChapterTestStats> = {};
+      for (const chapter of data) {
+        if (chapter.test_stats) {
+          stats[chapterGroupKey(chapter.chapter_label)] = chapter.test_stats;
+        }
+      }
+      setChapterStats(stats);
+    });
+    return () => {
+      active = false;
+    };
+  }, [course.id]);
 
   // Resume: jump to the saved scroll position once, instantly, as soon as
   // the resumed section's body has actually rendered (scrollHeight isn't
@@ -261,10 +290,12 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
       <div className="flex min-h-0 flex-1">
         {!sidebarCollapsed && (
           <Sidebar
+            courseId={course.id}
             sections={sections}
             activeSectionId={activeSection.id}
             onSelect={setActiveIndex}
             lessonStatusOverrides={lessonStatusOverrides}
+            chapterStats={chapterStats}
           />
         )}
         <ReadingColumn

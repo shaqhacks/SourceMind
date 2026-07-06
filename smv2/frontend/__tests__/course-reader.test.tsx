@@ -11,6 +11,7 @@ import {
   getLlmUsage,
   getSection,
   listCards,
+  listChapters,
   listSections,
   saveProgress,
 } from "@/lib/api/client";
@@ -36,6 +37,7 @@ vi.mock("@/lib/api/client", () => ({
   generateCards: vi.fn(),
   listSections: vi.fn(),
   editOutline: vi.fn(),
+  listChapters: vi.fn(),
 }));
 
 const mockedGetSection = vi.mocked(getSection);
@@ -47,6 +49,7 @@ const mockedListCards = vi.mocked(listCards);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 const mockedListSections = vi.mocked(listSections);
 const mockedEditOutline = vi.mocked(editOutline);
+const mockedListChapters = vi.mocked(listChapters);
 
 // A minimal 3-section fixture keeps these assertions about
 // active-chapter bookkeeping (not content) easy to follow.
@@ -63,6 +66,8 @@ const COURSE: ReaderCourse = {
       lesson_status: "none",
       has_content: true,
       word_count: 100,
+      kind: "content",
+      chapter_label: null,
     },
     {
       id: "sec-2",
@@ -73,6 +78,8 @@ const COURSE: ReaderCourse = {
       lesson_status: "none",
       has_content: true,
       word_count: 120,
+      kind: "content",
+      chapter_label: null,
     },
     {
       id: "sec-3",
@@ -83,6 +90,8 @@ const COURSE: ReaderCourse = {
       lesson_status: "none",
       has_content: true,
       word_count: 90,
+      kind: "content",
+      chapter_label: null,
     },
   ],
 };
@@ -108,6 +117,8 @@ describe("CourseReader", () => {
           order_index: section.order_index,
           page_start: section.page_start,
           page_end: section.page_end,
+          kind: section.kind,
+          chapter_label: section.chapter_label,
           body_md: BODIES[id],
           content_hash: "hash",
           lesson_md: null,
@@ -135,6 +146,7 @@ describe("CourseReader", () => {
     mockedFindActiveCardsJob.mockResolvedValue(null);
     mockedListSections.mockResolvedValue(ok(COURSE.sections));
     mockedEditOutline.mockResolvedValue(ok(COURSE.sections));
+    mockedListChapters.mockResolvedValue(ok([]));
   });
 
   afterEach(() => {

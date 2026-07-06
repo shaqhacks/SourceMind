@@ -16,19 +16,30 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 import fitz
 
-from app.pipeline.extract import extract_heading_candidates, extract_markdown_pages, get_toc, open_pdf
-from app.pipeline.outline_detect import detect_sections
+from app.pipeline.extract import (
+    extract_heading_candidates,
+    extract_markdown_pages_in_batches,
+    get_toc,
+    open_pdf,
+    rewrite_image_refs_to_api_path,
+)
+from app.pipeline.outline_detect import assign_chapter_labels, classify_section_kind, detect_sections
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures" / "pdfs"
 SNAPSHOTS_DIR = REPO_ROOT / "tests" / "snapshots"
 
 _FIXED_DATE = "D:20250101000000Z"
-_SNAPSHOT_FIXTURES = ("with_bookmarks", "no_bookmarks", "non_english", "headings_no_bookmarks")
+_SNAPSHOT_FIXTURES = ("with_bookmarks", "no_bookmarks", "non_english", "headings_no_bookmarks", "images")
+# Not a real course — snapshot generation has no DB/course context, just a
+# fixed, obviously-a-placeholder id so the rewritten image refs are
+# reproducible in the committed golden JSON.
+_SNAPSHOT_COURSE_ID_PLACEHOLDER = "snapshot-course-id"
 
 
 def _set_fixed_metadata(doc: fitz.Document, title: str) -> None:
@@ -326,14 +337,20 @@ _BODY_FONT_SIZE = 11
 def make_headings_no_bookmarks() -> Path:
     """No embedded bookmarks at all — chapter boundaries are only signaled
     by large bold "Chapter N: Title" lines (ADR-015's heading-detection
-    tier). 12 pages, 4 chapters:
+    tier). 14 pages, 4 chapters plus a practice sheet and an answer key
+    (ADR-017's section-kind/chapter-grouping classification):
 
-    - Chapter 2's and Chapter 3's headings both land on page 4 (0-based) —
+    - Chapter 2's and Chapter 3's headings both land on the same page —
       exercises the same-page-collision rule (first heading claims the
       page; the second is bumped to start on the next page).
-    - A large-font, otherwise heading-shaped line on page 2 that ends in a
-      period (a "pull-quote") — must be excluded by the trailing-
-      punctuation rule despite its size.
+    - A large-font, otherwise heading-shaped line that ends in a period (a
+      "pull-quote") — must be excluded by the trailing-punctuation rule
+      despite its size.
+    - "0.1 Practice - Foundations" (kind='practice') sits right after
+      Chapter 1, so it's grouped under Chapter 1's label positionally.
+    - "Answers - Chapter 1" (kind='answers') sits at the very end, after
+      Chapter 4 — positionally it would inherit Chapter 4's label, but its
+      own title names Chapter 1, which must win (the answer-key override).
     - Every other line is ordinary body-size (11pt) prose, so the body-size
       histogram clearly picks 11pt as the modal size.
     """
@@ -364,6 +381,15 @@ def make_headings_no_bookmarks() -> Path:
             ("heading despite its size, because it ends in a period.", _BODY_FONT_SIZE, False),
             ("", _BODY_FONT_SIZE, False),
             ("Deterministic fixtures make regressions visible.", _HEADING_FONT_SIZE, True),
+        ],
+    )
+    _add_mixed_page(
+        doc,
+        [
+            ("0.1 Practice - Foundations", _HEADING_FONT_SIZE, True),
+            ("", _BODY_FONT_SIZE, False),
+            ("A short practice sheet reinforcing the ideas from this", _BODY_FONT_SIZE, False),
+            ("chapter, in plain deterministic fixture prose.", _BODY_FONT_SIZE, False),
         ],
     )
     _add_text_page(
@@ -410,36 +436,83 @@ def make_headings_no_bookmarks() -> Path:
     _add_mixed_page(
         doc,
         [
-            ("Chapter 4: Practice", _HEADING_FONT_SIZE, True),
+            ("Chapter 4: Geometry", _HEADING_FONT_SIZE, True),
             ("", _BODY_FONT_SIZE, False),
-            ("The final chapter walks through worked practice problems", _BODY_FONT_SIZE, False),
+            ("The final chapter walks through worked geometry problems", _BODY_FONT_SIZE, False),
             ("using plain deterministic prose, same as every chapter.", _BODY_FONT_SIZE, False),
         ],
     )
     _add_text_page(
         doc,
         [
-            "Practice continues here with more ordinary body text,",
+            "Geometry continues here with more ordinary body text,",
             "long enough to read as genuine prose for this fixture.",
         ],
     )
     _add_text_page(
         doc,
         [
-            "Still more practice body text on this page before the",
-            "fixture reaches its final closing page.",
+            "Still more geometry body text on this page before the",
+            "fixture reaches its answer key.",
+        ],
+    )
+    _add_mixed_page(
+        doc,
+        [
+            ("Answers - Chapter 1", _HEADING_FONT_SIZE, True),
+            ("", _BODY_FONT_SIZE, False),
+            ("A short answer key naming the chapter it belongs to,", _BODY_FONT_SIZE, False),
+            ("even though it physically sits at the end of the book.", _BODY_FONT_SIZE, False),
         ],
     )
     _add_text_page(
         doc,
         [
-            "Practice closes out the fixture here with one last",
-            "ordinary paragraph of deterministic body text.",
+            "The fixture closes out here with one last ordinary",
+            "paragraph of deterministic body text.",
         ],
     )
 
     _set_fixed_metadata(doc, "Headings No Bookmarks Fixture")
     out = FIXTURES_DIR / "headings_no_bookmarks.pdf"
+    doc.save(str(out), no_new_id=1)
+    doc.close()
+    return out
+
+
+def make_images() -> Path:
+    """A born-digital PDF with ONE embedded raster image (a solid-color
+    square — deterministic pixel data, no randomness) and no bookmarks —
+    exercises image extraction + markdown-ref rewriting during ingest
+    (ADR-018). No chapter markers, so it falls back to the page-window
+    outline path exactly like no_bookmarks.pdf; page 2 has no image of its
+    own, confirming extraction doesn't affect image-free pages.
+    """
+    doc = fitz.open()
+    _add_text_page(
+        doc,
+        [
+            "Images Fixture",
+            "",
+            "This page has ordinary body text before the embedded",
+            "raster image below, for testing deterministic image",
+            "extraction and markdown-ref rewriting during ingest.",
+        ],
+    )
+    page = doc[-1]
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 40, 40))
+    pix.set_rect(pix.irect, (200, 30, 30))  # solid fixed color -- no randomness
+    page.insert_image(fitz.Rect(72, 300, 272, 500), pixmap=pix)
+    _add_text_page(
+        doc,
+        [
+            "This second page has no image of its own, just ordinary",
+            "body text, to confirm image extraction doesn't affect",
+            "pages that have none.",
+        ],
+    )
+    _set_fixed_metadata(doc, "Images Fixture")
+    out = FIXTURES_DIR / "images.pdf"
     doc.save(str(out), no_new_id=1)
     doc.close()
     return out
@@ -455,6 +528,7 @@ FIXTURE_BUILDERS = {
     "non_english": make_non_english,
     "front_matter": make_front_matter,
     "headings_no_bookmarks": make_headings_no_bookmarks,
+    "images": make_images,
 }
 
 
@@ -463,19 +537,37 @@ def _snapshot_for(pdf_path: Path) -> dict:
     try:
         toc = get_toc(doc)
         heading_candidates = extract_heading_candidates(doc)
-        pages = extract_markdown_pages(doc)
         total_pages = doc.page_count
+        # Scratch dir, never committed: mirrors ingest.py's own image_dir/
+        # image_filename usage so a fixture's golden snapshot reflects the
+        # SAME rewritten-ref markdown a real ingest would produce, using a
+        # fixed placeholder course_id (there's no real course/DB here).
+        with tempfile.TemporaryDirectory() as scratch_dir:
+            pages = extract_markdown_pages_in_batches(
+                doc,
+                batch_pages=max(total_pages, 1),
+                image_dir=Path(scratch_dir),
+                image_filename=pdf_path.stem,
+            )
+        pages = [rewrite_image_refs_to_api_path(p, _SNAPSHOT_COURSE_ID_PLACEHOLDER) for p in pages]
     finally:
         doc.close()
 
     sections = detect_sections(
         toc, total_pages, pages_per_window=12, pages=pages, heading_candidates=heading_candidates
     )
+    chapter_labels = assign_chapter_labels([s.title for s in sections])
     outline = {
         "section_count": len(sections),
         "sections": [
-            {"title": s.title, "page_start": s.page_start, "page_end": s.page_end}
-            for s in sections
+            {
+                "title": s.title,
+                "page_start": s.page_start,
+                "page_end": s.page_end,
+                "kind": classify_section_kind(s.title),
+                "chapter_label": chapter_labels[i],
+            }
+            for i, s in enumerate(sections)
         ],
     }
 

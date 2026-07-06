@@ -28,7 +28,7 @@ def test_generate_lesson_happy_path(client, ingest_course, stub_provider):
     assert section["lesson_stale"] is False
     # UX law: generated content must be labeled with model + prompt version.
     assert section["lesson_model"] == "stub-model"
-    assert section["lesson_prompt_version"] == "v1"
+    assert section["lesson_prompt_version"] == "v2"
 
     job = client.get(f"/api/jobs/{job_id}").json()
     assert job["status"] == "succeeded"
@@ -264,7 +264,7 @@ def test_generate_lesson_degenerate_output_records_parse_failure_ledger_row(
     assert [c.status for c in calls] == ["ok", "ok", "parse_failure"]
     parse_failure_row = calls[-1]
     assert parse_failure_row.cost_estimate is None  # spend already counted by the 'ok' row
-    assert parse_failure_row.prompt_version == "v1"
+    assert parse_failure_row.prompt_version == "v2"
     assert parse_failure_row.course_id == course_id
 
 

@@ -58,7 +58,7 @@ def test_generate_cards_records_prompt_version_on_each_card(client, ingest_cours
     session = get_session()
     try:
         card = session.get(Card, cards[0]["id"])
-        assert card.prompt_version == "v1"
+        assert card.prompt_version == "v2"
     finally:
         session.close()
 
@@ -221,7 +221,7 @@ def test_generate_cards_fails_after_two_parse_failures_records_parse_failure_led
     assert [c.status for c in calls] == ["ok", "ok", "parse_failure"]
     parse_failure_row = calls[-1]
     assert parse_failure_row.cost_estimate is None
-    assert parse_failure_row.prompt_version == "v1"
+    assert parse_failure_row.prompt_version == "v2"
     assert parse_failure_row.course_id == course_id
 
 

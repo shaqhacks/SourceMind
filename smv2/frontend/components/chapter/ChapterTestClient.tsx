@@ -1,0 +1,266 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import ChapterMasteryBar from "@/components/chapter/ChapterMasteryBar";
+import ErrorBanner from "@/components/ErrorBanner";
+import Markdown from "@/components/Markdown";
+import { describeError, type FetchError } from "@/lib/api/errors";
+import {
+  generateTest,
+  getJob,
+  getSection,
+  listChapters,
+  listTests,
+  type ChapterOut,
+  type TestAttemptSummaryOut,
+} from "@/lib/api/client";
+import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
+import { formatJobProgress } from "@/lib/jobs/format";
+
+export interface ChapterTestClientProps {
+  courseId: string;
+  chapterLabel: string;
+}
+
+interface PracticeSection {
+  id: string;
+  body: string;
+}
+
+type LoadState =
+  | { kind: "loading" }
+  | { kind: "error"; error: FetchError }
+  | { kind: "not-found" }
+  | { kind: "ready"; chapter: ChapterOut; practiceSections: PracticeSection[] };
+
+async function loadChapter(courseId: string, chapterLabel: string): Promise<LoadState> {
+  const { data, status } = await listChapters(courseId);
+  if (!data) return { kind: "error", error: describeError(status, "Loading chapter") };
+
+  const chapter = data.find((candidate) => candidate.chapter_label === chapterLabel);
+  if (!chapter) return { kind: "not-found" };
+
+  // Per-section failure isolation: one bad get_section shouldn't block the
+  // rest of the chapter's practice material from rendering, same
+  // philosophy as GenerateAllLessons' per-job handling.
+  const results = await Promise.all(chapter.practice_section_ids.map((id) => getSection(id)));
+  const practiceSections: PracticeSection[] = [];
+  results.forEach((result, index) => {
+    if (result.data) {
+      practiceSections.push({ id: chapter.practice_section_ids[index], body: result.data.body_md });
+    }
+  });
+
+  return { kind: "ready", chapter, practiceSections };
+}
+
+export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTestClientProps) {
+  const router = useRouter();
+  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [attempts, setAttempts] = useState<TestAttemptSummaryOut[] | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
+    null,
+  );
+  // Attempt ids known before the current generation started, so the
+  // settle handler can tell which attempt in the refetched list is the
+  // new one to navigate into — generate_test's own response is just a
+  // job_id, no attempt_id (same gap QuizzesPanel works around by refetching
+  // the whole list rather than being told the new id directly).
+  const knownAttemptIdsRef = useRef<Set<string>>(new Set());
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useRouteFocus(headingRef);
+
+  const { job, done, stalled } = useJobEvents(jobId);
+  const isGenerating = jobId !== null && !done;
+  const jobFailed = done && job?.status === "failed";
+  const failureMessage = failureInfo?.jobId === jobId ? failureInfo.message : null;
+
+  const retryLoad = useCallback(() => {
+    setState({ kind: "loading" });
+    loadChapter(courseId, chapterLabel).then(setState);
+  }, [courseId, chapterLabel]);
+
+  // Mount/param-change fetch: state already starts as `{ kind: "loading" }`
+  // (see useState above), so this just fetches directly rather than
+  // routing through retryLoad's redundant synchronous reset — a plain
+  // `retryLoad()` call here would touch state synchronously at the top of
+  // an effect body, not inside the fetch's own callback.
+  useEffect(() => {
+    let active = true;
+    loadChapter(courseId, chapterLabel).then((result) => {
+      if (active) setState(result);
+    });
+    return () => {
+      active = false;
+    };
+  }, [courseId, chapterLabel]);
+
+  const loadAttempts = useCallback(() => {
+    listTests(courseId).then(({ data }) => {
+      if (data) setAttempts(data.filter((attempt) => attempt.chapter_label === chapterLabel));
+    });
+  }, [courseId, chapterLabel]);
+
+  useEffect(() => {
+    loadAttempts();
+  }, [loadAttempts]);
+
+  // Job settled successfully: refetch this chapter's attempts and jump
+  // straight into taking the new one via the existing TestAttemptClient
+  // route — this page's own job is generation + history, not re-taking.
+  useEffect(() => {
+    if (!done || job?.status !== "succeeded") return;
+    listTests(courseId).then(({ data }) => {
+      if (!data) return;
+      const forChapter = data.filter((attempt) => attempt.chapter_label === chapterLabel);
+      setAttempts(forChapter);
+      const fresh = forChapter.find((attempt) => !knownAttemptIdsRef.current.has(attempt.id));
+      if (fresh) router.push(`/course/${courseId}/test/${fresh.id}`);
+    });
+  }, [done, job?.status, courseId, chapterLabel, router]);
+
+  // JobEvent (the SSE snapshot) carries no error text — only {id, status,
+  // progress} — so surfacing the actual failure message needs a follow-up
+  // plain REST fetch, same pattern as CardsCTA/LessonPane/QuizzesPanel.
+  useEffect(() => {
+    if (!jobFailed || !jobId) return;
+    let active = true;
+    getJob(jobId).then(({ data }) => {
+      if (active) setFailureInfo({ jobId, message: data?.error ?? null });
+    });
+    return () => {
+      active = false;
+    };
+  }, [jobFailed, jobId]);
+
+  async function handleGenerate() {
+    setStarting(true);
+    setStartError(null);
+    knownAttemptIdsRef.current = new Set((attempts ?? []).map((attempt) => attempt.id));
+    const { data, status } = await generateTest(courseId, { chapterLabel });
+    setStarting(false);
+    if (data) {
+      setJobId(data.job_id);
+      return;
+    }
+    setStartError(describeError(status, "Starting chapter test generation").message);
+  }
+
+  if (state.kind === "loading") {
+    return (
+      <p role="status" className="p-8 text-sm text-muted-foreground">
+        Loading chapter…
+      </p>
+    );
+  }
+
+  if (state.kind === "error") {
+    return (
+      <div className="p-8">
+        <ErrorBanner status={state.error.status} message={state.error.message} onRetry={retryLoad} />
+      </div>
+    );
+  }
+
+  if (state.kind === "not-found") {
+    return (
+      <div className="p-8">
+        <ErrorBanner message={`No chapter named "${chapterLabel}" was found in this course.`} />
+      </div>
+    );
+  }
+
+  const { chapter, practiceSections } = state;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between border-b border-border px-8 py-4">
+        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-semibold outline-none">
+          {chapterLabel} — Chapter test
+        </h1>
+        <Link href={`/course/${courseId}`} className="text-sm font-medium text-accent underline">
+          Back to course
+        </Link>
+      </div>
+
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
+        <ChapterMasteryBar stats={chapter.test_stats} />
+
+        <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
+          <h2 className="text-base font-semibold">Practice material</h2>
+          {practiceSections.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No practice sections detected in this chapter — take a test generated from its
+              lessons instead.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-6">
+              {practiceSections.map((section) => (
+                <Markdown key={section.id}>{section.body}</Markdown>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {jobFailed && (
+            <ErrorBanner
+              message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
+              onRetry={() => void handleGenerate()}
+            />
+          )}
+          {isGenerating ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              {formatJobProgress(job, stalled)}
+            </p>
+          ) : (
+            !jobFailed && (
+              <button
+                type="button"
+                onClick={() => void handleGenerate()}
+                disabled={starting}
+                className="self-start rounded-md bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
+              >
+                Take chapter test
+              </button>
+            )
+          )}
+          {startError && <p className="text-xs text-red-600 dark:text-red-400">{startError}</p>}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <h2 className="text-base font-semibold">Attempt history</h2>
+          {attempts === null && (
+            <p role="status" className="text-sm text-muted-foreground">
+              Loading attempts…
+            </p>
+          )}
+          {attempts !== null && attempts.length > 0 && (
+            <ul className="flex flex-col gap-1">
+              {attempts.map((attempt) => (
+                <li key={attempt.id}>
+                  <Link
+                    href={`/course/${courseId}/test/${attempt.id}`}
+                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-sm hover:bg-muted-foreground/10"
+                  >
+                    <span>{new Date(attempt.created_at).toLocaleDateString()}</span>
+                    <span className="text-muted-foreground">
+                      {attempt.score !== null ? `${Math.round(attempt.score * 100)}%` : "In progress"}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

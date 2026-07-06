@@ -89,6 +89,8 @@ class SectionOut(BaseModel):
     lesson_status: str
     has_content: bool
     word_count: int
+    kind: Literal["content", "practice", "answers"]
+    chapter_label: str | None
 
 
 class SectionDetailOut(BaseModel):
@@ -106,6 +108,8 @@ class SectionDetailOut(BaseModel):
     lesson_model: str | None
     lesson_prompt_version: str | None
     extractor_version: str | None
+    kind: Literal["content", "practice", "answers"]
+    chapter_label: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -247,6 +251,7 @@ class ReviewSummaryOut(BaseModel):
 
 class GenerateTestIn(BaseModel):
     section_ids: list[str] | None = None
+    chapter_label: str | None = None
 
 
 class GenerateTestOut(BaseModel):
@@ -264,6 +269,7 @@ class TestAttemptOut(BaseModel):
     id: str
     course_id: str
     score: float | None
+    chapter_label: str | None
     questions: list[TestQuestionOut]
     created_at: datetime
 
@@ -272,6 +278,7 @@ class TestAttemptSummaryOut(BaseModel):
     id: str
     course_id: str
     score: float | None
+    chapter_label: str | None
     question_count: int
     created_at: datetime
 
@@ -290,6 +297,24 @@ class SubmitTestQuestionResultOut(BaseModel):
 class SubmitTestOut(BaseModel):
     score: float
     results: list[SubmitTestQuestionResultOut]
+    added_card_ids: list[str]
+
+
+# --- Chapters --------------------------------------------------------------
+
+
+class ChapterTestStatsOut(BaseModel):
+    attempts: int
+    best_score: float | None
+    latest_score: float | None
+
+
+class ChapterOut(BaseModel):
+    chapter_label: str | None
+    section_ids: list[str]
+    practice_section_ids: list[str]
+    answers_section_ids: list[str]
+    test_stats: ChapterTestStatsOut | None
 
 
 # --- Chat ------------------------------------------------------------

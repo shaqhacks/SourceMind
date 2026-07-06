@@ -259,3 +259,171 @@ are unaffected (byte-identical after regeneration): none of their
 candidate sets have more than one qualifying tier or a first-boundary gap,
 so none of the four rule changes above have anything to act on.
 `_EXTRACTOR_ALGO_VERSION` bumped to `algo-4`.
+
+## ADR-017 — Practice/testing surface: section kind, chapter grouping, missed-question SRS (2026-07-06)
+
+The owner's real textbook has per-chapter practice sheets ("0.1 Practice -
+Integers") and an end-of-book answer key ("Answers - Chapter 8") mixed in
+among ordinary chapter sections. Three deterministic additions turn that
+structure into a chapters/testing/review surface, still inside ingest's
+zero-LLM prime directive (classification is title-only, no LLM, no body
+text inspection):
+
+**Schema** (migration `0004_section_kind_chapter_label`): `sections.kind`
+(`'content'|'practice'|'answers'`, default `'content'`) and
+`sections.chapter_label` (nullable), `test_attempts.chapter_label`
+(nullable, set only for a chapter-scoped test). No new FK-bearing table, so
+no `app/db/registry.py` change was needed — `Section`/`TestAttempt` are
+already registered.
+
+**Classification** (`app/pipeline/outline_detect.py::classify_section_kind`/
+`assign_chapter_labels`, computed per-asset during ingest so one PDF's
+chapter numbering never leaks into another's in a multi-asset course):
+`kind` from the title alone (`practice`/`exercise(s)`/`problems`/`review
+questions` → practice; `^answers?` or `answer key` → answers; else
+content). `chapter_label` is the exact title of the nearest PRECEDING
+`^chapter N` marker section (a marker section labels itself); sections
+before the very first marker backfill to that marker's title, so preamble
+joins the chapter it introduces; a course with no chapter marker at all
+gets `chapter_label=None` for every section (grouped client-side as "Front
+matter"). Answer-key override: when a section's own title names a chapter
+anywhere (e.g. "Answers - Chapter 8"), that reference wins over
+position — answer keys cluster at a book's end and would otherwise all
+inherit the LAST chapter's label. `_EXTRACTOR_ALGO_VERSION` bumped to
+`algo-5`; the `headings_no_bookmarks` fixture gained a practice section and
+an answer key (naming an earlier chapter) to exercise both the ordinary
+and override paths in its golden snapshot; the other three snapshots
+gained the two new fields with no value changes (verified byte-diff:
+additions only).
+
+**Chapters API** (`GET /api/courses/{course_id}/chapters`): sections
+grouped by `chapter_label`, split into `section_ids` (content),
+`practice_section_ids`, `answers_section_ids`, plus `test_stats` (attempt
+count, best/latest graded score) from `test_attempts` grouped the same
+way. The `chapter_label=None` group sorts first (labeled "Front matter"
+client-side); everything else keeps course order.
+
+**Chapter test mode**: `POST .../tests` gains an optional `chapter_label`
+that resolves server-side to that chapter's practice+content section ids —
+answer-key sections are excluded from every path that lets the SYSTEM
+choose scope (chapter resolution here, and the pre-existing whole-course
+fallback when neither `chapter_label` nor `section_ids` is given), since a
+printed answer key in the prompt invites the model to copy its numbering
+instead of writing real questions. A caller-supplied explicit `section_ids`
+list is trusted as-is, unchanged from before. An unknown `chapter_label`
+404s rather than silently falling back to a whole-course quiz.
+
+**Missed → SRS** (`tests_service.submit_test`): each incorrectly answered
+question becomes a `Card` (front = question + choices, back = correct
+answer + explanation) via the existing content-addressed `card_id_for`, so
+a repeated miss of the same question across attempts dedupes onto the same
+card instead of violating its primary key. The target section is the
+attempt's chapter's first practice section, else that chapter's first
+section, else the attempt's own single-section scope, else the course's
+first section. A brand-new card gets no `ReviewState` row at all — the
+review queue already treats "no state" as "new" (and thus due), so nothing
+further is needed for it to surface immediately. A card that already has
+real SM-2 history (graded before, then missed again in a later test) only
+gets `due_at` moved to now; ease/interval/reps are left untouched — a miss
+on a test is evidence the card needs review, not a formal SM-2 lapse, and
+only a real Again grade from the review queue should touch that state.
+`submit_test`'s response gains `added_card_ids` (every card touched by this
+submission's misses, whether newly created or refreshed).
+
+## ADR-018 — Image extraction during ingest, LaTeX-aware prompts v2, narrower practice classification (2026-07-06)
+
+Three independent, owner-approved changes landed together because the
+first triggers an extractor-version bump the other two could ride along
+with for one snapshot regeneration.
+
+**Image extraction** (`app/pipeline/extract.py`,
+`app/pipeline/ingest.py`, `app/services/images_service.py`,
+`app/routers/images.py`): `pymupdf4llm.to_markdown(..., write_images=True,
+image_path=..., filename=asset.id)` writes each embedded raster image to
+`data_dir()/assets/{course_id}/images/` as
+`{asset_id}-{page}-{index}.{ext}` — pymupdf4llm's own naming convention,
+already deterministic (page + per-page index, no random component) as
+long as a stable `filename` is passed in, which the asset's own id
+provides for free. The markdown pymupdf4llm returns embeds the image's
+*local filesystem path* inline as `![](...)`; `rewrite_image_refs_to_api_path`
+rewrites that to `/api/courses/{course_id}/images/{basename}` before
+`body_md` is normalized/hashed/persisted, since `body_md` is immutable
+once a section exists (`smv2/CLAUDE.md` invariant #1) — this is the only
+point the rewrite can happen. Re-ingesting the same course reproduces
+identical rewritten text (same course_id, same deterministic filenames),
+so content-addressed section identity is unaffected.
+
+Per-image failure isolation required switching image-aware extraction to
+PAGE granularity (pymupdf4llm exposes no finer-grained try/except point
+than one `to_markdown()` call): if writing a page's image(s) raises for
+any reason, that page is silently re-extracted with images disabled so
+its text still lands, rather than losing a whole batch over one bad
+image. Naively doing this per-page for every page turned out to cost
+~15x on a large document — `IdentifyHeaders`, pymupdf4llm's whole-document
+font-size histogram, is recomputed on *every* `to_markdown()` call by
+default regardless of the `pages=` subset requested (the same
+whole-document scan behavior the batched-extraction progress heartbeat
+already relies on being byte-identical across page subsets), so 520
+per-page calls each redid a 520-page scan. Computing it once
+(`IdentifyHeaders(doc)`) and
+passing it in via `hdr_info=` on every call — batched or per-page — drops
+520-page per-page extraction from ~14.7s to ~0.8s, empirically verified
+byte-identical output either way. `IdentifyHeaders` is not part of
+pymupdf4llm's public API; the import is annotated with why and accepts
+that a future refactor there breaks it loudly (ImportError) rather than
+silently regressing performance.
+
+Images directory is REPLACED-bucket semantics: wiped at the start of
+every ingest run (before extraction begins, so it can't be an
+after-the-fact cleanup step racing the new images being written) and
+regenerated from scratch, so an asset removed or a shrunk image count
+never leaves an orphaned file behind. This is a non-transactional
+filesystem side effect done up front — same risk tolerance the ingest
+loop already accepts for per-asset bookkeeping commits (see
+`_extract_one_asset`'s own comment): if a later ingest stage fails, the
+course lands in `ingest_failed` regardless, a state the user must already
+recognize and retry, which repopulates images fully again. Course delete
+needed no code change — the images directory is a subdirectory of the
+course's assets dir, already covered by
+`courses_service._remove_course_asset_files`'s existing `rmtree`.
+
+`GET /api/courses/{course_id}/images/{filename}` (`get_course_image`)
+serves only from that directory: a strict `^[A-Za-z0-9._-]+$` allowlist
+rejects any path separator outright, plus an independent resolved-path
+containment check, because a filename made entirely of dots (`".."`)
+passes the allowlist regex on its own but would otherwise resolve to the
+images directory's *parent* once joined and resolved — the regex alone is
+not sufficient. `FileResponse` is given no explicit `media_type`, relying
+on `mimetypes`' extension-based guess (pymupdf4llm's default format is
+`.png`). `_EXTRACTOR_ALGO_VERSION` bumped `algo-5` → `algo-6`; a new
+`images.pdf` fixture (one embedded solid-color raster, deterministic
+pixel data, no bookmarks) exercises the whole path in its golden
+snapshot; the other four snapshots were re-verified byte-identical when
+routed through the same image-aware extraction call with zero images
+present.
+
+**Prompts v2** (`backend/prompts/v2/`): all four prompts (`lesson`,
+`cards`, `quiz`, `chat`) gain one added rule — write math as LaTeX
+(`$...$` inline, `$$...$$` display), never raw HTML — copied otherwise
+unchanged from v1. `load_prompt`'s "always the highest `vN` present"
+contract picks v2 up automatically. Expected and desired side effect:
+every section with an existing `lesson_md` now reads `lesson_stale=true`
+against the new prompt version (`parse_prompt_version` numeric comparison
+against the section's stored `lesson_prompt_version`), nudging a
+regenerate — the intended mechanism, not a bug.
+
+**Classification narrowing** (`app/pipeline/outline_detect.py`,
+supersedes ADR-017's classification rule): a real-book verification pass
+against ADR-017's original regex found bare `problems` misclassifying
+ordinary lesson titles ("Age Problems", "Distance, Rate, and Time
+Problems") as practice sheets — a lesson misfiled as practice is worse
+than a worksheet shown as content, so bare `problems` no longer counts on
+its own. Final practice pattern: `practice | exercises? | problem sets? |
+review questions | worksheets?` (added `worksheet(s)` as a new signal,
+kept `problem set(s)` as the only way "problem(s)" still counts). Re-run
+against the same real 489-page textbook: practice count dropped from 79
+to 76, content rose from 91 to 94 (exactly the three reclassified
+titles), answer-key count (11) and chapter count (11) unchanged. No
+extractor-version bump needed on its own — classification is pure
+title-metadata, not extraction — but folded into the same `algo-6`
+snapshot regeneration since it was happening anyway.

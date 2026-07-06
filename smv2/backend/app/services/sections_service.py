@@ -44,6 +44,8 @@ def list_sections(course_id: str) -> list[dict[str, Any]]:
                     "lesson_status": s.lesson_status,
                     "has_content": bool(body.strip()),
                     "word_count": len(body.split()),
+                    "kind": s.kind,
+                    "chapter_label": s.chapter_label,
                 }
             )
         return result
@@ -81,6 +83,8 @@ def get_section(section_id: str) -> dict[str, Any] | None:
             "lesson_model": s.lesson_model,
             "lesson_prompt_version": s.lesson_prompt_version,
             "extractor_version": s.extractor_version,
+            "kind": s.kind,
+            "chapter_label": s.chapter_label,
             "created_at": s.created_at,
             "updated_at": s.updated_at,
         }

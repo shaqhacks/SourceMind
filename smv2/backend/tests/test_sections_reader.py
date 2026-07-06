@@ -17,10 +17,13 @@ def test_list_sections_shape(client, ingest_course):
             "lesson_status",
             "has_content",
             "word_count",
+            "kind",
+            "chapter_label",
         }
         assert s["lesson_status"] == "none"
         assert s["has_content"] is True
         assert s["word_count"] > 0
+        assert s["kind"] == "content"
 
 
 def test_list_sections_404_for_missing_course(client):

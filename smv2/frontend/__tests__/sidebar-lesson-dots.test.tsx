@@ -14,6 +14,8 @@ function makeSection(overrides: Partial<ReaderSection> = {}): ReaderSection {
     lesson_status: "none",
     has_content: true,
     word_count: 100,
+    kind: "content",
+    chapter_label: null,
     ...overrides,
   };
 }
@@ -26,6 +28,7 @@ describe("Sidebar lesson status dots", () => {
   it("labels a dot from the section's own lesson_status", () => {
     render(
       <Sidebar
+        courseId="course-1"
         sections={[makeSection({ lesson_status: "ready" })]}
         activeSectionId="sec-1"
         onSelect={vi.fn()}
@@ -38,6 +41,7 @@ describe("Sidebar lesson status dots", () => {
   it("prefers a lessonStatusOverrides entry over the section's own lesson_status", () => {
     render(
       <Sidebar
+        courseId="course-1"
         sections={[makeSection({ lesson_status: "none" })]}
         activeSectionId="sec-1"
         onSelect={vi.fn()}
@@ -52,6 +56,7 @@ describe("Sidebar lesson status dots", () => {
   it("shows the synthetic stale label, which list_sections itself never carries", () => {
     render(
       <Sidebar
+        courseId="course-1"
         sections={[makeSection({ lesson_status: "ready" })]}
         activeSectionId="sec-1"
         onSelect={vi.fn()}

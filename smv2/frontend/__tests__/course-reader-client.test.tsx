@@ -10,6 +10,7 @@ import {
   getProgress,
   getSection,
   listCards,
+  listChapters,
   listSections,
   saveProgress,
   type CourseOut,
@@ -38,6 +39,7 @@ vi.mock("@/lib/api/client", () => ({
   listCards: vi.fn(),
   findActiveCardsJob: vi.fn(),
   generateCards: vi.fn(),
+  listChapters: vi.fn(),
 }));
 
 const mockedGetCourse = vi.mocked(getCourse);
@@ -48,6 +50,7 @@ const mockedSaveProgress = vi.mocked(saveProgress);
 const mockedGetLlmUsage = vi.mocked(getLlmUsage);
 const mockedListCards = vi.mocked(listCards);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
+const mockedListChapters = vi.mocked(listChapters);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
@@ -72,6 +75,8 @@ function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
     lesson_status: "none",
     has_content: true,
     word_count: 100,
+    kind: "content",
+    chapter_label: null,
     ...overrides,
   };
 }
@@ -94,6 +99,8 @@ function makeSectionDetail(id: string) {
     order_index: id === "sec-2" ? 1 : 0,
     page_start: 1,
     page_end: 5,
+    kind: "content" as const,
+    chapter_label: null,
     body_md: `Body for ${id}`,
     content_hash: "hash",
     lesson_md: null,
@@ -117,6 +124,7 @@ describe("CourseReaderClient", () => {
     );
     mockedListCards.mockResolvedValue(ok([]));
     mockedFindActiveCardsJob.mockResolvedValue(null);
+    mockedListChapters.mockResolvedValue(ok([]));
   });
 
   afterEach(() => {

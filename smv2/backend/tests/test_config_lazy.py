@@ -39,3 +39,56 @@ def test_skip_front_matter_is_read_lazily(monkeypatch):
 
     monkeypatch.setenv("SMV2_SKIP_FRONT_MATTER", "1")
     assert config.skip_front_matter() is True
+
+
+def _write_secrets(tmp_path, monkeypatch, contents: str) -> None:
+    monkeypatch.setenv("SMV2_DATA_DIR", str(tmp_path))
+    (tmp_path / "secrets.toml").write_text(contents)
+
+
+def test_anthropic_api_key_none_when_neither_env_nor_file_set(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("SMV2_DATA_DIR", str(tmp_path))
+    assert config.anthropic_api_key() is None
+
+
+def test_anthropic_api_key_falls_back_to_secrets_file_when_env_absent(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _write_secrets(tmp_path, monkeypatch, 'anthropic_api_key = "sk-from-file"\n')
+    assert config.anthropic_api_key() == "sk-from-file"
+
+
+def test_anthropic_api_key_env_takes_precedence_over_secrets_file(tmp_path, monkeypatch):
+    _write_secrets(tmp_path, monkeypatch, 'anthropic_api_key = "sk-from-file"\n')
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
+    assert config.anthropic_api_key() == "sk-from-env"
+
+
+def test_anthropic_api_key_malformed_toml_returns_none_not_crash(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _write_secrets(tmp_path, monkeypatch, "this is not valid toml {{{\n")
+    assert config.anthropic_api_key() is None
+
+
+def test_anthropic_api_key_missing_file_returns_none(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("SMV2_DATA_DIR", str(tmp_path))  # directory exists, no secrets.toml in it
+    assert config.anthropic_api_key() is None
+
+
+def test_ollama_base_url_falls_back_to_secrets_file_when_env_absent(tmp_path, monkeypatch):
+    monkeypatch.delenv("SMV2_OLLAMA_BASE_URL", raising=False)
+    _write_secrets(tmp_path, monkeypatch, 'ollama_base_url = "http://file-configured:11434"\n')
+    assert config.ollama_base_url() == "http://file-configured:11434"
+
+
+def test_ollama_base_url_env_takes_precedence_over_secrets_file(tmp_path, monkeypatch):
+    _write_secrets(tmp_path, monkeypatch, 'ollama_base_url = "http://file-configured:11434"\n')
+    monkeypatch.setenv("SMV2_OLLAMA_BASE_URL", "http://env-configured:11434")
+    assert config.ollama_base_url() == "http://env-configured:11434"
+
+
+def test_ollama_base_url_default_when_neither_set(tmp_path, monkeypatch):
+    monkeypatch.delenv("SMV2_OLLAMA_BASE_URL", raising=False)
+    monkeypatch.setenv("SMV2_DATA_DIR", str(tmp_path))
+    assert config.ollama_base_url() == "http://localhost:11434"

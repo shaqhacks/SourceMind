@@ -15,10 +15,12 @@ from app.llm.limiter import LLMBusyError
 from app.routers import (
     assets,
     cards,
+    chapters,
     chat,
     courses,
     export,
     health,
+    images,
     ingest,
     jobs,
     lessons,
@@ -75,6 +77,8 @@ def create_app() -> FastAPI:
     app.include_router(ingest.router)
     app.include_router(sections.router)
     app.include_router(sections.section_router)
+    app.include_router(chapters.router)
+    app.include_router(images.router)
     app.include_router(export.router)
     app.include_router(lessons.router)
     app.include_router(llm_usage.router)

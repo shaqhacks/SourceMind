@@ -4,6 +4,8 @@ from pathlib import Path
 
 from app.pipeline.extract import extract_heading_candidates, extract_markdown_pages, get_toc, open_pdf
 from app.pipeline.outline_detect import (
+    assign_chapter_labels,
+    classify_section_kind,
     detect_sections,
     first_content_page_index,
     front_matter_bookmark_titles,
@@ -634,3 +636,122 @@ def test_detect_sections_no_bookmarks_pdf_still_falls_back_to_windows():
     sections = _detect_sections_for_fixture("no_bookmarks.pdf")
     assert len(sections) == 1
     assert sections[0].title == "Pages 1–10"
+
+
+# --- ADR-017: section kind + chapter grouping -------------------------------
+
+
+def test_classify_section_kind_detects_practice_titles():
+    for title in [
+        "0.1 Practice - Integers",
+        "Exercises",
+        "Exercise Set 3",
+        "Practice Problems",
+        "Chapter 2 Review Questions",
+        "Problem Set 4",
+        "Problem Sets",
+        "Worksheet 3",
+        "Worksheets",
+    ]:
+        assert classify_section_kind(title) == "practice", title
+
+
+def test_classify_section_kind_bare_problems_no_longer_matches():
+    """Regression: bare "problems" used to match, misfiling ordinary lesson
+    titles that just use "problems" as a topic word (age problems, word
+    problems, distance problems...) as practice sheets. Only "problem
+    set(s)" counts now -- a lesson misfiled as practice is worse than a
+    worksheet shown as content.
+    """
+    assert classify_section_kind("Solving Linear Equations - Age Problems") == "content"
+    assert classify_section_kind("Distance, Rate, and Time Problems") == "content"
+    assert classify_section_kind("Word Problems") == "content"
+    # Still correctly practice -- matches "Practice", not "Problems".
+    assert classify_section_kind("1.10 Practice - Distance, Rate, and Time Problems") == "practice"
+
+
+def test_classify_section_kind_detects_answer_key_titles():
+    for title in ["Answers - Chapter 8", "Answer Key", "Answers", "Full Answer Key for Unit 2"]:
+        assert classify_section_kind(title) == "answers", title
+
+
+def test_classify_section_kind_defaults_to_content():
+    for title in ["Chapter 1: Foundations", "Pre-Algebra - Integers", "Introduction"]:
+        assert classify_section_kind(title) == "content", title
+
+
+def test_classify_section_kind_answers_word_must_be_first_or_answer_key_phrase():
+    """"Answers" only counts when it opens the title, or "answer key"
+    appears anywhere -- a section that merely DISCUSSES answers midway
+    through its title shouldn't be misclassified.
+    """
+    assert classify_section_kind("Chapter 5: Checking Your Answers") == "content"
+    assert classify_section_kind("The Answer Key Explained") == "answers"
+
+
+def test_assign_chapter_labels_marker_section_labels_itself():
+    titles = ["Chapter 1: Foundations", "Chapter 2: Structures"]
+    assert assign_chapter_labels(titles) == ["Chapter 1: Foundations", "Chapter 2: Structures"]
+
+
+def test_assign_chapter_labels_nearest_preceding_marker_wins():
+    titles = ["Chapter 1: Foundations", "0.1 Practice", "0.2 Practice", "Chapter 2: Structures", "2.1 Practice"]
+    assert assign_chapter_labels(titles) == [
+        "Chapter 1: Foundations",
+        "Chapter 1: Foundations",
+        "Chapter 1: Foundations",
+        "Chapter 2: Structures",
+        "Chapter 2: Structures",
+    ]
+
+
+def test_assign_chapter_labels_backfills_content_before_first_marker():
+    titles = ["Title Page", "Preface", "Chapter 1: Foundations", "0.1 Practice"]
+    assert assign_chapter_labels(titles) == [
+        "Chapter 1: Foundations",
+        "Chapter 1: Foundations",
+        "Chapter 1: Foundations",
+        "Chapter 1: Foundations",
+    ]
+
+
+def test_assign_chapter_labels_all_none_when_no_marker_at_all():
+    titles = ["Introduction", "Pages 1-12", "Pages 13-24"]
+    assert assign_chapter_labels(titles) == [None, None, None]
+
+
+def test_assign_chapter_labels_answer_key_override_beats_position():
+    """An answer key at the book's end, naming an earlier chapter in its
+    own title, must be grouped with the chapter it names -- not the one it
+    physically follows.
+    """
+    titles = [
+        "Chapter 1: Foundations",
+        "Chapter 2: Structures",
+        "Chapter 3: Applications",
+        "Answers - Chapter 1",
+    ]
+    assert assign_chapter_labels(titles) == [
+        "Chapter 1: Foundations",
+        "Chapter 2: Structures",
+        "Chapter 3: Applications",
+        "Chapter 1: Foundations",
+    ]
+
+
+def test_assign_chapter_labels_answer_key_override_synthesizes_label_when_no_matching_marker():
+    """The referenced chapter number doesn't correspond to any detected
+    marker section -- falls back to a synthesized "Chapter N" label rather
+    than reverting to the (wrong) position-based one.
+    """
+    titles = ["Chapter 1: Foundations", "Answers - Chapter 9"]
+    assert assign_chapter_labels(titles) == ["Chapter 1: Foundations", "Chapter 9"]
+
+
+def test_assign_chapter_labels_roman_numeral_marker():
+    titles = ["Chapter IV: Something", "Practice Set"]
+    assert assign_chapter_labels(titles) == ["Chapter IV: Something", "Chapter IV: Something"]
+
+
+def test_assign_chapter_labels_empty_list():
+    assert assign_chapter_labels([]) == []

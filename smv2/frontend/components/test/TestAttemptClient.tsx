@@ -152,6 +152,20 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
     mainContent = (
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
         <h2 className="text-lg font-semibold">Score: {Math.round(result.score * 100)}%</h2>
+        {result.added_card_ids.length > 0 && (
+          <div
+            role="status"
+            className="flex items-center justify-between gap-3 rounded-md border border-accent/30 bg-accent/5 px-4 py-3 text-sm"
+          >
+            <span>
+              {result.added_card_ids.length} missed concept
+              {result.added_card_ids.length === 1 ? "" : "s"} added to your reviews.
+            </span>
+            <Link href="/review" className="shrink-0 font-medium text-accent underline">
+              Go to review
+            </Link>
+          </div>
+        )}
         <ul className="flex flex-col gap-6">
           {result.results.map((questionResult, index) => {
             const question = attempt.questions[index];

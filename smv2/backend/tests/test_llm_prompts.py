@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.llm.prompts import parse_prompt_version
+from app.llm.prompts import load_prompt, parse_prompt_version
 
 
 def test_parse_prompt_version_extracts_the_integer():
@@ -19,3 +19,15 @@ def test_parse_prompt_version_v9_less_than_v10_numerically():
     assert "v9" > "v10"  # sanity: confirms the string comparison IS the trap
     assert parse_prompt_version("v9") < parse_prompt_version("v10")
     assert not parse_prompt_version("v10") < parse_prompt_version("v9")
+
+
+def test_load_prompt_picks_v2_now_that_it_exists():
+    """v2 adds the LaTeX-math instruction to all four prompts -- confirms
+    load_prompt's "always the highest vN present" contract actually picks
+    it up now that prompts/v2/ exists alongside v1.
+    """
+    for name in ["lesson", "cards", "quiz", "chat"]:
+        text, version = load_prompt(name)
+        assert version == "v2", name
+        assert "LaTeX" in text, name
+        assert "$" in text, name

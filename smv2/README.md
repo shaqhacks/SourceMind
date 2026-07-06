@@ -25,6 +25,10 @@ Deviations from the brief are recorded in [`docs/decisions.md`](./docs/decisions
 cd backend && uv run pytest  # backend tests only
 ```
 
+API keys: set `ANTHROPIC_API_KEY` in the environment, or copy
+[`secrets.toml.example`](./secrets.toml.example) to `data/secrets.toml` and
+fill it in (env always takes precedence when both are present).
+
 ## Layout
 
 ```

@@ -36,6 +36,9 @@ export type GradeCardOut = components["schemas"]["GradeCardOut"];
 export type ReviewSummaryOut = components["schemas"]["ReviewSummaryOut"];
 export type CourseReviewSummaryOut = components["schemas"]["CourseReviewSummaryOut"];
 export type GenerateTestOut = components["schemas"]["GenerateTestOut"];
+export type GenerateTestIn = components["schemas"]["GenerateTestIn"];
+export type ChapterOut = components["schemas"]["ChapterOut"];
+export type ChapterTestStatsOut = components["schemas"]["ChapterTestStatsOut"];
 export type TestAttemptOut = components["schemas"]["TestAttemptOut"];
 export type TestQuestionOut = components["schemas"]["TestQuestionOut"];
 export type TestAttemptSummaryOut = components["schemas"]["TestAttemptSummaryOut"];
@@ -204,6 +207,18 @@ export function exportCourseUrl(courseId: string): string {
   return `${API_BASE}/api/courses/${encodeURIComponent(courseId)}/export`;
 }
 
+/**
+ * Same rationale as exportCourseUrl: a plain <img src> resource URL is
+ * browser-native resource loading, not a request this app's ApiResult/status
+ * handling applies to. Markdown.tsx's gated image renderer calls this with
+ * the courseId/filename it parsed out of a body_md image reference — never
+ * with unvalidated input, since the caller only invokes this after matching
+ * the extracted-image src pattern.
+ */
+export function buildCourseImageUrl(courseId: string, filename: string): string {
+  return `${API_BASE}/api/courses/${encodeURIComponent(courseId)}/images/${encodeURIComponent(filename)}`;
+}
+
 function payloadCourseId(payload: { [key: string]: unknown } | null | undefined): string | null {
   return payload && typeof payload.course_id === "string" ? payload.course_id : null;
 }
@@ -356,11 +371,24 @@ export function getReviewSummary() {
   return request(client.GET("/api/review/summary"));
 }
 
-export function generateTest(courseId: string, sectionIds?: string[]) {
+/**
+ * Course-wide by default; pass exactly one of `sectionIds` (an explicit
+ * subset) or `chapterLabel` (a single chapter's own practice+content, minus
+ * answers sections — the backend excludes those from generation input) to
+ * scope it. Passing both is meaningless — the backend's GenerateTestIn
+ * doesn't define which one would win, so this is caller error.
+ */
+export function generateTest(
+  courseId: string,
+  options?: { sectionIds?: string[]; chapterLabel?: string },
+) {
+  const body: GenerateTestIn = {};
+  if (options?.sectionIds !== undefined) body.section_ids = options.sectionIds;
+  if (options?.chapterLabel !== undefined) body.chapter_label = options.chapterLabel;
   return request(
     client.POST("/api/courses/{course_id}/tests", {
       params: { path: { course_id: courseId } },
-      body: sectionIds === undefined ? {} : { section_ids: sectionIds },
+      body,
     }),
   );
 }
@@ -368,6 +396,16 @@ export function generateTest(courseId: string, sectionIds?: string[]) {
 export function listTests(courseId: string) {
   return request(
     client.GET("/api/courses/{course_id}/tests", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+/** Ordered chapters — sections split into content/practice/answers, plus
+ * each chapter's aggregate test_stats (null until it has an attempt). */
+export function listChapters(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/chapters", {
       params: { path: { course_id: courseId } },
     }),
   );

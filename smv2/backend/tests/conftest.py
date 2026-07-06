@@ -24,6 +24,12 @@ def _setup_isolated_env(tmp_path, monkeypatch, *, sample_course_enabled: bool = 
     monkeypatch.setenv("SMV2_WORKER_ENABLED", "0")
     monkeypatch.setenv("SMV2_BACKUPS_ENABLED", "0")
     monkeypatch.setenv("SMV2_SAMPLE_COURSE_ENABLED", "1" if sample_course_enabled else "0")
+    # SMV2_DATA_DIR above already guarantees no secrets.toml exists on disk
+    # for a test to accidentally read, but a real ANTHROPIC_API_KEY set in
+    # the developer's own shell would still leak in via os.environ and make
+    # provider-not-configured tests pass/fail depending on whose machine
+    # runs them — clear it explicitly so tests are deterministic everywhere.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     dispose_engine()
     init_db()
 

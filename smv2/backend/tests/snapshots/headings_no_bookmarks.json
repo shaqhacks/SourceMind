@@ -1,32 +1,56 @@
 {
   "first_40_lines": {
-    "section_0": "# **Chapter 1: Foundations**\n\nThis chapter introduces the foundational ideas the rest of\n\nthe book builds on, in plain deterministic fixture prose.\n\n\n\n\nFoundations continue with more ordinary body text on this\npage, long enough to read as genuine prose rather than a\nheading or a table of contents entry of any kind.\n\n\n\n\nMore foundations body text lives on this page before the\n\nlarge pull-quote below, which must NOT be detected as a\n\nheading despite its size, because it ends in a period.\n# **Deterministic fixtures make regressions visible.**\n\n\n\n\nFoundations closes out here with one more ordinary\nparagraph of body text before chapter 2 begins on the\nnext page.\n\n",
-    "section_1": "# **Chapter 2: Structures**\n\nA deliberately short chapter.\n# **Chapter 3: Applications**\n\n\nApplications begins immediately, sharing this same page\n\nwith the end of chapter 2 directly above it.\n\n",
-    "section_2": "Applications continues here with plain body text, long\nenough to read as genuine prose rather than a heading\ncandidate of any kind.\n\n\n\n\nMore applications body text on this page, still well\nunder the font-size threshold that would make it look\nlike a heading.\n\n\n\n\nApplications closes out here with one final ordinary\nparagraph before chapter 4 begins on the next page.\n\n",
-    "section_3": "# **Chapter 4: Practice**\n\nThe final chapter walks through worked practice problems\n\nusing plain deterministic prose, same as every chapter.\n\n\n\n\nPractice continues here with more ordinary body text,\nlong enough to read as genuine prose for this fixture.\n\n\n\n\nStill more practice body text on this page before the\nfixture reaches its final closing page.\n\n\n\n\nPractice closes out the fixture here with one last\nordinary paragraph of deterministic body text.\n\n"
+    "section_0": "# **Chapter 1: Foundations**\n\nThis chapter introduces the foundational ideas the rest of\n\nthe book builds on, in plain deterministic fixture prose.\n\n\n\n\nFoundations continue with more ordinary body text on this\npage, long enough to read as genuine prose rather than a\nheading or a table of contents entry of any kind.\n\n\n\n\nMore foundations body text lives on this page before the\n\nlarge pull-quote below, which must NOT be detected as a\n\nheading despite its size, because it ends in a period.\n# **Deterministic fixtures make regressions visible.**\n\n",
+    "section_1": "# **0.1 Practice - Foundations**\n\nA short practice sheet reinforcing the ideas from this\n\nchapter, in plain deterministic fixture prose.\n\n\n\n\nFoundations closes out here with one more ordinary\nparagraph of body text before chapter 2 begins on the\nnext page.\n\n",
+    "section_2": "# **Chapter 2: Structures**\n\nA deliberately short chapter.\n# **Chapter 3: Applications**\n\n\nApplications begins immediately, sharing this same page\n\nwith the end of chapter 2 directly above it.\n\n",
+    "section_3": "Applications continues here with plain body text, long\nenough to read as genuine prose rather than a heading\ncandidate of any kind.\n\n\n\n\nMore applications body text on this page, still well\nunder the font-size threshold that would make it look\nlike a heading.\n\n\n\n\nApplications closes out here with one final ordinary\nparagraph before chapter 4 begins on the next page.\n\n",
+    "section_4": "# **Chapter 4: Geometry**\n\nThe final chapter walks through worked geometry problems\n\nusing plain deterministic prose, same as every chapter.\n\n\n\n\nGeometry continues here with more ordinary body text,\nlong enough to read as genuine prose for this fixture.\n\n\n\n\nStill more geometry body text on this page before the\nfixture reaches its answer key.\n\n",
+    "section_5": "# **Answers - Chapter 1**\n\nA short answer key naming the chapter it belongs to,\n\neven though it physically sits at the end of the book.\n\n\n\n\nThe fixture closes out here with one last ordinary\nparagraph of deterministic body text.\n\n"
   },
   "outline": {
-    "section_count": 4,
+    "section_count": 6,
     "sections": [
       {
-        "page_end": 3,
+        "chapter_label": "Chapter 1: Foundations",
+        "kind": "content",
+        "page_end": 2,
         "page_start": 0,
         "title": "Chapter 1: Foundations"
       },
       {
+        "chapter_label": "Chapter 1: Foundations",
+        "kind": "practice",
         "page_end": 4,
-        "page_start": 4,
+        "page_start": 3,
+        "title": "0.1 Practice - Foundations"
+      },
+      {
+        "chapter_label": "Chapter 2: Structures",
+        "kind": "content",
+        "page_end": 5,
+        "page_start": 5,
         "title": "Chapter 2: Structures"
       },
       {
-        "page_end": 7,
-        "page_start": 5,
+        "chapter_label": "Chapter 3: Applications",
+        "kind": "content",
+        "page_end": 8,
+        "page_start": 6,
         "title": "Chapter 3: Applications"
       },
       {
+        "chapter_label": "Chapter 4: Geometry",
+        "kind": "content",
         "page_end": 11,
-        "page_start": 8,
-        "title": "Chapter 4: Practice"
+        "page_start": 9,
+        "title": "Chapter 4: Geometry"
+      },
+      {
+        "chapter_label": "Chapter 1: Foundations",
+        "kind": "answers",
+        "page_end": 13,
+        "page_start": 12,
+        "title": "Answers - Chapter 1"
       }
     ]
   }

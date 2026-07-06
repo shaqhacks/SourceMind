@@ -124,7 +124,7 @@ def test_extract_heading_candidates_reports_size_and_bold_per_line():
 
     by_text = {text.strip(): (page, size, bold) for page, text, size, bold in candidates}
     assert by_text["Chapter 1: Foundations"] == (0, 20.0, True)
-    assert by_text["Chapter 4: Practice"] == (8, 20.0, True)
+    assert by_text["Chapter 4: Geometry"] == (9, 20.0, True)
     # Ordinary body text is neither bold nor large.
     non_heading = next(
         (page, text, size, bold)
