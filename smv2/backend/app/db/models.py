@@ -90,6 +90,10 @@ class Asset(Base):
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="stored")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 'none' | 'converting' | 'ready' | 'failed' — pdf2htmlEX per-page HTML
+    # conversion state (ADR-020), a post-ingest enhancement job, separate
+    # from `status` (the PDF extraction state above).
+    html_status: Mapped[str] = mapped_column(String, nullable=False, default="none")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, onupdate=utcnow

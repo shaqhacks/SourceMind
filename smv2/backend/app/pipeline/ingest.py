@@ -33,7 +33,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.config import data_dir, pages_per_window
+from app.config import data_dir, html_conversion_enabled, pages_per_window
 from app.config import skip_front_matter as _skip_front_matter_enabled
 from app.db.identity import content_hash_for, normalize_text, section_id_for
 from app.db.models import Asset, ChatTurn, Chunk, Course, Job, Section, TestAttempt
@@ -48,6 +48,7 @@ from app.pipeline.extract import (
     open_pdf,
     rewrite_image_refs_to_api_path,
 )
+from app.pipeline.html_conversion import html_dir
 from app.pipeline.outline_detect import (
     assign_chapter_labels,
     classify_section_kind,
@@ -186,6 +187,20 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     images_dir = _images_dir(course_id)
     if images_dir.exists():
         shutil.rmtree(images_dir)
+
+    # Same REPLACED reasoning as images_dir above: pdf2htmlEX output
+    # (ADR-020) is a post-ingest enhancement. Unlike Section/Chunk, Asset
+    # rows are NEVER deleted/recreated here (assets persist across
+    # re-ingest — only their bookkeeping fields get updated below), so
+    # html_status does NOT reset on its own just because the directory
+    # was wiped; every asset's status is reset to 'none' explicitly so the
+    # DB never claims 'ready'/'converting' for html output that no longer
+    # exists on disk.
+    html_dir_path = html_dir(course_id)
+    if html_dir_path.exists():
+        shutil.rmtree(html_dir_path)
+    for asset in assets:
+        asset.html_status = "none"
 
     window = pages_per_window()
     skip_fm = _skip_front_matter_enabled()
@@ -420,5 +435,12 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
 
     any_extracted_ok = any(a.status == "extracted" for a in assets)
     course.status = "ready" if any_extracted_ok else "ingest_failed"
+    # Fire-and-forget enhancement (ADR-020): a separate durable job, added to
+    # THIS session so it rides along with the same commit as everything
+    # else above rather than needing its own round trip — ingest itself
+    # must never slow down or fail because this is unavailable/misbehaving,
+    # so this is nothing more than inserting a queued Job row.
+    if any_extracted_ok and html_conversion_enabled():
+        session.add(Job(type="convert_html", status="queued", payload={"course_id": course_id}))
     _report_progress_in_session(job, stage="done", pct=100, message="ingest complete")
     session.commit()

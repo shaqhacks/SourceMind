@@ -42,6 +42,7 @@ function makeAsset(overrides: Partial<AssetOut> = {}): AssetOut {
     content_type: "application/pdf",
     size_bytes: 1024,
     sha256: "abc",
+    html_status: "none",
     page_count: 10,
     status: "stored",
     error: null,

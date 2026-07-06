@@ -78,6 +78,7 @@ function makeAsset(filename: string) {
     sha256: "abc",
     page_count: 10,
     status: "uploaded",
+    html_status: "none" as const,
     error: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",

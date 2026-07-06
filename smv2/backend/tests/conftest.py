@@ -30,6 +30,15 @@ def _setup_isolated_env(tmp_path, monkeypatch, *, sample_course_enabled: bool = 
     # provider-not-configured tests pass/fail depending on whose machine
     # runs them — clear it explicitly so tests are deterministic everywhere.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # html_conversion_enabled()'s 'auto' default is True on any machine with
+    # a `docker` binary on PATH — left alone, every successful ingest_course
+    # call would enqueue a REAL convert_html job that (a) tries to invoke
+    # Docker from a test and (b) sits in the queue and gets claimed by the
+    # NEXT run_due_jobs_once() call instead of the job a test actually
+    # wants (claim order is oldest-queued-first), silently breaking any
+    # test that ingests more than once. Force it off by default; tests of
+    # the conversion feature itself override this explicitly.
+    monkeypatch.setenv("SMV2_HTML_CONVERSION", "0")
     dispose_engine()
     init_db()
 

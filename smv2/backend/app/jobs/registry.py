@@ -15,10 +15,11 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Course, Job, Section
+from app.db.models import Asset, Course, Job, Section
 from app.pipeline.cards_generation import run_card_generation
 from app.pipeline.embedding import run_embed_course
 from app.pipeline.generation import run_lesson_generation
+from app.pipeline.html_conversion import run_html_conversion
 from app.pipeline.ingest import run_ingest
 from app.pipeline.quiz_generation import run_test_generation
 from app.services.backup_service import run_backup
@@ -81,6 +82,14 @@ def _embed_course_handler(session: Session, job: Job) -> dict[str, Any]:
     return {"course_id": course_id, **extra}
 
 
+def _convert_html_handler(session: Session, job: Job) -> dict[str, Any]:
+    course_id = (job.payload or {}).get("course_id")
+    if not course_id:
+        raise ValueError("convert_html job payload missing course_id")
+    extra = run_html_conversion(session, job, course_id)
+    return {"course_id": course_id, **extra}
+
+
 JOB_HANDLERS: dict[str, JobHandler] = {
     "noop": _noop_handler,
     "backup": _backup_handler,
@@ -89,6 +98,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "generate_cards": _generate_cards_handler,
     "generate_test": _generate_test_handler,
     "embed_course": _embed_course_handler,
+    "convert_html": _convert_html_handler,
 }
 
 
@@ -141,8 +151,32 @@ def _generate_lesson_on_orphan(session: Session, job: Job) -> None:
         section.lesson_status = "failed"
 
 
+def _convert_html_on_orphan(session: Session, job: Job) -> None:
+    """Mirrors _ingest_on_orphan/_generate_lesson_on_orphan: Asset.html_status
+    is a user-visible status the frontend polls, so it must not be left
+    stuck on 'converting' after an orphan event. Requeued: leave assets
+    already 'converting' as-is, the retry picks them back up. Exhausted:
+    flip any still-'converting' asset to 'failed' so the UI stops showing
+    a stale spinner for a conversion that will never resume.
+    """
+    default_on_orphan(session, job)
+    if job.status != "failed":
+        return
+    course_id = (job.payload or {}).get("course_id")
+    if not course_id:
+        return
+    stuck = (
+        session.query(Asset)
+        .filter(Asset.course_id == course_id, Asset.html_status == "converting")
+        .all()
+    )
+    for asset in stuck:
+        asset.html_status = "failed"
+
+
 ON_ORPHAN_HOOKS: dict[str, OrphanHook] = {
     "noop": default_on_orphan,
     "ingest": _ingest_on_orphan,
     "generate_lesson": _generate_lesson_on_orphan,
+    "convert_html": _convert_html_on_orphan,
 }

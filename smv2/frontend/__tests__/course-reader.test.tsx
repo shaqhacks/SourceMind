@@ -11,6 +11,7 @@ import {
   getLessonEstimate,
   getLlmUsage,
   getSection,
+  listAssets,
   listCards,
   listChapters,
   listSections,
@@ -40,7 +41,12 @@ vi.mock("@/lib/api/client", () => ({
   listSections: vi.fn(),
   editOutline: vi.fn(),
   listChapters: vi.fn(),
+  listAssets: vi.fn(),
   buildAssetFileUrl: vi.fn((assetId: string) => `https://mock/api/assets/${assetId}/file`),
+  buildAssetHtmlPageUrl: vi.fn(
+    (assetId: string, page: number) => `https://mock/api/assets/${assetId}/html/${page}`,
+  ),
+  getAssetHtmlManifest: vi.fn(),
 }));
 
 // The reader tree imports PdfPagesView, which imports pdfjs-dist at
@@ -63,6 +69,7 @@ const mockedListSections = vi.mocked(listSections);
 const mockedEditOutline = vi.mocked(editOutline);
 const mockedListChapters = vi.mocked(listChapters);
 const mockedGetDocument = vi.mocked(getDocument);
+const mockedListAssets = vi.mocked(listAssets);
 
 // A minimal 3-section fixture keeps these assertions about
 // active-chapter bookkeeping (not content) easy to follow.
@@ -160,6 +167,11 @@ describe("CourseReader", () => {
       ok({ calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 }),
     );
     mockedListCards.mockResolvedValue(ok([]));
+    // Default: no assets have an enhanced (html) view yet, so "pages"
+    // mode falls back to plain PdfPagesView — matches existing
+    // expectations in every test that doesn't specifically test the
+    // html_status resolution (see the "enhanced pages" describe block).
+    mockedListAssets.mockResolvedValue(ok([]));
     mockedFindActiveCardsJob.mockResolvedValue(null);
     mockedListSections.mockResolvedValue(ok(COURSE.sections));
     mockedEditOutline.mockResolvedValue(ok(COURSE.sections));

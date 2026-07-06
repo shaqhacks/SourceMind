@@ -10,7 +10,7 @@ import type { ReaderSection, SectionBodyState, ViewMode } from "@/lib/reader/typ
 
 import CardsCTA from "./CardsCTA";
 import LessonPane, { type LessonDisplayStatus } from "./LessonPane";
-import PdfPagesView from "./PdfPagesView";
+import PagesView from "./PagesView";
 
 export interface ReadingColumnProps {
   courseId: string;
@@ -98,11 +98,12 @@ export default function ReadingColumn({
         ) : mode === "pages" ? (
           section.asset_id && section.page_start !== null && section.page_end !== null ? (
             // Keyed on section id: switching chapters is a fresh document
-            // view, not a state transition (PdfPagesView's own per-assetId
-            // document cache means this remount is cheap when the new
-            // section shares the same book).
-            <PdfPagesView
+            // view, not a state transition (PdfPagesView/HtmlPagesView's
+            // own per-assetId caches mean this remount is cheap when the
+            // new section shares the same book).
+            <PagesView
               key={section.id}
+              courseId={courseId}
               assetId={section.asset_id}
               pageStart={section.page_start}
               pageEnd={section.page_end}

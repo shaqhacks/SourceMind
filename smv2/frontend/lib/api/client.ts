@@ -229,6 +229,40 @@ export function buildAssetFileUrl(assetId: string): string {
   return `${API_BASE}/api/assets/${encodeURIComponent(assetId)}/file`;
 }
 
+/**
+ * Same rationale as buildAssetFileUrl: an <iframe src> resource URL is
+ * browser-native resource loading, not a request this app's ApiResult
+ * handling applies to. Serves one pdf2htmlEX-converted page's
+ * self-contained HTML (the "enhanced" pages view).
+ */
+export function buildAssetHtmlPageUrl(assetId: string, pageNumber: number): string {
+  return `${API_BASE}/api/assets/${encodeURIComponent(assetId)}/html/${pageNumber}`;
+}
+
+/**
+ * Manifest for the enhanced (pdf2htmlEX HTML) pages view — present only
+ * once conversion has finished (404 otherwise). get_asset_html_manifest
+ * returns a plain JSONResponse with no response_model, so the generated
+ * type for its body is `unknown`; the real, stable field names
+ * (pages/width_px/height_px) are pinned here and verified directly
+ * against app/pipeline/html_conversion.py's own manifest-writing code
+ * rather than assumed.
+ */
+export interface AssetHtmlManifest {
+  pages: number;
+  width_px: number;
+  height_px: number;
+}
+
+export async function getAssetHtmlManifest(assetId: string): Promise<ApiResult<AssetHtmlManifest>> {
+  const { data, error, status, ok } = await request<unknown>(
+    client.GET("/api/assets/{asset_id}/html/manifest", {
+      params: { path: { asset_id: assetId } },
+    }),
+  );
+  return { data: data as AssetHtmlManifest | undefined, error, status, ok };
+}
+
 function payloadCourseId(payload: { [key: string]: unknown } | null | undefined): string | null {
   return payload && typeof payload.course_id === "string" ? payload.course_id : null;
 }

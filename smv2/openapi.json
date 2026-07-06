@@ -31,6 +31,16 @@
             "title": "Filename",
             "type": "string"
           },
+          "html_status": {
+            "enum": [
+              "none",
+              "converting",
+              "ready",
+              "failed"
+            ],
+            "title": "Html Status",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -74,6 +84,7 @@
           "page_count",
           "status",
           "error",
+          "html_status",
           "created_at",
           "updated_at"
         ],
@@ -1713,6 +1724,95 @@
           }
         },
         "summary": "Get Asset File",
+        "tags": [
+          "assets"
+        ]
+      }
+    },
+    "/api/assets/{asset_id}/html/manifest": {
+      "get": {
+        "operationId": "get_asset_html_manifest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Asset Html Manifest",
+        "tags": [
+          "assets"
+        ]
+      }
+    },
+    "/api/assets/{asset_id}/html/{page}": {
+      "get": {
+        "operationId": "get_asset_html_page",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Asset Html Page",
         "tags": [
           "assets"
         ]

@@ -496,3 +496,112 @@ request against the endpoint). No fallback/plain-full-file code path was
 needed. This matters for `pdf.js`, which uses range requests for
 progressive loading of large PDFs rather than fetching the whole file
 upfront.
+
+## ADR-020 — pdf2htmlEX: a Docker-gated post-ingest enhancement over the pdf.js view (2026-07-06)
+
+Owner request: better-than-pdf.js rendering (real selectable text, no
+client-side PDF.js worker cost per page) as an *optional* enhancement, not
+a replacement for ADR-019's PDF-serving view. What this buys: pdf2htmlEX
+produces real HTML+CSS per page — sharper at any zoom level than a
+rasterized pdf.js canvas, and the text layer is genuinely selectable/
+searchable rather than an invisible overlay approximating glyph
+positions. The cost is a heavyweight native dependency (poppler + custom
+patches, not pip/npm-installable) that this project has no interest in
+building/maintaining directly — Docker isolates that entirely, at the
+price of the feature simply not existing on a box without Docker. Hence
+"auto" detection (`html_conversion_enabled()`, `smv2-dev-loop` §6) rather
+than a hard dependency: the reader degrades to the ADR-019 pdf.js view
+with zero code path difference, not an error state.
+
+**No canonical Docker image exists** — worth recording since the original
+task assumed one did. The pdf2htmlEX GitHub README never mentions Docker
+at all; its own in-repo Dockerfile does an unpinned `git clone` of
+`master` (not reproducible). Of the two pre-built Docker Hub candidates,
+`bwits/pdf2htmlex:0.14.6` (the more-pulled one) fails to pull at all on a
+modern Docker daemon — its manifest uses a format containerd 2.1+
+rejects, verified by actually attempting the pull.
+`pdf2htmlex/pdf2htmlex:0.18.8.rc2-master-20200820-alpine-3.12.0-x86_64`
+(~2020, x86_64-only, no arm64 build) is the one actually verified
+pullable and runnable, so it's the default; `docker_image()` is
+overridable via `SMV2_HTML_DOCKER_IMAGE` for a deployer's own better-
+pinned build. Never bump the default to `:latest`.
+
+**`--split-pages` does not produce standalone pages** — the second wrong
+assumption in the original task, caught by actually running a real
+conversion against the pulled image rather than trusting its `--help`
+text alone. Split-page output (`page{N}.html`) is a bare content fragment
+— no `<html>`/`<head>`/`<style>` wrapper, no `<link>` to any stylesheet —
+meant to be injected into `index.html`'s own DOM by its bundled JS for
+progressive loading in pdf2htmlEX's OWN multi-page viewer, not served
+standalone. The actual layout/typography rules (page dimensions, font
+metrics, positioning — everything a fragment needs to render correctly)
+live in one small `shared.css` (`--css-filename shared.css --embed-css 0`);
+the rest of the tool's default CSS (`base.min.css`/`fancy.min.css`) is
+viewer-chrome (sidebar, loading spinner) for its own reader, irrelevant to
+an independently-served page. `app.pipeline.html_conversion._wrap_page_fragment`
+inlines `shared.css` into a real `<style>` tag around each fragment at
+conversion time, producing the standalone file that's actually served —
+this wrapping is not optional post-processing, it's required for the
+served page to render at all.
+
+**No script ever gets wrapped in**, which is why the CSP
+(`default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src
+data:`) omits `script-src` entirely rather than needing to explicitly
+disable it: per-page fragments never contained a `<script>` tag to begin
+with (JS lives only in `index.html`, never duplicated into split pages),
+and the wrapper only ever adds `shared.css`, never JS — verified by
+asserting `"<script" not in page1` in the test suite, not just assumed
+from reading `--help`. This sidesteps a real upstream limitation: pdf2htmlEX's
+own JS is load-bearing for font-rendering correctness in its normal mode
+(disabling it is documented to break fonts), so if fragments *had* needed
+JS, this CSP would have broken rendering — the fragments' actual structure
+makes that a non-issue rather than something this design had to work
+around.
+
+**Why a post-ingest job, not part of ingest**: ingest must stay fast and
+zero-LLM (ADR-010) regardless of whether this optional, Docker-dependent,
+possibly-slow (spins up a container per asset) enhancement succeeds,
+fails, or isn't even enabled. `run_ingest` enqueues `convert_html`
+fire-and-forget, in the SAME commit as `course.status = "ready"`
+(`session.add(Job(...))` before the final commit, no `jobs_service`
+import needed — `Job` is already imported in `ingest.py`), only when
+`any_extracted_ok and html_conversion_enabled()`. Per-asset isolation
+mirrors ingest's own per-asset extraction isolation: one asset's
+conversion failing sets only that asset's `html_status='failed'`, the job
+continues to the next. A missing/failed image pull is a whole-job failure
+(nothing to convert without the image at all) with a friendly,
+Docker-mentioning error message, distinct from a per-asset conversion
+failure. `Asset.html_status` is a user-visible status field the frontend
+polls, so `convert_html` gets a custom orphan hook
+(`_convert_html_on_orphan`, mirroring `_ingest_on_orphan`) rather than the
+default: an exhausted retry flips any still-`'converting'` asset to
+`'failed'` so the UI never shows a stale spinner.
+
+**Test-isolation catch, the same class of bug as ADR-018's**: this
+sandbox happens to have a real `docker` binary on PATH, so
+`html_conversion_enabled()`'s `'auto'` default is `True` here unless
+overridden — left alone, every successful `ingest_course` call in the
+*entire pre-existing test suite* would have enqueued a real
+`convert_html` job. That job sits queued and, being older, gets claimed by
+the *next* `run_due_jobs_once()` call ahead of whatever job a test
+actually intended (claim order is oldest-created-first) — silently
+breaking any test that ingests more than once (three pre-existing
+re-ingest tests went red the moment this was wired in, with no exception
+thrown, just wrong content because the real re-ingest job never ran).
+Fixed the same way as ADR-018's `ANTHROPIC_API_KEY` leak:
+`tests/conftest.py::_setup_isolated_env` now forces
+`SMV2_HTML_CONVERSION=0` for every test by default; the tests that
+exercise this feature specifically override it back on. All Docker/
+subprocess calls (`_docker_image_present`/`_docker_pull`/`_docker_convert`)
+are separately mockable module-level functions specifically so the test
+suite never shells out to a real `docker` binary at all.
+
+**Manifest limitation, stated rather than silently accepted**: `{pages,
+width_px, height_px}` is one dimension pair per asset, taken from the
+PDF's first page via PyMuPDF (`page.rect.width/height`, matching
+pdf2htmlEX's own default unscaled-to-points rendering — verified
+numerically equal in a real conversion). A PDF with mixed page sizes
+(e.g. one landscape page in an otherwise-portrait book) would have every
+other page's actual dimensions misreported by this single pair. Not
+handled — flagged here as a known gap rather than silently designed
+around, since the spec asked for exactly this shape.

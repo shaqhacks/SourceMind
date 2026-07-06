@@ -3,17 +3,28 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from app.config import max_upload_bytes
 from app.schemas import AssetOut
-from app.services import assets_service, courses_service
+from app.services import assets_service, courses_service, html_pages_service
 from app.services.assets_service import (
     AssetFileMissingError,
     AssetNotFoundError,
     FileTooLargeError,
     UnsupportedFileTypeError,
 )
+
+# Applied to both the manifest and page-HTML responses: the served page
+# HTML is untrusted-ish (derived from a user-uploaded PDF) and rendered in
+# a sandboxed iframe on the frontend — default-src 'none' blocks scripts
+# entirely (the pages this endpoint serves never contain any: pdf2htmlEX's
+# --split-pages output is a bare content fragment, and app.pipeline.
+# html_conversion only ever inlines CSS into it, never JS), style-src
+# 'unsafe-inline' allows the inlined layout CSS, font-src/img-src data:
+# allow the base64-embedded fonts/background images pdf2htmlEX produces.
+_HTML_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:"
+_HTML_PAGE_HEADERS = {"Content-Security-Policy": _HTML_PAGE_CSP, "X-Frame-Options": "SAMEORIGIN"}
 
 router = APIRouter(prefix="/api/courses", tags=["assets"])
 asset_router = APIRouter(prefix="/api/assets", tags=["assets"])
@@ -86,3 +97,28 @@ def get_asset_file(asset_id: str) -> FileResponse:
         filename=_sanitize_download_filename(filename),
         content_disposition_type="inline",
     )
+
+
+@asset_router.get("/{asset_id}/html/manifest", operation_id="get_asset_html_manifest")
+def get_asset_html_manifest(asset_id: str) -> JSONResponse:
+    try:
+        manifest = html_pages_service.get_manifest(asset_id)
+    except html_pages_service.AssetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="asset not found") from exc
+    except html_pages_service.HtmlNotReadyError as exc:
+        raise HTTPException(status_code=404, detail="html conversion not ready") from exc
+    return JSONResponse(content=manifest, headers=_HTML_PAGE_HEADERS)
+
+
+@asset_router.get("/{asset_id}/html/{page}", operation_id="get_asset_html_page")
+def get_asset_html_page(asset_id: str, page: int) -> HTMLResponse:
+    try:
+        path = html_pages_service.resolve_page_path(asset_id, page)
+    except html_pages_service.AssetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="asset not found") from exc
+    except html_pages_service.HtmlNotReadyError as exc:
+        raise HTTPException(status_code=404, detail="html conversion not ready") from exc
+    except html_pages_service.HtmlPageNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="page not found") from exc
+
+    return HTMLResponse(content=path.read_text(encoding="utf-8"), headers=_HTML_PAGE_HEADERS)

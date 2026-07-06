@@ -68,6 +68,7 @@ class AssetOut(BaseModel):
     page_count: int | None
     status: str
     error: str | None
+    html_status: Literal["none", "converting", "ready", "failed"]
     created_at: datetime
     updated_at: datetime
 

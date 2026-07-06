@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import { buildAssetFileUrl } from "@/lib/api/client";
+import { useNearViewport } from "@/lib/hooks/useNearViewport";
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
 
 // The reader subtree this mounts into is already ssr:false (see
@@ -130,37 +131,8 @@ type PageStatus = "pending" | "rendered" | "error";
 function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // No IntersectionObserver support: fail open (treat as always visible)
-  // rather than never rendering — computed as the lazy initial state
-  // itself (support doesn't change mid-session) rather than a synchronous
-  // setState in the effect below, which react-hooks/set-state-in-effect
-  // flags as an avoidable cascading render.
-  const [nearViewport, setNearViewport] = useState(() => typeof IntersectionObserver === "undefined");
+  const nearViewport = useNearViewport(containerRef);
   const [status, setStatus] = useState<PageStatus>("pending");
-
-  // Lazy trigger: a 40-page section must not render 40 canvases up front.
-  // Default root (the browser viewport) is correct even though the reader
-  // scrolls inside a nested overflow-y-auto column — IntersectionObserver
-  // measures against each target's actual clipped screen rect, which
-  // already reflects ancestor scroll/overflow, so no explicit `root` is
-  // needed. Disconnects after the first hit: once a page has rendered it
-  // stays rendered, there's no un-rendering as it scrolls back out.
-  useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") return undefined;
-    const el = containerRef.current;
-    if (!el) return undefined;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setNearViewport(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "200px 0px" },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     if (!nearViewport) return undefined;

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import tomllib
 from pathlib import Path
 
@@ -178,3 +179,37 @@ def chat_history_turns() -> int:
 def sample_course_enabled() -> bool:
     raw = os.environ.get("SMV2_SAMPLE_COURSE_ENABLED", "1")
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def html_conversion_enabled() -> bool:
+    """'auto' (default): enabled iff a `docker` binary is on PATH — a
+    laptop/CI box with no Docker installed silently gets no HTML pages
+    rather than a hard failure. Explicit '0'/'1' (or false/true/no/yes/
+    off/on, matching every other bool accessor's tolerance) overrides the
+    auto-detection either way, e.g. to force it off on a box that has
+    Docker for unrelated reasons, or force it on against a remote Docker
+    daemon reachable via DOCKER_HOST even without a local `docker` binary.
+    """
+    raw = os.environ.get("SMV2_HTML_CONVERSION", "auto").strip().lower()
+    if raw == "auto":
+        return shutil.which("docker") is not None
+    return raw not in {"0", "false", "no", "off"}
+
+
+def docker_image() -> str:
+    """The pdf2htmlEX image `convert_html` runs. No actively-maintained
+    canonical image exists (verified against the pdf2htmlEX GitHub repo:
+    its README never mentions Docker at all, and its own in-repo
+    Dockerfile does an unpinned `git clone` of HEAD — not reproducible).
+    Of the two pre-built Docker Hub candidates, `bwits/pdf2htmlex:0.14.6`
+    fails to pull at all on a modern Docker daemon (its manifest uses a
+    format containerd 2.1+ rejects); `pdf2htmlex/pdf2htmlex:0.18.8.rc2-
+    master-20200820-alpine-3.12.0-x86_64` (~2020, x86_64-only, no arm64)
+    is the one actually verified pullable and runnable here, so it's the
+    default. Override via SMV2_HTML_DOCKER_IMAGE for a self-built,
+    better-pinned image — never bump this default to `:latest`.
+    """
+    return os.environ.get(
+        "SMV2_HTML_DOCKER_IMAGE",
+        "pdf2htmlex/pdf2htmlex:0.18.8.rc2-master-20200820-alpine-3.12.0-x86_64",
+    )
