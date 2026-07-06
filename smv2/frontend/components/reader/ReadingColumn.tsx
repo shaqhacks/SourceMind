@@ -6,12 +6,11 @@ import Link from "next/link";
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
 import { prefsToCssVars, type TypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
-import type { ReaderSection, SectionBodyState } from "@/lib/reader/types";
+import type { ReaderSection, SectionBodyState, ViewMode } from "@/lib/reader/types";
 
 import CardsCTA from "./CardsCTA";
 import LessonPane, { type LessonDisplayStatus } from "./LessonPane";
-
-export type ViewMode = "source" | "lesson";
+import PdfPagesView from "./PdfPagesView";
 
 export interface ReadingColumnProps {
   courseId: string;
@@ -95,6 +94,23 @@ export default function ReadingColumn({
             <ErrorBanner message={body.message} />
           ) : (
             <Markdown>{body.body}</Markdown>
+          )
+        ) : mode === "pages" ? (
+          section.asset_id && section.page_start !== null && section.page_end !== null ? (
+            // Keyed on section id: switching chapters is a fresh document
+            // view, not a state transition (PdfPagesView's own per-assetId
+            // document cache means this remount is cheap when the new
+            // section shares the same book).
+            <PdfPagesView
+              key={section.id}
+              assetId={section.asset_id}
+              pageStart={section.page_start}
+              pageEnd={section.page_end}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Original pages aren&apos;t available for this section.
+            </p>
           )
         ) : (
           // Keyed on section id: switching chapters while in lesson view is

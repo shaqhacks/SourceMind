@@ -12,6 +12,7 @@ def test_list_sections_shape(client, ingest_course):
             "id",
             "title",
             "order_index",
+            "asset_id",
             "page_start",
             "page_end",
             "lesson_status",

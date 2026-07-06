@@ -320,6 +320,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                     "id": section_id,
                     "title": bounds.title,
                     "order_index": order_index,
+                    "asset_id": item.asset.id,
                     "page_start": bounds.page_start,
                     "page_end": bounds.page_end,
                     "body_md": normalized,
@@ -378,6 +379,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
             # content_hash are never touched here.
             existing.title = data["title"]
             existing.order_index = data["order_index"]
+            existing.asset_id = data["asset_id"]
             existing.page_start = data["page_start"]
             existing.page_end = data["page_end"]
             existing.extractor_version = version_tag
@@ -391,6 +393,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                 course_id=course_id,
                 order_index=data["order_index"],
                 title=data["title"],
+                asset_id=data["asset_id"],
                 page_start=data["page_start"],
                 page_end=data["page_end"],
                 body_md=data["body_md"],

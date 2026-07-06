@@ -18,6 +18,7 @@ function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
     has_content: true,
     word_count: 100,
     kind: "content",
+    asset_id: null,
     chapter_label: null,
     ...overrides,
   };

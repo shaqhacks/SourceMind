@@ -62,6 +62,7 @@ function makeSectionDetail(overrides: Partial<SectionDetailOut> = {}): SectionDe
     page_end: 7,
     kind: "practice",
     chapter_label: "Chapter 1",
+    asset_id: null,
     body_md: "Practice question: what is 2+2?",
     content_hash: "hash",
     lesson_md: null,

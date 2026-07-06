@@ -1110,7 +1110,19 @@
         "type": "object"
       },
       "SectionDetailOut": {
+        "description": "page_start/page_end convention: see SectionOut's docstring above \u2014\nalready 1-based page numbers, ready to hand to a PDF viewer as-is.",
         "properties": {
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
           "body_md": {
             "title": "Body Md",
             "type": "string"
@@ -1245,6 +1257,7 @@
           "course_id",
           "title",
           "order_index",
+          "asset_id",
           "page_start",
           "page_end",
           "body_md",
@@ -1264,8 +1277,19 @@
         "type": "object"
       },
       "SectionOut": {
-        "description": "Reader list view \u2014 no body_md (can be large); use get_section for that.",
+        "description": "Reader list view \u2014 no body_md (can be large); use get_section for that.\n\npage_start/page_end here are already 1-based, inclusive page numbers\ninto asset_id's own PDF (not course-wide) \u2014 app.services.sections_service\nconverts from the DB's 0-based storage (app.pipeline.outline_detect's\nSectionBounds convention) via to_display_page() before this schema is\never built. That means a caller driving pdf.js (which numbers pages\n1-based) can pass this value straight through \u2014 do NOT add another +1\n\"to be safe,\" that would double-offset it.",
         "properties": {
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
           "chapter_label": {
             "anyOf": [
               {
@@ -1337,6 +1361,7 @@
           "id",
           "title",
           "order_index",
+          "asset_id",
           "page_start",
           "page_end",
           "lesson_status",
@@ -1652,6 +1677,47 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/assets/{asset_id}/file": {
+      "get": {
+        "description": "Serves the original uploaded PDF as-is, for the reader's\noriginal-PDF page view. Inline disposition (not attachment) so a\nbrowser embeds/views it (e.g. via pdf.js) instead of downloading it.",
+        "operationId": "get_asset_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Asset File",
+        "tags": [
+          "assets"
+        ]
+      }
+    },
     "/api/cards/{card_id}/grade": {
       "post": {
         "operationId": "grade_card",

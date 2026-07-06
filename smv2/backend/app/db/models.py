@@ -114,6 +114,15 @@ class Section(Base):
     )
     order_index: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
+    # Which uploaded PDF this section's text came from — lets the reader
+    # offer an original-PDF page view. NULL for sections created before this
+    # column existed (backfills only on the next re-ingest, never
+    # retroactively). page_start/page_end are already per-asset 1-based
+    # page numbers (not course-wide), so pdf.js can use them directly as
+    # page numbers for THIS asset — never re-derive or re-offset them.
+    asset_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("assets.id", ondelete="SET NULL"), nullable=True
+    )
     page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     body_md: Mapped[str] = mapped_column(Text, nullable=False)

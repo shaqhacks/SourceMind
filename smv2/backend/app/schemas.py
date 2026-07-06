@@ -79,11 +79,21 @@ class IngestStartOut(BaseModel):
 
 
 class SectionOut(BaseModel):
-    """Reader list view — no body_md (can be large); use get_section for that."""
+    """Reader list view — no body_md (can be large); use get_section for that.
+
+    page_start/page_end here are already 1-based, inclusive page numbers
+    into asset_id's own PDF (not course-wide) — app.services.sections_service
+    converts from the DB's 0-based storage (app.pipeline.outline_detect's
+    SectionBounds convention) via to_display_page() before this schema is
+    ever built. That means a caller driving pdf.js (which numbers pages
+    1-based) can pass this value straight through — do NOT add another +1
+    "to be safe," that would double-offset it.
+    """
 
     id: str
     title: str
     order_index: int
+    asset_id: str | None
     page_start: int | None
     page_end: int | None
     lesson_status: str
@@ -94,10 +104,14 @@ class SectionOut(BaseModel):
 
 
 class SectionDetailOut(BaseModel):
+    """page_start/page_end convention: see SectionOut's docstring above —
+    already 1-based page numbers, ready to hand to a PDF viewer as-is."""
+
     id: str
     course_id: str
     title: str
     order_index: int
+    asset_id: str | None
     page_start: int | None
     page_end: int | None
     body_md: str

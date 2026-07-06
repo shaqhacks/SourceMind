@@ -40,6 +40,17 @@ vi.mock("@/lib/api/client", () => ({
   findActiveCardsJob: vi.fn(),
   generateCards: vi.fn(),
   listChapters: vi.fn(),
+  buildAssetFileUrl: vi.fn(),
+}));
+
+// The reader tree imports PdfPagesView, which imports pdfjs-dist at
+// module scope — jsdom has neither DOMMatrix nor Worker (see
+// PdfPagesView.tsx's own guard for the latter), so the real module
+// throws the moment it's evaluated. None of this file's tests exercise
+// "pages" mode, so a minimal inert mock is enough.
+vi.mock("pdfjs-dist", () => ({
+  GlobalWorkerOptions: { workerPort: null },
+  getDocument: vi.fn(() => ({ promise: new Promise(() => {}) })),
 }));
 
 const mockedGetCourse = vi.mocked(getCourse);
@@ -77,6 +88,7 @@ function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
     word_count: 100,
     kind: "content",
     chapter_label: null,
+    asset_id: null,
     ...overrides,
   };
 }
@@ -101,6 +113,7 @@ function makeSectionDetail(id: string) {
     page_end: 5,
     kind: "content" as const,
     chapter_label: null,
+    asset_id: null,
     body_md: `Body for ${id}`,
     content_hash: "hash",
     lesson_md: null,
@@ -130,6 +143,11 @@ describe("CourseReaderClient", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    // useReaderView persists view mode to real localStorage (see
+    // vitest.setup.ts's polyfill, not reset automatically) — course-1 is
+    // reused across most tests here, so clear it defensively even though
+    // none of this file's own tests currently change view mode.
+    window.localStorage.clear();
   });
 
   it("shows a loading state before the fetches resolve", () => {

@@ -28,6 +28,12 @@ export interface ReaderSection {
   word_count: number;
   kind: SectionKind;
   chapter_label: string | null;
+  /** The PDF asset this section's original pages live in (null for older/
+   * not-yet-migrated data, or a section with no backing asset at all) —
+   * backing the reader's "original pages" view. page_start/page_end
+   * (above) are per-asset 1-based page numbers, direct pdf.js page
+   * numbers, whenever this is non-null. */
+  asset_id: string | null;
 }
 
 export interface ReaderCourse {
@@ -35,6 +41,10 @@ export interface ReaderCourse {
   title: string;
   sections: ReaderSection[];
 }
+
+/** The reader's three-state view. "pages" (the original PDF, via pdf.js)
+ * is only available for a section with an asset_id — see ReaderSection. */
+export type ViewMode = "source" | "pages" | "lesson";
 
 /** Where to resume: the section last read and how far down it, as a 0..1 fraction. */
 export interface ReaderProgress {

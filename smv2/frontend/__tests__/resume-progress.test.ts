@@ -15,6 +15,7 @@ function makeSection(overrides: Partial<ReaderSection> = {}): ReaderSection {
     word_count: 100,
     kind: "content",
     chapter_label: null,
+    asset_id: null,
     ...overrides,
   };
 }

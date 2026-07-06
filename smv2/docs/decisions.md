@@ -427,3 +427,72 @@ titles), answer-key count (11) and chapter count (11) unchanged. No
 extractor-version bump needed on its own — classification is pure
 title-metadata, not extraction — but folded into the same `algo-6`
 snapshot regeneration since it was happening anyway.
+
+## ADR-019 — Section→asset attribution + original-PDF serving endpoint (2026-07-06)
+
+Owner request: the reader should be able to show a section's original PDF
+page(s) alongside its extracted text/lesson. Two additions.
+
+**`sections.asset_id`** (migration `0005_section_asset_id`, FK →
+`assets.id` `ON DELETE SET NULL` — a section outlives its asset; deleting
+the asset just disables the PDF view for sections that pointed at it, not
+the sections themselves). Set at section creation in `ingest.py` (`item.asset.id`
+is already in scope in the per-asset loop). Existing rows stay `NULL` until
+their course is re-ingested — deliberately not backfilled retroactively;
+`SectionOut`/`SectionDetailOut` both declare it nullable and every response
+path was verified NULL-tolerant.
+
+**SQLite migration gotcha, worth recording so it isn't rediscovered the
+hard way**: adding a column with an inline FK constraint via plain
+`op.add_column(..., sa.ForeignKey(...))` raises
+`NotImplementedError: No support for ALTER of constraints in SQLite
+dialect` — SQLite has no in-place ALTER for constraints at all; Alembic's
+`batch_alter_table` is required, which performs the standard SQLite
+workaround (build a new table, copy rows, drop the old one, rename the new
+one into place). That rebuild **silently drops every trigger scoped to the
+old table** — including `sections_body_md_immutable` (migration `0002`,
+the very trigger enforcing `smv2-invariants`' body_md-immutability law).
+Caught immediately by `test_body_md_immutable.py` going red across the
+whole suite; the fix is recreating the trigger with the exact same `CREATE
+TRIGGER` statement immediately after the `batch_alter_table` block, in
+both `upgrade()` and `downgrade()`. Any future SQLite migration that uses
+batch mode on `sections` must re-verify this trigger survives — it is not
+protected by any schema-level dependency, only by remembering this note.
+
+**`page_start`/`page_end` clarification** (not a change, a documentation
+fix prompted by writing this ADR): these fields are 0-based internally
+(`app.pipeline.outline_detect.SectionBounds`, `Section.page_start` column)
+but `app.services.sections_service.to_display_page()` converts to 1-based
+before they ever reach `SectionOut`/`SectionDetailOut` — the API response
+value is already viewer-ready. `pdf.js` and most PDF viewers number pages
+1-based, so a frontend consumer can pass `page_start`/`page_end` straight
+into a viewer with **no further adjustment** — adding another `+1` "to be
+safe" would double-offset it. Both schemas' docstrings now state this
+explicitly since it's exactly the kind of detail a future refactor could
+silently break in either direction.
+
+**`GET /api/assets/{asset_id}/file`** (`get_asset_file`,
+`app/services/assets_service.py::resolve_asset_file_path`): serves the
+original uploaded PDF via `FileResponse`, `content_disposition_type="inline"`
+(not the default `attachment`) so a browser embeds/views it instead of
+downloading it, filename sanitized from `Asset.filename` and coerced to end
+in `.pdf`. `Asset.stored_path` is server-minted at upload time
+(`assets_service.save_upload`), never user input at request time, but the
+resolver still asserts the resolved path stays under `data_dir()/assets`
+before returning it — belt and braces, same posture as
+`images_service.resolve_image_path`'s containment check (ADR-018) even
+though the attack surface here is narrower (no user-supplied filename
+component at all). 404 for both an unknown asset id and a row whose file
+has gone missing from disk, distinguished internally
+(`AssetNotFoundError`/`AssetFileMissingError`) but not to the caller — both
+are just "can't serve this," and a caller has no actionable way to tell
+them apart anyway.
+
+**Range requests**: verified rather than assumed — the installed Starlette
+version's `FileResponse` (1.3.1) parses `Range`/`If-Range` natively and
+returns `206 Partial Content` with a correct `Content-Range` header
+(`test_get_asset_file_supports_range_requests` asserts a real 10-byte range
+request against the endpoint). No fallback/plain-full-file code path was
+needed. This matters for `pdf.js`, which uses range requests for
+progressive loading of large PDFs rather than fetching the whole file
+upfront.

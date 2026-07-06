@@ -74,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router)
     app.include_router(courses.router)
     app.include_router(assets.router)
+    app.include_router(assets.asset_router)
     app.include_router(ingest.router)
     app.include_router(sections.router)
     app.include_router(sections.section_router)

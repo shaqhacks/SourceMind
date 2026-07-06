@@ -4,6 +4,28 @@
  */
 
 export interface paths {
+    "/api/assets/{asset_id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Asset File
+         * @description Serves the original uploaded PDF as-is, for the reader's
+         *     original-PDF page view. Inline disposition (not attachment) so a
+         *     browser embeds/views it (e.g. via pdf.js) instead of downloading it.
+         */
+        get: operations["get_asset_file"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cards/{card_id}/grade": {
         parameters: {
             query?: never;
@@ -871,8 +893,14 @@ export interface components {
             /** Due Total */
             due_total: number;
         };
-        /** SectionDetailOut */
+        /**
+         * SectionDetailOut
+         * @description page_start/page_end convention: see SectionOut's docstring above —
+         *     already 1-based page numbers, ready to hand to a PDF viewer as-is.
+         */
         SectionDetailOut: {
+            /** Asset Id */
+            asset_id: string | null;
             /** Body Md */
             body_md: string;
             /** Chapter Label */
@@ -922,8 +950,18 @@ export interface components {
         /**
          * SectionOut
          * @description Reader list view — no body_md (can be large); use get_section for that.
+         *
+         *     page_start/page_end here are already 1-based, inclusive page numbers
+         *     into asset_id's own PDF (not course-wide) — app.services.sections_service
+         *     converts from the DB's 0-based storage (app.pipeline.outline_detect's
+         *     SectionBounds convention) via to_display_page() before this schema is
+         *     ever built. That means a caller driving pdf.js (which numbers pages
+         *     1-based) can pass this value straight through — do NOT add another +1
+         *     "to be safe," that would double-offset it.
          */
         SectionOut: {
+            /** Asset Id */
+            asset_id: string | null;
             /** Chapter Label */
             chapter_label: string | null;
             /** Has Content */
@@ -1054,6 +1092,37 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_asset_file: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     grade_card: {
         parameters: {
             query?: never;

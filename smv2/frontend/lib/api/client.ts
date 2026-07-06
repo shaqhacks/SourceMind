@@ -219,6 +219,16 @@ export function buildCourseImageUrl(courseId: string, filename: string): string 
   return `${API_BASE}/api/courses/${encodeURIComponent(courseId)}/images/${encodeURIComponent(filename)}`;
 }
 
+/**
+ * Same rationale as exportCourseUrl/buildCourseImageUrl: pdf.js's own
+ * getDocument({ url }) fetches this URL itself (a plain GET returning the
+ * raw PDF binary) — it's not a JSON round-trip this app's ApiResult
+ * handling applies to, so there's nothing for the generated client to wrap.
+ */
+export function buildAssetFileUrl(assetId: string): string {
+  return `${API_BASE}/api/assets/${encodeURIComponent(assetId)}/file`;
+}
+
 function payloadCourseId(payload: { [key: string]: unknown } | null | undefined): string | null {
   return payload && typeof payload.course_id === "string" ? payload.course_id : null;
 }

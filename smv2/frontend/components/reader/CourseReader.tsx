@@ -7,6 +7,7 @@ import ShortcutsOverlay, { type ShortcutHint } from "@/components/ShortcutsOverl
 import { getSection, listChapters, type SectionOut } from "@/lib/api/client";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 import { useProgressSync } from "@/lib/hooks/useProgressSync";
+import { useReaderView } from "@/lib/hooks/useReaderView";
 import { useTypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import { chapterGroupKey } from "@/lib/reader/chapterGroups";
 import type {
@@ -14,19 +15,21 @@ import type {
   ReaderCourse,
   ReaderProgress,
   SectionBodyState,
+  ViewMode,
 } from "@/lib/reader/types";
+import { nextViewMode } from "@/lib/reader/viewMode";
 
 import CourseChatDrawer from "./CourseChatDrawer";
 import type { LessonDisplayStatus } from "./LessonPane";
 import OutlineEditorModal from "./OutlineEditorModal";
-import ReadingColumn, { type ViewMode } from "./ReadingColumn";
+import ReadingColumn from "./ReadingColumn";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
 import UsageFooter from "./UsageFooter";
 
 const SHORTCUT_HINTS: ShortcutHint[] = [
   { keys: "← / → or j / k", description: "Next / previous chapter" },
-  { keys: "s", description: "Toggle source / lesson view" },
+  { keys: "s", description: "Cycle source / pages / lesson view" },
   { keys: "c", description: "Toggle chat" },
   { keys: "o", description: "Edit outline" },
   { keys: "?", description: "Show this help" },
@@ -80,7 +83,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     const index = sections.findIndex((section) => section.id === initialProgress.section_id);
     return index === -1 ? 0 : index;
   });
-  const [mode, setMode] = useState<ViewMode>("source");
+  const { storedMode, setStoredMode } = useReaderView(course.id);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -112,6 +115,13 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   // goToOffset's own clamp regardless.
   const safeActiveIndex = Math.min(activeIndex, Math.max(sections.length - 1, 0));
   const activeSection = sections[safeActiveIndex];
+
+  // "pages" (the original PDF via pdf.js) needs an asset_id on the active
+  // section — a stored preference of "pages" from a different section (or
+  // a course whose asset backfill hasn't landed) degrades to "source"
+  // rather than rendering a disabled view.
+  const pagesAvailable = activeSection.asset_id != null;
+  const mode: ViewMode = storedMode === "pages" && !pagesAvailable ? "source" : storedMode;
 
   useProgressSync(course.id, activeSection.id, columnRef);
 
@@ -169,6 +179,17 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   // heading even exists in the DOM) takes priority over the saved
   // position — same one-time guard either way, so the two never both
   // fire for the same mount.
+  // Known limitation: sectionBodies readiness (the source-text fetch,
+  // which always runs regardless of view mode) is a reliable proxy for
+  // "the column has real content, scrollHeight is meaningful" for the
+  // common case, but view mode now persists across mounts (see
+  // useReaderView) — resuming straight into "pages" means this can fire
+  // before PdfPagesView's own independent PDF load has painted anything
+  // with real height, so `scrollable` reads as 0 and the restore silently
+  // no-ops (same as genuinely short content always has). A retry-until-
+  // ready loop was tried and reverted: it can fire on a later frame after
+  // the user has already scrolled elsewhere, stomping their new position
+  // with the stale initial one — worse than the rare miss it fixed.
   const hasRestoredScroll = useRef(false);
   useEffect(() => {
     if (hasRestoredScroll.current) return;
@@ -232,9 +253,9 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
 
   const goNext = useCallback(() => goToOffset(1), [goToOffset]);
   const goPrevious = useCallback(() => goToOffset(-1), [goToOffset]);
-  const toggleMode = useCallback(() => {
-    setMode((current) => (current === "source" ? "lesson" : "source"));
-  }, []);
+  const cycleMode = useCallback(() => {
+    setStoredMode(nextViewMode(mode, pagesAvailable));
+  }, [mode, pagesAvailable, setStoredMode]);
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
   const toggleChat = useCallback(() => setChatOpen((value) => !value), []);
@@ -267,7 +288,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     j: goNext,
     arrowleft: goPrevious,
     k: goPrevious,
-    s: toggleMode,
+    s: cycleMode,
     c: toggleChat,
     o: openOutlineEditor,
     "?": openShortcuts,
@@ -298,6 +319,9 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
         chatOpen={chatOpen}
         onToggleChat={toggleChat}
         onOpenOutlineEditor={openOutlineEditor}
+        viewMode={mode}
+        pagesAvailable={pagesAvailable}
+        onChangeViewMode={setStoredMode}
       />
       <div className="flex min-h-0 flex-1">
         {!sidebarCollapsed && (

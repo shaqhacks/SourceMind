@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from pathlib import Path
 from typing import Protocol
 
 from app.config import data_dir, max_upload_bytes
@@ -110,3 +111,40 @@ def list_assets(course_id: str) -> list[Asset]:
         )
     finally:
         session.close()
+
+
+class AssetNotFoundError(ValueError):
+    pass
+
+
+class AssetFileMissingError(ValueError):
+    pass
+
+
+def resolve_asset_file_path(asset_id: str) -> tuple[Path, str]:
+    """Returns (absolute path, original filename) for serving asset_id's
+    stored PDF as-is (original-PDF page view). Asset.stored_path is a
+    server-minted value written once at upload time (assets_service.
+    save_upload), never user input at request time — but we still assert it
+    resolves under data_dir()/assets before returning it, belt and braces,
+    the same reasoning as images_service.resolve_image_path's containment
+    check for a path that's normally trustworthy by construction.
+    """
+    session = get_session()
+    try:
+        asset = session.get(Asset, asset_id)
+    finally:
+        session.close()
+
+    if asset is None:
+        raise AssetNotFoundError(f"asset not found: {asset_id!r}")
+
+    assets_root = (data_dir() / "assets").resolve()
+    candidate = Path(asset.stored_path).resolve()
+    if candidate != assets_root and assets_root not in candidate.parents:
+        raise AssetNotFoundError(f"asset {asset_id!r} stored_path escapes the assets directory")
+
+    if not candidate.is_file():
+        raise AssetFileMissingError(f"asset file missing on disk: {asset_id!r}")
+
+    return candidate, asset.filename

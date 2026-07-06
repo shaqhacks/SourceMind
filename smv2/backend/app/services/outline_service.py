@@ -37,6 +37,7 @@ def edit_outline(course_id: str, operations: list[Any]) -> list[dict[str, Any]]:
                 "id": s.id,
                 "title": s.title,
                 "order_index": s.order_index,
+                "asset_id": s.asset_id,
                 "page_start": to_display_page(s.page_start),
                 "page_end": to_display_page(s.page_end),
                 "lesson_status": s.lesson_status,

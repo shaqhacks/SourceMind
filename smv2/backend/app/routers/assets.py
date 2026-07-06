@@ -1,13 +1,29 @@
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 
 from app.config import max_upload_bytes
 from app.schemas import AssetOut
 from app.services import assets_service, courses_service
-from app.services.assets_service import FileTooLargeError, UnsupportedFileTypeError
+from app.services.assets_service import (
+    AssetFileMissingError,
+    AssetNotFoundError,
+    FileTooLargeError,
+    UnsupportedFileTypeError,
+)
 
 router = APIRouter(prefix="/api/courses", tags=["assets"])
+asset_router = APIRouter(prefix="/api/assets", tags=["assets"])
+
+_UNSAFE_FILENAME_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _sanitize_download_filename(filename: str) -> str:
+    cleaned = _UNSAFE_FILENAME_CHARS_RE.sub("-", filename).strip("-") or "asset"
+    return cleaned if cleaned.lower().endswith(".pdf") else f"{cleaned}.pdf"
 
 
 @router.post(
@@ -49,3 +65,24 @@ def list_assets(course_id: str) -> list[AssetOut]:
     if courses_service.get_course(course_id) is None:
         raise HTTPException(status_code=404, detail="course not found")
     return [AssetOut.model_validate(a) for a in assets_service.list_assets(course_id)]
+
+
+@asset_router.get("/{asset_id}/file", operation_id="get_asset_file")
+def get_asset_file(asset_id: str) -> FileResponse:
+    """Serves the original uploaded PDF as-is, for the reader's
+    original-PDF page view. Inline disposition (not attachment) so a
+    browser embeds/views it (e.g. via pdf.js) instead of downloading it.
+    """
+    try:
+        path, filename = assets_service.resolve_asset_file_path(asset_id)
+    except AssetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="asset not found") from exc
+    except AssetFileMissingError as exc:
+        raise HTTPException(status_code=404, detail="asset file not found") from exc
+
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=_sanitize_download_filename(filename),
+        content_disposition_type="inline",
+    )

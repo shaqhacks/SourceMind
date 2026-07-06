@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { getDocument } from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CourseReader from "@/components/reader/CourseReader";
@@ -18,6 +19,7 @@ import {
 import type { ReaderCourse, ReaderProgress } from "@/lib/reader/types";
 
 import { err, ok } from "./support/api-result";
+import { makeFakeDocument, makeFakePage } from "./support/fake-pdfjs";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -38,6 +40,16 @@ vi.mock("@/lib/api/client", () => ({
   listSections: vi.fn(),
   editOutline: vi.fn(),
   listChapters: vi.fn(),
+  buildAssetFileUrl: vi.fn((assetId: string) => `https://mock/api/assets/${assetId}/file`),
+}));
+
+// The reader tree imports PdfPagesView, which imports pdfjs-dist at
+// module scope — jsdom has neither DOMMatrix nor Worker (see
+// PdfPagesView.tsx's own guard for the latter), so the real module
+// throws the moment it's evaluated.
+vi.mock("pdfjs-dist", () => ({
+  GlobalWorkerOptions: { workerPort: null },
+  getDocument: vi.fn(),
 }));
 
 const mockedGetSection = vi.mocked(getSection);
@@ -50,6 +62,7 @@ const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 const mockedListSections = vi.mocked(listSections);
 const mockedEditOutline = vi.mocked(editOutline);
 const mockedListChapters = vi.mocked(listChapters);
+const mockedGetDocument = vi.mocked(getDocument);
 
 // A minimal 3-section fixture keeps these assertions about
 // active-chapter bookkeeping (not content) easy to follow.
@@ -68,6 +81,7 @@ const COURSE: ReaderCourse = {
       word_count: 100,
       kind: "content",
       chapter_label: null,
+      asset_id: null,
     },
     {
       id: "sec-2",
@@ -80,6 +94,7 @@ const COURSE: ReaderCourse = {
       word_count: 120,
       kind: "content",
       chapter_label: null,
+      asset_id: null,
     },
     {
       id: "sec-3",
@@ -92,6 +107,7 @@ const COURSE: ReaderCourse = {
       word_count: 90,
       kind: "content",
       chapter_label: null,
+      asset_id: null,
     },
   ],
 };
@@ -119,6 +135,7 @@ describe("CourseReader", () => {
           page_end: section.page_end,
           kind: section.kind,
           chapter_label: section.chapter_label,
+          asset_id: section.asset_id,
           body_md: BODIES[id],
           content_hash: "hash",
           lesson_md: null,
@@ -154,6 +171,13 @@ describe("CourseReader", () => {
     vi.clearAllMocks();
     vi.useRealTimers();
     window.location.hash = "";
+    // useReaderView (view-mode persistence) and useTypographyPrefs both
+    // write to real localStorage (see vitest.setup.ts's polyfill, which
+    // isn't reset automatically) — course-1 is reused across nearly every
+    // test in this file, so a mode change in one test (e.g. "toggles
+    // between source and lesson view with 's'") would otherwise leak into
+    // every later test's initial render.
+    window.localStorage.clear();
   });
 
   it("starts on the first chapter with focus on its heading", async () => {
@@ -534,6 +558,7 @@ describe("CourseReader", () => {
           word_count: 100,
           kind: "content",
           chapter_label: "Chapter 1",
+          asset_id: null,
         },
         {
           id: "sec-practice",
@@ -546,6 +571,7 @@ describe("CourseReader", () => {
           word_count: 20,
           kind: "practice",
           chapter_label: "Chapter 1",
+          asset_id: null,
         },
         {
           id: "sec-2",
@@ -558,6 +584,7 @@ describe("CourseReader", () => {
           word_count: 120,
           kind: "content",
           chapter_label: "Chapter 2",
+          asset_id: null,
         },
       ],
     };
@@ -582,6 +609,7 @@ describe("CourseReader", () => {
             page_end: section.page_end,
             kind: section.kind,
             chapter_label: section.chapter_label,
+            asset_id: section.asset_id,
             body_md: bodies[id],
             content_hash: "hash",
             lesson_md: null,
@@ -676,6 +704,151 @@ describe("CourseReader", () => {
       await screen.findByText(/first body/i);
 
       expect(screen.queryByRole("note", { name: /reading flow notice/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("view toggle (source / pages / lesson)", () => {
+    const COURSE_WITH_ASSET: ReaderCourse = {
+      id: "course-asset",
+      title: "Test Course",
+      sections: [
+        {
+          id: "sec-asset",
+          title: "Chapter One",
+          order_index: 0,
+          page_start: 1,
+          page_end: 2,
+          lesson_status: "none",
+          has_content: true,
+          word_count: 100,
+          kind: "content",
+          chapter_label: "Chapter 1",
+          asset_id: "asset-1",
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      mockedGetSection.mockImplementation((id: string) => {
+        // Some of this block's own tests render the plain COURSE fixture
+        // (no asset_id, to exercise the "Pages disabled" state) rather
+        // than COURSE_WITH_ASSET — fall back to it here rather than only
+        // knowing about "sec-asset", or COURSE's own sections 404.
+        const plainSection = COURSE.sections.find((section) => section.id === id);
+        if (plainSection) {
+          return Promise.resolve(
+            ok({
+              id: plainSection.id,
+              course_id: COURSE.id,
+              title: plainSection.title,
+              order_index: plainSection.order_index,
+              page_start: plainSection.page_start,
+              page_end: plainSection.page_end,
+              kind: plainSection.kind,
+              chapter_label: plainSection.chapter_label,
+              asset_id: plainSection.asset_id,
+              body_md: BODIES[id],
+              content_hash: "hash",
+              lesson_md: null,
+              lesson_status: plainSection.lesson_status,
+              lesson_stale: false,
+              lesson_model: null,
+              lesson_prompt_version: null,
+              extractor_version: null,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+            }),
+          );
+        }
+        if (id !== "sec-asset") return Promise.resolve(err(404));
+        return Promise.resolve(
+          ok({
+            id: "sec-asset",
+            course_id: "course-asset",
+            title: "Chapter One",
+            order_index: 0,
+            page_start: 1,
+            page_end: 2,
+            kind: "content" as const,
+            chapter_label: "Chapter 1",
+            asset_id: "asset-1",
+            body_md: "# Chapter One\n\nSource body.",
+            content_hash: "hash",
+            lesson_md: null,
+            lesson_status: "none" as const,
+            lesson_stale: false,
+            lesson_model: null,
+            lesson_prompt_version: null,
+            extractor_version: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          }),
+        );
+      });
+    });
+
+    it("disables the Pages option (with a tooltip) when the active section has no asset_id", async () => {
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      const pagesButton = screen.getByRole("button", { name: "Pages" });
+      expect(pagesButton).toBeDisabled();
+      expect(pagesButton).toHaveAttribute("title", "Re-ingest this course to enable original pages");
+    });
+
+    it("cycling with 's' skips the disabled Pages option, going straight from source to lesson", async () => {
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.keyboard("s");
+
+      expect(await screen.findByRole("button", { name: /generate lesson/i })).toBeInTheDocument();
+    });
+
+    it("clicking Pages switches to the original-PDF view and renders its pages", async () => {
+      const doc = makeFakeDocument({ 1: makeFakePage(), 2: makeFakePage() });
+      mockedGetDocument.mockReturnValue({
+        promise: Promise.resolve(doc),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE_WITH_ASSET} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/source body/i);
+
+      await user.click(screen.getByRole("button", { name: "Pages" }));
+
+      // jsdom has no IntersectionObserver at all, so PdfPagesView's own
+      // fail-open guard renders every page's canvas immediately rather
+      // than gating on a (nonexistent) intersection signal — the lazy
+      // near-viewport-only behavior itself is covered by
+      // pdf-pages-view.test.tsx, which stubs a fake observer.
+      expect(await screen.findByLabelText("Page 1")).toBeInTheDocument();
+      expect(screen.getByLabelText("Page 2")).toBeInTheDocument();
+      expect(mockedGetDocument).toHaveBeenCalledWith({
+        url: "https://mock/api/assets/asset-1/file",
+      });
+    });
+
+    it("persists the chosen view per course — a remount honors the last choice", async () => {
+      const doc = makeFakeDocument({ 1: makeFakePage(), 2: makeFakePage() });
+      mockedGetDocument.mockReturnValue({
+        promise: Promise.resolve(doc),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      const user = userEvent.setup();
+      const { unmount } = render(
+        <CourseReader course={COURSE_WITH_ASSET} initialProgress={NO_PROGRESS} />,
+      );
+      await screen.findByText(/source body/i);
+      await user.click(screen.getByRole("button", { name: "Pages" }));
+      await screen.findByLabelText("Page 1");
+      unmount();
+
+      render(<CourseReader course={COURSE_WITH_ASSET} initialProgress={NO_PROGRESS} />);
+
+      expect(await screen.findByLabelText("Page 1")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Pages" })).toHaveAttribute("aria-pressed", "true");
     });
   });
 });

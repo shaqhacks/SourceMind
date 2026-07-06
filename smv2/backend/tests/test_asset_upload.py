@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "pdfs"
 
 
@@ -186,4 +188,118 @@ def test_list_assets_shows_stored_and_extract_failed_with_error_detail(client):
 
 def test_list_assets_404_for_missing_course(client):
     resp = client.get("/api/courses/does-not-exist/assets")
+    assert resp.status_code == 404
+
+
+def test_ingest_populates_section_asset_id(client, ingest_course):
+    course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
+    asset_id = upload_resp.json()["id"]
+
+    sections = client.get(f"/api/courses/{course_id}/sections").json()
+    assert len(sections) == 3
+    assert all(s["asset_id"] == asset_id for s in sections)
+
+
+def test_section_responses_tolerate_null_asset_id(client, ingest_course):
+    """Sections created before this column existed have asset_id=NULL —
+    they only backfill on the next re-ingest, never retroactively. Both the
+    list and detail responses must serialize fine either way.
+    """
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    from app.db.engine import get_session
+    from app.db.models import Section
+
+    session = get_session()
+    try:
+        for s in session.query(Section).filter(Section.course_id == course_id).all():
+            s.asset_id = None
+        session.commit()
+    finally:
+        session.close()
+
+    sections = client.get(f"/api/courses/{course_id}/sections").json()
+    assert all(s["asset_id"] is None for s in sections)
+
+    detail = client.get(f"/api/sections/{sections[0]['id']}").json()
+    assert detail["asset_id"] is None
+
+
+def test_get_asset_file_serves_exact_bytes_and_content_type(client, ingest_course):
+    course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
+    asset_id = upload_resp.json()["id"]
+
+    resp = client.get(f"/api/assets/{asset_id}/file")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert "inline" in resp.headers["content-disposition"]
+    assert resp.content == (FIXTURES_DIR / "with_bookmarks.pdf").read_bytes()
+
+
+def test_get_asset_file_supports_range_requests(client, ingest_course):
+    """pdf.js relies on byte-range requests for progressive loading —
+    confirm the installed Starlette FileResponse actually honors Range,
+    not just that a full-file GET works.
+    """
+    course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
+    asset_id = upload_resp.json()["id"]
+    full_bytes = (FIXTURES_DIR / "with_bookmarks.pdf").read_bytes()
+
+    resp = client.get(f"/api/assets/{asset_id}/file", headers={"Range": "bytes=0-9"})
+    assert resp.status_code == 206
+    assert resp.content == full_bytes[:10]
+    assert resp.headers["content-range"] == f"bytes 0-9/{len(full_bytes)}"
+
+
+def test_get_asset_file_404_for_missing_asset(client):
+    resp = client.get("/api/assets/does-not-exist/file")
+    assert resp.status_code == 404
+
+
+def test_get_asset_file_404_when_stored_file_missing_on_disk(client, ingest_course):
+    course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
+    asset_id = upload_resp.json()["id"]
+
+    from app.db.engine import get_session
+    from app.db.models import Asset
+
+    session = get_session()
+    try:
+        asset = session.get(Asset, asset_id)
+        Path(asset.stored_path).unlink()
+    finally:
+        session.close()
+
+    resp = client.get(f"/api/assets/{asset_id}/file")
+    assert resp.status_code == 404
+
+
+def test_resolve_asset_file_path_rejects_stored_path_outside_assets_dir(client, ingest_course, tmp_path):
+    """stored_path is server-minted (never user input at request time), but
+    the containment check must still hold as defense in depth — belt and
+    braces, same reasoning as images_service.resolve_image_path.
+    """
+    course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
+    asset_id = upload_resp.json()["id"]
+
+    from app.db.engine import get_session
+    from app.db.models import Asset
+
+    outside_file = tmp_path / "escaped.pdf"
+    outside_file.write_bytes(b"%PDF-1.7\nescaped content")
+
+    session = get_session()
+    try:
+        asset = session.get(Asset, asset_id)
+        asset.stored_path = str(outside_file)
+        session.commit()
+    finally:
+        session.close()
+
+    from app.services import assets_service
+
+    with pytest.raises(assets_service.AssetNotFoundError):
+        assets_service.resolve_asset_file_path(asset_id)
+
+    resp = client.get(f"/api/assets/{asset_id}/file")
     assert resp.status_code == 404
