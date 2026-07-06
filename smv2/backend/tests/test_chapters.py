@@ -20,6 +20,7 @@ def test_list_chapters_groups_and_splits_by_kind(client, ingest_course):
         "Chapter 2: Structures",
         "Chapter 3: Applications",
         "Chapter 4: Geometry",
+        "Chapter 5: Probability",
     ]
 
     sections = client.get(f"/api/courses/{course_id}/sections").json()

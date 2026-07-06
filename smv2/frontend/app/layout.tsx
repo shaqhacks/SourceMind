@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
+import AppShell from "@/components/AppShell";
 import SiteHeader from "@/components/SiteHeader";
 import SkipToMainLink from "@/components/SkipToMainLink";
 import { THEME_STORAGE_KEY } from "@/lib/hooks/useTheme";
@@ -43,12 +44,9 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: noFlashThemeScript }} />
       </head>
-      <body className="min-h-full flex flex-col">
+      <body className="h-full">
         <SkipToMainLink />
-        <SiteHeader />
-        <main id="main-content" tabIndex={-1} className="flex flex-1 flex-col">
-          {children}
-        </main>
+        <AppShell header={<SiteHeader />}>{children}</AppShell>
       </body>
     </html>
   );

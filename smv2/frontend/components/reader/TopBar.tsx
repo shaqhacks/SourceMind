@@ -39,18 +39,18 @@ export default function TopBar({
   onChangeViewMode,
 }: TopBarProps) {
   return (
-    <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+    <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-sm">
       <button
         type="button"
         onClick={onToggleSidebar}
         aria-expanded={!sidebarCollapsed}
         aria-controls="reader-sidebar"
         aria-label={sidebarCollapsed ? "Show outline" : "Hide outline"}
-        className="rounded-md border border-border px-2 py-1 text-sm"
+        className="rounded-md border border-border px-2 py-1 text-sm hover:bg-muted-foreground/10"
       >
         ☰
       </button>
-      <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">{courseTitle}</h1>
+      <h1 className="min-w-0 flex-1 truncate text-sm font-medium">{courseTitle}</h1>
       <div role="group" aria-label="Reading view" className="flex overflow-hidden rounded-md border border-border text-sm">
         {VIEW_OPTIONS.map(({ mode, label }) => {
           const disabled = mode === "pages" && !pagesAvailable;

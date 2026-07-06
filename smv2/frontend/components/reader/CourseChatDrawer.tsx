@@ -7,6 +7,12 @@ import Chat, { type ChatCitation, type ChatSendResult, type ChatTurn } from "@/c
 import { getChatHistory, sendChat, type ChatTurnOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
+import { useNarrowViewport } from "@/lib/hooks/useNarrowViewport";
+
+// Below this, docking the chat as a third column would squeeze the
+// reading column uncomfortably narrow — falls back to the pre-existing
+// overlay-drawer treatment instead of pushing content aside.
+const NARROW_VIEWPORT_BREAKPOINT_PX = 1099;
 
 export interface CourseChatDrawerProps {
   courseId: string;
@@ -64,6 +70,7 @@ function describeSendError(status: number | undefined): { message: string; retry
  */
 export default function CourseChatDrawer({ courseId, open, onClose }: CourseChatDrawerProps) {
   const router = useRouter();
+  const isNarrow = useNarrowViewport(NARROW_VIEWPORT_BREAKPOINT_PX);
 
   // Own scope while open, same pattern as ShortcutsOverlay: sits on top of
   // the reader's arrow/j/k/s/c scope so those don't fire behind an open
@@ -105,9 +112,15 @@ export default function CourseChatDrawer({ courseId, open, onClose }: CourseChat
   const handleCitationClick = useCallback(
     (citation: ChatCitation) => {
       router.push(`/course/${courseId}?section=${citation.sectionId}`);
-      onClose();
+      // Docked (wide viewport): the chat and reading column are
+      // independent panels side by side, so there's no reason to lose
+      // the conversation just to follow a citation — stay open, just
+      // navigate. Narrow-viewport overlay: it covers the content, so
+      // closing it is the only way to actually see the section just
+      // navigated to.
+      if (isNarrow) onClose();
     },
-    [courseId, router, onClose],
+    [courseId, router, onClose, isNarrow],
   );
 
   if (!open) return null;
@@ -118,7 +131,11 @@ export default function CourseChatDrawer({ courseId, open, onClose }: CourseChat
       role="complementary"
       aria-label="Course chat"
       tabIndex={-1}
-      className="flex w-96 shrink-0 flex-col border-l border-border"
+      className={
+        isNarrow
+          ? "fixed inset-y-0 right-0 z-40 flex w-96 max-w-[90vw] flex-col border-l border-border bg-background shadow-xl"
+          : "flex w-[380px] shrink-0 flex-col border-l border-border"
+      }
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold">Chat</h2>

@@ -120,7 +120,7 @@ export default function Sidebar({
     <nav
       id="reader-sidebar"
       aria-label="Chapter outline"
-      className="flex w-64 shrink-0 flex-col overflow-y-auto border-r border-border"
+      className="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-border bg-background/60 py-2"
     >
       <ul>
         {groups.map((group) => {
@@ -134,16 +134,18 @@ export default function Sidebar({
           const testLabel = testLinkLabel(scoreLabel, practiceCount);
 
           return (
-            <li key={group.key} className="border-b border-border">
-              <div className="flex items-center gap-1 py-1 pl-2 pr-3">
+            <li key={group.key}>
+              <div className="flex items-center gap-1 py-1 pl-3 pr-3">
                 <button
                   type="button"
                   onClick={() => toggleGroup(group.key, isActiveGroup)}
                   aria-expanded={open}
                   aria-controls={listId}
-                  className="flex flex-1 items-center gap-1.5 truncate rounded px-1 py-1 text-left text-xs font-semibold text-muted-foreground hover:bg-muted-foreground/10"
+                  className="flex flex-1 items-center gap-1.5 truncate rounded px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted-foreground/10"
                 >
-                  <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+                  <span aria-hidden="true" className="text-[10px]">
+                    {open ? "▾" : "▸"}
+                  </span>
                   <span className="truncate">{group.displayLabel}</span>
                 </button>
                 {group.label !== null && (
@@ -158,7 +160,7 @@ export default function Sidebar({
               </div>
               {open && (
                 <ul id={listId}>
-                  {contentSections.map((section) => {
+                  {contentSections.map((section, sectionIndex) => {
                     const index = indexById.get(section.id);
                     if (index === undefined) return null;
                     const active = section.id === activeSectionId;
@@ -170,21 +172,19 @@ export default function Sidebar({
                           type="button"
                           aria-current={active ? "true" : undefined}
                           onClick={() => onSelect(index)}
-                          className={`block w-full px-4 py-2 text-left text-sm ${
+                          className={`block w-full border-l-2 py-1.5 pl-4 pr-3 text-left text-sm transition-colors ${
                             active
-                              ? "bg-accent/10 font-medium text-accent"
-                              : "hover:bg-muted-foreground/10"
+                              ? "border-accent font-medium text-accent"
+                              : "border-transparent hover:bg-muted-foreground/10"
                           }`}
                         >
                           <span className="flex items-center gap-2">
                             <LessonDot status={lessonDisplayStatus} />
+                            <span className="shrink-0 text-muted-foreground">
+                              {sectionIndex + 1}.
+                            </span>
                             <span className="truncate">{section.title}</span>
                           </span>
-                          {section.page_start !== null && section.page_end !== null ? (
-                            <span className="block text-xs text-muted-foreground">
-                              p.{section.page_start}–{section.page_end}
-                            </span>
-                          ) : null}
                         </button>
                       </li>
                     );

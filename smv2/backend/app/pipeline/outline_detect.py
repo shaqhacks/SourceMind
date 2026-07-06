@@ -179,6 +179,80 @@ def front_matter_bookmark_titles(toc_entries: list[tuple[int, str, int]]) -> lis
     return [title for (_lvl, title, _pg) in chosen if _is_front_matter_title(title)]
 
 
+# A chapter's own cover page is often a mini-ToC ("Chapter 2 : Solving Linear
+# Equations" followed by a dotted list of that chapter's own section titles
+# and page numbers) rather than real content. Safety bound: only a SHORT
+# section is eligible, so a coincidentally page-number-heavy but genuinely
+# long section is never dropped on shape alone.
+_CHAPTER_COVER_MAX_PAGES = 3
+
+# Deliberately NOT _looks_like_toc_page/_TOC_LINE_MIN_COUNT (the book-level
+# ToC-page signal) — verified against a real textbook that reusing it as
+# specified drops far more than chapter covers: a numbered practice-problem
+# worksheet ("13) 9 = n/12", "27) 20b = -200", ...) also has most of its
+# lines ending in a digit (the equation's own numeric answer/coefficient,
+# not a page reference), which is indistinguishable from a ToC line under
+# that bare signal alone (measured: 38 sections dropped instead of the
+# expected ~11, the large majority of them real practice sheets). A dot
+# leader ("....") between the text and the trailing number is much more
+# specific to genuine ToC-style formatting and a practice worksheet never
+# has one. _TOC_LINE_MIN_COUNT=5 is also too strict here — it was
+# calibrated for a book-level ToC listing many chapters, but a legitimate
+# per-chapter mini-ToC can have as few as 3 listed sub-sections (measured:
+# the real textbook's shortest genuine chapter cover lists exactly 3), so
+# this uses its own, lower, dedicated minimum instead of the shared one.
+_CHAPTER_COVER_TOC_LINE_MIN_COUNT = 3
+
+
+def _looks_like_chapter_cover_page(text: str) -> bool:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    leadered = sum(1 for ln in lines if _TRAILING_DOT_LEADER_RE.search(ln))
+    return (
+        leadered >= _CHAPTER_COVER_TOC_LINE_MIN_COUNT
+        and (leadered / len(lines)) >= _TOC_LINE_FRACTION
+    )
+
+
+def toc_shaped_chapter_cover_mask(
+    bounds_list: list[SectionBounds], pages: list[str], *, skip_front_matter: bool = True
+) -> list[bool]:
+    """One bool per bounds_list entry, same order (True = keep) — apply
+    this SAME mask to any other per-section parallel list (e.g.
+    assign_chapter_labels' output) so nothing drifts out of sync with
+    which sections actually survive.
+
+    MUST be applied AFTER assign_chapter_labels/classify_section_kind have
+    already been computed against the full, undropped bounds_list — a
+    cover section's own title is exactly the `^chapter N` marker
+    assign_chapter_labels anchors on; dropping it first would silently
+    orphan every section that chapter marker was supposed to label.
+    Labels/kinds are computed once up front and simply filtered alongside
+    bounds_list by this mask, never recomputed from the shortened list.
+
+    A section is dropped only when BOTH hold: every one of its pages looks
+    like a chapter-cover mini-ToC (_looks_like_chapter_cover_page — see its
+    own docstring for why this is a dot-leader signal, not a reuse of
+    _looks_like_toc_page), and it spans at most _CHAPTER_COVER_MAX_PAGES
+    pages.
+    """
+    if not skip_front_matter:
+        return [True] * len(bounds_list)
+
+    keep: list[bool] = []
+    for bounds in bounds_list:
+        span = bounds.page_end - bounds.page_start + 1
+        page_texts = pages[bounds.page_start : bounds.page_end + 1]
+        is_cover = (
+            span <= _CHAPTER_COVER_MAX_PAGES
+            and bool(page_texts)
+            and all(_looks_like_chapter_cover_page(p) for p in page_texts)
+        )
+        keep.append(not is_cover)
+    return keep
+
+
 def _round_size(size: float) -> int:
     return round(size)
 

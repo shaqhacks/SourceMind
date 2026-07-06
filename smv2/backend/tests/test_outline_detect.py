@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.pipeline.extract import extract_heading_candidates, extract_markdown_pages, get_toc, open_pdf
 from app.pipeline.outline_detect import (
+    SectionBounds,
     assign_chapter_labels,
     classify_section_kind,
     detect_sections,
@@ -12,6 +13,7 @@ from app.pipeline.outline_detect import (
     sections_from_headings,
     sections_from_page_windows,
     sections_from_toc,
+    toc_shaped_chapter_cover_mask,
 )
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "pdfs"
@@ -755,3 +757,95 @@ def test_assign_chapter_labels_roman_numeral_marker():
 
 def test_assign_chapter_labels_empty_list():
     assert assign_chapter_labels([]) == []
+
+
+# --- ADR-021: ToC-shaped chapter cover drop ---------------------------------
+
+_TOC_SHAPED_PAGE = "\n".join(
+    [
+        "Chapter 9: Something",
+        "9.1 Section One .......................... 100",
+        "9.2 Section Two .......................... 101",
+        "9.3 Section Three ........................ 102",
+        "9.4 Section Four ......................... 103",
+        "9.5 Section Five ......................... 104",
+    ]
+)
+
+_REAL_CONTENT_PAGE = "\n".join(
+    [
+        "This is an ordinary one-page section of real prose content,",
+        "with no page-number-ending lines anywhere on it at all, so it",
+        "must never be mistaken for a chapter cover page.",
+    ]
+)
+
+
+def test_toc_shaped_chapter_cover_mask_drops_short_all_toc_shaped_section():
+    bounds_list = [SectionBounds(title="Chapter 9: Something", page_start=0, page_end=0)]
+    assert toc_shaped_chapter_cover_mask(bounds_list, [_TOC_SHAPED_PAGE]) == [False]
+
+
+def test_toc_shaped_chapter_cover_mask_keeps_real_one_page_content_section():
+    bounds_list = [SectionBounds(title="A Real Short Section", page_start=0, page_end=0)]
+    assert toc_shaped_chapter_cover_mask(bounds_list, [_REAL_CONTENT_PAGE]) == [True]
+
+
+def test_toc_shaped_chapter_cover_mask_respects_the_page_span_safety_bound():
+    """4 pages, every one ToC-shaped -- still kept, because it exceeds the
+    3-page safety bound. Shape alone is never enough to drop a long
+    section; only a short one is even eligible.
+    """
+    bounds_list = [SectionBounds(title="Chapter 9: Something", page_start=0, page_end=3)]
+    pages = [_TOC_SHAPED_PAGE] * 4
+    assert toc_shaped_chapter_cover_mask(bounds_list, pages) == [True]
+
+
+def test_toc_shaped_chapter_cover_mask_keeps_everything_when_flag_is_off():
+    bounds_list = [SectionBounds(title="Chapter 9: Something", page_start=0, page_end=0)]
+    assert (
+        toc_shaped_chapter_cover_mask(bounds_list, [_TOC_SHAPED_PAGE], skip_front_matter=False)
+        == [True]
+    )
+
+
+def test_toc_shaped_chapter_cover_mask_keeps_numbered_practice_worksheet():
+    """Regression: a real math-practice worksheet's numbered problems (each
+    line ending in the equation's own numeric answer/coefficient, e.g.
+    "13) 9 = n/12") also mostly end in a digit, which is indistinguishable
+    from a ToC line under a bare "ends in a number" signal -- verified
+    against a real textbook that reusing _looks_like_toc_page as originally
+    specified drops far more than chapter covers (38 sections instead of
+    the expected ~11, mostly practice sheets like this one). The dot-leader
+    requirement is what keeps this correctly classified as real content.
+    """
+    worksheet_page = "\n".join(
+        [
+            "1.1 Practice - One Step Equations",
+            "Solve each equation.",
+            "1) v + 9 = 16",
+            "3) x - 11 = -16",
+            "5) 30 = a + 20",
+            "7) x - 7 = -26",
+            "9) 13 = n - 5",
+            "11) 340 = -17x",
+        ]
+    )
+    bounds_list = [
+        SectionBounds(title="1.1 Practice - One Step Equations", page_start=0, page_end=0)
+    ]
+    assert toc_shaped_chapter_cover_mask(bounds_list, [worksheet_page]) == [True]
+
+
+def test_toc_shaped_chapter_cover_mask_only_drops_the_matching_entries_in_a_mixed_list():
+    """Regression for the ordering requirement: the mask must align 1:1
+    with bounds_list so callers (ingest.py) can filter chapter_labels by
+    the identical mask without anything drifting out of sync.
+    """
+    bounds_list = [
+        SectionBounds(title="Chapter 1: Foundations", page_start=0, page_end=2),
+        SectionBounds(title="Chapter 2: Something", page_start=3, page_end=3),  # cover, dropped
+        SectionBounds(title="2.1 Real Content", page_start=4, page_end=4),
+    ]
+    pages = ["", "", "", _TOC_SHAPED_PAGE, _REAL_CONTENT_PAGE]
+    assert toc_shaped_chapter_cover_mask(bounds_list, pages) == [True, False, True]

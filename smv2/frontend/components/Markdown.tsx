@@ -19,6 +19,20 @@ import "katex/dist/katex.min.css";
 
 type HeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 
+// A deliberate, subdued size/spacing step per level rather than the
+// browser's own (much looser) heading defaults — mdBook's own calmer
+// density: clear hierarchy without dramatic jumps between levels, and
+// margins tight enough that a chapter doesn't feel broken into oversized
+// slabs by its own subheadings.
+const HEADING_CLASSES: Record<HeadingTag, string> = {
+  h1: "mt-10 mb-4 text-2xl font-bold",
+  h2: "mt-8 mb-3 text-xl font-semibold",
+  h3: "mt-6 mb-2 text-lg font-semibold",
+  h4: "mt-5 mb-2 text-base font-semibold",
+  h5: "mt-4 mb-1 text-base font-semibold",
+  h6: "mt-4 mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground",
+};
+
 function makeHeading(Tag: HeadingTag) {
   function Heading({
     id,
@@ -28,7 +42,11 @@ function makeHeading(Tag: HeadingTag) {
     ...rest
   }: ComponentPropsWithoutRef<HeadingTag> & ExtraProps) {
     return (
-      <Tag id={id} className={`group relative scroll-mt-20 ${className ?? ""}`} {...rest}>
+      <Tag
+        id={id}
+        className={`group relative scroll-mt-20 ${HEADING_CLASSES[Tag]} ${className ?? ""}`}
+        {...rest}
+      >
         {children}
         {id ? (
           <a
@@ -160,8 +178,11 @@ const components: Components = {
       return <div className="overflow-x-auto">{children}</div>;
     }
     return (
+      // No border — a plain, quiet background block reads calmer (mdBook's
+      // own code-block treatment) than a bordered box for something this
+      // common in source text.
       <pre
-        className="overflow-x-auto rounded-md border border-border bg-muted-foreground/5 p-4 font-mono text-sm [&>code]:bg-transparent [&>code]:p-0"
+        className="overflow-x-auto rounded-md bg-muted-foreground/5 p-4 font-mono text-sm [&>code]:bg-transparent [&>code]:p-0"
         {...rest}
       >
         {children}
@@ -177,12 +198,12 @@ const components: Components = {
     </div>
   ),
   th: ({ children, node: _node, ...rest }) => (
-    <th className="border-b border-border px-3 py-2 text-left font-semibold" {...rest}>
+    <th className="border-b border-border px-3 py-2.5 text-left font-semibold" {...rest}>
       {children}
     </th>
   ),
   td: ({ children, node: _node, ...rest }) => (
-    <td className="border-b border-border px-3 py-2" {...rest}>
+    <td className="border-b border-border px-3 py-2.5" {...rest}>
       {children}
     </td>
   ),

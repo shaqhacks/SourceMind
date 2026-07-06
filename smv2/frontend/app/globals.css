@@ -11,21 +11,33 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
-  --background: #ffffff;
+  /* Warm off-white (mdBook-reference feel) rather than pure white —
+     computed luminance 0.9747, still 16.98:1 against --foreground. */
+  --background: #fdfcfb;
   --foreground: #1a1a1a;
   --muted-foreground: #52525b;
-  /* zinc-500 — chosen over the lighter zinc-200 default because many
-     secondary buttons here rely on the border alone (no fill) to convey
-     their clickable boundary; WCAG 1.4.11 needs 3:1 for that, and this
-     clears it in both themes (4.83:1 light, 4.10:1 dark) without needing
-     a separate per-theme override. */
-  --border: #71717a;
+  /* This block is the light-theme/pre-hydration default (see the
+     "Fallback" comment below on the prefers-color-scheme block) — a
+     quieter, warmer gray than a plain neutral zinc. Many secondary
+     buttons here rely on the border alone (no fill) to convey their
+     clickable boundary; WCAG 1.4.11 needs 3:1 for that, and this clears
+     it (4.04:1 against this theme's own --background, computed via the
+     WCAG relative-luminance formula, not eyeballed). Dark theme uses its
+     own cooler-toned value below (4.63:1) rather than sharing this one —
+     see the "warm whites, quiet borders" (light) vs. "navy/coal-like
+     neutral" (dark) distinction this is meant to carry. */
+  --border: #7d7d78;
   --accent: #2563eb;
 
   /* Reading-column typography defaults (WCAG AA target: 4.5:1+ for body
-     text). Overridden per-user as inline CSS vars by TypographyControls. */
+     text). Overridden per-user as inline CSS vars by TypographyControls.
+     --reading-measure: 78ch lands close to mdBook's own ~750px reference
+     measure at this default 18px font size (character-width-relative ch
+     units, not px, so it keeps scaling sensibly if the default font size
+     itself changes — TypographyControls' existing 55-90ch range is
+     unchanged, just the default within it). */
   --reading-font-size: 18px;
-  --reading-measure: 70ch;
+  --reading-measure: 78ch;
   --reading-line-height: 1.6;
   --font-serif: Charter, Georgia, "Times New Roman", serif;
 }
@@ -47,27 +59,29 @@
    take over and reflect the user's explicit choice. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
+    /* mdBook "Coal"-like navy-black rather than a flat neutral black —
+       computed luminance 0.0090, still 15.89:1 against --foreground. */
+    --background: #15181d;
     --foreground: #f2f2f2;
     --muted-foreground: #a1a1aa;
-    --border: #71717a;
+    --border: #7d8290;
     --accent: #60a5fa;
   }
 }
 
 :root[data-theme="light"] {
-  --background: #ffffff;
+  --background: #fdfcfb;
   --foreground: #1a1a1a;
   --muted-foreground: #52525b;
-  --border: #71717a;
+  --border: #7d7d78;
   --accent: #2563eb;
 }
 
 :root[data-theme="dark"] {
-  --background: #0a0a0a;
+  --background: #15181d;
   --foreground: #f2f2f2;
   --muted-foreground: #a1a1aa;
-  --border: #71717a;
+  --border: #7d8290;
   --accent: #60a5fa;
 }
 
@@ -89,7 +103,7 @@ body {
 }
 
 /* Global keyboard-focus indicator. --accent already clears WCAG 1.4.11's
-   3:1 non-text contrast in both themes (5.17:1 light, 7.79:1 dark against
+   3:1 non-text contrast in both themes (5.04:1 light, 7.00:1 dark against
    their backgrounds — see the --border comment above for the same
    computation approach), so one rule covers every focusable element
    without a separate dark: override. :focus-visible (not :focus) so

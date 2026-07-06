@@ -15,7 +15,11 @@ export const FONT_SIZE_RANGE = { min: 16, max: 22 } as const;
 export const MEASURE_RANGE = { min: 55, max: 90 } as const;
 export const LINE_HEIGHT_RANGE = { min: 1.4, max: 1.9 } as const;
 
-const DEFAULT_PREFS: TypographyPrefs = { fontSize: 18, measure: 70, lineHeight: 1.6 };
+// measure: 78ch lands close to mdBook's own ~750px reference measure at
+// this default 18px font size — see the matching --reading-measure
+// comment in app/globals.css (that CSS var is only the pre-hydration
+// fallback; this is what actually renders once React mounts).
+const DEFAULT_PREFS: TypographyPrefs = { fontSize: 18, measure: 78, lineHeight: 1.6 };
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));

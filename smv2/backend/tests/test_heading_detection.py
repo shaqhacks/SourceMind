@@ -1,9 +1,10 @@
 """ADR-015: heading-detection middle tier (bookmarks -> heading detection ->
 page windows). Uses the headings_no_bookmarks.pdf fixture (no embedded
-bookmarks; 4 chapters signaled only by large bold "Chapter N: Title"
+bookmarks; 5 chapters signaled only by large bold "Chapter N: Title"
 lines, including two whose headings share a single page, plus one
-large-font non-heading trap ending in a period, plus a practice sheet and
-an answer key -- see ADR-017) end to end through the real ingest pipeline.
+large-font non-heading trap ending in a period, plus a practice sheet, an
+answer key (ADR-017), and a ToC-shaped chapter cover page (ADR-021) --
+end to end through the real ingest pipeline.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ def test_ingest_detects_chapters_by_heading_when_no_bookmarks(client, ingest_cou
 
     course = client.get(f"/api/courses/{course_id}").json()
     assert course["status"] == "ready"
-    assert course["section_count"] == 6
+    assert course["section_count"] == 7
 
     sections = client.get(f"/api/courses/{course_id}/sections").json()
     assert [s["title"] for s in sections] == [
@@ -24,16 +25,21 @@ def test_ingest_detects_chapters_by_heading_when_no_bookmarks(client, ingest_cou
         "Chapter 2: Structures",
         "Chapter 3: Applications",
         "Chapter 4: Geometry",
+        "5.1 Basic Probability",
         "Answers - Chapter 1",
     ]
     # Display pages are 1-based (DB is 0-based) -- matches the golden
-    # snapshot's 0-based page_start/page_end + 1.
+    # snapshot's 0-based page_start/page_end + 1. Chapter 5's own cover
+    # page (page 13, 1-based) is a ToC-shaped chapter cover (ADR-021) and
+    # is dropped entirely -- "5.1 Basic Probability" is what's left of
+    # Chapter 5, correctly still labeled under it (see test_chapters.py).
     assert (sections[0]["page_start"], sections[0]["page_end"]) == (1, 3)
     assert (sections[1]["page_start"], sections[1]["page_end"]) == (4, 5)
     assert (sections[2]["page_start"], sections[2]["page_end"]) == (6, 6)  # claims the shared page
     assert (sections[3]["page_start"], sections[3]["page_end"]) == (7, 9)  # bumped to the next page
     assert (sections[4]["page_start"], sections[4]["page_end"]) == (10, 12)
-    assert (sections[5]["page_start"], sections[5]["page_end"]) == (13, 14)
+    assert (sections[5]["page_start"], sections[5]["page_end"]) == (14, 14)  # cover (p.13) dropped
+    assert (sections[6]["page_start"], sections[6]["page_end"]) == (15, 16)
 
 
 def test_ingest_heading_trap_stays_inside_chapter_body_not_its_own_section(client, ingest_course):

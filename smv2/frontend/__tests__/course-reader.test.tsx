@@ -309,7 +309,7 @@ describe("CourseReader", () => {
     const column = screen.getByTestId("reading-column");
     // Defaults from useTypographyPrefs, applied with no user interaction.
     expect(column.style.getPropertyValue("--reading-font-size")).toBe("18px");
-    expect(column.style.getPropertyValue("--reading-measure")).toBe("70ch");
+    expect(column.style.getPropertyValue("--reading-measure")).toBe("78ch");
     expect(column.style.getPropertyValue("--reading-line-height")).toBe("1.6");
 
     await user.click(screen.getByRole("button", { name: /typography settings/i }));
@@ -717,6 +717,19 @@ describe("CourseReader", () => {
 
       expect(screen.queryByRole("note", { name: /reading flow notice/i })).not.toBeInTheDocument();
     });
+
+    it("the Next chevron skips a practice section, same as keyboard nav — label and target both reflect the next content chapter", async () => {
+      mockGetSectionForCourse(COURSE_WITH_PRACTICE, PRACTICE_BODIES);
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE_WITH_PRACTICE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      const nextButton = screen.getByRole("button", { name: "Next chapter: Chapter Two" });
+      await user.click(nextButton);
+
+      expect(screen.getByRole("heading", { level: 2, name: /chapter two/i })).toHaveFocus();
+      await screen.findByText(/second body/i);
+    });
   });
 
   describe("view toggle (source / pages / lesson)", () => {
@@ -861,6 +874,87 @@ describe("CourseReader", () => {
 
       expect(await screen.findByLabelText("Page 1")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Pages" })).toHaveAttribute("aria-pressed", "true");
+    });
+  });
+
+  describe("prev/next chevrons", () => {
+    it("shows only a Next chevron on the first chapter, only a Previous chevron on the last", async () => {
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      expect(
+        screen.queryByRole("button", { name: /previous chapter/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Next chapter: Chapter Two" }),
+      ).toBeInTheDocument();
+
+      await userEvent.setup().click(screen.getByRole("button", { name: "Next chapter: Chapter Two" }));
+      await userEvent.setup().click(screen.getByRole("button", { name: "Next chapter: Chapter Three" }));
+      await screen.findByText(/third body/i);
+
+      expect(
+        screen.queryByRole("button", { name: /next chapter/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Previous chapter: Chapter Two" }),
+      ).toBeInTheDocument();
+    });
+
+    it("clicking Next moves forward and focuses the new heading, same as keyboard nav", async () => {
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.click(screen.getByRole("button", { name: "Next chapter: Chapter Two" }));
+
+      expect(screen.getByRole("button", { name: /chapter two/i })).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      expect(screen.getByRole("heading", { level: 2, name: /chapter two/i })).toHaveFocus();
+    });
+  });
+
+  describe("sidebar collapse persistence", () => {
+    afterEach(() => {
+      window.localStorage.clear();
+    });
+
+    it("persists the collapsed state across a remount", async () => {
+      const user = userEvent.setup();
+      const { unmount } = render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      expect(screen.getByRole("navigation", { name: /chapter outline/i })).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /hide outline/i }));
+      expect(screen.queryByRole("navigation", { name: /chapter outline/i })).not.toBeInTheDocument();
+      unmount();
+
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+      expect(screen.queryByRole("navigation", { name: /chapter outline/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /show outline/i })).toBeInTheDocument();
+    });
+  });
+
+  describe("chat open-state persistence", () => {
+    afterEach(() => {
+      window.localStorage.clear();
+    });
+
+    it("persists the chat panel's open state per course across a remount", async () => {
+      const user = userEvent.setup();
+      const { unmount } = render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      expect(screen.queryByRole("complementary", { name: /course chat/i })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /open chat/i }));
+      expect(await screen.findByRole("complementary", { name: /course chat/i })).toBeInTheDocument();
+      unmount();
+
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      expect(await screen.findByRole("complementary", { name: /course chat/i })).toBeInTheDocument();
     });
   });
 });

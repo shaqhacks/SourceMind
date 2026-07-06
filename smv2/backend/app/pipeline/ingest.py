@@ -54,9 +54,10 @@ from app.pipeline.outline_detect import (
     classify_section_kind,
     detect_sections,
     front_matter_bookmark_titles,
+    toc_shaped_chapter_cover_mask,
 )
 
-_EXTRACTOR_ALGO_VERSION = "algo-6"
+_EXTRACTOR_ALGO_VERSION = "algo-7"
 _LOW_TEXT_YIELD_CHARS_PER_PAGE = 20
 # Page-batch granularity for extraction-phase progress heartbeats — bounds
 # the number of report_progress DB writes per asset regardless of document
@@ -312,6 +313,27 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
         # chapter numbering leak into another's front sections.
         asset_titles = [b.title for b in bounds_list]
         asset_chapter_labels = assign_chapter_labels(asset_titles)
+
+        # Drop ToC-shaped chapter cover pages (ADR-021) — MUST happen after
+        # assign_chapter_labels above: a cover section's own title is
+        # exactly the ^chapter N marker that call anchors on, so dropping
+        # it first would silently orphan every section that chapter marker
+        # was supposed to label. bounds_list and asset_chapter_labels are
+        # filtered by the identical mask so the two stay in lockstep.
+        cover_mask = toc_shaped_chapter_cover_mask(bounds_list, item.pages, skip_front_matter=skip_fm)
+        dropped_cover_titles = [b.title for b, keep in zip(bounds_list, cover_mask) if not keep]
+        if dropped_cover_titles:
+            _report_progress(
+                job.id,
+                stage="outlining",
+                pct=80,
+                message=(
+                    f"skipped chapter cover pages in {item.asset.filename}: "
+                    f"{', '.join(dropped_cover_titles)}"
+                ),
+            )
+        bounds_list = [b for b, keep in zip(bounds_list, cover_mask) if keep]
+        asset_chapter_labels = [lbl for lbl, keep in zip(asset_chapter_labels, cover_mask) if keep]
 
         for idx, bounds in enumerate(bounds_list):
             page_slice = [(p, item.pages[p]) for p in range(bounds.page_start, bounds.page_end + 1)]

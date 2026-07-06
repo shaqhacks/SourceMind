@@ -5,10 +5,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import HintRow from "@/components/HintRow";
 import ShortcutsOverlay, { type ShortcutHint } from "@/components/ShortcutsOverlay";
 import { getSection, listChapters, type SectionOut } from "@/lib/api/client";
+import { useChatOpenPref } from "@/lib/hooks/useChatOpenPref";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 import { useProgressSync } from "@/lib/hooks/useProgressSync";
 import { useReaderView } from "@/lib/hooks/useReaderView";
+import { useSidebarCollapsed } from "@/lib/hooks/useSidebarCollapsed";
 import { useTypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
+import { findNextContentIndex } from "@/lib/reader/chapterNav";
 import { chapterGroupKey } from "@/lib/reader/chapterGroups";
 import type {
   ChapterTestStats,
@@ -84,9 +87,11 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     return index === -1 ? 0 : index;
   });
   const { storedMode, setStoredMode } = useReaderView(course.id);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebarCollapsed();
+  const { open: chatOpen, setOpen: setChatOpen, toggle: toggleChatOpen } = useChatOpenPref(
+    course.id,
+  );
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
   const [outlineEditorOpen, setOutlineEditorOpen] = useState(false);
   const [chapterStats, setChapterStats] = useState<Record<string, ChapterTestStats>>({});
   const [sectionBodies, setSectionBodies] = useState<Record<string, string>>({});
@@ -229,37 +234,43 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
-  // Keyboard nav (j/k/arrows) walks content sections only — practice/answers
-  // sections are reachable by deep link but aren't part of the reading
-  // flow's "next chapter" (their home is the chapter test page). Steps one
-  // index at a time in the given direction until landing on a content
-  // section; if the direction runs off the end without finding one, stays
-  // put rather than landing on a non-content section — the "clamp instead
-  // of wrap" behavior generalizes to "clamp instead of landing off-flow".
+  // Keyboard nav (j/k/arrows) and the reading column's prev/next chevrons
+  // both walk content sections only — practice/answers sections are
+  // reachable by deep link but aren't part of the reading flow's "next
+  // chapter" (their home is the chapter test page). If the direction runs
+  // off the end without finding one, stays put rather than landing on a
+  // non-content section — the "clamp instead of wrap" behavior
+  // generalizes to "clamp instead of landing off-flow".
   const goToOffset = useCallback(
     (offset: number) => {
       const direction = offset > 0 ? 1 : -1;
-      setActiveIndex((current) => {
-        let candidate = current;
-        for (;;) {
-          candidate += direction;
-          if (candidate < 0 || candidate > sections.length - 1) return current;
-          if (sections[candidate].kind === "content") return candidate;
-        }
-      });
+      setActiveIndex((current) => findNextContentIndex(sections, current, direction) ?? current);
     },
     [sections],
   );
 
   const goNext = useCallback(() => goToOffset(1), [goToOffset]);
   const goPrevious = useCallback(() => goToOffset(-1), [goToOffset]);
+
+  // Chevron visibility/labels: whether a next/previous content section
+  // actually exists from here, and what it's titled — null means "don't
+  // render that chevron at all" (matches the clamp above: nothing to
+  // navigate to in that direction).
+  const nextSection = useMemo(() => {
+    const index = findNextContentIndex(sections, safeActiveIndex, 1);
+    return index === null ? null : sections[index];
+  }, [sections, safeActiveIndex]);
+  const previousSection = useMemo(() => {
+    const index = findNextContentIndex(sections, safeActiveIndex, -1);
+    return index === null ? null : sections[index];
+  }, [sections, safeActiveIndex]);
   const cycleMode = useCallback(() => {
     setStoredMode(nextViewMode(mode, pagesAvailable));
   }, [mode, pagesAvailable, setStoredMode]);
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
-  const toggleChat = useCallback(() => setChatOpen((value) => !value), []);
-  const closeChat = useCallback(() => setChatOpen(false), []);
+  const toggleChat = toggleChatOpen;
+  const closeChat = useCallback(() => setChatOpen(false), [setChatOpen]);
   const openOutlineEditor = useCallback(() => setOutlineEditorOpen(true), []);
   const closeOutlineEditor = useCallback(() => setOutlineEditorOpen(false), []);
   const handleOutlineApplied = useCallback((updated: SectionOut[]) => {
@@ -314,7 +325,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
         courseId={course.id}
         courseTitle={course.title}
         sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
+        onToggleSidebar={toggleSidebar}
         onLessonSectionSettled={patchLessonStatus}
         chatOpen={chatOpen}
         onToggleChat={toggleChat}
@@ -343,6 +354,10 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
           columnRef={columnRef}
           body={bodyState}
           onLessonStatusChange={patchLessonStatus}
+          onNext={goNext}
+          onPrevious={goPrevious}
+          nextTitle={nextSection?.title ?? null}
+          previousTitle={previousSection?.title ?? null}
         />
         <CourseChatDrawer courseId={course.id} open={chatOpen} onClose={closeChat} />
       </div>

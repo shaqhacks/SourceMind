@@ -62,7 +62,7 @@ describe("CourseChatDrawer", () => {
     expect(mockedGetChatHistory).toHaveBeenCalledWith("course-1");
   });
 
-  it("a citation chip navigates using the structured section_id field — never parses source_ref — and closes the drawer", async () => {
+  it("a citation chip navigates using the structured section_id field — never parses source_ref — and stays open (docked, wide viewport)", async () => {
     mockedGetChatHistory.mockResolvedValue(ok([]));
     mockedSendChat.mockResolvedValue(
       ok({
@@ -87,7 +87,42 @@ describe("CourseChatDrawer", () => {
     // The chip's own label is the verbatim source_ref (display-only), but
     // navigation must use section_id, not anything parsed from that string.
     expect(mockPush).toHaveBeenCalledWith("/course/course-1?section=sec-xyz");
+    // Docked panel: navigating via a citation doesn't lose the
+    // conversation — only the narrow-viewport overlay fallback closes on
+    // citation click (see the next test).
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("a citation chip closes the panel on narrow viewports (overlay fallback)", async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) =>
+      ({
+        matches: true,
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }) as unknown as MediaQueryList) as typeof window.matchMedia;
+
+    mockedGetChatHistory.mockResolvedValue(ok([]));
+    mockedSendChat.mockResolvedValue(
+      ok({ reply_md: "The answer is 42.", citations: [{ n: 1, section_id: "sec-xyz", page: 5, source_ref: "ref:p.9" }] }),
+    );
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+
+    render(<CourseChatDrawer courseId="course-1" open onClose={onClose} />);
+    await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
+
+    await user.type(screen.getByLabelText(/message/i), "What is the answer?");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    const chip = await screen.findByRole("button", { name: /ref:p\.9/i });
+    await user.click(chip);
+
+    expect(mockPush).toHaveBeenCalledWith("/course/course-1?section=sec-xyz");
     expect(onClose).toHaveBeenCalled();
+
+    window.matchMedia = originalMatchMedia;
   });
 
   it("'c' toggles the drawer open and closed, as wired by the reader shell", async () => {

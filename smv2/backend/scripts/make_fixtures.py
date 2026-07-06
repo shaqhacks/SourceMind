@@ -28,7 +28,12 @@ from app.pipeline.extract import (
     open_pdf,
     rewrite_image_refs_to_api_path,
 )
-from app.pipeline.outline_detect import assign_chapter_labels, classify_section_kind, detect_sections
+from app.pipeline.outline_detect import (
+    assign_chapter_labels,
+    classify_section_kind,
+    detect_sections,
+    toc_shaped_chapter_cover_mask,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures" / "pdfs"
@@ -337,7 +342,7 @@ _BODY_FONT_SIZE = 11
 def make_headings_no_bookmarks() -> Path:
     """No embedded bookmarks at all — chapter boundaries are only signaled
     by large bold "Chapter N: Title" lines (ADR-015's heading-detection
-    tier). 14 pages, 4 chapters plus a practice sheet and an answer key
+    tier). 16 pages, 5 chapters plus a practice sheet and an answer key
     (ADR-017's section-kind/chapter-grouping classification):
 
     - Chapter 2's and Chapter 3's headings both land on the same page —
@@ -351,6 +356,13 @@ def make_headings_no_bookmarks() -> Path:
     - "Answers - Chapter 1" (kind='answers') sits at the very end, after
       Chapter 4 — positionally it would inherit Chapter 4's label, but its
       own title names Chapter 1, which must win (the answer-key override).
+    - Chapter 5's own cover page ("Chapter 5: Probability" + a dotted
+      mini-ToC of its own sections/page numbers, 1 page) sits between
+      Chapter 4 and the answer key (ADR-021's ToC-shaped-chapter-cover
+      drop) — must be dropped from the outline entirely, while the
+      ordinary lesson section right after it ("5.1 Basic Probability")
+      still correctly inherits chapter_label="Chapter 5: Probability",
+      proving labels survive being computed before the cover is dropped.
     - Every other line is ordinary body-size (11pt) prose, so the body-size
       histogram clearly picks 11pt as the modal size.
     """
@@ -459,6 +471,28 @@ def make_headings_no_bookmarks() -> Path:
     _add_mixed_page(
         doc,
         [
+            ("Chapter 5: Probability", _HEADING_FONT_SIZE, True),
+            ("", _BODY_FONT_SIZE, False),
+            ("5.1 Basic Probability .......................... 14", _BODY_FONT_SIZE, False),
+            ("5.2 Independent Events ......................... 15", _BODY_FONT_SIZE, False),
+            ("5.3 Conditional Probability .................... 16", _BODY_FONT_SIZE, False),
+            ("5.4 Expected Value ............................. 17", _BODY_FONT_SIZE, False),
+            ("5.5 Chapter Summary ............................ 18", _BODY_FONT_SIZE, False),
+        ],
+    )
+    _add_mixed_page(
+        doc,
+        [
+            ("5.1 Basic Probability", _HEADING_FONT_SIZE, True),
+            ("", _BODY_FONT_SIZE, False),
+            ("Chapter 5's own lesson content begins here, in plain", _BODY_FONT_SIZE, False),
+            ("deterministic fixture prose covering the topics the", _BODY_FONT_SIZE, False),
+            ("cover page's table of contents just listed.", _BODY_FONT_SIZE, False),
+        ],
+    )
+    _add_mixed_page(
+        doc,
+        [
             ("Answers - Chapter 1", _HEADING_FONT_SIZE, True),
             ("", _BODY_FONT_SIZE, False),
             ("A short answer key naming the chapter it belongs to,", _BODY_FONT_SIZE, False),
@@ -557,6 +591,15 @@ def _snapshot_for(pdf_path: Path) -> dict:
         toc, total_pages, pages_per_window=12, pages=pages, heading_candidates=heading_candidates
     )
     chapter_labels = assign_chapter_labels([s.title for s in sections])
+
+    # ADR-021: same ordering requirement as ingest.py — labels are computed
+    # against the full, undropped section list above, THEN ToC-shaped
+    # chapter covers are filtered out, using the identical mask for both
+    # sections and chapter_labels so they never drift out of sync.
+    cover_mask = toc_shaped_chapter_cover_mask(sections, pages)
+    sections = [s for s, keep in zip(sections, cover_mask) if keep]
+    chapter_labels = [lbl for lbl, keep in zip(chapter_labels, cover_mask) if keep]
+
     outline = {
         "section_count": len(sections),
         "sections": [

@@ -605,3 +605,61 @@ numerically equal in a real conversion). A PDF with mixed page sizes
 other page's actual dimensions misreported by this single pair. Not
 handled — flagged here as a known gap rather than silently designed
 around, since the spec asked for exactly this shape.
+
+## ADR-021 — Drop ToC-shaped chapter cover pages from the outline (2026-07-06)
+
+Owner-reported (live repro): a chapter's own cover page — "Chapter 1 :
+Solving Linear Equations" (p.27), a mini table of contents listing that
+chapter's own sections and their page numbers — was being ingested as a
+1-page *content* section instead of being recognized as front matter for
+that chapter. `app.pipeline.outline_detect.toc_shaped_chapter_cover_mask`
+(gated by the existing `skip_front_matter()` flag) drops any section
+where every page looks like a chapter-cover mini-ToC and the section
+spans at most 3 pages (safety bound — shape alone never drops a long
+section, only a short one is even eligible).
+
+**Ordering is load-bearing, same class of bug as ADR-019's trigger-drop
+catch**: the mask must be applied to `bounds_list` (and the identical mask
+applied to `assign_chapter_labels`' output) *after* both have already
+been computed against the full, undropped list. A cover section's own
+title is exactly the `^chapter N` marker `assign_chapter_labels` anchors
+on — dropping it first would silently orphan every section that chapter
+marker was supposed to label. Labels are computed once and only ever
+filtered alongside the mask afterward, never recomputed from the
+shortened list; `ingest.py` and `scripts/make_fixtures.py::_snapshot_for`
+both follow this same order.
+
+**The spec's literal instruction ("reuse the same pure function the
+leading-page skip uses," i.e. `_looks_like_toc_page`) would have shipped
+a serious content-loss regression, caught only by the mandated real-book
+verification step, not by unit tests written against the spec's own
+premise.** Running the literal instruction against the real textbook
+dropped 38 sections instead of the expected ~11 — the large majority were
+real numbered practice worksheets ("1.1 Practice - One Step Equations":
+"13) 9 = n - 5", "27) 20b = -200", ...), whose numbered problems mostly
+end in a digit (the equation's own numeric answer/coefficient) for
+exactly the same reason a genuine ToC line does, making them
+indistinguishable under a bare "≥40% of lines end in a number" signal.
+Fixed with a signal specific to this use case
+(`_looks_like_chapter_cover_page`): require a dot leader ("....") between
+the text and the trailing number — real ToC-style formatting has one, a
+worksheet's numbered problem never does — and its own lower minimum line
+count (3, not the shared `_TOC_LINE_MIN_COUNT=5`), since a legitimate
+per-chapter mini-ToC can list as few as 3 sub-sections (the real
+textbook's shortest genuine cover) where a book-level ToC would always
+list many more. Re-verified against the same real book with the corrected
+signal: 10 of 11 expected covers dropped (including both of the owner's
+own cited examples, p.6 and p.27), zero practice sheets affected (kind
+counts: `content` 94→84, `practice` unchanged at 76, `answers` unchanged
+at 11), all 11 distinct chapter labels and every surviving section's
+label unchanged. The one un-dropped cover ("Chapter 7 :
+Rational Expressions") spans 4 pages — correctly kept by the explicit
+3-page safety bound, not a miss.
+
+`_EXTRACTOR_ALGO_VERSION` bumped `algo-6` → `algo-7`; `headings_no_bookmarks.pdf`
+gained a 5th chapter whose own 1-page ToC-shaped cover ("Chapter 5:
+Probability" + 5 dotted sub-section lines) is dropped from its snapshot
+while the ordinary lesson section right after it ("5.1 Basic
+Probability") still correctly inherits `chapter_label="Chapter 5:
+Probability"` — proving the label-then-drop ordering in the golden
+snapshot, not just in production code. No API/schema changes.
