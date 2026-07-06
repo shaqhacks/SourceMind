@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QuizzesPanel from "@/components/reader/QuizzesPanel";
 import { generateTest, listTests, type TestAttemptSummaryOut } from "@/lib/api/client";
 
+import { ok } from "./support/api-result";
 import { FakeEventSource } from "./support/fake-event-source";
 
 const mockPush = vi.fn();
@@ -65,7 +66,7 @@ describe("QuizzesPanel", () => {
   });
 
   it("names the next action when the course has no quizzes yet", async () => {
-    mockedListTests.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedListTests.mockResolvedValue(ok([]));
     const user = userEvent.setup();
 
     render(<QuizzesPanel courseId="course-1" />);
@@ -92,9 +93,9 @@ describe("QuizzesPanel", () => {
 
   it("'Generate quiz' starts a job, renders SSE progress, and refetches the list on settle", async () => {
     mockedListTests
-      .mockResolvedValueOnce({ status: 200, ok: true, data: [] })
-      .mockResolvedValueOnce({ status: 200, ok: true, data: [makeAttempt({ id: "new-attempt" })] });
-    mockedGenerateTest.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-1" } });
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValueOnce(ok([makeAttempt({ id: "new-attempt" })]));
+    mockedGenerateTest.mockResolvedValue(ok({ job_id: "job-1" }, 202));
     const user = userEvent.setup();
 
     render(<QuizzesPanel courseId="course-1" />);

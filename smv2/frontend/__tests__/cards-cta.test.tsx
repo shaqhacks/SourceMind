@@ -11,6 +11,7 @@ import {
   type JobOut,
 } from "@/lib/api/client";
 
+import { err, ok } from "./support/api-result";
 import { FakeEventSource } from "./support/fake-event-source";
 
 vi.mock("@/lib/api/client", () => ({
@@ -70,7 +71,7 @@ describe("CardsCTA", () => {
   });
 
   it("shows 'Generate flashcards' with no count when the section has no cards yet", async () => {
-    mockedListCards.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedListCards.mockResolvedValue(ok([]));
 
     render(<CardsCTA sectionId="sec-1" />);
 
@@ -79,11 +80,7 @@ describe("CardsCTA", () => {
   });
 
   it("shows the card count and 'Generate more flashcards' when cards already exist", async () => {
-    mockedListCards.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: [makeCard({ id: "c1" }), makeCard({ id: "c2" })],
-    });
+    mockedListCards.mockResolvedValue(ok([makeCard({ id: "c1" }), makeCard({ id: "c2" })]));
 
     render(<CardsCTA sectionId="sec-1" />);
 
@@ -92,10 +89,8 @@ describe("CardsCTA", () => {
   });
 
   it("clicking Generate flashcards starts the job and renders live SSE progress, then refetches on settle", async () => {
-    mockedListCards
-      .mockResolvedValueOnce({ status: 200, ok: true, data: [] })
-      .mockResolvedValueOnce({ status: 200, ok: true, data: [makeCard()] });
-    mockedGenerateCards.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-1" } });
+    mockedListCards.mockResolvedValueOnce(ok([])).mockResolvedValueOnce(ok([makeCard()]));
+    mockedGenerateCards.mockResolvedValue(ok({ job_id: "job-1" }, 202));
 
     const user = userEvent.setup();
     render(<CardsCTA sectionId="sec-1" />);
@@ -117,7 +112,7 @@ describe("CardsCTA", () => {
   });
 
   it("rediscovers an in-flight job on mount and shows the generating state without a click", async () => {
-    mockedListCards.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedListCards.mockResolvedValue(ok([]));
     mockedFindActiveCardsJob.mockResolvedValue(makeJob({ id: "job-existing" }));
 
     render(<CardsCTA sectionId="sec-1" />);
@@ -127,11 +122,11 @@ describe("CardsCTA", () => {
   });
 
   it("resyncs to the in-flight job instead of erroring on a 409", async () => {
-    mockedListCards.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedListCards.mockResolvedValue(ok([]));
     mockedFindActiveCardsJob
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(makeJob({ id: "job-conflict" }));
-    mockedGenerateCards.mockResolvedValue({ status: 409, ok: false });
+    mockedGenerateCards.mockResolvedValue(err(409));
 
     const user = userEvent.setup();
     render(<CardsCTA sectionId="sec-1" />);

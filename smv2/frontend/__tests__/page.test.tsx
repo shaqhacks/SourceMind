@@ -13,6 +13,8 @@ import {
   type CourseOut,
 } from "@/lib/api/client";
 
+import { err, ok } from "./support/api-result";
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => "/",
@@ -63,9 +65,9 @@ describe("Home page", () => {
   beforeEach(() => {
     mockedFindActiveIngestJob.mockResolvedValue(null);
     mockedFindLatestIngestJob.mockResolvedValue(null);
-    mockedListAssets.mockResolvedValue({ status: 200, ok: true, data: [] });
-    mockedDeleteCourse.mockResolvedValue({ status: 200, ok: true });
-    mockedListSections.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedListAssets.mockResolvedValue(ok([]));
+    mockedDeleteCourse.mockResolvedValue(ok(undefined));
+    mockedListSections.mockResolvedValue(ok([]));
   });
 
   afterEach(() => {
@@ -74,34 +76,32 @@ describe("Home page", () => {
   });
 
   it("shows the empty-state hero when there are no courses", async () => {
-    mockedListCourses.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedListCourses.mockResolvedValue(ok([]));
     render(<Home />);
 
     expect(await screen.findByText(/drop a pdf anywhere to start/i)).toBeInTheDocument();
   });
 
   it("shows a retryable error banner when loading courses fails", async () => {
-    mockedListCourses.mockResolvedValue({ status: 500, ok: false });
+    mockedListCourses.mockResolvedValue(err(500));
     render(<Home />);
 
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent(/loading courses failed/i);
 
-    mockedListCourses.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedListCourses.mockResolvedValue(ok([]));
     await userEvent.setup().click(screen.getByRole("button", { name: /retry/i }));
 
     expect(await screen.findByText(/drop a pdf anywhere to start/i)).toBeInTheDocument();
   });
 
   it("renders a course card for each course", async () => {
-    mockedListCourses.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: [
+    mockedListCourses.mockResolvedValue(
+      ok([
         makeCourse({ id: "a", title: "Distributed Systems" }),
         makeCourse({ id: "b", title: "Compilers", status: "draft" }),
-      ],
-    });
+      ]),
+    );
     render(<Home />);
 
     expect(await screen.findByText("Distributed Systems")).toBeInTheDocument();
@@ -110,14 +110,12 @@ describe("Home page", () => {
   });
 
   it("a ready course's title is a real link into its reader (every card must be reachable, not just the Continue one)", async () => {
-    mockedListCourses.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: [
+    mockedListCourses.mockResolvedValue(
+      ok([
         makeCourse({ id: "a", title: "Distributed Systems" }),
         makeCourse({ id: "b", title: "Not Ready Yet", status: "draft" }),
-      ],
-    });
+      ]),
+    );
     render(<Home />);
 
     const link = await screen.findByRole("link", { name: "Distributed Systems" });
@@ -127,10 +125,8 @@ describe("Home page", () => {
   });
 
   it("shows the Continue card for the course with the most recent progress, ahead of the course grid", async () => {
-    mockedListCourses.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: [
+    mockedListCourses.mockResolvedValue(
+      ok([
         makeCourse({
           id: "a",
           title: "Older Progress",
@@ -141,8 +137,8 @@ describe("Home page", () => {
           title: "Newer Progress",
           progress: { section_id: "sec-1", scroll_pos: 0.9, updated_at: "2026-01-10T00:00:00Z" },
         }),
-      ],
-    });
+      ]),
+    );
     render(<Home />);
 
     expect(await screen.findByText(/continue reading/i)).toBeInTheDocument();
@@ -152,11 +148,7 @@ describe("Home page", () => {
   });
 
   it("shows no Continue card when no course has saved progress", async () => {
-    mockedListCourses.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: [makeCourse({ id: "a", progress: null })],
-    });
+    mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", progress: null })]));
     render(<Home />);
 
     await screen.findByText("Distributed Systems");
@@ -164,11 +156,7 @@ describe("Home page", () => {
   });
 
   it("deleting a course via its card removes it from the grid", async () => {
-    mockedListCourses.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: [makeCourse({ id: "a", title: "Distributed Systems" })],
-    });
+    mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", title: "Distributed Systems" })]));
     const user = userEvent.setup();
     render(<Home />);
 
@@ -181,7 +169,7 @@ describe("Home page", () => {
   });
 
   it("opens the upload flow after choosing files via the Upload PDF button", async () => {
-    mockedListCourses.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedListCourses.mockResolvedValue(ok([]));
     render(<Home />);
     await screen.findByText(/drop a pdf anywhere to start/i);
 
@@ -192,7 +180,7 @@ describe("Home page", () => {
   });
 
   it("opens the upload flow when PDFs are dropped anywhere on the dashboard", async () => {
-    mockedListCourses.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedListCourses.mockResolvedValue(ok([]));
     const { container } = render(<Home />);
     await screen.findByText(/drop a pdf anywhere to start/i);
 
@@ -204,7 +192,7 @@ describe("Home page", () => {
   });
 
   it("ignores non-PDF files dropped on the dashboard", async () => {
-    mockedListCourses.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedListCourses.mockResolvedValue(ok([]));
     const { container } = render(<Home />);
     await screen.findByText(/drop a pdf anywhere to start/i);
 
@@ -217,11 +205,9 @@ describe("Home page", () => {
 
   describe("sample course hint", () => {
     it("shows the hint when exactly one course exists and it's ready", async () => {
-      mockedListCourses.mockResolvedValue({
-        status: 200,
-        ok: true,
-        data: [makeCourse({ id: "a", title: "Welcome to SourceMind", status: "ready" })],
-      });
+      mockedListCourses.mockResolvedValue(
+        ok([makeCourse({ id: "a", title: "Welcome to SourceMind", status: "ready" })]),
+      );
 
       render(<Home />);
 
@@ -231,11 +217,7 @@ describe("Home page", () => {
     });
 
     it("shows the hint while the single course is still ingesting", async () => {
-      mockedListCourses.mockResolvedValue({
-        status: 200,
-        ok: true,
-        data: [makeCourse({ id: "a", status: "ingesting" })],
-      });
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "ingesting" })]));
 
       render(<Home />);
 
@@ -243,11 +225,9 @@ describe("Home page", () => {
     });
 
     it("does not show the hint when more than one course exists", async () => {
-      mockedListCourses.mockResolvedValue({
-        status: 200,
-        ok: true,
-        data: [makeCourse({ id: "a" }), makeCourse({ id: "b", title: "Second course" })],
-      });
+      mockedListCourses.mockResolvedValue(
+        ok([makeCourse({ id: "a" }), makeCourse({ id: "b", title: "Second course" })]),
+      );
 
       render(<Home />);
       await screen.findByText("Second course");
@@ -256,11 +236,7 @@ describe("Home page", () => {
     });
 
     it("does not show the hint for a draft or failed single course", async () => {
-      mockedListCourses.mockResolvedValue({
-        status: 200,
-        ok: true,
-        data: [makeCourse({ id: "a", status: "draft" })],
-      });
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "draft" })]));
 
       render(<Home />);
       await screen.findByText("Distributed Systems");
@@ -269,11 +245,7 @@ describe("Home page", () => {
     });
 
     it("dismissing hides it and persists the choice across remounts", async () => {
-      mockedListCourses.mockResolvedValue({
-        status: 200,
-        ok: true,
-        data: [makeCourse({ id: "a", status: "ready" })],
-      });
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "ready" })]));
       const user = userEvent.setup();
 
       const { unmount } = render(<Home />);

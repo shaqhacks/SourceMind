@@ -13,6 +13,10 @@ from app.main import create_app
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "pdfs"
 
 
+def _first_section_id(client, course_id: str) -> str:
+    return client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
+
+
 def _setup_isolated_env(tmp_path, monkeypatch, *, sample_course_enabled: bool = False) -> None:
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("SMV2_DB_URL", f"sqlite:///{db_path}")

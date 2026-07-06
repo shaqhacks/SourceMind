@@ -12,6 +12,8 @@ import {
   type ReviewSummaryOut,
 } from "@/lib/api/client";
 
+import { ok } from "./support/api-result";
+
 let mockSearchParams = new URLSearchParams();
 const mockPush = vi.fn();
 
@@ -60,11 +62,7 @@ function makeQueueCard(overrides: Partial<ReviewQueueCardOut> = {}): ReviewQueue
 describe("ReviewPage", () => {
   beforeEach(() => {
     mockSearchParams = new URLSearchParams();
-    mockedGradeCard.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: { next_due_at: "2026-01-02T00:00:00Z", remaining_due: 0 },
-    });
+    mockedGradeCard.mockResolvedValue(ok({ next_due_at: "2026-01-02T00:00:00Z", remaining_due: 0 }));
   });
 
   afterEach(() => {
@@ -73,11 +71,7 @@ describe("ReviewPage", () => {
   });
 
   it("hub: shows the backlog warning and course list from review_summary", async () => {
-    mockedGetReviewSummary.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: makeSummary({ backlog_warning: true, due_total: 40 }),
-    });
+    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary({ backlog_warning: true, due_total: 40 })));
 
     render(<ReviewPage />);
 
@@ -88,11 +82,7 @@ describe("ReviewPage", () => {
   });
 
   it("hub: shows a next-action empty state when nothing is due anywhere", async () => {
-    mockedGetReviewSummary.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: makeSummary({ due_total: 0, courses: [] }),
-    });
+    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary({ due_total: 0, courses: [] })));
 
     render(<ReviewPage />);
 
@@ -103,8 +93,8 @@ describe("ReviewPage", () => {
   });
 
   it("hub: clicking a course navigates to its chooser via ?course=", async () => {
-    mockedGetReviewSummary.mockResolvedValue({ status: 200, ok: true, data: makeSummary() });
-    mockedGetReviewQueue.mockResolvedValue({ status: 200, ok: true, data: makeQueue() });
+    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue()));
     const user = userEvent.setup();
 
     render(<ReviewPage />);
@@ -117,11 +107,7 @@ describe("ReviewPage", () => {
 
   it("chooser: offers 10 / 25 / all only when the total justifies them", async () => {
     mockSearchParams = new URLSearchParams({ course: "course-1" });
-    mockedGetReviewQueue.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: makeQueue({ total: 30, due: 25, new: 5 }),
-    });
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 30, due: 25, new: 5 })));
 
     render(<ReviewPage />);
 
@@ -132,11 +118,7 @@ describe("ReviewPage", () => {
 
   it("chooser: collapses to a single 'All (n)' option when the total is small", async () => {
     mockSearchParams = new URLSearchParams({ course: "course-1" });
-    mockedGetReviewQueue.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: makeQueue({ total: 8, due: 6, new: 2 }),
-    });
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 8, due: 6, new: 2 })));
 
     render(<ReviewPage />);
 
@@ -146,7 +128,7 @@ describe("ReviewPage", () => {
 
   it("chooser: shows the empty state when the course has nothing due", async () => {
     mockSearchParams = new URLSearchParams({ course: "course-1" });
-    mockedGetReviewQueue.mockResolvedValue({ status: 200, ok: true, data: makeQueue({ total: 0 }) });
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 0 })));
 
     render(<ReviewPage />);
 
@@ -156,18 +138,18 @@ describe("ReviewPage", () => {
   it("session: space reveals the back, grading keys 1-4 advance and capture elapsed_ms, and the summary tallies by grade", async () => {
     mockSearchParams = new URLSearchParams({ course: "course-1" });
     mockedGetReviewQueue
-      .mockResolvedValueOnce({ status: 200, ok: true, data: makeQueue({ total: 2, due: 2 }) })
-      .mockResolvedValueOnce({
-        status: 200,
-        ok: true,
-        data: makeQueue({
-          total: 2,
-          cards: [
-            makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" }),
-            makeQueueCard({ id: "card-2", front_md: "Q2", back_md: "A2" }),
-          ],
-        }),
-      });
+      .mockResolvedValueOnce(ok(makeQueue({ total: 2, due: 2 })))
+      .mockResolvedValueOnce(
+        ok(
+          makeQueue({
+            total: 2,
+            cards: [
+              makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" }),
+              makeQueueCard({ id: "card-2", front_md: "Q2", back_md: "A2" }),
+            ],
+          }),
+        ),
+      );
     const user = userEvent.setup();
 
     render(<ReviewPage />);
@@ -213,7 +195,7 @@ describe("ReviewPage", () => {
   });
 
   it("'?' opens the shortcuts overlay from any phase (e.g. the hub)", async () => {
-    mockedGetReviewSummary.mockResolvedValue({ status: 200, ok: true, data: makeSummary() });
+    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
 
     render(<ReviewPage />);
     await screen.findByRole("button", { name: /intro to testing/i });

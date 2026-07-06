@@ -1,4 +1,19 @@
+import { configure } from "@testing-library/dom";
 import "@testing-library/jest-dom/vitest";
+
+// Root cause (found while chasing full-suite-only flakes, never
+// reproducible in isolation): @testing-library/dom's own default
+// asyncUtilTimeout is 1000ms — every findBy*/waitFor call in this suite
+// inherits that ceiling. Under CPU contention (many vitest worker
+// threads competing for cores, e.g. a busy CI runner), individual calls
+// can legitimately take longer than 1000ms with nothing actually wrong,
+// which surfaced as "Unable to find ..." on a different, effectively
+// random test each run — reproduced locally by running several full
+// suites concurrently to force contention; every failure was this same
+// timeout class, never a real assertion mismatch. Raised well above what
+// contention needed in that reproduction, comfortably under vitest's own
+// (also-raised) 10s testTimeout in vitest.config.ts.
+configure({ asyncUtilTimeout: 5000 });
 
 // Node 26's own experimental global `localStorage`/`sessionStorage`
 // shadow jsdom's per-window implementation here (window === globalThis

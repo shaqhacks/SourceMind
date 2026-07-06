@@ -2,24 +2,14 @@
 
 import { useEffect, useState } from "react";
 
+import { describeError, type FetchError } from "@/lib/api/errors";
 import { findActiveCardsJob, generateCards, listCards, type CardOut } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface CardsCTAProps {
   sectionId: string;
-}
-
-interface FetchError {
-  status?: number;
-  message: string;
-}
-
-function describeError(status: number | undefined, action: string): FetchError {
-  if (status === undefined) {
-    return { message: `${action}: could not reach the API. Is the backend running?` };
-  }
-  return { status, message: `${action} failed (HTTP ${status}).` };
 }
 
 type LoadState =
@@ -110,11 +100,7 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
   if (isGenerating) {
     return (
       <p role="status" className="text-xs text-muted-foreground">
-        {stalled
-          ? "Still working — check back shortly."
-          : job?.progress
-            ? `${job.progress.stage} — ${job.progress.pct}% — ${job.progress.message}`
-            : "Preparing…"}
+        {formatJobProgress(job, stalled)}
       </p>
     );
   }

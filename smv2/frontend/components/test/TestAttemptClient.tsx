@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import { getTest, submitTest, type SubmitTestOut, type TestAttemptOut } from "@/lib/api/client";
 import { useKeyboardShortcuts, type ShortcutMap } from "@/lib/hooks/useKeyboardShortcuts";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
@@ -13,18 +14,6 @@ import { notifyReviewSettled } from "@/lib/review/reviewBus";
 export interface TestAttemptClientProps {
   courseId: string;
   attemptId: string;
-}
-
-interface FetchError {
-  status?: number;
-  message: string;
-}
-
-function describeError(status: number | undefined, action: string): FetchError {
-  if (status === undefined) {
-    return { message: `${action}: could not reach the API. Is the backend running?` };
-  }
-  return { status, message: `${action} failed (HTTP ${status}).` };
 }
 
 type LoadState =

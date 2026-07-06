@@ -14,6 +14,8 @@ import {
 } from "@/lib/api/client";
 import type { ReaderCourse, ReaderProgress } from "@/lib/reader/types";
 
+import { err, ok } from "./support/api-result";
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
@@ -40,10 +42,8 @@ const mockedGetLlmUsage = vi.mocked(getLlmUsage);
 const mockedListCards = vi.mocked(listCards);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 
-// A small hand-rolled fixture rather than importing lib/reader/mockCourse:
-// that module is documented as page.tsx-only, and a minimal 3-section
-// fixture keeps these assertions about active-chapter bookkeeping
-// (not content) easy to follow.
+// A minimal 3-section fixture keeps these assertions about
+// active-chapter bookkeeping (not content) easy to follow.
 const COURSE: ReaderCourse = {
   id: "course-1",
   title: "Test Course",
@@ -93,11 +93,9 @@ describe("CourseReader", () => {
   beforeEach(() => {
     mockedGetSection.mockImplementation((id: string) => {
       const section = COURSE.sections.find((candidate) => candidate.id === id);
-      if (!section) return Promise.resolve({ status: 404, ok: false });
-      return Promise.resolve({
-        status: 200,
-        ok: true,
-        data: {
+      if (!section) return Promise.resolve(err(404));
+      return Promise.resolve(
+        ok({
           id: section.id,
           course_id: COURSE.id,
           title: section.title,
@@ -114,22 +112,20 @@ describe("CourseReader", () => {
           extractor_version: null,
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:00Z",
-        },
-      });
+        }),
+      );
     });
-    mockedSaveProgress.mockResolvedValue({ status: 200, ok: true });
-    mockedGetLessonEstimate.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: { est_seconds: 30, est_cost_usd: 0.01, based_on_calls: 0 },
-    });
+    mockedSaveProgress.mockResolvedValue(
+      ok({ course_id: COURSE.id, section_id: null, scroll_pos: 0, updated_at: null }),
+    );
+    mockedGetLessonEstimate.mockResolvedValue(
+      ok({ est_seconds: 30, est_cost_usd: 0.01, based_on_calls: 0 }),
+    );
     mockedFindActiveLessonJob.mockResolvedValue(null);
-    mockedGetLlmUsage.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: { calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 },
-    });
-    mockedListCards.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedGetLlmUsage.mockResolvedValue(
+      ok({ calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 }),
+    );
+    mockedListCards.mockResolvedValue(ok([]));
     mockedFindActiveCardsJob.mockResolvedValue(null);
   });
 

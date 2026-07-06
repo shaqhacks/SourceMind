@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from app.db.engine import get_session
 from app.db.models import LlmCall, utcnow
-
-
-def _first_section_id(client, course_id: str) -> str:
-    return client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
+from conftest import _first_section_id
 
 
 def test_estimate_uses_deterministic_default_with_no_history(client, ingest_course):

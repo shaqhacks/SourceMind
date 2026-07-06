@@ -8,6 +8,7 @@ import ErrorBanner from "@/components/ErrorBanner";
 import HintRow from "@/components/HintRow";
 import Markdown from "@/components/Markdown";
 import ShortcutsOverlay, { type ShortcutHint } from "@/components/ShortcutsOverlay";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   getReviewQueue,
   getReviewSummary,
@@ -29,18 +30,6 @@ const GRADE_LABELS: Record<number, string> = { 1: "Again", 2: "Hard", 3: "Good",
 // review_queue's `limit` caps at 200 — a session's "all" is "all up to
 // that cap", not literally unbounded. Fine at this app's scale.
 const MAX_QUEUE_FETCH = 200;
-
-interface FetchError {
-  status?: number;
-  message: string;
-}
-
-function describeError(status: number | undefined, action: string): FetchError {
-  if (status === undefined) {
-    return { message: `${action}: could not reach the API. Is the backend running?` };
-  }
-  return { status, message: `${action} failed (HTTP ${status}).` };
-}
 
 type HubState =
   | { kind: "loading" }

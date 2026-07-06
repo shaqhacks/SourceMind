@@ -20,10 +20,6 @@ class CourseNotFoundError(ValueError):
     pass
 
 
-class TestAttemptNotFoundError(ValueError):
-    pass
-
-
 class TestAlreadySubmittedError(ValueError):
     pass
 

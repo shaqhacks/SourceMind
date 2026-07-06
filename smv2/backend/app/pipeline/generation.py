@@ -14,18 +14,18 @@ second bad result fails the section outright rather than looping.
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.config import course_spend_cap_usd
-from app.db.models import Job, Section, utcnow
+from app.db.models import Job, Section
 from app.llm.ledger import course_spend_so_far
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
+from app.pipeline._common import report_progress as _report_progress
+from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 
-_PROGRESS_LEASE_EXTENSION_SECONDS = 60
 _MAX_TOKENS = 4096
 
 
@@ -33,26 +33,8 @@ class SpendCapExceededError(Exception):
     pass
 
 
-def _report_progress(session: Session, job: Job, stage: str, pct: int, message: str) -> None:
-    job.progress = {"stage": stage, "pct": pct, "message": message}
-    job.lease_until = utcnow() + timedelta(seconds=_PROGRESS_LEASE_EXTENSION_SECONDS)
-    session.commit()
-
-
 def _is_degenerate(text: str) -> bool:
     return not text or not text.strip()
-
-
-def _strip_leading_fence(text: str) -> str:
-    stripped = text.strip()
-    if not stripped.startswith("```"):
-        return stripped
-    lines = stripped.splitlines()
-    if lines:
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
 
 
 def _build_messages(section: Section) -> tuple[str, list[dict]]:

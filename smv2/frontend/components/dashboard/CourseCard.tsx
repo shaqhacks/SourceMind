@@ -15,6 +15,7 @@ import {
   type CourseOut,
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { formatJobProgress } from "@/lib/jobs/format";
 
 export interface CourseCardProps {
   course: CourseOut;
@@ -141,15 +142,7 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
 
       {isIngesting && (
         <div role="status" className="text-xs text-muted-foreground">
-          {stalled ? (
-            <span>Still working — check back shortly.</span>
-          ) : job?.progress ? (
-            <span>
-              {job.progress.stage} — {job.progress.pct}% — {job.progress.message}
-            </span>
-          ) : (
-            <span>Preparing…</span>
-          )}
+          <span>{formatJobProgress(job, stalled)}</span>
         </div>
       )}
 

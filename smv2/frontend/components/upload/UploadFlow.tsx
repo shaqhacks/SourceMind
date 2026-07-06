@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import OutlineConfirmation from "@/components/upload/OutlineConfirmation";
+import { describeError } from "@/lib/api/errors";
 import {
   createCourse,
   editOutline,
@@ -18,6 +19,8 @@ import {
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
+import { formatJobProgress } from "@/lib/jobs/format";
+import { defaultTitleFromFilename } from "@/lib/upload/filename";
 
 export interface UploadFlowProps {
   files: File[];
@@ -30,12 +33,6 @@ interface UploadItem {
   error?: string;
 }
 
-function defaultTitleFromFilename(name: string): string {
-  const withoutExtension = name.replace(/\.[^./]+$/, "");
-  const spaced = withoutExtension.replace(/[_-]+/g, " ").trim();
-  return spaced || "Untitled course";
-}
-
 type Step =
   | { kind: "title"; title: string }
   | { kind: "creating" }
@@ -46,12 +43,6 @@ type Step =
   | { kind: "confirming"; courseId: string; sections: SectionOut[] }
   | { kind: "applying"; courseId: string }
   | { kind: "fatal"; message: string };
-
-function describeApiError(status: number | undefined, action: string): string {
-  return status === undefined
-    ? `${action}: could not reach the API. Is the backend running?`
-    : `${action} failed (HTTP ${status}).`;
-}
 
 /**
  * Modal walking a freshly-selected/dropped batch of PDFs through: create
@@ -84,7 +75,7 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
           const { data, status } = await uploadAsset(courseId, file);
           const result: UploadItem = data
             ? { file, status: "success" }
-            : { file, status: "error", error: describeApiError(status, "Upload") };
+            : { file, status: "error", error: describeError(status, "Upload").message };
           setStep((prev) =>
             prev.kind === "uploading"
               ? { ...prev, items: prev.items.map((item, i) => (i === index ? result : item)) }
@@ -102,7 +93,7 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
           kind: "ingest-failed",
           courseId,
           items: settled,
-          message: describeApiError(ingestStatus, "Starting ingest"),
+          message: describeError(ingestStatus, "Starting ingest").message,
         });
         return;
       }
@@ -119,7 +110,7 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
 
     const { data, status } = await createCourse({ title });
     if (!data) {
-      setStep({ kind: "fatal", message: describeApiError(status, "Creating the course") });
+      setStep({ kind: "fatal", message: describeError(status, "Creating the course").message });
       return;
     }
 
@@ -203,24 +194,10 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
   }
 
   function renderIngestProgress() {
-    if (stalled) {
-      return (
-        <p className="text-sm text-muted-foreground">
-          Still working — check back shortly.
-        </p>
-      );
-    }
-    if (sseError && !done) {
+    if (!stalled && sseError && !done) {
       return <ErrorBanner message={sseError} />;
     }
-    if (!job || !job.progress) {
-      return <p className="text-sm text-muted-foreground">Preparing…</p>;
-    }
-    return (
-      <p className="text-sm text-muted-foreground">
-        {job.progress.stage} — {job.progress.pct}% — {job.progress.message}
-      </p>
-    );
+    return <p className="text-sm text-muted-foreground">{formatJobProgress(job, stalled)}</p>;
   }
 
   return (

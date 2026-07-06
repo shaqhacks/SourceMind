@@ -4,10 +4,7 @@ from app.db.engine import get_session
 from app.db.models import LlmCall, utcnow
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
-
-
-def _first_section_id(client, course_id: str) -> str:
-    return client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
+from conftest import _first_section_id
 
 
 def test_spend_cap_blocks_generation_when_exceeded(client, ingest_course, stub_provider, monkeypatch):

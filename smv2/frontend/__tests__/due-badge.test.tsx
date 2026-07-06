@@ -5,6 +5,8 @@ import DueBadge from "@/components/DueBadge";
 import { getReviewSummary, type ReviewSummaryOut } from "@/lib/api/client";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
+import { ok } from "./support/api-result";
+
 let mockPathname = "/";
 
 vi.mock("next/navigation", () => ({
@@ -38,11 +40,7 @@ describe("DueBadge", () => {
   });
 
   it("renders no link once loaded with zero due (but keeps the live region mounted)", async () => {
-    mockedGetReviewSummary.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: makeSummary({ due_total: 0 }),
-    });
+    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary({ due_total: 0 })));
 
     render(<DueBadge />);
     await waitFor(() => expect(mockedGetReviewSummary).toHaveBeenCalledTimes(1));
@@ -50,11 +48,7 @@ describe("DueBadge", () => {
   });
 
   it("shows the due total as a link to /review", async () => {
-    mockedGetReviewSummary.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: makeSummary({ due_total: 7 }),
-    });
+    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary({ due_total: 7 })));
 
     render(<DueBadge />);
 
@@ -64,8 +58,8 @@ describe("DueBadge", () => {
 
   it("refetches when the route changes", async () => {
     mockedGetReviewSummary
-      .mockResolvedValueOnce({ status: 200, ok: true, data: makeSummary({ due_total: 3 }) })
-      .mockResolvedValueOnce({ status: 200, ok: true, data: makeSummary({ due_total: 5 }) });
+      .mockResolvedValueOnce(ok(makeSummary({ due_total: 3 })))
+      .mockResolvedValueOnce(ok(makeSummary({ due_total: 5 })));
 
     const { rerender } = render(<DueBadge />);
     expect(await screen.findByText("3 due")).toBeInTheDocument();
@@ -79,8 +73,8 @@ describe("DueBadge", () => {
 
   it("refetches when the review bus fires (a grade or a generation settled)", async () => {
     mockedGetReviewSummary
-      .mockResolvedValueOnce({ status: 200, ok: true, data: makeSummary({ due_total: 2 }) })
-      .mockResolvedValueOnce({ status: 200, ok: true, data: makeSummary({ due_total: 1 }) });
+      .mockResolvedValueOnce(ok(makeSummary({ due_total: 2 })))
+      .mockResolvedValueOnce(ok(makeSummary({ due_total: 1 })));
 
     render(<DueBadge />);
     expect(await screen.findByText("2 due")).toBeInTheDocument();
@@ -91,11 +85,7 @@ describe("DueBadge", () => {
   });
 
   it("is a stable aria-live region so a screen reader announces the count changing", async () => {
-    mockedGetReviewSummary.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: makeSummary({ due_total: 4 }),
-    });
+    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary({ due_total: 4 })));
 
     const { container } = render(<DueBadge />);
     await screen.findByText("4 due");

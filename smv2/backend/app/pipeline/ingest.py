@@ -18,7 +18,6 @@ them); new sections are inserted. This is why the 'ingest' ON_ORPHAN hook
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any
@@ -27,18 +26,14 @@ from sqlalchemy.orm import Session
 
 from app.config import pages_per_window
 from app.db.identity import content_hash_for, normalize_text, section_id_for
-from app.db.models import Asset, ChatTurn, Chunk, Course, Job, Section, TestAttempt, utcnow
+from app.db.models import Asset, ChatTurn, Chunk, Course, Job, Section, TestAttempt
+from app.pipeline._common import report_progress as _report_progress
 from app.pipeline.chunking import chunk_pages
 from app.pipeline.extract import PdfExtractionError, extract_markdown_pages, get_toc, open_pdf
 from app.pipeline.outline_detect import detect_sections
 
 _EXTRACTOR_ALGO_VERSION = "algo-1"
 _LOW_TEXT_YIELD_CHARS_PER_PAGE = 20
-# Lease extension while a long ingest job is heartbeating progress. Kept as
-# a local constant (not imported from app.jobs.worker) to avoid a circular
-# import — app.jobs.registry imports this module to register the 'ingest'
-# handler, so this module must not import back from app.jobs.*.
-_PROGRESS_LEASE_EXTENSION_SECONDS = 60
 
 
 def extractor_version() -> str:
@@ -47,12 +42,6 @@ def extractor_version() -> str:
     except PackageNotFoundError:
         pymupdf4llm_version = "unknown"
     return f"pymupdf4llm-{pymupdf4llm_version}+{_EXTRACTOR_ALGO_VERSION}"
-
-
-def _report_progress(session: Session, job: Job, stage: str, pct: int, message: str) -> None:
-    job.progress = {"stage": stage, "pct": pct, "message": message}
-    job.lease_until = utcnow() + timedelta(seconds=_PROGRESS_LEASE_EXTENSION_SECONDS)
-    session.commit()
 
 
 @dataclass

@@ -9,6 +9,8 @@ import {
   type TestAttemptOut,
 } from "@/lib/api/client";
 
+import { err, ok } from "./support/api-result";
+
 vi.mock("next/navigation", () => ({
   usePathname: () => "/course/course-1/test/attempt-1",
 }));
@@ -58,7 +60,7 @@ describe("TestAttemptClient", () => {
   });
 
   it("never renders correct_index/explanation before submit — the API redacts them", async () => {
-    mockedGetTest.mockResolvedValue({ status: 200, ok: true, data: makeAttempt() });
+    mockedGetTest.mockResolvedValue(ok(makeAttempt()));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
 
@@ -69,9 +71,7 @@ describe("TestAttemptClient", () => {
   });
 
   it("shows a retryable error banner on load failure, and retry recovers", async () => {
-    mockedGetTest
-      .mockResolvedValueOnce({ status: undefined, ok: false })
-      .mockResolvedValueOnce({ status: 200, ok: true, data: makeAttempt() });
+    mockedGetTest.mockResolvedValueOnce(err()).mockResolvedValueOnce(ok(makeAttempt()));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
 
@@ -83,8 +83,8 @@ describe("TestAttemptClient", () => {
   });
 
   it("blocks advancing with an unanswered guard, and keys 1-4 + Enter select/advance/submit", async () => {
-    mockedGetTest.mockResolvedValue({ status: 200, ok: true, data: makeAttempt() });
-    mockedSubmitTest.mockResolvedValue({ status: 200, ok: true, data: makeSubmitResult() });
+    mockedGetTest.mockResolvedValue(ok(makeAttempt()));
+    mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult()));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
@@ -107,8 +107,8 @@ describe("TestAttemptClient", () => {
   });
 
   it("submitting shows the score and a per-question review with accessible (not color-only) correctness marking", async () => {
-    mockedGetTest.mockResolvedValue({ status: 200, ok: true, data: makeAttempt() });
-    mockedSubmitTest.mockResolvedValue({ status: 200, ok: true, data: makeSubmitResult() });
+    mockedGetTest.mockResolvedValue(ok(makeAttempt()));
+    mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult()));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");

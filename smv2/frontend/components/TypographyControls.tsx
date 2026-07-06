@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
+import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import {
   FONT_SIZE_RANGE,
   LINE_HEIGHT_RANGE,
@@ -16,27 +17,9 @@ export default function TypographyControls() {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useDialogFocus<HTMLDivElement>(open, { trap: false });
+  const close = useCallback(() => setOpen(false), []);
+  useDismissOnOutsideOrEscape(open, close, containerRef);
   const { prefs, setFontSize, setMeasure, setLineHeight } = useTypographyPrefs();
-
-  useEffect(() => {
-    if (!open) return;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    function handlePointerDown(event: PointerEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("pointerdown", handlePointerDown);
-    };
-  }, [open]);
 
   return (
     <div ref={containerRef} className="relative">

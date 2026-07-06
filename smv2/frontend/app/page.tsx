@@ -7,22 +7,11 @@ import ContinueCard from "@/components/dashboard/ContinueCard";
 import CourseCard from "@/components/dashboard/CourseCard";
 import ErrorBanner from "@/components/ErrorBanner";
 import UploadFlow from "@/components/upload/UploadFlow";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import { listCourses, type CourseOut } from "@/lib/api/client";
 import { pickMostRecentCourse } from "@/lib/dashboard/continue";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
 import { useSampleHintDismissed } from "@/lib/hooks/useSampleHint";
-
-interface FetchError {
-  status?: number;
-  message: string;
-}
-
-function describeError(status: number | undefined, action: string): FetchError {
-  if (status === undefined) {
-    return { message: `${action}: could not reach the API. Is the backend running?` };
-  }
-  return { status, message: `${action} failed (HTTP ${status}).` };
-}
 
 function isPdf(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");

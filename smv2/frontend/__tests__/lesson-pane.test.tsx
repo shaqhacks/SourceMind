@@ -11,6 +11,7 @@ import {
   type SectionDetailOut,
 } from "@/lib/api/client";
 
+import { ok } from "./support/api-result";
 import { FakeEventSource } from "./support/fake-event-source";
 
 vi.mock("@/lib/api/client", () => ({
@@ -68,7 +69,7 @@ describe("LessonPane", () => {
   });
 
   it("shows the CTA with an estimate based on prior calls", async () => {
-    mockedGetSection.mockResolvedValue({ status: 200, ok: true, data: makeDetail() });
+    mockedGetSection.mockResolvedValue(ok(makeDetail()));
     mockedGetLessonEstimate.mockResolvedValue({
       status: 200,
       ok: true,
@@ -83,7 +84,7 @@ describe("LessonPane", () => {
   });
 
   it("shows a rough first-generation estimate when there's no call history", async () => {
-    mockedGetSection.mockResolvedValue({ status: 200, ok: true, data: makeDetail() });
+    mockedGetSection.mockResolvedValue(ok(makeDetail()));
     mockedGetLessonEstimate.mockResolvedValue({
       status: 200,
       ok: true,
@@ -96,13 +97,13 @@ describe("LessonPane", () => {
   });
 
   it("clicking Generate lesson starts the job and renders live SSE progress", async () => {
-    mockedGetSection.mockResolvedValue({ status: 200, ok: true, data: makeDetail() });
+    mockedGetSection.mockResolvedValue(ok(makeDetail()));
     mockedGetLessonEstimate.mockResolvedValue({
       status: 200,
       ok: true,
       data: { est_seconds: 30, est_cost_usd: 0.01, based_on_calls: 1 },
     });
-    mockedGenerateLesson.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-1" } });
+    mockedGenerateLesson.mockResolvedValue(ok({ job_id: "job-1" }, 202));
 
     const user = userEvent.setup();
     render(<LessonPane sectionId="sec-1" />);
@@ -126,13 +127,13 @@ describe("LessonPane", () => {
   });
 
   it("shows the stalled message after 120s with no SSE event", async () => {
-    mockedGetSection.mockResolvedValue({ status: 200, ok: true, data: makeDetail() });
+    mockedGetSection.mockResolvedValue(ok(makeDetail()));
     mockedGetLessonEstimate.mockResolvedValue({
       status: 200,
       ok: true,
       data: { est_seconds: 30, est_cost_usd: 0.01, based_on_calls: 1 },
     });
-    mockedGenerateLesson.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-1" } });
+    mockedGenerateLesson.mockResolvedValue(ok({ job_id: "job-1" }, 202));
 
     vi.useFakeTimers();
     render(<LessonPane sectionId="sec-1" />);
@@ -170,7 +171,7 @@ describe("LessonPane", () => {
       ok: true,
       data: { est_seconds: 20, est_cost_usd: 0.02, based_on_calls: 3 },
     });
-    mockedGenerateLesson.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-2" } });
+    mockedGenerateLesson.mockResolvedValue(ok({ job_id: "job-2" }, 202));
 
     const user = userEvent.setup();
     render(<LessonPane sectionId="sec-1" />);
@@ -237,7 +238,7 @@ describe("LessonPane", () => {
       ok: true,
       data: { est_seconds: 20, est_cost_usd: 0.02, based_on_calls: 3 },
     });
-    mockedGenerateLesson.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-3" } });
+    mockedGenerateLesson.mockResolvedValue(ok({ job_id: "job-3" }, 202));
 
     const user = userEvent.setup();
     render(<LessonPane sectionId="sec-1" />);

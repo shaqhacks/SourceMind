@@ -15,6 +15,7 @@ import {
   type SectionOut,
 } from "@/lib/api/client";
 
+import { err, ok } from "./support/api-result";
 import { FakeEventSource } from "./support/fake-event-source";
 
 const mockPush = vi.fn();
@@ -111,13 +112,13 @@ describe("UploadFlow", () => {
     FakeEventSource.instances = [];
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
 
-    mockedCreateCourse.mockResolvedValue({ status: 201, ok: true, data: makeCourse() });
+    mockedCreateCourse.mockResolvedValue(ok(makeCourse(), 201));
     mockedUploadAsset.mockImplementation((_courseId, file: File) =>
-      Promise.resolve({ status: 201, ok: true, data: makeAsset(file.name) }),
+      Promise.resolve(ok(makeAsset(file.name), 201)),
     );
-    mockedStartIngest.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-1" } });
-    mockedListSections.mockResolvedValue({ status: 200, ok: true, data: [makeSection()] });
-    mockedEditOutline.mockResolvedValue({ status: 200, ok: true, data: [makeSection()] });
+    mockedStartIngest.mockResolvedValue(ok({ job_id: "job-1" }, 202));
+    mockedListSections.mockResolvedValue(ok([makeSection()]));
+    mockedEditOutline.mockResolvedValue(ok([makeSection()]));
   });
 
   afterEach(() => {
@@ -138,9 +139,9 @@ describe("UploadFlow", () => {
     const user = userEvent.setup();
     mockedUploadAsset.mockImplementation((_courseId, file: File) => {
       if (file.name === "bad.pdf") {
-        return Promise.resolve({ status: 500, ok: false });
+        return Promise.resolve(err(500));
       }
-      return Promise.resolve({ status: 201, ok: true, data: makeAsset(file.name) });
+      return Promise.resolve(ok(makeAsset(file.name), 201));
     });
 
     render(<UploadFlow files={[pdfFile("good.pdf"), pdfFile("bad.pdf")]} onClose={vi.fn()} />);

@@ -17,6 +17,8 @@ import {
   type SectionOut,
 } from "@/lib/api/client";
 
+import { err, ok } from "./support/api-result";
+
 let mockSearchParams = new URLSearchParams();
 
 vi.mock("next/navigation", () => ({
@@ -83,38 +85,36 @@ function makeProgress(overrides: Partial<ProgressOut> = {}): ProgressOut {
   };
 }
 
+function makeSectionDetail(id: string) {
+  return {
+    id,
+    course_id: "course-1",
+    title: id === "sec-2" ? "Deep Dive" : "Introduction",
+    order_index: id === "sec-2" ? 1 : 0,
+    page_start: 1,
+    page_end: 5,
+    body_md: `Body for ${id}`,
+    content_hash: "hash",
+    lesson_md: null,
+    lesson_status: "none" as const,
+    lesson_stale: false,
+    lesson_model: null,
+    lesson_prompt_version: null,
+    extractor_version: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+}
+
 describe("CourseReaderClient", () => {
   beforeEach(() => {
     mockSearchParams = new URLSearchParams();
-    mockedGetSection.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: {
-        id: "sec-1",
-        course_id: "course-1",
-        title: "Introduction",
-        order_index: 0,
-        page_start: 1,
-        page_end: 5,
-        body_md: "# Introduction\n\nBody text.",
-        content_hash: "hash",
-        lesson_md: null,
-        lesson_status: "none",
-        lesson_stale: false,
-        lesson_model: null,
-        lesson_prompt_version: null,
-        extractor_version: null,
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
-      },
-    });
-    mockedSaveProgress.mockResolvedValue({ status: 200, ok: true });
-    mockedGetLlmUsage.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: { calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 },
-    });
-    mockedListCards.mockResolvedValue({ status: 200, ok: true, data: [] });
+    mockedGetSection.mockResolvedValue(ok(makeSectionDetail("sec-1")));
+    mockedSaveProgress.mockResolvedValue(ok(makeProgress()));
+    mockedGetLlmUsage.mockResolvedValue(
+      ok({ calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 }),
+    );
+    mockedListCards.mockResolvedValue(ok([]));
     mockedFindActiveCardsJob.mockResolvedValue(null);
   });
 
@@ -134,13 +134,9 @@ describe("CourseReaderClient", () => {
   });
 
   it("loads the course, its sections, and saved progress, then renders the reader", async () => {
-    mockedGetCourse.mockResolvedValue({ status: 200, ok: true, data: makeCourse() });
-    mockedListSections.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: [makeSection()],
-    });
-    mockedGetProgress.mockResolvedValue({ status: 200, ok: true, data: makeProgress() });
+    mockedGetCourse.mockResolvedValue(ok(makeCourse()));
+    mockedListSections.mockResolvedValue(ok([makeSection()]));
+    mockedGetProgress.mockResolvedValue(ok(makeProgress()));
 
     render(<CourseReaderClient courseId="course-1" />);
 
@@ -151,9 +147,9 @@ describe("CourseReaderClient", () => {
   });
 
   it("shows a retryable error banner when a fetch fails, and recovers on retry", async () => {
-    mockedGetCourse.mockResolvedValueOnce({ status: 500, ok: false });
-    mockedListSections.mockResolvedValue({ status: 200, ok: true, data: [makeSection()] });
-    mockedGetProgress.mockResolvedValue({ status: 200, ok: true, data: makeProgress() });
+    mockedGetCourse.mockResolvedValueOnce(err(500));
+    mockedListSections.mockResolvedValue(ok([makeSection()]));
+    mockedGetProgress.mockResolvedValue(ok(makeProgress()));
 
     const user = userEvent.setup();
     render(<CourseReaderClient courseId="course-1" />);
@@ -161,7 +157,7 @@ describe("CourseReaderClient", () => {
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent(/loading course failed/i);
 
-    mockedGetCourse.mockResolvedValue({ status: 200, ok: true, data: makeCourse() });
+    mockedGetCourse.mockResolvedValue(ok(makeCourse()));
     await user.click(screen.getByRole("button", { name: /retry/i }));
 
     expect(
@@ -170,9 +166,9 @@ describe("CourseReaderClient", () => {
   });
 
   it("treats a network failure (no status) as retryable", async () => {
-    mockedGetCourse.mockResolvedValue({ ok: false });
-    mockedListSections.mockResolvedValue({ status: 200, ok: true, data: [] });
-    mockedGetProgress.mockResolvedValue({ status: 200, ok: true, data: makeProgress() });
+    mockedGetCourse.mockResolvedValue(err());
+    mockedListSections.mockResolvedValue(ok([]));
+    mockedGetProgress.mockResolvedValue(ok(makeProgress()));
 
     render(<CourseReaderClient courseId="course-1" />);
 
@@ -182,9 +178,9 @@ describe("CourseReaderClient", () => {
   });
 
   it("shows an empty-course message with a link back to the dashboard when there are no sections", async () => {
-    mockedGetCourse.mockResolvedValue({ status: 200, ok: true, data: makeCourse() });
-    mockedListSections.mockResolvedValue({ status: 200, ok: true, data: [] });
-    mockedGetProgress.mockResolvedValue({ status: 200, ok: true, data: makeProgress() });
+    mockedGetCourse.mockResolvedValue(ok(makeCourse()));
+    mockedListSections.mockResolvedValue(ok([]));
+    mockedGetProgress.mockResolvedValue(ok(makeProgress()));
 
     render(<CourseReaderClient courseId="course-1" />);
 
@@ -193,41 +189,17 @@ describe("CourseReaderClient", () => {
   });
 
   it("resumes at the saved section once loaded", async () => {
-    mockedGetCourse.mockResolvedValue({ status: 200, ok: true, data: makeCourse() });
-    mockedListSections.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: [makeSection({ id: "sec-1", title: "Introduction" }), makeSection({ id: "sec-2", title: "Deep Dive", order_index: 1 })],
-    });
-    mockedGetProgress.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: makeProgress({ section_id: "sec-2", scroll_pos: 0.3 }),
-    });
-    mockedGetSection.mockImplementation((id: string) =>
-      Promise.resolve({
-        status: 200,
-        ok: true,
-        data: {
-          id,
-          course_id: "course-1",
-          title: id === "sec-2" ? "Deep Dive" : "Introduction",
-          order_index: id === "sec-2" ? 1 : 0,
-          page_start: 1,
-          page_end: 5,
-          body_md: `Body for ${id}`,
-          content_hash: "hash",
-          lesson_md: null,
-          lesson_status: "none",
-          lesson_stale: false,
-          lesson_model: null,
-          lesson_prompt_version: null,
-          extractor_version: null,
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
-        },
-      }),
+    mockedGetCourse.mockResolvedValue(ok(makeCourse()));
+    mockedListSections.mockResolvedValue(
+      ok([
+        makeSection({ id: "sec-1", title: "Introduction" }),
+        makeSection({ id: "sec-2", title: "Deep Dive", order_index: 1 }),
+      ]),
     );
+    mockedGetProgress.mockResolvedValue(
+      ok(makeProgress({ section_id: "sec-2", scroll_pos: 0.3 })),
+    );
+    mockedGetSection.mockImplementation((id: string) => Promise.resolve(ok(makeSectionDetail(id))));
 
     render(<CourseReaderClient courseId="course-1" />);
 
@@ -241,45 +213,18 @@ describe("CourseReaderClient", () => {
 
   it("a ?section= query param overrides saved progress (e.g. a chat citation click)", async () => {
     mockSearchParams = new URLSearchParams({ section: "sec-2" });
-    mockedGetCourse.mockResolvedValue({ status: 200, ok: true, data: makeCourse() });
-    mockedListSections.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: [
+    mockedGetCourse.mockResolvedValue(ok(makeCourse()));
+    mockedListSections.mockResolvedValue(
+      ok([
         makeSection({ id: "sec-1", title: "Introduction" }),
         makeSection({ id: "sec-2", title: "Deep Dive", order_index: 1 }),
-      ],
-    });
-    // Saved progress points at sec-1 — the query param must win.
-    mockedGetProgress.mockResolvedValue({
-      status: 200,
-      ok: true,
-      data: makeProgress({ section_id: "sec-1", scroll_pos: 0.8 }),
-    });
-    mockedGetSection.mockImplementation((id: string) =>
-      Promise.resolve({
-        status: 200,
-        ok: true,
-        data: {
-          id,
-          course_id: "course-1",
-          title: id === "sec-2" ? "Deep Dive" : "Introduction",
-          order_index: id === "sec-2" ? 1 : 0,
-          page_start: 1,
-          page_end: 5,
-          body_md: `Body for ${id}`,
-          content_hash: "hash",
-          lesson_md: null,
-          lesson_status: "none",
-          lesson_stale: false,
-          lesson_model: null,
-          lesson_prompt_version: null,
-          extractor_version: null,
-          created_at: "2026-01-01T00:00:00Z",
-          updated_at: "2026-01-01T00:00:00Z",
-        },
-      }),
+      ]),
     );
+    // Saved progress points at sec-1 — the query param must win.
+    mockedGetProgress.mockResolvedValue(
+      ok(makeProgress({ section_id: "sec-1", scroll_pos: 0.8 })),
+    );
+    mockedGetSection.mockImplementation((id: string) => Promise.resolve(ok(makeSectionDetail(id))));
 
     render(<CourseReaderClient courseId="course-1" />);
 

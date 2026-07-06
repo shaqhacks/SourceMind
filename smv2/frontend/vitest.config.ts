@@ -28,5 +28,16 @@ export default defineConfig({
     },
     setupFiles: ["./vitest.setup.ts"],
     globals: true,
+    // @testing-library/dom's default asyncUtilTimeout (1000ms, set in
+    // vitest.setup.ts) is well under vitest's own 5000ms default — under
+    // CPU contention (many worker threads/processes competing for cores,
+    // e.g. a busy CI runner), individual findBy*/waitFor calls can
+    // legitimately take longer than 1000ms even though nothing is
+    // actually hung, which manifested as flaky "Unable to find ..."
+    // failures on a different, effectively random test each run. Raised
+    // to 10s here so a real hang still fails within one test run, with
+    // enough headroom over asyncUtilTimeout's 5s that the more specific
+    // "unable to find X" error surfaces before this cruder timeout would.
+    testTimeout: 10000,
   },
 });

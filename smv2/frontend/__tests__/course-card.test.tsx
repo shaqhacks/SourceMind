@@ -14,6 +14,7 @@ import {
   type JobOut,
 } from "@/lib/api/client";
 
+import { ok } from "./support/api-result";
 import { FakeEventSource } from "./support/fake-event-source";
 
 vi.mock("@/lib/api/client", () => ({
@@ -87,11 +88,11 @@ describe("CourseCard", () => {
     FakeEventSource.instances = [];
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
 
-    mockedDeleteCourse.mockResolvedValue({ status: 200, ok: true });
+    mockedDeleteCourse.mockResolvedValue(ok(undefined));
     mockedFindActiveIngestJob.mockResolvedValue(null);
     mockedFindLatestIngestJob.mockResolvedValue(null);
-    mockedListAssets.mockResolvedValue({ status: 200, ok: true, data: [] });
-    mockedStartIngest.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-2" } });
+    mockedListAssets.mockResolvedValue(ok([]));
+    mockedStartIngest.mockResolvedValue(ok({ job_id: "job-2" }, 202));
   });
 
   afterEach(() => {

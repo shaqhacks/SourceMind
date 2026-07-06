@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   findActiveLessonJob,
   generateLesson,
@@ -13,6 +14,7 @@ import {
   type SectionDetailOut,
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export type LessonDisplayStatus = "none" | "queued" | "generating" | "ready" | "failed" | "stale";
@@ -21,18 +23,6 @@ export interface LessonPaneProps {
   sectionId: string;
   /** Bubbles the pane's current effective status up for the sidebar dot. */
   onStatusChange?: (status: LessonDisplayStatus) => void;
-}
-
-interface FetchError {
-  status?: number;
-  message: string;
-}
-
-function describeError(status: number | undefined, action: string): FetchError {
-  if (status === undefined) {
-    return { message: `${action}: could not reach the API. Is the backend running?` };
-  }
-  return { status, message: `${action} failed (HTTP ${status}).` };
 }
 
 function formatEstimate(estimate: LessonEstimateOut): string {
@@ -192,15 +182,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   if (effectiveStatus === "generating") {
     return (
       <div role="status" className="text-sm text-muted-foreground">
-        {stalled ? (
-          <p>Still working — check back shortly.</p>
-        ) : job?.progress ? (
-          <p>
-            {job.progress.stage} — {job.progress.pct}% — {job.progress.message}
-          </p>
-        ) : (
-          <p>Preparing…</p>
-        )}
+        <p>{formatJobProgress(job, stalled)}</p>
       </div>
     );
   }

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import { getCourse, getProgress, listSections, type ProgressOut } from "@/lib/api/client";
 import type { ReaderCourse } from "@/lib/reader/types";
 
@@ -30,18 +31,6 @@ const CourseReader = dynamic(() => import("./CourseReader"), {
 
 export interface CourseReaderClientProps {
   courseId: string;
-}
-
-interface FetchError {
-  status?: number;
-  message: string;
-}
-
-function describeError(status: number | undefined, action: string): FetchError {
-  if (status === undefined) {
-    return { message: `${action}: could not reach the API. Is the backend running?` };
-  }
-  return { status, message: `${action} failed (HTTP ${status}).` };
 }
 
 type LoadState =

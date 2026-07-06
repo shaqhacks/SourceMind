@@ -68,7 +68,7 @@ describe("useJobEvents", () => {
       source.emitError();
     });
 
-    expect(result.current.error).toBeTruthy();
+    expect(result.current.error).toBe("Lost connection to the job stream.");
     expect(source.closed).toBe(true);
     expect(FakeEventSource.instances).toHaveLength(1);
   });

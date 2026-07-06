@@ -5,10 +5,7 @@ from datetime import datetime, timedelta, timezone
 from app.db.engine import get_session
 from app.db.models import Job, Section
 from app.jobs.worker import MAX_ORPHAN_ATTEMPTS, reconcile_interrupted_jobs
-
-
-def _first_section_id(client, course_id: str) -> str:
-    return client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
+from conftest import _first_section_id
 
 
 def _insert_orphaned_generate_lesson_job(section_id: str, attempts: int) -> str:

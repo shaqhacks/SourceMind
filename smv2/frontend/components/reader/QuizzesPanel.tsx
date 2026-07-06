@@ -4,26 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import { generateTest, listTests, type TestAttemptSummaryOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface QuizzesPanelProps {
   courseId: string;
-}
-
-interface FetchError {
-  status?: number;
-  message: string;
-}
-
-function describeError(status: number | undefined, action: string): FetchError {
-  if (status === undefined) {
-    return { message: `${action}: could not reach the API. Is the backend running?` };
-  }
-  return { status, message: `${action} failed (HTTP ${status}).` };
 }
 
 type ListState =
@@ -113,13 +103,7 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
             aria-live="polite"
             className="mb-3 w-full rounded-md bg-black px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
           >
-            {isGenerating
-              ? stalled
-                ? "Still working — check back shortly."
-                : job?.progress
-                  ? `${job.progress.stage} — ${job.progress.pct}%`
-                  : "Preparing…"
-              : "Generate quiz"}
+            {isGenerating ? formatJobProgress(job, stalled, { includeMessage: false }) : "Generate quiz"}
           </button>
           {startError && (
             <p className="mb-2 text-xs text-red-600 dark:text-red-400">{startError}</p>
