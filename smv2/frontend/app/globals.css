@@ -84,11 +84,11 @@
     --accent: #60a5fa;
     --surface-raised: #1c2027;
     --accent-soft: #1e2a45;
-    --status-good: #16a34a;
+    --status-good: #4ade80;
     --status-good-soft: #12271a;
-    --status-warning: #d97706;
+    --status-warning: #fbbf24;
     --status-warning-soft: #2b2412;
-    --status-serious: #dc2626;
+    --status-serious: #f87171;
     --status-serious-soft: #2f1a1a;
   }
 }
@@ -117,11 +117,11 @@
   --accent: #60a5fa;
   --surface-raised: #1c2027;
   --accent-soft: #1e2a45;
-  --status-good: #16a34a;
+  --status-good: #4ade80;
   --status-good-soft: #12271a;
-  --status-warning: #d97706;
+  --status-warning: #fbbf24;
   --status-warning-soft: #2b2412;
-  --status-serious: #dc2626;
+  --status-serious: #f87171;
   --status-serious-soft: #2f1a1a;
 }
 
