@@ -28,6 +28,14 @@
      neutral" (dark) distinction this is meant to carry. */
   --border: #7d7d78;
   --accent: #2563eb;
+  --surface-raised: #f5f3ef;
+  --accent-soft: #dbeafe;
+  --status-good: #15803d;
+  --status-good-soft: #dcfce7;
+  --status-warning: #a16207;
+  --status-warning-soft: #fef3c7;
+  --status-serious: #b91c1c;
+  --status-serious-soft: #fee2e2;
 
   /* Reading-column typography defaults (WCAG AA target: 4.5:1+ for body
      text). Overridden per-user as inline CSS vars by TypographyControls.
@@ -48,6 +56,14 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
   --color-accent: var(--accent);
+  --color-surface-raised: var(--surface-raised);
+  --color-accent-soft: var(--accent-soft);
+  --color-status-good: var(--status-good);
+  --color-status-good-soft: var(--status-good-soft);
+  --color-status-warning: var(--status-warning);
+  --color-status-warning-soft: var(--status-warning-soft);
+  --color-status-serious: var(--status-serious);
+  --color-status-serious-soft: var(--status-serious-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-serif: var(--font-serif);
@@ -66,6 +82,14 @@
     --muted-foreground: #a1a1aa;
     --border: #7d8290;
     --accent: #60a5fa;
+    --surface-raised: #1c2027;
+    --accent-soft: #1e2a45;
+    --status-good: #16a34a;
+    --status-good-soft: #12271a;
+    --status-warning: #d97706;
+    --status-warning-soft: #2b2412;
+    --status-serious: #dc2626;
+    --status-serious-soft: #2f1a1a;
   }
 }
 
@@ -75,6 +99,14 @@
   --muted-foreground: #52525b;
   --border: #7d7d78;
   --accent: #2563eb;
+  --surface-raised: #f5f3ef;
+  --accent-soft: #dbeafe;
+  --status-good: #15803d;
+  --status-good-soft: #dcfce7;
+  --status-warning: #a16207;
+  --status-warning-soft: #fef3c7;
+  --status-serious: #b91c1c;
+  --status-serious-soft: #fee2e2;
 }
 
 :root[data-theme="dark"] {
@@ -83,12 +115,20 @@
   --muted-foreground: #a1a1aa;
   --border: #7d8290;
   --accent: #60a5fa;
+  --surface-raised: #1c2027;
+  --accent-soft: #1e2a45;
+  --status-good: #16a34a;
+  --status-good-soft: #12271a;
+  --status-warning: #d97706;
+  --status-warning-soft: #2b2412;
+  --status-serious: #dc2626;
+  --status-serious-soft: #2f1a1a;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
 @media (prefers-reduced-motion: reduce) {
