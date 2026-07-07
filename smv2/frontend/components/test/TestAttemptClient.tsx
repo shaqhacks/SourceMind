@@ -6,6 +6,11 @@ import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
+import Card from "@/components/ui/Card";
+import ProgressBar from "@/components/ui/ProgressBar";
+import StatTile from "@/components/ui/StatTile";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   getTest,
@@ -172,9 +177,14 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
     );
   } else if (result) {
     const { attempt } = state;
+    const correctCount = result.results.filter((questionResult) => questionResult.correct).length;
+    const totalCount = result.results.length;
     mainContent = (
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
-        <h2 className="text-lg font-semibold">Score: {Math.round(result.score * 100)}%</h2>
+        <StatTile
+          value={`${Math.round(result.score * 100)}%`}
+          label={`${correctCount} of ${totalCount} correct`}
+        />
         {result.added_card_ids.length > 0 && (
           <div
             role="status"
@@ -190,50 +200,47 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
           {result.due_now_count > 0 && (
             <Link
               href={`/review?course=${courseId}&start=due`}
-              className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
+              className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:opacity-90"
             >
               Start review — {result.due_now_count} card{result.due_now_count === 1 ? "" : "s"} due
               now
             </Link>
           )}
-          <button
-            type="button"
+          <Button
+            variant="primary"
             onClick={() => void handleRetake()}
             disabled={retaking}
             title="Same questions, no generation cost"
-            className="rounded-md border border-border px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             Retake test
-          </button>
+          </Button>
         </div>
         {retakeError && <ErrorBanner message={retakeError} onRetry={() => void handleRetake()} />}
         <ul className="flex flex-col gap-6">
           {result.results.map((questionResult, index) => {
             const question = attempt.questions[index];
             return (
-              <li key={index} className="rounded-lg border border-border p-4">
-                <p className="mb-2 text-sm font-medium">{question.question}</p>
-                <p
-                  className={`mb-2 text-sm font-medium ${
-                    questionResult.correct
-                      ? "text-green-700 dark:text-green-400"
-                      : "text-red-700 dark:text-red-400"
-                  }`}
-                >
-                  {questionResult.correct ? "✓ Correct" : "✗ Incorrect"}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Your answer:{" "}
-                  {questionResult.your_answer !== null
-                    ? question.choices[questionResult.your_answer]
-                    : "(none)"}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Correct answer: {question.choices[questionResult.correct_index]}
-                </p>
-                <div className="mt-2 text-sm">
-                  <Markdown>{questionResult.explanation}</Markdown>
-                </div>
+              <li key={index}>
+                <Card className="flex flex-col gap-2">
+                  <p className="text-sm font-medium">{question.question}</p>
+                  {questionResult.correct ? (
+                    <Badge tone="good">Correct</Badge>
+                  ) : (
+                    <Badge tone="serious">Incorrect</Badge>
+                  )}
+                  <p className="text-sm text-muted-foreground">
+                    Your answer:{" "}
+                    {questionResult.your_answer !== null
+                      ? question.choices[questionResult.your_answer]
+                      : "(none)"}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Correct answer: {question.choices[questionResult.correct_index]}
+                  </p>
+                  <div className="text-sm">
+                    <Markdown>{questionResult.explanation}</Markdown>
+                  </div>
+                </Card>
               </li>
             );
           })}
@@ -248,22 +255,29 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
     const question = attempt.questions[questionIndex];
     mainContent = (
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
-        <p role="status" className="text-sm text-muted-foreground">
-          {questionIndex + 1} of {questionCount}
-        </p>
+        <div className="flex flex-col gap-2">
+          <p role="status" className="text-sm text-muted-foreground">
+            Question {questionIndex + 1} of {questionCount}
+          </p>
+          <ProgressBar
+            percent={((questionIndex + 1) / questionCount) * 100}
+            label="Quiz progress"
+          />
+        </div>
         <h2 className="text-base font-semibold">{question.question}</h2>
         <fieldset className="flex flex-col gap-2">
           <legend className="sr-only">Choices</legend>
           {question.choices.map((choice, index) => (
             <label
               key={index}
-              className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
+              className="flex items-start gap-3 rounded-lg border border-border bg-surface-raised p-3 transition-colors hover:border-muted-foreground has-checked:border-accent has-checked:bg-accent-soft/40"
             >
               <input
                 type="radio"
                 name={`question-${questionIndex}`}
                 checked={answers[questionIndex] === index}
                 onChange={() => selectAnswer(index)}
+                className="mt-0.5"
               />
               {choice}
             </label>
@@ -275,14 +289,9 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
           </p>
         )}
         {submitError && <ErrorBanner message={submitError} onRetry={handleSubmit} />}
-        <button
-          type="button"
-          onClick={goNext}
-          disabled={submitting}
-          className="self-start rounded-md bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
-        >
+        <Button variant="primary" onClick={goNext} disabled={submitting} className="self-start">
           {questionIndex + 1 < questionCount ? "Next (Enter)" : "Submit (Enter)"}
-        </button>
+        </Button>
       </div>
     );
   }

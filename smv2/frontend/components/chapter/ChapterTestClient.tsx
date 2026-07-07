@@ -7,6 +7,9 @@ import { useRouter } from "next/navigation";
 import ChapterMasteryBar from "@/components/chapter/ChapterMasteryBar";
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
+import Card from "@/components/ui/Card";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   generateTest,
@@ -18,6 +21,7 @@ import {
   type ChapterOut,
   type TestSummaryOut,
 } from "@/lib/api/client";
+import { QUIZ_RETAKE_THRESHOLD } from "@/lib/dashboard/quizzes";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
 import { formatJobProgress } from "@/lib/jobs/format";
@@ -271,8 +275,8 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
             </p>
           ) : (
             !jobFailed && (
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 onClick={() => void handleGenerate()}
                 disabled={starting}
                 title={
@@ -280,10 +284,10 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
                     ? "Generates a brand-new set of questions — costs an LLM call"
                     : undefined
                 }
-                className="self-start rounded-md bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
+                className="self-start"
               >
                 {tests && tests.length > 0 ? "New test (regenerates)" : "Take chapter test"}
-              </button>
+              </Button>
             )
           )}
           {startError && <p className="text-xs text-red-600 dark:text-red-400">{startError}</p>}
@@ -306,29 +310,32 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
                       {new Date(test.created_at).toLocaleDateString()} · {test.question_count}{" "}
                       questions
                     </span>
-                    <button
-                      type="button"
+                    <Button
+                      size="sm"
                       onClick={() => void handleRetake(test.id)}
                       disabled={retakingTestId === test.id}
                       title="Same questions, no generation cost"
-                      className="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium disabled:opacity-50"
+                      className="shrink-0"
                     >
                       Retake
-                    </button>
+                    </Button>
                   </div>
                   <ul className="mt-2 flex flex-col gap-1">
                     {test.attempts.map((attempt) => (
                       <li key={attempt.id}>
-                        <Link
-                          href={`/course/${courseId}/test/${attempt.id}`}
-                          className="flex w-full items-center justify-between rounded px-2 py-1.5 text-sm hover:bg-muted-foreground/10"
-                        >
-                          <span>{new Date(attempt.created_at).toLocaleDateString()}</span>
-                          <span className="text-muted-foreground">
-                            {attempt.score !== null
-                              ? `${Math.round(attempt.score * 100)}%`
-                              : "In progress"}
-                          </span>
+                        <Link href={`/course/${courseId}/test/${attempt.id}`} className="block">
+                          <Card interactive className="flex items-center justify-between text-sm">
+                            <span>{new Date(attempt.created_at).toLocaleDateString()}</span>
+                            {attempt.score !== null ? (
+                              <Badge
+                                tone={attempt.score >= QUIZ_RETAKE_THRESHOLD ? "good" : "warning"}
+                              >
+                                {Math.round(attempt.score * 100)}%
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">In progress</span>
+                            )}
+                          </Card>
                         </Link>
                       </li>
                     ))}

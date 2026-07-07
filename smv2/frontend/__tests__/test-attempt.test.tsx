@@ -116,7 +116,7 @@ describe("TestAttemptClient", () => {
 
     fireEvent.keyDown(window, { key: "Enter" });
     expect(await screen.findByText("Capital of France?")).toBeInTheDocument();
-    expect(screen.getByText("2 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Question 2 of 2")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "1" });
     fireEvent.keyDown(window, { key: "Enter" });
@@ -137,9 +137,10 @@ describe("TestAttemptClient", () => {
     fireEvent.keyDown(window, { key: "1" });
     fireEvent.keyDown(window, { key: "Enter" });
 
-    expect(await screen.findByText(/score: 50%/i)).toBeInTheDocument();
-    expect(screen.getByText(/✓ correct/i)).toBeInTheDocument();
-    expect(screen.getByText(/✗ incorrect/i)).toBeInTheDocument();
+    expect(await screen.findByText("50%")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2 correct")).toBeInTheDocument();
+    expect(screen.getByText("Correct")).toBeInTheDocument();
+    expect(screen.getByText("Incorrect")).toBeInTheDocument();
     expect(screen.getByText(/paris is the capital of france/i)).toBeInTheDocument();
     expect(screen.getByText(/your answer: berlin/i)).toBeInTheDocument();
     expect(screen.getByText(/correct answer: paris/i)).toBeInTheDocument();
@@ -164,7 +165,7 @@ describe("TestAttemptClient", () => {
     // in-progress "N of 2" indicator also has role="status", so querying
     // for the banner by role alone races the async submit and can match
     // that stale element before the real banner ever renders.
-    await screen.findByText(/score: 50%/i);
+    await screen.findByText("50%");
     const banner = screen.getByRole("status");
     expect(banner).toHaveTextContent(/2 missed concepts added to your reviews/i);
     expect(mockedNotifyReviewSettled).toHaveBeenCalled();
@@ -198,7 +199,7 @@ describe("TestAttemptClient", () => {
     fireEvent.keyDown(window, { key: "1" });
     fireEvent.keyDown(window, { key: "Enter" });
 
-    await screen.findByText(/score: 50%/i);
+    await screen.findByText("50%");
     expect(screen.queryByRole("link", { name: /start review/i })).not.toBeInTheDocument();
   });
 
@@ -215,7 +216,7 @@ describe("TestAttemptClient", () => {
     fireEvent.keyDown(window, { key: "1" });
     fireEvent.keyDown(window, { key: "Enter" });
 
-    await screen.findByText(/score: 50%/i);
+    await screen.findByText("50%");
     fireEvent.click(screen.getByRole("button", { name: /retake test/i }));
 
     // Retake targets the persisted Test/deck (test_id), not this specific
@@ -254,7 +255,7 @@ describe("TestAttemptClient", () => {
     fireEvent.keyDown(window, { key: "1" });
     fireEvent.keyDown(window, { key: "Enter" });
 
-    await screen.findByText(/score: 50%/i);
+    await screen.findByText("50%");
     expect(screen.queryByText(/missed concept/i)).not.toBeInTheDocument();
     expect(mockedNotifyReviewSettled).toHaveBeenCalled();
   });
