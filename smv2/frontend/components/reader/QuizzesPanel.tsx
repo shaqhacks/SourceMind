@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import { generateTest, getJob, listTests, type TestSummaryOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
@@ -118,15 +119,16 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
           tabIndex={-1}
           className="absolute right-0 z-10 mt-2 w-72 rounded-md border border-border bg-background p-4 text-sm shadow-lg"
         >
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="md"
             onClick={() => void handleGenerate()}
             disabled={starting || isGenerating}
             aria-live="polite"
-            className="mb-3 w-full rounded-md bg-black px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
+            className="mb-3 w-full"
           >
             {isGenerating ? formatJobProgress(job, stalled, { includeMessage: false }) : "Generate quiz"}
-          </button>
+          </Button>
           {jobFailed && (
             <div className="mb-3">
               <ErrorBanner

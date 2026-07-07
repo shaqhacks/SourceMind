@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import Markdown from "@/components/Markdown";
+import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import { deleteCard, listCards, patchCard, type CardOut } from "@/lib/api/client";
 import { subscribeCardsSettled } from "@/lib/cards/cardsBus";
@@ -166,14 +167,9 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
                 </label>
                 {editError && <p className="text-xs text-red-600 dark:text-red-400">{editError}</p>}
                 <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void saveEdit(card.id)}
-                    disabled={saving}
-                    className="rounded-md bg-black px-3 py-1 text-xs font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
-                  >
+                  <Button variant="primary" size="sm" onClick={() => void saveEdit(card.id)} disabled={saving}>
                     {saving ? "Saving…" : "Save"}
-                  </button>
+                  </Button>
                   <button
                     type="button"
                     onClick={cancelEdit}

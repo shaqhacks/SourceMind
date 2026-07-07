@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   findActiveLessonJob,
@@ -286,13 +287,9 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
       <p className="text-sm text-muted-foreground">
         {estimate ? formatEstimate(estimate) : "Loading estimate…"}
       </p>
-      <button
-        type="button"
-        onClick={() => void handleGenerate(false)}
-        className="self-start rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
-      >
+      <Button variant="primary" size="md" onClick={() => void handleGenerate(false)} className="self-start">
         Generate lesson
-      </button>
+      </Button>
       {actionError && <p className="text-xs text-red-600 dark:text-red-400">{actionError}</p>}
     </div>
   );

@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import Button from "@/components/ui/Button";
 
 export interface ChatCitation {
   n: number;
@@ -212,13 +213,9 @@ export default function Chat({ loadHistory, sendFn, onCitationClick }: ChatProps
           aria-label="Message"
           className="flex-1 rounded-md border border-border bg-transparent px-3 py-2 text-sm disabled:opacity-50"
         />
-        <button
-          type="submit"
-          disabled={sending || !input.trim()}
-          className="rounded-md bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
-        >
+        <Button type="submit" variant="primary" disabled={sending || !input.trim()}>
           Send
-        </button>
+        </Button>
       </form>
     </div>
   );

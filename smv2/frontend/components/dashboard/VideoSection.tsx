@@ -1,31 +1,52 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 import { LEARNING_VIDEOS } from "@/lib/dashboard/videos";
 
 const STORAGE_KEY = "smv2.dashboard.videos";
 
+function readCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === "collapsed";
+  } catch {
+    return false;
+  }
+}
+
+function getServerSnapshot(): boolean {
+  return false;
+}
+
+const listeners = new Set<() => void>();
+
+function subscribe(onChange: () => void): () => void {
+  listeners.add(onChange);
+  return () => listeners.delete(onChange);
+}
+
+function persist(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, collapsed ? "collapsed" : "expanded");
+  } catch {
+    // Best-effort — a full or blocked localStorage shouldn't crash the dashboard.
+  }
+  for (const listener of listeners) listener();
+}
+
 /**
  * Bottom-of-dashboard learning-science explainers (spec §4). Direct
  * iframes by explicit user decision; youtube-nocookie + loading=lazy keep
  * it private-ish and free until scrolled into view. Collapse state
- * persists so it stays out of the way once dismissed.
+ * persists so it stays out of the way once dismissed — same
+ * useSyncExternalStore-backed-preference convention as
+ * lib/hooks/useSidebarCollapsed.ts (avoids a hydration-mismatch flash and
+ * the react-hooks/set-state-in-effect footgun of setState-on-mount).
  */
 export default function VideoSection() {
-  const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    setCollapsed(localStorage.getItem(STORAGE_KEY) === "collapsed");
-  }, []);
-
-  function toggle() {
-    setCollapsed((value) => {
-      const next = !value;
-      localStorage.setItem(STORAGE_KEY, next ? "collapsed" : "expanded");
-      return next;
-    });
-  }
+  const collapsed = useSyncExternalStore(subscribe, readCollapsed, getServerSnapshot);
+  const toggle = useCallback(() => persist(!readCollapsed()), []);
 
   if (LEARNING_VIDEOS.length === 0) return null;
 

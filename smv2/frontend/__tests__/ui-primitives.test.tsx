@@ -118,7 +118,7 @@ describe("Skeleton", () => {
 
 describe("EmptyState", () => {
   it("renders title, body and CTA", () => {
-    render(<EmptyState title="All caught up" body="Nothing due." cta={<a href="/">Home</a>} />);
+    render(<EmptyState title="All caught up" body="Nothing due." cta={<a href="#">Home</a>} />);
     expect(screen.getByText("All caught up")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument();
   });
