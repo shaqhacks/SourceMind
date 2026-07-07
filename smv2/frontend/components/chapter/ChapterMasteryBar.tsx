@@ -1,3 +1,4 @@
+import ProgressBar from "@/components/ui/ProgressBar";
 import type { ChapterTestStats } from "@/lib/reader/types";
 
 export interface ChapterMasteryBarProps {
@@ -36,16 +37,7 @@ export default function ChapterMasteryBar({ stats }: ChapterMasteryBarProps) {
           <span className="text-muted-foreground">Latest: {latestPercent}%</span>
         )}
       </div>
-      <div
-        role="progressbar"
-        aria-label="Chapter mastery"
-        aria-valuenow={bestPercent}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        className="h-2 w-full overflow-hidden rounded-full bg-muted-foreground/20"
-      >
-        <div className="h-full rounded-full bg-accent" style={{ width: `${bestPercent}%` }} />
-      </div>
+      <ProgressBar percent={bestPercent} label="Chapter mastery" />
     </div>
   );
 }
