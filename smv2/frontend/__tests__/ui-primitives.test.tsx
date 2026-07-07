@@ -6,6 +6,7 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import StatTile from "@/components/ui/StatTile";
 import ProgressBar from "@/components/ui/ProgressBar";
+import Skeleton from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
 
 describe("Button", () => {
@@ -97,6 +98,21 @@ describe("ProgressBar", () => {
     render(<ProgressBar percent={140} label="Course progress" />);
     const bar = screen.getByRole("progressbar", { name: "Course progress" });
     expect(bar).toHaveAttribute("aria-valuenow", "100");
+  });
+});
+
+describe("Skeleton", () => {
+  it("renders hidden from assistive tech with pulse animation", () => {
+    const { container } = render(<Skeleton />);
+    const el = container.firstChild as HTMLElement;
+    expect(el).toHaveAttribute("aria-hidden", "true");
+    expect(el.className).toContain("animate-pulse");
+  });
+  it("merges a passed className onto the element", () => {
+    const { container } = render(<Skeleton className="h-4 w-24" />);
+    const el = container.firstChild as HTMLElement;
+    expect(el.className).toContain("h-4 w-24");
+    expect(el.className).toContain("animate-pulse");
   });
 });
 
