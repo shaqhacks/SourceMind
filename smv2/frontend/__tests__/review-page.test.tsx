@@ -87,7 +87,7 @@ describe("ReviewPage", () => {
 
     render(<ReviewPage />);
 
-    expect(await screen.findByText("No cards due")).toBeInTheDocument();
+    expect(await screen.findByText("All caught up")).toBeInTheDocument();
     expect(
       screen.getByText(/generate flashcards from a chapter, or keep reading/i),
     ).toBeInTheDocument();
@@ -133,7 +133,7 @@ describe("ReviewPage", () => {
 
     render(<ReviewPage />);
 
-    expect(await screen.findByText("No cards due")).toBeInTheDocument();
+    expect(await screen.findByText("All caught up")).toBeInTheDocument();
   });
 
   it("session: space reveals the back, grading keys 1-4 advance and capture elapsed_ms, and the summary tallies by grade", async () => {
@@ -382,7 +382,7 @@ describe("ReviewPage", () => {
       render(<ReviewPage />);
 
       // total > 0 (there are new cards) so the chooser offers them, rather
-      // than the "No cards due" empty state which only applies at total===0.
+      // than the "All caught up" empty state which only applies at total===0.
       expect(await screen.findByText(/ready to review/i)).toBeInTheDocument();
       expect(screen.getByText(/0 due · 2 new/i)).toBeInTheDocument();
       expect(mockedGetReviewQueue).toHaveBeenCalledTimes(2);
@@ -394,7 +394,7 @@ describe("ReviewPage", () => {
 
       render(<ReviewPage />);
 
-      expect(await screen.findByText("No cards due")).toBeInTheDocument();
+      expect(await screen.findByText("All caught up")).toBeInTheDocument();
     });
   });
 });

@@ -8,6 +8,11 @@ import ErrorBanner from "@/components/ErrorBanner";
 import HintRow from "@/components/HintRow";
 import Markdown from "@/components/Markdown";
 import ShortcutsOverlay, { type ShortcutHint } from "@/components/ShortcutsOverlay";
+import Badge, { type BadgeTone } from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
+import Card from "@/components/ui/Card";
+import EmptyState from "@/components/ui/EmptyState";
+import Skeleton from "@/components/ui/Skeleton";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   getReviewQueue,
@@ -27,6 +32,7 @@ const SHORTCUT_HINTS: ShortcutHint[] = [
 ];
 
 const GRADE_LABELS: Record<number, string> = { 1: "Again", 2: "Hard", 3: "Good", 4: "Easy" };
+const GRADE_TONES: Record<number, BadgeTone> = { 1: "serious", 2: "warning", 3: "good", 4: "accent" };
 // review_queue's `limit` caps at 200 — a session's "all" is "all up to
 // that cap", not literally unbounded. Fine at this app's scale.
 const MAX_QUEUE_FETCH = 200;
@@ -395,9 +401,10 @@ function ReviewPageInner() {
   } else if (phase === "hub") {
     if (hubState.kind === "loading") {
       mainContent = (
-        <p role="status" className="p-8 text-sm text-muted-foreground">
-          Loading review summary…
-        </p>
+        <div role="status" className="p-8">
+          <span className="sr-only">Loading…</span>
+          <Skeleton className="mx-auto mt-8 h-40 w-full max-w-2xl" />
+        </div>
       );
     } else if (hubState.kind === "error") {
       mainContent = (
@@ -411,9 +418,12 @@ function ReviewPageInner() {
       );
     } else if (hubState.summary.due_total === 0) {
       mainContent = (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center text-sm text-muted-foreground">
-          <p className="text-lg font-medium text-foreground">No cards due</p>
-          <p>Generate flashcards from a chapter, or keep reading.</p>
+        <div className="flex flex-1 items-center justify-center p-8">
+          <EmptyState
+            icon="✨"
+            title="All caught up"
+            body="Generate flashcards from a chapter, or keep reading."
+          />
         </div>
       );
     } else {
@@ -432,16 +442,18 @@ function ReviewPageInner() {
           <ul className="flex flex-col gap-2">
             {summary.courses.map((course) => (
               <li key={course.course_id}>
-                <button
-                  type="button"
-                  onClick={() => goToChooser(course.course_id)}
-                  className="flex w-full items-center justify-between rounded-md border border-border px-4 py-3 text-left text-sm hover:bg-muted-foreground/5"
-                >
-                  <span className="font-medium">{course.title}</span>
-                  <span className="text-muted-foreground">
-                    {course.due_count} due · {course.new_count} new
-                  </span>
-                </button>
+                <Card interactive>
+                  <button
+                    type="button"
+                    onClick={() => goToChooser(course.course_id)}
+                    className="flex w-full items-center justify-between text-left text-sm"
+                  >
+                    <span className="font-medium">{course.title}</span>
+                    <span className="text-muted-foreground">
+                      {course.due_count} due · {course.new_count} new
+                    </span>
+                  </button>
+                </Card>
               </li>
             ))}
           </ul>
@@ -451,9 +463,10 @@ function ReviewPageInner() {
   } else if (phase === "chooser") {
     if (chooserState.kind === "loading") {
       mainContent = (
-        <p role="status" className="p-8 text-sm text-muted-foreground">
-          Loading review queue…
-        </p>
+        <div role="status" className="p-8">
+          <span className="sr-only">Loading…</span>
+          <Skeleton className="mx-auto mt-8 h-40 w-full max-w-2xl" />
+        </div>
       );
     } else if (chooserState.kind === "error") {
       mainContent = (
@@ -467,9 +480,12 @@ function ReviewPageInner() {
       );
     } else if (chooserState.total === 0) {
       mainContent = (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center text-sm text-muted-foreground">
-          <p className="text-lg font-medium text-foreground">No cards due</p>
-          <p>Generate flashcards from a chapter, or keep reading.</p>
+        <div className="flex flex-1 items-center justify-center p-8">
+          <EmptyState
+            icon="✨"
+            title="All caught up"
+            body="Generate flashcards from a chapter, or keep reading."
+          />
         </div>
       );
     } else {
@@ -487,14 +503,9 @@ function ReviewPageInner() {
           </p>
           <div className="flex gap-3">
             {sizeOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => startSession(option.value)}
-                className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
-              >
+              <Button key={option.value} variant="primary" onClick={() => startSession(option.value)}>
                 Review {option.label}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
@@ -502,9 +513,10 @@ function ReviewPageInner() {
     }
   } else if (sessionState.kind === "loading") {
     mainContent = (
-      <p role="status" className="p-8 text-sm text-muted-foreground">
-        Loading cards…
-      </p>
+      <div role="status" className="p-8">
+        <span className="sr-only">Loading…</span>
+        <Skeleton className="mx-auto mt-8 h-40 w-full max-w-2xl" />
+      </div>
     );
   } else if (sessionState.kind === "error") {
     mainContent = (
@@ -518,19 +530,24 @@ function ReviewPageInner() {
     );
   } else if (sessionState.kind === "empty") {
     mainContent = (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center text-sm text-muted-foreground">
-        <p className="text-lg font-medium text-foreground">No cards due</p>
-        <p>Generate flashcards from a chapter, or keep reading.</p>
+      <div className="flex flex-1 items-center justify-center p-8">
+        <EmptyState
+          icon="✨"
+          title="All caught up"
+          body="Generate flashcards from a chapter, or keep reading."
+        />
       </div>
     );
   } else if (sessionState.kind === "done") {
     mainContent = (
       <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 p-8 text-center">
         <h2 className="text-lg font-semibold">Session complete</h2>
-        <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+        <ul className="flex flex-col gap-2">
           {[1, 2, 3, 4].map((value) => (
             <li key={value}>
-              {GRADE_LABELS[value]}: {gradeCounts[value] ?? 0}
+              <Badge tone={GRADE_TONES[value]}>
+                {GRADE_LABELS[value]}: {gradeCounts[value] ?? 0}
+              </Badge>
             </li>
           ))}
         </ul>
@@ -563,7 +580,7 @@ function ReviewPageInner() {
         <p role="status" className="text-sm text-muted-foreground">
           {cardIndex + 1} of {cards.length}
         </p>
-        <div className="rounded-lg border border-border p-6">
+        <div className="rounded-lg border border-border bg-surface-raised p-6">
           <Markdown>{card.front_md}</Markdown>
           {revealed && (
             <div className="mt-6 border-t border-border pt-6">
@@ -573,21 +590,24 @@ function ReviewPageInner() {
         </div>
 
         {!revealed ? (
-          <button
-            type="button"
-            onClick={reveal}
-            className="self-center rounded-md bg-black px-6 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
-          >
+          <Button variant="primary" size="md" onClick={reveal} className="self-center px-6">
             Reveal (space)
-          </button>
+          </Button>
         ) : (
           <div className="flex justify-center gap-3">
-            {[1, 2, 3, 4].map((value) => (
+            {(
+              [
+                { value: 1, classes: "border-status-serious/40 bg-status-serious-soft text-status-serious" },
+                { value: 2, classes: "border-status-warning/40 bg-status-warning-soft text-status-warning" },
+                { value: 3, classes: "border-status-good/40 bg-status-good-soft text-status-good" },
+                { value: 4, classes: "border-accent/40 bg-accent-soft text-accent" },
+              ] as const
+            ).map(({ value, classes }) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => grade(value)}
-                className="rounded-md border border-border px-4 py-2 text-sm font-medium"
+                className={`rounded-md border px-4 py-2 text-sm font-medium transition-colors hover:opacity-80 ${classes}`}
               >
                 {GRADE_LABELS[value]} ({value})
               </button>
