@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
+import StatTile from "@/components/ui/StatTile";
+import ProgressBar from "@/components/ui/ProgressBar";
+import EmptyState from "@/components/ui/EmptyState";
 
 describe("Button", () => {
   it("renders primary variant with token classes", () => {
@@ -79,5 +82,28 @@ describe("Badge", () => {
     const glyph = badge.querySelector('[aria-hidden="true"]')!;
     expect(glyph.textContent).toBe("★");
     expect(badge.textContent).not.toContain("✓");
+  });
+});
+
+describe("StatTile", () => {
+  it("links when href given", () => {
+    render(<StatTile value={12} label="Cards due" href="/review" />);
+    expect(screen.getByRole("link", { name: /12.*Cards due/s })).toHaveAttribute("href", "/review");
+  });
+});
+
+describe("ProgressBar", () => {
+  it("exposes progressbar semantics and clamps", () => {
+    render(<ProgressBar percent={140} label="Course progress" />);
+    const bar = screen.getByRole("progressbar", { name: "Course progress" });
+    expect(bar).toHaveAttribute("aria-valuenow", "100");
+  });
+});
+
+describe("EmptyState", () => {
+  it("renders title, body and CTA", () => {
+    render(<EmptyState title="All caught up" body="Nothing due." cta={<a href="/">Home</a>} />);
+    expect(screen.getByText("All caught up")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument();
   });
 });
