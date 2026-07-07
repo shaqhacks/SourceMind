@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import QuizzesToTakePanel from "@/components/dashboard/QuizzesToTakePanel";
 import { listChapters, type ChapterOut, type CourseOut } from "@/lib/api/client";
 
-import { ok } from "./support/api-result";
+import { err, ok } from "./support/api-result";
 
 // Only the network boundary is mocked — deriveQuizItems runs for real so
 // the test also exercises the not_attempted/retake classification.
@@ -106,5 +106,19 @@ describe("QuizzesToTakePanel", () => {
 
     await waitFor(() => expect(mockedListChapters).toHaveBeenCalledWith("ready-course"));
     expect(mockedListChapters).not.toHaveBeenCalledWith("draft-course");
+  });
+
+  it("shows a panel-level error instead of silently reporting zero quizzes when a fetch fails", async () => {
+    mockedListChapters.mockResolvedValue(err(500));
+    const onCount = vi.fn();
+
+    render(
+      <QuizzesToTakePanel courses={[makeCourse({ id: "c1" })]} onCount={onCount} />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Loading quizzes failed/i);
+    // The section itself must still render — a failed panel never blanks the page.
+    expect(screen.getByRole("region", { name: "Quizzes to take" })).toBeInTheDocument();
+    expect(onCount).not.toHaveBeenCalledWith(0);
   });
 });
