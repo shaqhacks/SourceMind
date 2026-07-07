@@ -153,8 +153,8 @@ export default function ReadingColumn({
             />
           )}
           <div className="mt-8 border-t border-border pt-4">
-            <CardsCTA key={section.id} sectionId={section.id} />
-            <SectionCards key={section.id} sectionId={section.id} />
+            <CardsCTA key={`cta-${section.id}`} sectionId={section.id} />
+            <SectionCards key={`cards-${section.id}`} sectionId={section.id} />
           </div>
         </article>
       </div>
