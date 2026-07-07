@@ -145,14 +145,28 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
     existing_cards = {c.id: c for c in session.query(Card).filter(Card.section_id == section_id).all()}
     new_ids = set(new_cards_by_id)
 
+    # ADR-023: the delete side of this diff applies ONLY to origin=
+    # 'generated' cards — a user-authored card, or one that started as
+    # generated but was then edited (edit mints a NEW origin='user' card,
+    # app/services/cards_service.py::update_card), must survive
+    # regeneration untouched, same "don't clobber what a person
+    # deliberately customized" philosophy as re-ingest's replace/remap
+    # split (smv2-invariants law #2/#3).
     for existing_id, existing in list(existing_cards.items()):
-        if existing_id not in new_ids:
+        if existing.origin == "generated" and existing_id not in new_ids:
             session.delete(existing)  # cascades this card's ReviewState/ReviewLog only
     session.flush()
 
     for data in new_cards_by_id.values():
         existing = existing_cards.get(data["id"])
         if existing is not None:
+            if existing.origin == "user":
+                # A user-origin card happens to already BE this exact
+                # content (e.g. the learner's own edit converged on the
+                # same text the model just generated) — keep the user's
+                # card as-is, skip the insert entirely rather than
+                # touching a card the diff isn't supposed to manage.
+                continue
             existing.position = data["position"]
             existing.prompt_version = prompt_version
         else:
@@ -165,6 +179,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
                     back_md=data["back"],
                     position=data["position"],
                     prompt_version=prompt_version,
+                    origin="generated",
                 )
             )
 

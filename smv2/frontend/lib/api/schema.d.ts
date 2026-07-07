@@ -60,6 +60,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/cards/{card_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Card */
+        delete: operations["delete_card"];
+        options?: never;
+        head?: never;
+        /** Update Card */
+        patch: operations["update_card"];
+        trace?: never;
+    };
     "/api/cards/{card_id}/grade": {
         parameters: {
             query?: never;
@@ -619,6 +637,11 @@ export interface components {
             front_md: string;
             /** Id */
             id: string;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "generated" | "user";
             /** Position */
             position: number;
             /** Section Id */
@@ -1198,6 +1221,13 @@ export interface components {
             /** Question Count */
             question_count: number;
         };
+        /** UpdateCardIn */
+        UpdateCardIn: {
+            /** Back Md */
+            back_md: string;
+            /** Front Md */
+            front_md: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -1301,6 +1331,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_card: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_card: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                card_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCardIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CardOut"];
                 };
             };
             /** @description Validation Error */

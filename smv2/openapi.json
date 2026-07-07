@@ -124,6 +124,14 @@
             "title": "Id",
             "type": "string"
           },
+          "origin": {
+            "enum": [
+              "generated",
+              "user"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
           "position": {
             "title": "Position",
             "type": "integer"
@@ -139,6 +147,7 @@
           "front_md",
           "back_md",
           "position",
+          "origin",
           "created_at"
         ],
         "title": "CardOut",
@@ -1760,6 +1769,24 @@
         "title": "TestSummaryOut",
         "type": "object"
       },
+      "UpdateCardIn": {
+        "properties": {
+          "back_md": {
+            "title": "Back Md",
+            "type": "string"
+          },
+          "front_md": {
+            "title": "Front Md",
+            "type": "string"
+          }
+        },
+        "required": [
+          "front_md",
+          "back_md"
+        ],
+        "title": "UpdateCardIn",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1935,6 +1962,91 @@
         "summary": "Get Asset Html Page",
         "tags": [
           "assets"
+        ]
+      }
+    },
+    "/api/cards/{card_id}": {
+      "delete": {
+        "operationId": "delete_card",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Card",
+        "tags": [
+          "cards"
+        ]
+      },
+      "patch": {
+        "operationId": "update_card",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCardIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Card",
+        "tags": [
+          "cards"
         ]
       }
     },

@@ -191,6 +191,11 @@ class Card(Base):
     back_md: Mapped[str] = mapped_column(Text, nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    # 'generated' | 'user' (ADR-023) — user-origin cards (newly authored, or
+    # the result of editing a generated card's content) are excluded from
+    # card_generation's regenerate diff, so a re-generation never touches
+    # them.
+    origin: Mapped[str] = mapped_column(String, nullable=False, default="generated")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 

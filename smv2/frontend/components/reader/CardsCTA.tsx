@@ -11,6 +11,7 @@ import {
   listCards,
   type CardOut,
 } from "@/lib/api/client";
+import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
@@ -83,6 +84,12 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
     if (!done) return;
     fetchCards(sectionId).then(setState);
     notifyReviewSettled();
+    // Tells SectionCards (rendered as a sibling below this CTA) to
+    // refetch and show the fresh cards right there — the whole point of
+    // this signal is "generate -> cards appear immediately", so it fires
+    // regardless of whether the job succeeded or failed (a failed job
+    // just means the refetch reconfirms the same list).
+    notifyCardsSettled(sectionId);
   }, [done, sectionId]);
 
   // JobEvent (the SSE snapshot) carries no error text — only {id, status,

@@ -213,9 +213,15 @@ class CardOut(BaseModel):
     front_md: str
     back_md: str
     position: int
+    origin: Literal["generated", "user"]
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class UpdateCardIn(BaseModel):
+    front_md: str
+    back_md: str
 
 
 # --- Spaced repetition ---------------------------------------------------

@@ -36,6 +36,7 @@ function makeCard(overrides: Partial<CardOut> = {}): CardOut {
     front_md: "Front",
     back_md: "Back",
     position: 0,
+    origin: "generated",
     created_at: "2026-01-01T00:00:00Z",
     ...overrides,
   };

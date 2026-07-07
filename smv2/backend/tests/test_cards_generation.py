@@ -286,3 +286,126 @@ def test_regenerate_cards_preserves_review_state_for_unchanged_cards(client, ing
         assert session.get(ReviewState, change_card["id"]) is None  # cascaded away with the old card
     finally:
         session.close()
+
+
+def test_regenerate_cards_preserves_user_edited_card_untouched(client, ingest_course, stub_provider):
+    """ADR-023: the regenerate diff's delete side applies ONLY to
+    origin='generated' cards. A card the learner edited (origin='user',
+    via PATCH /api/cards/{id}) must survive regeneration even though its
+    (edited) content is absent from the new generated set entirely.
+    """
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(
+            text=json.dumps([{"front": "Original Q", "back": "Original A"}]),
+            input_tokens=1, output_tokens=1, model="stub-model",
+        )
+    ]
+    client.post(f"/api/sections/{section_id}/cards")
+    assert run_due_jobs_once() is True
+    original_card = client.get(f"/api/sections/{section_id}/cards").json()[0]
+
+    edit_resp = client.patch(
+        f"/api/cards/{original_card['id']}", json={"front_md": "Edited Q", "back_md": "Edited A"}
+    )
+    assert edit_resp.status_code == 200
+    edited_card_id = edit_resp.json()["id"]
+    assert edited_card_id != original_card["id"]
+
+    # Regenerate with completely different content -- the user's edited
+    # card shares nothing with the new generated set at all.
+    stub_provider.responses = [
+        CompletionResult(
+            text=json.dumps([{"front": "Brand New Q", "back": "Brand New A"}]),
+            input_tokens=1, output_tokens=1, model="stub-model",
+        )
+    ]
+    resp = client.post(f"/api/sections/{section_id}/cards")
+    assert resp.status_code == 202
+    assert run_due_jobs_once() is True
+
+    cards_after = client.get(f"/api/sections/{section_id}/cards").json()
+    fronts = {c["front_md"] for c in cards_after}
+    assert "Edited Q" in fronts  # user-origin card survived
+    assert "Brand New Q" in fronts  # new generated card also present
+    assert "Original Q" not in fronts  # the pre-edit generated card is long gone
+
+    by_id = {c["id"]: c for c in cards_after}
+    assert by_id[edited_card_id]["origin"] == "user"
+
+
+def test_regenerate_cards_still_replaces_unedited_generated_cards(client, ingest_course, stub_provider):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(
+            text=json.dumps([{"front": "Old Q", "back": "Old A"}]),
+            input_tokens=1, output_tokens=1, model="stub-model",
+        )
+    ]
+    client.post(f"/api/sections/{section_id}/cards")
+    assert run_due_jobs_once() is True
+
+    stub_provider.responses = [
+        CompletionResult(
+            text=json.dumps([{"front": "New Q", "back": "New A"}]),
+            input_tokens=1, output_tokens=1, model="stub-model",
+        )
+    ]
+    client.post(f"/api/sections/{section_id}/cards")
+    assert run_due_jobs_once() is True
+
+    cards_after = client.get(f"/api/sections/{section_id}/cards").json()
+    fronts = {c["front_md"] for c in cards_after}
+    assert fronts == {"New Q"}  # untouched (origin='generated') card replaced, as before ADR-023
+
+
+def test_regenerate_cards_skips_insert_when_id_collides_with_user_card(client, ingest_course, stub_provider):
+    """A user's edit happens to produce EXACTLY the text a later
+    regeneration would also produce -- same content-addressed id. The
+    user's card (and its review history) must win; no duplicate insert,
+    no overwrite.
+    """
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(
+            text=json.dumps([{"front": "Placeholder Q", "back": "Placeholder A"}]),
+            input_tokens=1, output_tokens=1, model="stub-model",
+        )
+    ]
+    client.post(f"/api/sections/{section_id}/cards")
+    assert run_due_jobs_once() is True
+    placeholder_card = client.get(f"/api/sections/{section_id}/cards").json()[0]
+
+    # Edit it to converge on the exact text the NEXT generation will produce.
+    edit_resp = client.patch(
+        f"/api/cards/{placeholder_card['id']}", json={"front_md": "Converged Q", "back_md": "Converged A"}
+    )
+    assert edit_resp.status_code == 200
+    converged_card_id = edit_resp.json()["id"]
+    client.post(f"/api/cards/{converged_card_id}/grade", json={"grade": 3})
+
+    stub_provider.responses = [
+        CompletionResult(
+            text=json.dumps([{"front": "Converged Q", "back": "Converged A"}]),
+            input_tokens=1, output_tokens=1, model="stub-model",
+        )
+    ]
+    client.post(f"/api/sections/{section_id}/cards")
+    assert run_due_jobs_once() is True
+
+    cards_after = client.get(f"/api/sections/{section_id}/cards").json()
+    assert len(cards_after) == 1
+    assert cards_after[0]["id"] == converged_card_id
+    assert cards_after[0]["origin"] == "user"
+
+    session = get_session()
+    try:
+        assert session.get(ReviewState, converged_card_id) is not None  # the user's grade survived
+    finally:
+        session.close()

@@ -28,6 +28,7 @@ export type LessonEstimateOut = components["schemas"]["LessonEstimateOut"];
 export type GenerateAllLessonsOut = components["schemas"]["GenerateAllLessonsOut"];
 export type LlmUsageOut = components["schemas"]["LlmUsageOut"];
 export type CardOut = components["schemas"]["CardOut"];
+export type UpdateCardIn = components["schemas"]["UpdateCardIn"];
 export type GenerateCardsOut = components["schemas"]["GenerateCardsOut"];
 export type ReviewQueueOut = components["schemas"]["ReviewQueueOut"];
 export type ReviewQueueCardOut = components["schemas"]["ReviewQueueCardOut"];
@@ -380,6 +381,29 @@ export function listCards(sectionId: string) {
     client.GET("/api/sections/{section_id}/cards", {
       params: { path: { section_id: sectionId } },
     }),
+  );
+}
+
+/**
+ * Inline card editing — the response is a full card under a NEW id
+ * (editing front/back changes the content-addressed id), so callers must
+ * swap it into their list by the OLD id, not mutate the existing entry
+ * in place.
+ */
+export function patchCard(cardId: string, body: UpdateCardIn) {
+  return request(
+    client.PATCH("/api/cards/{card_id}", {
+      params: { path: { card_id: cardId } },
+      body,
+    }),
+  );
+}
+
+/** Deletes a card and its review history (ReviewState/ReviewLog cascade
+ * server-side). 204 with no body on success. */
+export function deleteCard(cardId: string) {
+  return request(
+    client.DELETE("/api/cards/{card_id}", { params: { path: { card_id: cardId } } }),
   );
 }
 

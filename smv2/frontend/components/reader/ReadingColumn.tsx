@@ -11,6 +11,7 @@ import type { ReaderSection, SectionBodyState, ViewMode } from "@/lib/reader/typ
 import CardsCTA from "./CardsCTA";
 import LessonPane, { type LessonDisplayStatus } from "./LessonPane";
 import PagesView from "./PagesView";
+import SectionCards from "./SectionCards";
 
 export interface ReadingColumnProps {
   courseId: string;
@@ -153,6 +154,7 @@ export default function ReadingColumn({
           )}
           <div className="mt-8 border-t border-border pt-4">
             <CardsCTA key={section.id} sectionId={section.id} />
+            <SectionCards key={section.id} sectionId={section.id} />
           </div>
         </article>
       </div>

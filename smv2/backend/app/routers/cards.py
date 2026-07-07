@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app.schemas import CardOut, GenerateCardsOut
+from app.schemas import CardOut, GenerateCardsOut, UpdateCardIn
 from app.services import cards_service
 
 router = APIRouter(tags=["cards"])
@@ -30,3 +30,21 @@ def list_cards(section_id: str) -> list[CardOut]:
     if cards is None:
         raise HTTPException(status_code=404, detail="section not found")
     return [CardOut.model_validate(c) for c in cards]
+
+
+@router.patch("/api/cards/{card_id}", operation_id="update_card", response_model=CardOut)
+def update_card(card_id: str, body: UpdateCardIn) -> CardOut:
+    try:
+        card = cards_service.update_card(card_id, body.front_md, body.back_md)
+    except cards_service.CardNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except cards_service.DuplicateCardError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return CardOut.model_validate(card)
+
+
+@router.delete("/api/cards/{card_id}", operation_id="delete_card", status_code=204)
+def delete_card(card_id: str) -> None:
+    deleted = cards_service.delete_card(card_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="card not found")

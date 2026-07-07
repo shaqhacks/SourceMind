@@ -787,3 +787,90 @@ both fields without fully disambiguating their relationship.
 
 No `_EXTRACTOR_ALGO_VERSION` bump — nothing in extraction/outline changed
 this round.
+
+## ADR-023 — Card editing: content-addressing extended to user edits (2026-07-06)
+
+Flashcards become visible and editable in the reader. The core design
+question was how card editing coexists with `card_id_for`'s
+content-addressed identity law (`smv2-invariants`, `smv2-srs-subsystem`
+§1): a card's id is a hash of its own front/back text, so editing that
+text necessarily produces a *different* id. Rather than special-casing
+edits to mutate a row in place (which would break the id-matches-content
+invariant every other part of the system relies on), an edit is modeled
+as **mint a new card at the new id, migrate its review history onto that
+id, delete the old row** — the same shape id stability already has
+everywhere else, just applied to a manual edit instead of a
+regeneration.
+
+**1. `cards.origin` (migration `0008_card_origin`)**: plain
+`op.add_column` with `server_default="generated"` — no FK, no trigger on
+`cards` (only `sections` has one, scoped to `body_md`), so no
+`batch_alter_table` needed, unlike ADR-019/ADR-022's FK-column additions.
+`'generated'` (produced by `run_card_generation`) vs `'user'` (created by
+an edit) is the flag every other part of this ADR keys off.
+
+**2. `PATCH /api/cards/{card_id}` (`update_card`)**:
+`cards_service.update_card` computes `new_id =
+card_id_for(section_id, new_front, new_back)`. If `new_id == card_id`
+(a byte-for-byte no-op edit — `card_id_for` does no text normalization,
+unlike section identity's `normalize_text`), returns the existing card
+unchanged. Otherwise: 404 if the card doesn't exist; 409
+(`DuplicateCardError`) if `new_id` already belongs to a *different*
+existing card in the section (the section's dedup law surfaced as a real
+error rather than a silent merge) — insert the new `origin='user'` card
+first (same `course_id`/`section_id`/`position`), then migrate
+`ReviewState`/`ReviewLog` from the old id to the new one, then delete the
+old card. That order matters: `PRAGMA foreign_keys=ON` enforces
+`review_states.card_id`/`review_logs.card_id`'s FK per-statement, so the
+new card must exist before either table is repointed at it, and the old
+card must not be deleted until nothing still points at it.
+
+**The PK-update question, resolved empirically**: `ReviewState.card_id`
+is that table's own primary key, not just an FK column, so migrating it
+meant either a raw `UPDATE review_states SET card_id = :new WHERE
+card_id = :old` or a safer-seeming insert-copy-then-delete. Verified
+directly against a throwaway SQLite file (mirroring ADR-022's
+round-trip-verification habit): a plain SQLAlchemy Core `update()`
+against the primary-key column works cleanly — the SQL-level UPDATE
+succeeds once the new card row already exists (FK target present), and a
+**fresh session** reading `session.get(ReviewState, new_id)` afterward
+returns the row intact (`due_at`/`interval_days`/`reps` all preserved),
+with the old id correctly returning `None`. No ORM identity-map
+staleness observed. `ReviewLog.card_id` is a plain FK column (not a PK —
+`ReviewLog` has its own `id`), so the same approach applies with even
+less risk. `update_card` uses this raw-UPDATE approach for both tables;
+the insert-copy+delete fallback was not needed.
+
+**3. `DELETE /api/cards/{card_id}` (`delete_card`)**: deletes the row and
+relies on `ON DELETE CASCADE` to remove its `ReviewState`/`ReviewLog` —
+204 on success, 404 if missing. This is a **deliberately different**
+outcome from an edit: deleting a card is permanent, intentional removal
+of its review history along with it, whereas editing migrates that
+history forward. Don't conflate the two code paths.
+
+**4. Regeneration diff scoped to `origin='generated'`**
+(`cards_generation.py`): the existing replace/remap diff (delete cards
+absent from the new generated id set; update position for cards present
+in both) now only ever considers `origin='generated'` cards as delete
+candidates — a `origin='user'` card (freshly authored, or the result of
+an edit) is invisible to the delete side of the diff entirely, mirroring
+re-ingest's replace vs. remap split (`smv2-invariants` law #2/#3) for
+content a person has deliberately customized. On the insert side, if a
+newly generated card's content-addressed id happens to collide with an
+existing `origin='user'` card's id, the insert is skipped and the user's
+card (and its state) is left untouched — the user's card wins, not the
+model's.
+
+**Tests** (`tests/test_card_editing.py`,
+`tests/test_cards_generation.py`): edit migrates `due_at`/`interval_days`
+/`reps`/logs to the new id; no-op edit (identical content) returns the
+same id, no new row; edit-to-duplicate-content → 409, both cards
+untouched; delete cascades state+logs, verified by direct DB query after
+a 204; `list_cards` includes `origin` for both kinds; a user-edited card
+survives regeneration with completely unrelated new content; unedited
+`origin='generated'` cards still replace exactly as before ADR-023; a
+regeneration whose new content collides with an edited user card's id
+skips the insert and preserves the user's card and its graded state.
+
+No `_EXTRACTOR_ALGO_VERSION` bump — nothing in extraction/outline changed
+this round.
