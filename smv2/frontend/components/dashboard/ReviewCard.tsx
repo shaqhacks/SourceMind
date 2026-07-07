@@ -16,7 +16,7 @@ export default function ReviewCard({ dueCount, href }: ReviewCardProps) {
   return (
     <Link
       href={href}
-      className="block rounded-lg border border-border bg-accent/5 p-4 transition-colors hover:bg-accent/10"
+      className="block rounded-lg border border-border bg-accent-soft/60 p-4 transition-colors hover:border-muted-foreground"
     >
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Review</p>
       <h2 className="mt-1 text-lg font-semibold">

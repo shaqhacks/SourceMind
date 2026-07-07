@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { ReactNode } from "react";
 
+import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
+import Card from "@/components/ui/Card";
+import ProgressBar from "@/components/ui/ProgressBar";
 import {
   deleteCourse,
   exportCourseUrl,
@@ -14,6 +17,7 @@ import {
   type AssetOut,
   type CourseOut,
 } from "@/lib/api/client";
+import { useContinueChapter } from "@/lib/dashboard/useContinueChapter";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { formatJobProgress } from "@/lib/jobs/format";
 
@@ -21,24 +25,6 @@ export interface CourseCardProps {
   course: CourseOut;
   onDeleted: (courseId: string) => void;
   onNeedsRefresh: () => void;
-}
-
-function StatusBadge({
-  children,
-  tone,
-}: {
-  children: ReactNode;
-  tone: "neutral" | "good" | "bad" | "warning";
-}) {
-  const toneClass =
-    tone === "good"
-      ? "text-green-700 dark:text-green-400"
-      : tone === "bad"
-        ? "text-red-700 dark:text-red-400"
-        : tone === "warning"
-          ? "text-amber-700 dark:text-amber-400"
-          : "text-muted-foreground";
-  return <span className={`text-xs font-medium ${toneClass}`}>{children}</span>;
 }
 
 export default function CourseCard({ course, onDeleted, onNeedsRefresh }: CourseCardProps) {
@@ -67,6 +53,12 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
   const failureMessage = effectiveStatus === "ingest_failed" ? discoveredFailureMessage : null;
 
   const { job, done, stalled } = useJobEvents(jobId);
+
+  // Read-progress bar for a ready course the user has started — reuses the
+  // same shared hook (one list_sections call) as ContinueCard/StatsRow. The
+  // hook no-ops when there's no saved section, so a never-opened ready
+  // course triggers no fetch.
+  const readProgress = useContinueChapter(course.status === "ready" ? course : null);
 
   // "ingesting" courses have no job_id on CourseOut itself — rediscover
   // the active job by scanning the job list (see findActiveIngestJob's
@@ -151,7 +143,7 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border p-4">
+    <Card className="flex flex-col gap-2">
       <div className="flex items-start justify-between gap-3">
         <h3 className="truncate text-sm font-semibold">
           {course.status === "ready" ? (
@@ -162,8 +154,8 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
             course.title
           )}
         </h3>
-        {course.status === "ready" && <StatusBadge tone="good">Ready</StatusBadge>}
-        {course.status === "draft" && <StatusBadge tone="neutral">Draft</StatusBadge>}
+        {course.status === "ready" && <Badge tone="good">Ready</Badge>}
+        {course.status === "draft" && <Badge tone="neutral">Draft</Badge>}
       </div>
 
       {isIngesting && (
@@ -180,10 +172,10 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
             aria-expanded={readyFailuresExpanded}
             className="self-start"
           >
-            <StatusBadge tone="warning">
+            <Badge tone="warning">
               {course.failed_asset_count} file{course.failed_asset_count === 1 ? "" : "s"} failed
               extraction
-            </StatusBadge>
+            </Badge>
           </button>
           {readyFailuresExpanded &&
             (readyFailedAssets === null ? (
@@ -192,10 +184,10 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
               <ul className="flex flex-col gap-1">
                 {readyFailedAssets.map((asset) => (
                   <li key={asset.id}>
-                    <StatusBadge tone="bad">
+                    <Badge tone="serious">
                       {asset.filename}
                       {asset.error ? `: ${asset.error}` : ""}
-                    </StatusBadge>
+                    </Badge>
                   </li>
                 ))}
               </ul>
@@ -209,25 +201,24 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
             <ul className="flex flex-col gap-1">
               {failedAssets.map((asset) => (
                 <li key={asset.id}>
-                  <StatusBadge tone="bad">
+                  <Badge tone="serious">
                     {asset.filename}
                     {asset.error ? `: ${asset.error}` : ""}
-                  </StatusBadge>
+                  </Badge>
                 </li>
               ))}
             </ul>
           ) : (
-            <StatusBadge tone="bad">{failureMessage ?? "Ingest failed"}</StatusBadge>
+            <Badge tone="serious">{failureMessage ?? "Ingest failed"}</Badge>
           )}
-          <button
-            type="button"
-            onClick={handleRetryIngest}
-            disabled={retrying}
-            className="self-start rounded-md border border-border px-2 py-1 text-xs font-medium disabled:opacity-50"
-          >
+          <Button size="sm" onClick={handleRetryIngest} disabled={retrying} className="self-start">
             {retrying ? "Retrying…" : "Retry ingest"}
-          </button>
+          </Button>
         </div>
+      )}
+
+      {readProgress && (
+        <ProgressBar percent={readProgress.percent} label={`Progress through ${course.title}`} />
       )}
 
       <div className="mt-auto flex items-center justify-between pt-2">
@@ -242,32 +233,19 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
         {confirmingDelete ? (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">Delete this course?</span>
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting}
-              className="font-medium text-red-600 disabled:opacity-50 dark:text-red-400"
-            >
+            <Button variant="danger" size="sm" onClick={handleDelete} disabled={deleting}>
               {deleting ? "Deleting…" : "Confirm"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmingDelete(false)}
-              className="text-muted-foreground"
-            >
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirmingDelete(false)}>
               Cancel
-            </button>
+            </Button>
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={() => setConfirmingDelete(true)}
-            className="text-xs font-medium text-red-600 dark:text-red-400"
-          >
+          <Button variant="danger" size="sm" onClick={() => setConfirmingDelete(true)}>
             Delete
-          </button>
+          </Button>
         )}
       </div>
-    </div>
+    </Card>
   );
 }

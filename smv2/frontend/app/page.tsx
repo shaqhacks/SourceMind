@@ -5,13 +5,20 @@ import type { DragEvent } from "react";
 
 import ContinueCard from "@/components/dashboard/ContinueCard";
 import CourseCard from "@/components/dashboard/CourseCard";
+import QuizzesToTakePanel from "@/components/dashboard/QuizzesToTakePanel";
 import ReviewCard from "@/components/dashboard/ReviewCard";
+import StatsRow from "@/components/dashboard/StatsRow";
 import StudyNextList from "@/components/dashboard/StudyNextList";
+import VideoSection from "@/components/dashboard/VideoSection";
 import ErrorBanner from "@/components/ErrorBanner";
+import Button from "@/components/ui/Button";
+import EmptyState from "@/components/ui/EmptyState";
+import Skeleton from "@/components/ui/Skeleton";
 import UploadFlow from "@/components/upload/UploadFlow";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import { getReviewSummary, listCourses, type CourseOut, type ReviewSummaryOut } from "@/lib/api/client";
 import { pickMostRecentCourse } from "@/lib/dashboard/continue";
+import { useContinueChapter } from "@/lib/dashboard/useContinueChapter";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
 import { useSampleHintDismissed } from "@/lib/hooks/useSampleHint";
 
@@ -24,6 +31,7 @@ export default function Home() {
   const [coursesError, setCoursesError] = useState<FetchError | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummaryOut | null>(null);
+  const [quizCount, setQuizCount] = useState(0);
   const [dragActive, setDragActive] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
   const dragDepth = useRef(0);
@@ -110,6 +118,10 @@ export default function Home() {
   }
 
   const continueCourse = pickMostRecentCourse(courses);
+  // The resume-point chapter (title + percent) for the primary course,
+  // shared with ContinueCard via the same hook so StatsRow's progress tile
+  // and the card can't disagree.
+  const continueChapter = useContinueChapter(continueCourse);
   // Honest about what one click actually delivers: due_total (cross-course)
   // only gates whether a review card shows at all; the count shown and the
   // session it links to are scoped to continueCourse specifically (the
@@ -141,7 +153,7 @@ export default function Home() {
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="relative mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-8"
+      className="relative mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-6 py-8"
     >
       {dragActive && (
         <div
@@ -155,7 +167,11 @@ export default function Home() {
       )}
 
       <div className="flex items-center justify-between">
-        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-semibold outline-none">
+        <h1
+          ref={headingRef}
+          tabIndex={-1}
+          className="text-2xl font-semibold tracking-tight outline-none"
+        >
           Your courses
         </h1>
         <div>
@@ -171,13 +187,9 @@ export default function Home() {
               event.target.value = "";
             }}
           />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
-          >
+          <Button variant="primary" onClick={() => fileInputRef.current?.click()}>
             Upload PDF
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -206,16 +218,35 @@ export default function Home() {
         </div>
       )}
 
-      {isEmpty ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border p-12 text-center text-muted-foreground">
-          <p className="text-lg font-medium">Drop a PDF anywhere to start</p>
-          <p className="text-sm">Or use the Upload PDF button above.</p>
+      {!loaded ? (
+        <div className="flex flex-col gap-4">
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
         </div>
+      ) : isEmpty ? (
+        <EmptyState
+          icon="📚"
+          title="Drop a PDF anywhere to start"
+          body="Or use the Upload PDF button above."
+        />
       ) : (
         <div className="flex flex-col gap-6">
+          <StatsRow
+            cardsDue={reviewSummary?.due_total ?? 0}
+            quizzesToTake={quizCount}
+            progressPercent={continueChapter?.percent ?? null}
+            progressCourseTitle={continueCourse?.title ?? null}
+            backlogWarning={Boolean(reviewSummary?.backlog_warning)}
+          />
+
           {(continueCourse || showReviewCard) && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {continueCourse && <ContinueCard course={continueCourse} />}
+            <div className="grid gap-4 md:grid-cols-3">
+              {continueCourse && (
+                <div className="md:col-span-2">
+                  <ContinueCard course={continueCourse} />
+                </div>
+              )}
               {showReviewCard && (
                 <ReviewCard dueCount={reviewCardDueCount} href={reviewCardHref} />
               )}
@@ -224,7 +255,9 @@ export default function Home() {
 
           {continueCourse && <StudyNextList courseId={continueCourse.id} />}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <QuizzesToTakePanel courses={courses} onCount={setQuizCount} />
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {courses.map((course) => (
               <CourseCard
                 key={course.id}
@@ -234,6 +267,8 @@ export default function Home() {
               />
             ))}
           </div>
+
+          <VideoSection />
         </div>
       )}
 

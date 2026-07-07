@@ -10,6 +10,7 @@ import {
   getReviewSummary,
   getStudyNext,
   listAssets,
+  listChapters,
   listCourses,
   listSections,
   type CourseOut,
@@ -33,6 +34,7 @@ vi.mock("@/lib/api/client", () => ({
   listAssets: vi.fn(),
   startIngest: vi.fn(),
   listSections: vi.fn(),
+  listChapters: vi.fn(),
   createCourse: vi.fn(),
   uploadAsset: vi.fn(),
   editOutline: vi.fn(),
@@ -47,6 +49,7 @@ const mockedFindActiveIngestJob = vi.mocked(findActiveIngestJob);
 const mockedFindLatestIngestJob = vi.mocked(findLatestIngestJob);
 const mockedListAssets = vi.mocked(listAssets);
 const mockedListSections = vi.mocked(listSections);
+const mockedListChapters = vi.mocked(listChapters);
 const mockedGetReviewSummary = vi.mocked(getReviewSummary);
 const mockedGetStudyNext = vi.mocked(getStudyNext);
 
@@ -75,6 +78,7 @@ describe("Home page", () => {
     mockedListAssets.mockResolvedValue(ok([]));
     mockedDeleteCourse.mockResolvedValue(ok(undefined));
     mockedListSections.mockResolvedValue(ok([]));
+    mockedListChapters.mockResolvedValue(ok([]));
     mockedGetReviewSummary.mockResolvedValue(
       ok({ courses: [], due_total: 0, daily_throughput: 0, backlog_warning: false }),
     );
@@ -185,8 +189,11 @@ describe("Home page", () => {
     );
     render(<Home />);
 
-    const link = await screen.findByRole("link", { name: /7 cards due/i });
+    // Target the Review card specifically — StatsRow now also renders a
+    // "7 cards due" stat tile that links to the generic /review hub.
+    const link = await screen.findByRole("link", { name: /start your review/i });
     expect(link).toHaveAttribute("href", "/review?course=a&start=due");
+    expect(link).toHaveTextContent(/7 cards due/i);
   });
 
   it("hides the Review card when nothing is due anywhere", async () => {
@@ -194,7 +201,9 @@ describe("Home page", () => {
     render(<Home />);
 
     await screen.findByText("Distributed Systems");
-    expect(screen.queryByText(/cards due/i)).not.toBeInTheDocument();
+    // The Review card is gone; StatsRow's always-present "cards due" tile
+    // (showing 0) is not the Review card, so assert the card's own copy.
+    expect(screen.queryByText(/start your review/i)).not.toBeInTheDocument();
   });
 
   it("shows up to 3 Study next suggestions for the primary course, each linking out with its reason", async () => {

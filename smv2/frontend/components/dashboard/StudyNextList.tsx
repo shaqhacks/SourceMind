@@ -3,10 +3,24 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+import Badge, { type BadgeTone } from "@/components/ui/Badge";
 import { getStudyNext, type StudyNextItemOut } from "@/lib/api/client";
 
 export interface StudyNextListProps {
   courseId: string;
+}
+
+// Reason → badge tone: low scores read as a warning, due cards as an
+// accent nudge, unread/stale as neutral (informational, not urgent).
+function reasonTone(reason: StudyNextItemOut["reason"]): BadgeTone {
+  switch (reason) {
+    case "low_test_score":
+      return "warning";
+    case "due_cards":
+      return "accent";
+    default:
+      return "neutral";
+  }
 }
 
 // study_service.study_next (ADR-022) already caps at 3 and orders by
@@ -97,9 +111,7 @@ export default function StudyNextList({ courseId }: StudyNextListProps) {
               className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted-foreground/5"
             >
               <span className="font-medium">{item.chapter_label}</span>
-              <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
-                {reasonLabel(item)}
-              </span>
+              <Badge tone={reasonTone(item.reason)}>{reasonLabel(item)}</Badge>
             </Link>
           </li>
         ))}

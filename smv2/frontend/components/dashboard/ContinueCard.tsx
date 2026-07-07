@@ -1,72 +1,40 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { listSections, type CourseOut } from "@/lib/api/client";
-import { percentComplete } from "@/lib/dashboard/continue";
+import ProgressBar from "@/components/ui/ProgressBar";
+import type { CourseOut } from "@/lib/api/client";
+import { useContinueChapter } from "@/lib/dashboard/useContinueChapter";
 
 export interface ContinueCardProps {
   course: CourseOut;
 }
 
-interface ChapterInfo {
-  title: string;
-  percent: number;
-}
-
 /**
  * The dashboard's first-priority card: jump straight back into the most
- * recently read course, at its resume point. Needs one extra
- * list_sections call (not carried on CourseOut) to turn the saved
- * section_id into a chapter title + position-among-content-sections
- * percentage.
+ * recently read course, at its resume point. The chapter title +
+ * completion percentage come from the shared useContinueChapter hook (one
+ * list_sections call), the same source StatsRow uses.
  */
 export default function ContinueCard({ course }: ContinueCardProps) {
-  const [chapter, setChapter] = useState<ChapterInfo | null>(null);
-  const sectionId = course.progress?.section_id ?? null;
-
-  useEffect(() => {
-    if (!sectionId) return;
-    let active = true;
-    listSections(course.id).then(({ data }) => {
-      if (!active || !data) return;
-      const section = data.find((candidate) => candidate.id === sectionId);
-      if (!section) return;
-
-      // Percent complete is measured against content sections only —
-      // practice/answers aren't part of the reading flow (see Sidebar/
-      // CourseReader), so counting them here would understate progress.
-      const contentSections = data
-        .filter((candidate) => candidate.kind === "content")
-        .sort((a, b) => a.order_index - b.order_index);
-      const contentIndex = contentSections.findIndex((candidate) => candidate.id === sectionId);
-      setChapter({
-        title: section.title,
-        percent:
-          contentIndex === -1
-            ? percentComplete(section.order_index, data.length)
-            : percentComplete(contentIndex, contentSections.length),
-      });
-    });
-    return () => {
-      active = false;
-    };
-  }, [course.id, sectionId]);
+  const chapter = useContinueChapter(course);
 
   return (
     <Link
       href={`/course/${course.id}`}
-      className="block rounded-lg border border-border bg-accent/5 p-4 transition-colors hover:bg-accent/10"
+      className="block rounded-lg border border-border bg-accent-soft/60 p-4 transition-colors hover:border-muted-foreground"
     >
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         Continue reading
       </p>
       <h2 className="mt-1 text-lg font-semibold">{course.title}</h2>
       {chapter ? (
-        <p className="mt-1 text-sm text-muted-foreground">
-          {chapter.title} — {chapter.percent}% complete
-        </p>
+        <div className="mt-2 flex flex-col gap-2">
+          <p className="text-sm text-muted-foreground">
+            {chapter.title} — {chapter.percent}% complete
+          </p>
+          <ProgressBar percent={chapter.percent} label={`Progress through ${course.title}`} />
+        </div>
       ) : null}
     </Link>
   );
