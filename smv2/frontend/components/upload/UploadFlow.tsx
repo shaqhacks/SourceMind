@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import Button from "@/components/ui/Button";
 import { describeError } from "@/lib/api/errors";
 import { createCourse, getJob, startIngest, uploadAsset } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
@@ -31,6 +32,30 @@ type Step =
   | { kind: "ingesting"; courseId: string; jobId: string; items: UploadItem[] }
   | { kind: "ingest-failed"; courseId: string; items: UploadItem[]; message: string }
   | { kind: "fatal"; message: string };
+
+const STEPS = ["Name", "Upload", "Ingest"] as const;
+
+/**
+ * Maps the state machine above onto the 3-step "Name -> Upload -> Ingest"
+ * indicator. "creating" folds into Upload (course creation is an invisible
+ * prerequisite, not a step a user perceives); "starting-ingest" folds into
+ * Ingest (it's that phase's own kickoff); "fatal" (course creation itself
+ * failed) stays at Name since the flow never actually left it.
+ */
+function currentStepFor(step: Step): 0 | 1 | 2 {
+  switch (step.kind) {
+    case "title":
+    case "fatal":
+      return 0;
+    case "creating":
+    case "uploading":
+      return 1;
+    case "starting-ingest":
+    case "ingesting":
+    case "ingest-failed":
+      return 2;
+  }
+}
 
 /**
  * Modal walking a freshly-selected/dropped batch of PDFs through: create
@@ -167,6 +192,8 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
     return <p className="text-sm text-muted-foreground">{formatJobProgress(job, stalled)}</p>;
   }
 
+  const currentStep = currentStepFor(step);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div
@@ -175,19 +202,41 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
         aria-modal="true"
         aria-label="Upload course"
         tabIndex={-1}
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-background p-6 shadow-xl"
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-surface-raised p-6 shadow-xl"
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold">Add a course</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-md border border-border px-2 py-1 text-sm"
-          >
+          <Button variant="secondary" size="sm" onClick={onClose} aria-label="Close">
             Close
-          </button>
+          </Button>
         </div>
+
+        <ol aria-label="Upload progress" className="mb-4 flex items-center gap-2 text-xs">
+          {STEPS.map((label, i) => (
+            <li key={label} className="flex items-center gap-2">
+              <span
+                aria-current={i === currentStep ? "step" : undefined}
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold ${
+                  i < currentStep
+                    ? "bg-status-good-soft text-status-good"
+                    : i === currentStep
+                      ? "bg-accent text-white"
+                      : "bg-muted-foreground/15 text-muted-foreground"
+                }`}
+              >
+                {i < currentStep ? "✓" : i + 1}
+              </span>
+              <span className={i === currentStep ? "font-medium" : "text-muted-foreground"}>
+                {label}
+              </span>
+              {i < STEPS.length - 1 && (
+                <span aria-hidden="true" className="text-muted-foreground">
+                  —
+                </span>
+              )}
+            </li>
+          ))}
+        </ol>
 
         {step.kind === "title" && (
           <div className="flex flex-col gap-4">
@@ -207,13 +256,9 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
                 </li>
               ))}
             </ul>
-            <button
-              type="button"
-              onClick={handleCreateCourse}
-              className="self-end rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
-            >
+            <Button variant="primary" onClick={handleCreateCourse} className="self-end">
               Create &amp; upload
-            </button>
+            </Button>
           </div>
         )}
 

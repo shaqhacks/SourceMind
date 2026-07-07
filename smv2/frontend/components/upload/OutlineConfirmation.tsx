@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import Button from "@/components/ui/Button";
 import type { OutlineOp, SectionOut } from "@/lib/api/client";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 import {
@@ -179,14 +180,9 @@ export default function OutlineConfirmation({
                 >
                   ↓
                 </button>
-                <button
-                  type="button"
-                  onClick={() => remove(id)}
-                  disabled={disabled}
-                  className="text-red-600 dark:text-red-400"
-                >
+                <Button variant="danger" size="sm" onClick={() => remove(id)} disabled={disabled}>
                   Delete
-                </button>
+                </Button>
               </div>
 
               {mergedIds.has(id) && (
@@ -248,13 +244,9 @@ export default function OutlineConfirmation({
       </p>
 
       <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={handleAccept}
-          className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
-        >
+        <Button variant="primary" onClick={handleAccept}>
           {submitLabel}
-        </button>
+        </Button>
       </div>
     </div>
   );
