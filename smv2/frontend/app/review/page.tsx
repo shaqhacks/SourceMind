@@ -102,16 +102,28 @@ type SessionState =
 
 function ReviewPageInner() {
   const router = useRouter();
-  const courseParam = useSearchParams().get("course");
+  const searchParams = useSearchParams();
+  const courseParam = searchParams.get("course");
+  const startParam = searchParams.get("start");
 
   // "resuming" is a brief transitional phase, only entered when a saved
   // session exists at mount: it reconciles remainingCardIds against a
   // fresh queue fetch (cards graded elsewhere meanwhile have already
   // dropped server-side) before deciding whether there's really
   // something to resume into.
-  const [phase, setPhase] = useState<"hub" | "chooser" | "session" | "resuming">(() =>
-    readStoredSession() ? "resuming" : courseParam ? "chooser" : "hub",
-  );
+  //
+  // "bootstrapping-due" is a separate, higher-priority entry point: an
+  // explicit ?start=due (e.g. the post-test "Start review" CTA, or the
+  // dashboard's Review card) is a fresh, deliberate intent to review
+  // what's due right now for a specific course — it bypasses hub/chooser
+  // entirely and takes priority over resuming a stale saved session,
+  // which gets silently superseded rather than restored.
+  const [phase, setPhase] = useState<
+    "hub" | "chooser" | "session" | "resuming" | "bootstrapping-due"
+  >(() => {
+    if (courseParam && startParam === "due") return "bootstrapping-due";
+    return readStoredSession() ? "resuming" : courseParam ? "chooser" : "hub";
+  });
   const [courseId, setCourseId] = useState<string | null>(courseParam);
   const [hubState, setHubState] = useState<HubState>({ kind: "loading" });
   const [chooserState, setChooserState] = useState<ChooserState>({ kind: "loading" });
@@ -273,6 +285,35 @@ function ReviewPageInner() {
     [courseId],
   );
 
+  // Runs once when the URL says start=due: discard whatever saved session
+  // was left over (a deliberate supersede, not a bug to guard against),
+  // look up how many cards are due right now, and kick off a session sized
+  // to exactly that — reusing startSession's own plumbing (localStorage
+  // write, phase transition) rather than duplicating it. Falls back to the
+  // chooser if the lookup fails or nothing is actually due.
+  useEffect(() => {
+    if (phase !== "bootstrapping-due" || !courseId) return;
+    clearStoredSession();
+    let active = true;
+    getReviewQueue(courseId, MAX_QUEUE_FETCH).then(({ data, status }) => {
+      if (!active) return;
+      if (!data) {
+        setChooserState({ kind: "error", error: describeError(status, "Loading review queue") });
+        setPhase("chooser");
+        return;
+      }
+      if (data.due === 0) {
+        setChooserState({ kind: "ready", due: data.due, new: data.new, total: data.total });
+        setPhase("chooser");
+        return;
+      }
+      startSession(data.due);
+    });
+    return () => {
+      active = false;
+    };
+  }, [phase, courseId, startSession]);
+
   const discardResumedSession = useCallback(() => {
     clearStoredSession();
     setIsResumedSession(false);
@@ -343,6 +384,12 @@ function ReviewPageInner() {
     mainContent = (
       <p role="status" className="p-8 text-sm text-muted-foreground">
         Checking for an unfinished session…
+      </p>
+    );
+  } else if (phase === "bootstrapping-due") {
+    mainContent = (
+      <p role="status" className="p-8 text-sm text-muted-foreground">
+        Starting your review…
       </p>
     );
   } else if (phase === "hub") {

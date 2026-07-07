@@ -321,4 +321,80 @@ describe("ReviewPage", () => {
       expect(screen.queryByText(/resumed session/i)).not.toBeInTheDocument();
     });
   });
+
+  describe("?start=due bootstrap", () => {
+    const STORAGE_KEY = "smv2.review.session";
+
+    it("skips the hub/chooser entirely and lands directly in a session sized to what's due now", async () => {
+      mockSearchParams = new URLSearchParams({ course: "course-1", start: "due" });
+      mockedGetReviewQueue
+        .mockResolvedValueOnce(ok(makeQueue({ due: 3, new: 1, total: 10 }))) // due-count lookup
+        .mockResolvedValueOnce(
+          ok(
+            makeQueue({
+              due: 3,
+              cards: [1, 2, 3].map((n) =>
+                makeQueueCard({ id: `card-${n}`, front_md: `Q${n}`, back_md: `A${n}` }),
+              ),
+            }),
+          ),
+        );
+
+      render(<ReviewPage />);
+
+      expect(await screen.findByText("1 of 3")).toBeInTheDocument();
+      expect(screen.queryByText(/ready to review/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /intro to testing/i })).not.toBeInTheDocument();
+      expect(mockedGetReviewQueue).toHaveBeenNthCalledWith(2, "course-1", 3);
+    });
+
+    it("silently supersedes a stale saved session instead of resuming it", async () => {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          courseId: "course-1",
+          chosenSize: 5,
+          remainingCardIds: ["stale-1", "stale-2"],
+          gradedTally: {},
+          startedAt: Date.now(),
+        }),
+      );
+      mockSearchParams = new URLSearchParams({ course: "course-1", start: "due" });
+      mockedGetReviewQueue
+        .mockResolvedValueOnce(ok(makeQueue({ due: 1, total: 1 })))
+        .mockResolvedValueOnce(ok(makeQueue({ due: 1, cards: [makeQueueCard({ id: "fresh-1" })] })));
+
+      render(<ReviewPage />);
+
+      expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+      expect(screen.queryByText(/resumed session/i)).not.toBeInTheDocument();
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
+      expect(stored).toMatchObject({ remainingCardIds: ["fresh-1"] });
+    });
+
+    it("falls back to the chooser when nothing is due, showing new cards there instead of starting an empty session", async () => {
+      mockSearchParams = new URLSearchParams({ course: "course-1", start: "due" });
+      // Two calls, not one: the bootstrap effect's own due-count lookup,
+      // then the chooser phase's own effect refetching once phase flips —
+      // a small, harmless redundancy in this uncommon fallback path.
+      mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ due: 0, new: 2, total: 2 })));
+
+      render(<ReviewPage />);
+
+      // total > 0 (there are new cards) so the chooser offers them, rather
+      // than the "No cards due" empty state which only applies at total===0.
+      expect(await screen.findByText(/ready to review/i)).toBeInTheDocument();
+      expect(screen.getByText(/0 due · 2 new/i)).toBeInTheDocument();
+      expect(mockedGetReviewQueue).toHaveBeenCalledTimes(2);
+    });
+
+    it("falls back to the chooser's empty state when there is truly nothing due or new", async () => {
+      mockSearchParams = new URLSearchParams({ course: "course-1", start: "due" });
+      mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ due: 0, new: 0, total: 0 })));
+
+      render(<ReviewPage />);
+
+      expect(await screen.findByText("No cards due")).toBeInTheDocument();
+    });
+  });
 });

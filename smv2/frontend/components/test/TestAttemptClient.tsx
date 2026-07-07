@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
 import { describeError, type FetchError } from "@/lib/api/errors";
-import { getTest, submitTest, type SubmitTestOut, type TestAttemptOut } from "@/lib/api/client";
+import {
+  getTest,
+  retakeTest,
+  submitTest,
+  type SubmitTestOut,
+  type TestAttemptOut,
+} from "@/lib/api/client";
 import { useKeyboardShortcuts, type ShortcutMap } from "@/lib/hooks/useKeyboardShortcuts";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
@@ -35,6 +42,7 @@ async function fetchAttempt(attemptId: string): Promise<LoadState> {
  * response, which does carry them) is set.
  */
 export default function TestAttemptClient({ courseId, attemptId }: TestAttemptClientProps) {
+  const router = useRouter();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [answers, setAnswers] = useState<(number | null)[]>([]);
   const [questionIndex, setQuestionIndex] = useState(0);
@@ -42,8 +50,23 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
   const [result, setResult] = useState<SubmitTestOut | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [retaking, setRetaking] = useState(false);
+  const [retakeError, setRetakeError] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus(headingRef);
+
+  const handleRetake = useCallback(async () => {
+    if (state.kind !== "loaded") return;
+    setRetaking(true);
+    setRetakeError(null);
+    const { data, status } = await retakeTest(state.attempt.test_id);
+    setRetaking(false);
+    if (data) {
+      router.push(`/course/${courseId}/test/${data.attempt_id}`);
+      return;
+    }
+    setRetakeError(describeError(status, "Starting a retake").message);
+  }, [state, courseId, router]);
 
   // Retry-button callback: no unmount guard needed, only ever runs from a
   // user click on an already-mounted ErrorBanner.
@@ -161,11 +184,29 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
               {result.added_card_ids.length} missed concept
               {result.added_card_ids.length === 1 ? "" : "s"} added to your reviews.
             </span>
-            <Link href="/review" className="shrink-0 font-medium text-accent underline">
-              Go to review
-            </Link>
           </div>
         )}
+        <div className="flex flex-wrap items-center gap-3">
+          {result.due_now_count > 0 && (
+            <Link
+              href={`/review?course=${courseId}&start=due`}
+              className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
+            >
+              Start review — {result.due_now_count} card{result.due_now_count === 1 ? "" : "s"} due
+              now
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={() => void handleRetake()}
+            disabled={retaking}
+            title="Same questions, no generation cost"
+            className="rounded-md border border-border px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            Retake test
+          </button>
+        </div>
+        {retakeError && <ErrorBanner message={retakeError} onRetry={() => void handleRetake()} />}
         <ul className="flex flex-col gap-6">
           {result.results.map((questionResult, index) => {
             const question = attempt.questions[index];

@@ -5,12 +5,7 @@ import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import { describeError, type FetchError } from "@/lib/api/errors";
-import {
-  generateTest,
-  getJob,
-  listTests,
-  type TestAttemptSummaryOut,
-} from "@/lib/api/client";
+import { generateTest, getJob, listTests, type TestSummaryOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
@@ -24,7 +19,7 @@ export interface QuizzesPanelProps {
 type ListState =
   | { kind: "loading" }
   | { kind: "error"; error: FetchError }
-  | { kind: "ready"; attempts: TestAttemptSummaryOut[] };
+  | { kind: "ready"; tests: TestSummaryOut[] };
 
 /**
  * TopBar-accessible popover: "Generate quiz" (job, like cards — no 409
@@ -62,7 +57,7 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
   // avoid the synchronous-setState-in-effect pitfall).
   const loadTests = useCallback(() => {
     listTests(courseId).then(({ data, status }) => {
-      if (data) setListState({ kind: "ready", attempts: data });
+      if (data) setListState({ kind: "ready", tests: data });
       else setListState({ kind: "error", error: describeError(status, "Loading quizzes") });
     });
   }, [courseId]);
@@ -158,30 +153,37 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
           )}
           {listState.kind === "ready" && (
             <ul className="flex flex-col gap-1">
-              {listState.attempts.length === 0 ? (
+              {listState.tests.length === 0 ? (
                 <li className="text-xs text-muted-foreground">
                   No quizzes yet — generate one above.
                 </li>
               ) : (
-                listState.attempts.map((attempt) => (
-                  <li key={attempt.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpen(false);
-                        router.push(`/course/${courseId}/test/${attempt.id}`);
-                      }}
-                      className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-muted-foreground/10"
-                    >
-                      <span>{attempt.question_count} questions</span>
-                      <span className="text-muted-foreground">
-                        {attempt.score !== null
-                          ? `${Math.round(attempt.score * 100)}%`
-                          : "In progress"}
-                      </span>
-                    </button>
-                  </li>
-                ))
+                // Each row is a test/deck; clicking jumps into its most
+                // recent attempt (TestSummaryOut's own attempts are
+                // newest-first) — retaking a specific test lives on the
+                // chapter test page's fuller history, not this popover.
+                listState.tests.map((test) => {
+                  const latest = test.attempts[0];
+                  return (
+                    <li key={test.id}>
+                      <button
+                        type="button"
+                        disabled={!latest}
+                        onClick={() => {
+                          if (!latest) return;
+                          setOpen(false);
+                          router.push(`/course/${courseId}/test/${latest.id}`);
+                        }}
+                        className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-muted-foreground/10 disabled:opacity-50"
+                      >
+                        <span>{test.question_count} questions</span>
+                        <span className="text-muted-foreground">
+                          {latest?.score != null ? `${Math.round(latest.score * 100)}%` : "In progress"}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })
               )}
             </ul>
           )}

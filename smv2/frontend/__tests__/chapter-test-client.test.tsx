@@ -9,10 +9,12 @@ import {
   getSection,
   listChapters,
   listTests,
+  retakeTest,
   type ChapterOut,
   type JobOut,
   type SectionDetailOut,
   type TestAttemptSummaryOut,
+  type TestSummaryOut,
 } from "@/lib/api/client";
 
 import { err, ok } from "./support/api-result";
@@ -33,6 +35,7 @@ vi.mock("@/lib/api/client", () => ({
   listTests: vi.fn(),
   generateTest: vi.fn(),
   getJob: vi.fn(),
+  retakeTest: vi.fn(),
 }));
 
 const mockedListChapters = vi.mocked(listChapters);
@@ -40,6 +43,7 @@ const mockedGetSection = vi.mocked(getSection);
 const mockedListTests = vi.mocked(listTests);
 const mockedGenerateTest = vi.mocked(generateTest);
 const mockedGetJob = vi.mocked(getJob);
+const mockedRetakeTest = vi.mocked(retakeTest);
 
 function makeChapter(overrides: Partial<ChapterOut> = {}): ChapterOut {
   return {
@@ -93,14 +97,25 @@ function mockGetSectionById(id: string) {
   );
 }
 
-function makeAttempt(overrides: Partial<TestAttemptSummaryOut> = {}): TestAttemptSummaryOut {
+function makeAttemptSummary(
+  overrides: Partial<TestAttemptSummaryOut> = {},
+): TestAttemptSummaryOut {
   return {
     id: "attempt-1",
+    score: 0.75,
+    created_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeTest(overrides: Partial<TestSummaryOut> = {}): TestSummaryOut {
+  return {
+    id: "test-1",
     course_id: "course-1",
     chapter_label: "Chapter 1",
-    score: 0.75,
     question_count: 4,
     created_at: "2026-01-01T00:00:00Z",
+    attempts: [makeAttemptSummary()],
     ...overrides,
   };
 }
@@ -194,7 +209,7 @@ describe("ChapterTestClient", () => {
       ok([makeChapter({ test_stats: { attempts: 2, best_score: 0.75, latest_score: 0.5 } })]),
     );
     mockedGetSection.mockImplementation(mockGetSectionById);
-    mockedListTests.mockResolvedValue(ok([makeAttempt()]));
+    mockedListTests.mockResolvedValue(ok([makeTest()]));
 
     render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
 
@@ -203,13 +218,21 @@ describe("ChapterTestClient", () => {
     expect(bar).toHaveAttribute("aria-valuenow", "75");
   });
 
-  it("shows attempt history scoped to this chapter, each linking to its taking/review page", async () => {
+  it("shows test history scoped to this chapter, each attempt linking to its taking/review page", async () => {
     mockedListChapters.mockResolvedValue(ok([makeChapter()]));
     mockedGetSection.mockImplementation(mockGetSectionById);
     mockedListTests.mockResolvedValue(
       ok([
-        makeAttempt({ id: "attempt-1", chapter_label: "Chapter 1", score: 0.75 }),
-        makeAttempt({ id: "attempt-2", chapter_label: "Chapter 2", score: 0.9 }),
+        makeTest({
+          id: "test-1",
+          chapter_label: "Chapter 1",
+          attempts: [makeAttemptSummary({ id: "attempt-1", score: 0.75 })],
+        }),
+        makeTest({
+          id: "test-2",
+          chapter_label: "Chapter 2",
+          attempts: [makeAttemptSummary({ id: "attempt-2", score: 0.9 })],
+        }),
       ]),
     );
 
@@ -220,12 +243,44 @@ describe("ChapterTestClient", () => {
     expect(screen.queryByText("90%")).not.toBeInTheDocument();
   });
 
+  it("retaking a test calls the retake endpoint and navigates straight into the new attempt", async () => {
+    mockedListChapters.mockResolvedValue(ok([makeChapter()]));
+    mockedGetSection.mockImplementation(mockGetSectionById);
+    mockedListTests.mockResolvedValue(
+      ok([makeTest({ id: "test-1", attempts: [makeAttemptSummary({ id: "attempt-1" })] })]),
+    );
+    mockedRetakeTest.mockResolvedValue(ok({ attempt_id: "attempt-2" }));
+
+    const user = userEvent.setup();
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+
+    await user.click(await screen.findByRole("button", { name: /^retake$/i }));
+
+    expect(mockedRetakeTest).toHaveBeenCalledWith("test-1");
+    await waitFor(() =>
+      expect(mockPush).toHaveBeenCalledWith("/course/course-1/test/attempt-2"),
+    );
+  });
+
+  it("labels the generate button 'New test (regenerates)' once a test already exists, distinct from Retake", async () => {
+    mockedListChapters.mockResolvedValue(ok([makeChapter()]));
+    mockedGetSection.mockImplementation(mockGetSectionById);
+    mockedListTests.mockResolvedValue(ok([makeTest()]));
+
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+
+    expect(await screen.findByRole("button", { name: /new test \(regenerates\)/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^take chapter test$/i })).not.toBeInTheDocument();
+  });
+
   it("generating a test shows live SSE progress, then navigates into the newly created attempt", async () => {
     mockedListChapters.mockResolvedValue(ok([makeChapter()]));
     mockedGetSection.mockImplementation(mockGetSectionById);
     mockedListTests
       .mockResolvedValueOnce(ok([])) // initial history load: none yet
-      .mockResolvedValueOnce(ok([makeAttempt({ id: "brand-new-attempt" })])); // after settle
+      .mockResolvedValueOnce(
+        ok([makeTest({ attempts: [makeAttemptSummary({ id: "brand-new-attempt" })] })]),
+      ); // after settle
     mockedGenerateTest.mockResolvedValue(ok({ job_id: "job-1" }, 202));
 
     const user = userEvent.setup();

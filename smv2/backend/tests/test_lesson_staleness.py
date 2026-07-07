@@ -28,6 +28,37 @@ def test_lesson_stale_false_when_generated_under_current_version(client, ingest_
     assert detail["lesson_stale"] is False
 
 
+def test_lesson_stale_unaffected_by_chat_only_prompt_version_bump(client, ingest_course):
+    """ADR-022: prompts/v3/ holds ONLY chat.md -- load_prompt's per-file
+    resolution means lesson's own effective version is still v2 (chat's
+    v3 bump is invisible to it), so a lesson generated under v2 must NOT
+    read as stale just because chat's prompt moved on independently. This
+    is the whole reason per-file resolution replaced "one highest vN
+    overall": a wholesale bump would have stale-flagged every lesson in
+    every course for a prompt change that never touched lesson.md at all.
+    """
+    from app.llm.prompts import load_prompt
+
+    assert load_prompt("chat")[1] == "v3"
+    assert load_prompt("lesson")[1] == "v2"
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    session = get_session()
+    try:
+        section = session.get(Section, section_id)
+        section.lesson_md = "A lesson generated under the current lesson prompt version."
+        section.lesson_status = "ready"
+        section.lesson_prompt_version = "v2"  # matches load_prompt("lesson")'s current version
+        session.commit()
+    finally:
+        session.close()
+
+    detail = client.get(f"/api/sections/{section_id}").json()
+    assert detail["lesson_stale"] is False
+
+
 def test_lesson_stale_true_when_prompt_version_is_older(client, ingest_course):
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     section_id = _first_section_id(client, course_id)

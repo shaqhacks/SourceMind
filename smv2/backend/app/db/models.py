@@ -264,23 +264,58 @@ class ChatTurn(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
-class TestAttempt(Base):
-    __tablename__ = "test_attempts"
+class Test(Base):
+    """A generated quiz deck — the persisted questions, generated once.
+    Retaking a test (ADR-022) creates a new TestAttempt against this SAME
+    Test, zero further LLM calls; only the attempt's answers/score/results
+    differ between retakes.
+    """
+
+    __tablename__ = "tests"
     __test__ = False  # not a pytest test class, despite the name
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
     course_id: Mapped[str] = mapped_column(
         String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    section_id: Mapped[str | None] = mapped_column(
-        String, ForeignKey("sections.id", ondelete="SET NULL"), nullable=True
-    )
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
     # Set only for a chapter-scoped test (POST .../tests with chapter_label);
     # NULL for the pre-existing explicit-section_ids / whole-course modes.
     chapter_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Only ever set in the narrow single-section-quiz mode (see
+    # quiz_generation.py) — used as a missed-question card-attribution
+    # fallback (tests_service._resolve_missed_card_section_id), same
+    # semantics as the pre-split TestAttempt.section_id it replaces.
+    section_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("sections.id", ondelete="SET NULL"), nullable=True
+    )
+    questions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class TestAttempt(Base):
+    """One attempt at a Test's persisted questions. Deliberately carries no
+    copy of the questions themselves (Test.questions is the single source)
+    — only this attempt's own answers/results/score, so retaking a test
+    (a new TestAttempt against the same Test) never re-touches the deck.
+    answers/results are NULL until submitted, same "None = not graded yet"
+    convention TestAttempt.score already used pre-split.
+    """
+
+    __tablename__ = "test_attempts"
+    __test__ = False  # not a pytest test class, despite the name
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    test_id: Mapped[str] = mapped_column(
+        String, ForeignKey("tests.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    answers: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
+    results: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 

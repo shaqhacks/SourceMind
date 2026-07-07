@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 
 from app.db.engine import get_session
-from app.db.models import Card, LlmCall, ReviewState, TestAttempt, ensure_utc, utcnow
+from app.db.models import Card, LlmCall, ReviewState, Test, TestAttempt, ensure_utc, utcnow
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from app.pipeline.quiz_generation import _build_scoped_text
@@ -47,7 +48,10 @@ def test_generate_test_happy_path(client, ingest_course, stub_provider):
     assert all("explanation" not in q or q.get("explanation") is None for q in detail["questions"])
 
 
-def test_generate_test_records_prompt_version_on_test_attempt(client, ingest_course, stub_provider):
+def test_generate_test_records_prompt_version_and_model_on_the_test_deck(client, ingest_course, stub_provider):
+    """ADR-022: prompt_version/model live on Test (the deck), not the
+    attempt -- every attempt against the same deck shares them.
+    """
     course_id, *_ = ingest_course("with_bookmarks.pdf")
 
     stub_provider.responses = [
@@ -56,12 +60,13 @@ def test_generate_test_records_prompt_version_on_test_attempt(client, ingest_cou
     resp = client.post(f"/api/courses/{course_id}/tests")
     job_id = resp.json()["job_id"]
     assert run_due_jobs_once() is True
-    attempt_id = client.get(f"/api/jobs/{job_id}").json()["result"]["attempt_id"]
+    job_result = client.get(f"/api/jobs/{job_id}").json()["result"]
 
     session = get_session()
     try:
-        attempt = session.get(TestAttempt, attempt_id)
-        assert attempt.prompt_version == "v2"
+        test = session.get(Test, job_result["test_id"])
+        assert test.prompt_version == "v2"
+        assert test.model == "stub-model"
     finally:
         session.close()
 
@@ -232,7 +237,67 @@ def test_get_test_404_for_missing_attempt(client):
     assert resp.status_code == 404
 
 
+def test_retake_test_creates_new_attempt_with_zero_llm_calls(client, ingest_course, stub_provider):
+    """ADR-022: retaking a test reuses the SAME deck's questions -- no
+    further provider.complete() call at all.
+    """
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    questions = _make_questions(4)
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(questions), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+    resp = client.post(f"/api/courses/{course_id}/tests")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+    job_result = client.get(f"/api/jobs/{job_id}").json()["result"]
+    test_id = job_result["test_id"]
+    calls_after_generate = stub_provider.call_count
+
+    resp = client.post(f"/api/tests/{test_id}/attempts")
+    assert resp.status_code == 201
+    new_attempt_id = resp.json()["attempt_id"]
+    assert new_attempt_id != job_result["attempt_id"]
+    assert stub_provider.call_count == calls_after_generate  # no new LLM call
+
+    detail = client.get(f"/api/tests/{new_attempt_id}").json()
+    assert detail["test_id"] == test_id
+    assert detail["score"] is None
+    assert len(detail["questions"]) == 4
+    # Same underlying questions as the original attempt (redacted the same way).
+    original_detail = client.get(f"/api/tests/{job_result['attempt_id']}").json()
+    assert detail["questions"] == original_detail["questions"]
+
+
+def test_retake_test_404_for_missing_test(client):
+    resp = client.post("/api/tests/does-not-exist/attempts")
+    assert resp.status_code == 404
+
+
+def test_list_tests_groups_multiple_attempts_under_one_deck(client, ingest_course, stub_provider):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    questions = _make_questions(2)
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(questions), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+    resp = client.post(f"/api/courses/{course_id}/tests")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+    job_result = client.get(f"/api/jobs/{job_id}").json()["result"]
+    test_id = job_result["test_id"]
+
+    client.post(f"/api/tests/{test_id}/attempts")
+    client.post(f"/api/tests/{test_id}/attempts")
+
+    resp = client.get(f"/api/courses/{course_id}/tests")
+    tests = resp.json()
+    assert len(tests) == 1
+    assert len(tests[0]["attempts"]) == 3  # original + 2 retakes
+
+
 def test_list_tests_returns_summaries(client, ingest_course, stub_provider):
+    """ADR-022: list_tests is test-grouped -- one deck with a nested
+    attempt history, not a flat list of attempts.
+    """
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     stub_provider.responses = [
         CompletionResult(text=json.dumps(_make_questions()), input_tokens=1, output_tokens=1, model="stub-model")
@@ -242,10 +307,11 @@ def test_list_tests_returns_summaries(client, ingest_course, stub_provider):
 
     resp = client.get(f"/api/courses/{course_id}/tests")
     assert resp.status_code == 200
-    attempts = resp.json()
-    assert len(attempts) == 1
-    assert attempts[0]["question_count"] == 8
-    assert attempts[0]["score"] is None
+    tests = resp.json()
+    assert len(tests) == 1
+    assert tests[0]["question_count"] == 8
+    assert len(tests[0]["attempts"]) == 1
+    assert tests[0]["attempts"][0]["score"] is None
 
 
 def test_list_tests_404_for_missing_course(client):
@@ -364,7 +430,17 @@ def test_submit_test_wrong_answers_create_cards_due_now(client, ingest_course, s
         session.close()
 
 
-def test_submit_test_all_correct_creates_no_cards(client, ingest_course, stub_provider):
+def test_submit_test_all_correct_seeds_cards_as_good_reviews_not_added_card_ids(
+    client, ingest_course, stub_provider
+):
+    """ADR-022: every question becomes a card now, including correct ones --
+    but added_card_ids keeps its pre-ADR-022 meaning (missed-question cards
+    only, an existing frontend surface already reads it that way), so it
+    stays empty for an all-correct submission even though cards WERE
+    created. A brand-new card answered correctly is seeded as one
+    successful Good review: first-Good baseline (1 day), reps=1, due
+    tomorrow -- not due right now.
+    """
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     questions = _make_questions(3)
     stub_provider.responses = [
@@ -378,6 +454,128 @@ def test_submit_test_all_correct_creates_no_cards(client, ingest_course, stub_pr
     correct_answers = [q["correct_index"] for q in questions]
     body = client.post(f"/api/tests/{attempt_id}/submit", json={"answers": correct_answers}).json()
     assert body["added_card_ids"] == []
+    assert body["due_now_count"] == 0
+
+    section_id = client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
+    session = get_session()
+    try:
+        cards = session.query(Card).filter(Card.section_id == section_id).all()
+        assert len(cards) == 3
+        for card in cards:
+            state = session.get(ReviewState, card.id)
+            assert state is not None
+            assert state.reps == 1
+            assert state.last_grade == 3  # GOOD
+            assert 0.9 < state.interval_days < 1.1  # first-Good baseline, ~1 day
+            assert ensure_utc(state.due_at) > utcnow()  # due tomorrow, not now
+    finally:
+        session.close()
+
+
+def test_submit_test_correct_on_not_yet_due_card_is_a_cramming_guard_noop(
+    client, ingest_course, stub_provider
+):
+    """ADR-022 cramming guard: a card that already has SRS history and
+    isn't due yet must not get credit for a correct test answer -- that
+    would let a learner farm schedule advancement by re-taking a test on
+    material they only just reviewed. Answering it correctly on a test
+    leaves interval/ease/reps/due_at completely untouched.
+    """
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    questions = _make_questions(1)
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(questions), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+    resp = client.post(f"/api/courses/{course_id}/tests")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+    attempt_id = client.get(f"/api/jobs/{job_id}").json()["result"]["attempt_id"]
+
+    correct_answers = [q["correct_index"] for q in questions]
+    client.post(f"/api/tests/{attempt_id}/submit", json={"answers": correct_answers})
+
+    section_id = client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
+    session = get_session()
+    try:
+        card = session.query(Card).filter(Card.section_id == section_id).first()
+        state_before = session.get(ReviewState, card.id)
+        due_before, interval_before, ease_before, reps_before = (
+            state_before.due_at, state_before.interval_days, state_before.ease, state_before.reps
+        )
+        assert ensure_utc(due_before) > utcnow()  # seeded due tomorrow, not due yet
+        card_id = card.id
+    finally:
+        session.close()
+
+    # Retake the same test, answer the same question correctly again while
+    # its card is still not due -- must be a complete no-op.
+    test_id = client.get(f"/api/jobs/{job_id}").json()["result"]["test_id"]
+    retake_resp = client.post(f"/api/tests/{test_id}/attempts")
+    new_attempt_id = retake_resp.json()["attempt_id"]
+    client.post(f"/api/tests/{new_attempt_id}/submit", json={"answers": correct_answers})
+
+    session = get_session()
+    try:
+        state_after = session.get(ReviewState, card_id)
+        assert state_after.due_at == due_before
+        assert state_after.interval_days == interval_before
+        assert state_after.ease == ease_before
+        assert state_after.reps == reps_before
+    finally:
+        session.close()
+
+
+def test_submit_test_correct_on_a_due_existing_card_advances_via_real_schedule_next(
+    client, ingest_course, stub_provider
+):
+    """A card that's already due (or new) when answered correctly on a
+    test IS real review evidence -- schedule_next(GOOD, ...) applies from
+    its actual current state, same as a genuine review-queue grade.
+    """
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    questions = _make_questions(1)
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(questions), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+    resp = client.post(f"/api/courses/{course_id}/tests")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+    job_result = client.get(f"/api/jobs/{job_id}").json()["result"]
+    attempt_id = job_result["attempt_id"]
+    test_id = job_result["test_id"]
+
+    correct_answers = [q["correct_index"] for q in questions]
+    client.post(f"/api/tests/{attempt_id}/submit", json={"answers": correct_answers})
+
+    section_id = client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
+    session = get_session()
+    try:
+        card = session.query(Card).filter(Card.section_id == section_id).first()
+        card_id = card.id
+        # Force the seeded ReviewState into the past so it's genuinely due
+        # again, then note its state right before the second correct answer.
+        state = session.get(ReviewState, card_id)
+        state.due_at = utcnow() - timedelta(days=1)
+        ease_before, interval_before, reps_before = state.ease, state.interval_days, state.reps
+        session.commit()
+    finally:
+        session.close()
+
+    retake_resp = client.post(f"/api/tests/{test_id}/attempts")
+    new_attempt_id = retake_resp.json()["attempt_id"]
+    client.post(f"/api/tests/{new_attempt_id}/submit", json={"answers": correct_answers})
+
+    session = get_session()
+    try:
+        state_after = session.get(ReviewState, card_id)
+        assert state_after.reps == reps_before + 1
+        assert state_after.last_grade == 3  # GOOD
+        # Good's own formula at reps>=2 multiplies by ease; below that it's
+        # the plain baseline -- either way it must have genuinely advanced
+        # past the forced due_at, proving schedule_next actually ran.
+        assert ensure_utc(state_after.due_at) > utcnow()
+    finally:
+        session.close()
 
 
 def test_submit_test_repeat_miss_dedupes_and_refreshes_due_at_without_touching_srs_state(

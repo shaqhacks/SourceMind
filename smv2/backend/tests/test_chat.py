@@ -87,6 +87,55 @@ def test_chat_history_404_for_missing_course(client):
     assert resp.status_code == 404
 
 
+def test_send_chat_injects_learner_state_for_chapters_the_retrieval_hit(client, ingest_course, stub_provider):
+    """ADR-022: learner-state is scoped to only the chapters this turn's
+    retrieval hit (headings_no_bookmarks.pdf has real chapter_label
+    grouping), computed deterministically -- a fresh course has no test
+    attempts and no lesson yet, so both must read that way verbatim.
+    """
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    stub_provider.responses = [
+        CompletionResult(text="Reply [1].", input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+    client.post(f"/api/courses/{course_id}/chat", json={"message": "Tell me about foundations"})
+
+    sent_content = stub_provider.received_messages[-1][-1]["content"]
+    assert "<learner_state>" in sent_content
+    assert "no test attempts yet" in sent_content
+    assert "no lesson generated yet" in sent_content
+
+
+def test_send_chat_injects_study_suggestions_for_an_unopened_course(client, ingest_course, stub_provider):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    stub_provider.responses = [
+        CompletionResult(text="Reply [1].", input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+    client.post(f"/api/courses/{course_id}/chat", json={"message": "hello"})
+
+    sent_content = stub_provider.received_messages[-1][-1]["content"]
+    assert "<study_suggestions>" in sent_content
+    assert "not started yet" in sent_content
+
+
+def test_send_chat_omits_learner_state_and_suggestions_when_course_has_no_chapters(
+    client, ingest_course, stub_provider
+):
+    """no_bookmarks.pdf falls back to page-window sections with no
+    ^chapter N markers at all -- every section's chapter_label is None,
+    so there's nothing coherent to report; both tags must be omitted
+    entirely rather than emitted empty.
+    """
+    course_id, *_ = ingest_course("no_bookmarks.pdf")
+    stub_provider.responses = [
+        CompletionResult(text="Reply [1].", input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+    client.post(f"/api/courses/{course_id}/chat", json={"message": "hello"})
+
+    sent_content = stub_provider.received_messages[-1][-1]["content"]
+    assert "<learner_state>" not in sent_content
+    assert "<study_suggestions>" not in sent_content
+
+
 def test_send_chat_provider_failure_persists_no_turns(client, ingest_course, stub_provider):
     """A provider error must not leave an orphaned user turn with no
     matching assistant reply — nothing is persisted for this exchange at

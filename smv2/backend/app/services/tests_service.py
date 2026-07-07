@@ -1,14 +1,22 @@
-"""Quiz (TestAttempt) generation, retrieval, grading, and listing. Business
-logic for generate_test/get_test/submit_test/list_tests — routers only do
-existence/state checks and delegate here.
+"""Quiz (Test deck / TestAttempt) generation, retrieval, grading, listing,
+and retaking. Business logic for generate_test/get_test/submit_test/
+list_tests/retake_test — routers only do existence/state checks and
+delegate here.
+
+ADR-022 deck/attempt split: Test holds the generated questions (created
+once, by generate_test); TestAttempt holds only one attempt's own
+answers/results/score. Retaking a test (retake_test) creates a new
+TestAttempt against the SAME Test, zero further LLM calls.
 
 get_test hides correct_index/explanation while the attempt is ungraded
-(score is None) — a learner must not be able to peek at answers by reading
-the raw attempt before submitting.
+(score is None) — a learner must not be able to peek at answers by
+reading the raw attempt before submitting.
 
-ADR-017: submit_test also turns each missed question into a flashcard
-(missed -> SRS). See _resolve_missed_card_section_id/_record_missed_card
-for the exact policy.
+ADR-017/ADR-022: submit_test turns every question into a flashcard —
+missed -> due now (as before ADR-022), correct -> seeded as a successful
+review so the whole tested deck enters Anki rotation with the test as its
+first review event. See _resolve_missed_card_section_id/_seed_missed_card/
+_seed_correct_card for the exact policy, including the cramming guard.
 """
 
 from __future__ import annotations
@@ -17,8 +25,9 @@ from typing import Any
 
 from app.db.engine import get_session
 from app.db.identity import card_id_for
-from app.db.models import Card, Course, ReviewState, Section, TestAttempt, utcnow
+from app.db.models import Card, Course, ReviewState, Section, Test, TestAttempt, ensure_utc, utcnow
 from app.services import jobs_service
+from app.services.srs_service import DEFAULT_EASE, GOOD, schedule_next
 
 
 class CourseNotFoundError(ValueError):
@@ -81,36 +90,57 @@ def get_test(attempt_id: str) -> dict[str, Any] | None:
         attempt = session.get(TestAttempt, attempt_id)
         if attempt is None:
             return None
+        test = session.get(Test, attempt.test_id)
 
-        questions = attempt.payload.get("questions", [])
         if attempt.score is None:
-            visible_questions = [{"question": q["question"], "choices": q["choices"]} for q in questions]
+            visible_questions = [{"question": q["question"], "choices": q["choices"]} for q in test.questions]
         else:
-            visible_questions = questions
+            visible_questions = test.questions
 
         return {
             "id": attempt.id,
+            "test_id": test.id,
             "course_id": attempt.course_id,
+            "chapter_label": test.chapter_label,
             "score": attempt.score,
-            "chapter_label": attempt.chapter_label,
             "questions": visible_questions,
+            "answers": attempt.answers,
+            "results": attempt.results,
             "created_at": attempt.created_at,
         }
     finally:
         session.close()
 
 
-def _resolve_missed_card_section_id(session, attempt: TestAttempt) -> str | None:
-    """Where a card created from a missed question in THIS attempt should
-    live: the attempt's chapter's first practice section if one exists,
-    else that chapter's first section of any kind, else the attempt's own
+def retake_test(test_id: str) -> str | None:
+    """Creates a new TestAttempt against test_id's EXISTING, already-
+    generated questions — zero LLM calls (ADR-022). Returns the new
+    attempt's id, or None if the test doesn't exist.
+    """
+    session = get_session()
+    try:
+        test = session.get(Test, test_id)
+        if test is None:
+            return None
+        attempt = TestAttempt(test_id=test.id, course_id=test.course_id)
+        session.add(attempt)
+        session.commit()
+        return attempt.id
+    finally:
+        session.close()
+
+
+def _resolve_missed_card_section_id(session, test: Test) -> str | None:
+    """Where a card built from one of this test's questions should live:
+    the test's chapter's first practice section if one exists, else that
+    chapter's first section of any kind, else the test's own
     (single-section-mode) section_id, else the course's first section —
     always resolving to SOMETHING if the course has any section at all.
     """
-    if attempt.chapter_label is not None:
+    if test.chapter_label is not None:
         chapter_sections = (
             session.query(Section)
-            .filter(Section.course_id == attempt.course_id, Section.chapter_label == attempt.chapter_label)
+            .filter(Section.course_id == test.course_id, Section.chapter_label == test.chapter_label)
             .order_by(Section.order_index)
             .all()
         )
@@ -120,19 +150,19 @@ def _resolve_missed_card_section_id(session, attempt: TestAttempt) -> str | None
         if chapter_sections:
             return chapter_sections[0].id
 
-    if attempt.section_id is not None:
-        return attempt.section_id
+    if test.section_id is not None:
+        return test.section_id
 
     first_section = (
         session.query(Section)
-        .filter(Section.course_id == attempt.course_id)
+        .filter(Section.course_id == test.course_id)
         .order_by(Section.order_index)
         .first()
     )
     return first_section.id if first_section is not None else None
 
 
-def _build_missed_card_content(question: dict[str, Any]) -> tuple[str, str]:
+def _build_card_content(question: dict[str, Any]) -> tuple[str, str]:
     choices_md = "\n".join(f"- {c}" for c in question["choices"])
     front_md = f"{question['question']}\n\n{choices_md}"
 
@@ -142,44 +172,95 @@ def _build_missed_card_content(question: dict[str, Any]) -> tuple[str, str]:
     return front_md, back_md
 
 
-def _record_missed_card(session, attempt: TestAttempt, section_id: str, question: dict[str, Any]) -> str:
-    front_md, back_md = _build_missed_card_content(question)
+def _ensure_card(session, course_id: str, section_id: str, question: dict[str, Any]) -> tuple[str, bool]:
+    """Every question becomes a content-addressed card (ADR-022), whether
+    missed or correct — dedup as before (same front/back -> same id,
+    whether generated by card generation or a quiz question). Returns
+    (card_id, created_just_now).
+    """
+    front_md, back_md = _build_card_content(question)
     card_id = card_id_for(section_id, front_md, back_md)
 
     card = session.get(Card, card_id)
-    if card is None:
-        position = session.query(Card).filter(Card.section_id == section_id).count()
-        session.add(
-            Card(
-                id=card_id,
-                course_id=attempt.course_id,
-                section_id=section_id,
-                front_md=front_md,
-                back_md=back_md,
-                position=position,
-            )
-        )
-        # No ReviewState created here on purpose: a card with no
-        # ReviewState row is already picked up as "new" by
-        # srs_service.get_review_queue/_due_counts, so it surfaces in the
-        # queue immediately without one — same convention card generation
-        # itself follows.
-        return card_id
+    if card is not None:
+        return card_id, False
 
+    position = session.query(Card).filter(Card.section_id == section_id).count()
+    session.add(
+        Card(
+            id=card_id,
+            course_id=course_id,
+            section_id=section_id,
+            front_md=front_md,
+            back_md=back_md,
+            position=position,
+        )
+    )
+    return card_id, True
+
+
+def _seed_missed_card(session, card_id: str) -> None:
+    """A miss is evidence the card needs review NOW, not a formal SM-2
+    lapse — only due_at moves. A brand-new card (just created by
+    _ensure_card, no ReviewState row at all) needs no action here: the
+    review queue already treats "no ReviewState" as "new" and thus due,
+    same convention card generation itself relies on. ease/interval/reps
+    on an EXISTING card are left untouched — a genuine Again grade from
+    the review queue is what should ever reduce ease or count as a lapse,
+    not a test miss.
+    """
     review_state = session.get(ReviewState, card_id)
     if review_state is not None:
-        # A miss on a test is evidence the card needs review NOW, not a
-        # formal SM-2 lapse — only due_at moves. Leaving ease/interval/reps
-        # untouched (rather than replaying schedule_next as if this were an
-        # Again grade) keeps the card's real review history intact; a
-        # genuine Again grade from the review queue is what should ever
-        # reduce ease or count as a lapse.
         review_state.due_at = utcnow()
-    # else: the card already existed (from an earlier miss) but was never
-    # graded yet — no ReviewState means it's already "new" and due, same
-    # as the brand-new-card case above.
 
-    return card_id
+
+def _seed_correct_card(session, card_id: str, course_id: str, review_state: ReviewState | None) -> None:
+    """ADR-022: a correct answer is real review evidence, not a freebie —
+    the whole tested deck should enter Anki rotation with the test as its
+    first review event, but a card someone is deliberately CRAMMING (not
+    yet due) must not get credit it didn't earn, or a learner could farm
+    early advancement by re-taking a test on cards they only just saw.
+
+    Brand-new card (no ReviewState at all): seed one successful review via
+    the REAL schedule_next(GOOD, ...) from the bootstrap state — identical
+    to a genuine first Good grade from the review queue (baseline 1 day,
+    reps becomes 1, due tomorrow).
+
+    Existing card: only seed if it was ACTUALLY due or new right now (its
+    OWN due_at <= now) — schedule_next(GOOD, ...) from its current state,
+    same as a real review-queue grade. If it's not yet due, leave it
+    completely untouched: the test answered it correctly, but that's not
+    a real review opportunity if the card wasn't due to be seen yet — the
+    cramming guard this rule exists for.
+    """
+    if review_state is None:
+        result = schedule_next(GOOD, interval_days=0.0, ease=DEFAULT_EASE, reps=0)
+        session.add(
+            ReviewState(
+                card_id=card_id,
+                course_id=course_id,
+                due_at=result.due_at,
+                interval_days=result.interval_days,
+                ease=result.ease,
+                reps=result.reps,
+                lapses=result.lapses_delta,
+                last_grade=GOOD,
+            )
+        )
+        return
+
+    if ensure_utc(review_state.due_at) > utcnow():
+        return  # cramming guard: not yet due, leave untouched
+
+    result = schedule_next(
+        GOOD, interval_days=review_state.interval_days, ease=review_state.ease, reps=review_state.reps
+    )
+    review_state.due_at = result.due_at
+    review_state.interval_days = result.interval_days
+    review_state.ease = result.ease
+    review_state.reps = result.reps
+    review_state.lapses += result.lapses_delta
+    review_state.last_grade = GOOD
 
 
 def submit_test(attempt_id: str, answers: list[int]) -> dict[str, Any] | None:
@@ -191,19 +272,41 @@ def submit_test(attempt_id: str, answers: list[int]) -> dict[str, Any] | None:
         if attempt.score is not None:
             raise TestAlreadySubmittedError(f"test attempt {attempt_id} already submitted")
 
-        questions = attempt.payload.get("questions", [])
-        target_section_id = _resolve_missed_card_section_id(session, attempt)
+        test = session.get(Test, attempt.test_id)
+        questions = test.questions
+        target_section_id = _resolve_missed_card_section_id(session, test)
 
         results = []
         correct_count = 0
+        # added_card_ids keeps its pre-ADR-022 meaning exactly (missed-
+        # question cards only) — an existing frontend surface already
+        # reads this as "cards that need your attention now," and every
+        # missed card is exactly that; a correct answer's seeded review is
+        # NOT due now (1 day+ out) so it would be a misleading inclusion
+        # here. due_now_count is a new, separate count of the same set —
+        # kept as its own field because a MISSED card is the only outcome
+        # that ever produces a right-now-due card in this design, so the
+        # two numbers are equal in practice; this is intentional, not a
+        # bug, and documented since the redundancy could look like one.
         added_card_ids: list[str] = []
+        due_now_count = 0
         for i, q in enumerate(questions):
             your_answer = answers[i] if i < len(answers) else None
             is_correct = your_answer == q["correct_index"]
             if is_correct:
                 correct_count += 1
-            elif target_section_id is not None:
-                added_card_ids.append(_record_missed_card(session, attempt, target_section_id, q))
+
+            if target_section_id is not None:
+                card_id, created_now = _ensure_card(session, attempt.course_id, target_section_id, q)
+                if is_correct:
+                    review_state = None if created_now else session.get(ReviewState, card_id)
+                    _seed_correct_card(session, card_id, attempt.course_id, review_state)
+                else:
+                    if not created_now:
+                        _seed_missed_card(session, card_id)
+                    added_card_ids.append(card_id)
+                    due_now_count += 1
+
             results.append(
                 {
                     "correct": is_correct,
@@ -214,33 +317,54 @@ def submit_test(attempt_id: str, answers: list[int]) -> dict[str, Any] | None:
             )
 
         score = correct_count / len(questions) if questions else 0.0
+        attempt.answers = answers
+        attempt.results = results
         attempt.score = score
         session.commit()
 
-        return {"score": score, "results": results, "added_card_ids": added_card_ids}
+        return {
+            "score": score,
+            "results": results,
+            "added_card_ids": added_card_ids,
+            "due_now_count": due_now_count,
+        }
     finally:
         session.close()
 
 
 def list_tests(course_id: str) -> list[dict[str, Any]]:
+    """Test-grouped: one entry per generated deck, each with its own
+    ordered attempt history (ADR-022) — a course that's been retaken
+    several times shows one card with N attempts, not N flat rows.
+    """
     session = get_session()
     try:
-        attempts = (
-            session.query(TestAttempt)
-            .filter(TestAttempt.course_id == course_id)
-            .order_by(TestAttempt.created_at.desc())
+        tests = (
+            session.query(Test)
+            .filter(Test.course_id == course_id)
+            .order_by(Test.created_at.desc())
             .all()
         )
-        return [
-            {
-                "id": a.id,
-                "course_id": a.course_id,
-                "score": a.score,
-                "chapter_label": a.chapter_label,
-                "question_count": len(a.payload.get("questions", [])),
-                "created_at": a.created_at,
-            }
-            for a in attempts
-        ]
+        result = []
+        for t in tests:
+            attempts = (
+                session.query(TestAttempt)
+                .filter(TestAttempt.test_id == t.id)
+                .order_by(TestAttempt.created_at.desc())
+                .all()
+            )
+            result.append(
+                {
+                    "id": t.id,
+                    "course_id": t.course_id,
+                    "chapter_label": t.chapter_label,
+                    "question_count": len(t.questions),
+                    "created_at": t.created_at,
+                    "attempts": [
+                        {"id": a.id, "score": a.score, "created_at": a.created_at} for a in attempts
+                    ],
+                }
+            )
+        return result
     finally:
         session.close()

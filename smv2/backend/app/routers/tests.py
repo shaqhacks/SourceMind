@@ -5,10 +5,11 @@ from fastapi import APIRouter, HTTPException
 from app.schemas import (
     GenerateTestIn,
     GenerateTestOut,
+    RetakeTestOut,
     SubmitTestIn,
     SubmitTestOut,
     TestAttemptOut,
-    TestAttemptSummaryOut,
+    TestSummaryOut,
 )
 from app.services import courses_service, tests_service
 
@@ -53,9 +54,22 @@ def submit_test(attempt_id: str, body: SubmitTestIn) -> SubmitTestOut:
 @router.get(
     "/api/courses/{course_id}/tests",
     operation_id="list_tests",
-    response_model=list[TestAttemptSummaryOut],
+    response_model=list[TestSummaryOut],
 )
-def list_tests(course_id: str) -> list[TestAttemptSummaryOut]:
+def list_tests(course_id: str) -> list[TestSummaryOut]:
     if courses_service.get_course(course_id) is None:
         raise HTTPException(status_code=404, detail="course not found")
-    return [TestAttemptSummaryOut.model_validate(a) for a in tests_service.list_tests(course_id)]
+    return [TestSummaryOut.model_validate(t) for t in tests_service.list_tests(course_id)]
+
+
+@router.post(
+    "/api/tests/{test_id}/attempts",
+    operation_id="retake_test",
+    status_code=201,
+    response_model=RetakeTestOut,
+)
+def retake_test(test_id: str) -> RetakeTestOut:
+    attempt_id = tests_service.retake_test(test_id)
+    if attempt_id is None:
+        raise HTTPException(status_code=404, detail="test not found")
+    return RetakeTestOut(attempt_id=attempt_id)

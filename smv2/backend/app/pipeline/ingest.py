@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 from app.config import data_dir, html_conversion_enabled, pages_per_window
 from app.config import skip_front_matter as _skip_front_matter_enabled
 from app.db.identity import content_hash_for, normalize_text, section_id_for
-from app.db.models import Asset, ChatTurn, Chunk, Course, Job, Section, TestAttempt
+from app.db.models import Asset, ChatTurn, Chunk, Course, Job, Section, Test, TestAttempt
 from app.pipeline._common import report_progress as _report_progress
 from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline.chunking import chunk_pages
@@ -388,7 +388,13 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     # their own row is actually deleted below — no explicit "remap" step
     # needed beyond doing the section diff correctly.
     session.query(ChatTurn).filter(ChatTurn.course_id == course_id).delete()
+    # TestAttempt before Test: TestAttempt.test_id -> Test.id is ON DELETE
+    # CASCADE, so deleting Test first would already remove these via the
+    # DB itself, but every REPLACED table gets its own explicit delete here
+    # regardless (ADR-022) -- consistent with the rest of this block, not
+    # relying on cascade ordering to do it implicitly.
     session.query(TestAttempt).filter(TestAttempt.course_id == course_id).delete()
+    session.query(Test).filter(Test.course_id == course_id).delete()
 
     for existing_id, existing in list(existing_sections.items()):
         if existing_id not in new_ids:

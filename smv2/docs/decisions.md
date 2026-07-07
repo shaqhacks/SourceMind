@@ -663,3 +663,127 @@ while the ordinary lesson section right after it ("5.1 Basic
 Probability") still correctly inherits `chapter_label="Chapter 5:
 Probability"` — proving the label-then-drop ordering in the golden
 snapshot, not just in production code. No API/schema changes.
+
+## ADR-022 — Learning-companion chat, deck/attempt split, performance-seeded SRS (2026-07-06)
+
+Distilled from the owner's learn-anything skill family: chat becomes a
+guided-discovery companion rather than a pure Q&A tool, tests become
+reusable decks with a retake path, and answering a test question at all
+(not just missing one) now feeds the SRS system. Five parts, one round.
+
+**1. Per-file prompt resolution** (`app/llm/prompts.py::load_prompt`):
+changed from "the one highest `vN` overall" to "the highest `vN` that
+actually CONTAINS this file" — `prompts/v3/` holds only `chat.md`, so
+`load_prompt("lesson"/"cards"/"quiz")` still resolves to `v2` exactly as
+before, unaffected by chat's own version bump. This is the entire reason
+per-file resolution replaced the old contract: a wholesale bump to `v3`
+would have stale-flagged every existing lesson in every course the
+moment this shipped, for a prompt change that never touched `lesson.md`
+at all.
+
+**2. Chat prompt v3** (`prompts/v3/chat.md`) — the learning-companion
+persona: position the topic in the book's own outline, an analogy, the
+core mechanism, a cited example from the excerpts, a misconception when
+relevant, one closing Socratic check question. The check question is
+explicitly non-gating ("ask it, then move on — give the answer
+immediately if the learner seems unsure or asks directly"), matching the
+owner's "guide, don't lecture" stance line. All v2 rules carry over
+unchanged (excerpts-only grounding, `[n]` citations, LaTeX math,
+untrusted-content tagging per ADR-005).
+
+**3. Learner context injection** (`app/services/chat_service.py`,
+`app/services/study_service.py`): every chat turn's user message can gain
+two new tagged blocks alongside `<excerpts>`, both entirely
+deterministic — the model never computes a statistic, only reads one:
+
+- `<learner_state>`: one line per chapter the retrieval hit THIS TURN
+  (never the whole course) — best/latest test score or "no test attempts
+  yet", cards due/lapsed (via `Card`⟶`ReviewState` joins scoped to the
+  chapter's content+practice sections), whether a lesson has been
+  generated. Omitted entirely (not emitted empty) when retrieval hit no
+  chaptered sections at all (e.g. a page-window-only course with no
+  `^chapter N` markers).
+- `<study_suggestions>`: the top-3 results of `study_service.study_next`,
+  independent of what was asked this turn. Also exposed directly via `GET
+  /api/courses/{id}/study-next` (`study_next`) for the dashboard.
+
+`study_next`'s four-tier deterministic triage, each chapter suggested at
+most once (by its highest-priority matching tier, skipped by every later
+one): (a) failed/low best test score — worst first; (b) a due-card
+backlog past a minimum count — heaviest first; (c) the course has never
+been opened at all (`ProgressState` absent) — a single "start here" for
+the first chapter, since `ProgressState` is course-scoped (one row, the
+current position) and can't tell which *other* chapters were ever
+visited; (d) stale — opened before, just not recently, weighted by
+`(1 - score_norm) × days_since × weight` (an Anki-priority-style
+formula), where an untested chapter's `score_norm` defaults to a neutral
+0.5 rather than being treated as either mastered or failing. The exact
+thresholds (`0.6` low-score cutoff, `5`-card minimum backlog, `1.0`
+staleness weight) are this feature's own interpretive choices — the brief
+didn't pin down numbers — documented in `study_service.py`'s own
+docstring rather than guessed silently, same convention `srs_service.py`
+already follows for its bootstrap-interval choices.
+
+**4. Deck/attempt split** (migration `0007_test_deck_attempt_split`): new
+`tests` table holds the generated deck (`questions`, `prompt_version`,
+`model`, `chapter_label`, the single-section-mode `section_id`) —
+generated once. `test_attempts` sheds its own `payload`/`chapter_label`/
+`section_id`/`prompt_version` entirely, gains `test_id` (FK, CASCADE) and
+now persists `answers`/`results` (previously computed at submit time and
+returned but never written to the DB at all — a genuine gap this closes,
+not just a rename). `POST /api/tests/{test_id}/attempts` (`retake_test`)
+creates a new attempt against the SAME deck, zero further LLM calls;
+`list_tests` is now test-grouped (one entry per deck with a nested,
+newest-first attempt history) rather than a flat attempt list, matching
+what a "retake" feature actually needs to display. Every existing
+`test_attempts` row gets a backfilled `Test`, built from that row's own
+`payload`/`chapter_label`/`section_id`/`prompt_version` (`model` is `None`
+for backfilled rows — never tracked pre-split, nothing to recover).
+
+**The hairy part, as flagged in advance**: SQLite/Alembic can't add a
+`NOT NULL` column with no default to a table that already has rows (the
+batch-mode rebuild's data copy would have nothing to put in the new
+column for existing rows), so `test_id` is added nullable first, backfilled
+row-by-row via lightweight `sa.Table()` Core declarations bound to the
+migration's own connection (never the live ORM models — the standard
+Alembic pattern, so a future model change can't silently break this
+historical migration), *then* tightened to `NOT NULL` plus the FK
+constraint in a second `batch_alter_table` pass. A second, independent
+trap surfaced writing the `downgrade()`: an inline `sa.ForeignKey(...)`
+on a column added via `batch_op.add_column` mid-batch has no name of its
+own, and batch mode requires every constraint to be named — raises
+`ValueError: Constraint must have a name` otherwise. Fixed the same way
+ADR-019's migration did: the FK added as its own separately-named
+`create_foreign_key` call. Verified with a real round-trip (upgrade with
+a seeded legacy row → downgrade → re-upgrade) against a throwaway SQLite
+file, not just read for plausibility.
+
+**5. Performance-seeded cards on submit** (`tests_service.py`, extends
+ADR-017's missed→SRS path): every question becomes a content-addressed
+card now, not just missed ones — a correct answer on a **brand-new**
+card seeds it as one successful review via the real
+`schedule_next(GOOD, ...)` from the bootstrap state (first-Good baseline,
+1 day, `reps=1`), so the whole tested deck enters spaced-repetition
+rotation with the test as its first review event. A correct answer on an
+**existing** card only advances it if the card was genuinely due or new
+at that moment (`ReviewState.due_at <= now`) — a card not yet due is left
+completely untouched. This is the cramming guard: without it, retaking a
+test would let a learner farm schedule advancement on cards they only
+just reviewed, by re-answering material whose next real review isn't due
+yet. A miss keeps its pre-ADR-022 policy exactly (due now; ease/interval/
+reps untouched on an existing card, no `ReviewState` at all needed for a
+brand-new one).
+
+`added_card_ids` in the submit response deliberately **keeps its
+pre-ADR-022 meaning** — missed-question cards only — rather than
+expanding to include every card touched: an existing frontend surface
+already reads it as "cards that need your attention now," and a
+correct-answer card seeded 1+ days out is not that. `due_now_count` is a
+new, separate field counting the same set for this design (only a miss
+ever produces a right-now-due outcome here) — genuinely redundant with
+`len(added_card_ids)` in practice, called out explicitly in code rather
+than left to look like an unexplained duplicate, since the spec asked for
+both fields without fully disambiguating their relationship.
+
+No `_EXTRACTOR_ALGO_VERSION` bump — nothing in extraction/outline changed
+this round.

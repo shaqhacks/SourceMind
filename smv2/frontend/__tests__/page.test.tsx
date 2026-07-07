@@ -7,6 +7,8 @@ import {
   deleteCourse,
   findActiveIngestJob,
   findLatestIngestJob,
+  getReviewSummary,
+  getStudyNext,
   listAssets,
   listCourses,
   listSections,
@@ -35,6 +37,8 @@ vi.mock("@/lib/api/client", () => ({
   uploadAsset: vi.fn(),
   editOutline: vi.fn(),
   getJob: vi.fn(),
+  getReviewSummary: vi.fn(),
+  getStudyNext: vi.fn(),
 }));
 
 const mockedListCourses = vi.mocked(listCourses);
@@ -43,6 +47,8 @@ const mockedFindActiveIngestJob = vi.mocked(findActiveIngestJob);
 const mockedFindLatestIngestJob = vi.mocked(findLatestIngestJob);
 const mockedListAssets = vi.mocked(listAssets);
 const mockedListSections = vi.mocked(listSections);
+const mockedGetReviewSummary = vi.mocked(getReviewSummary);
+const mockedGetStudyNext = vi.mocked(getStudyNext);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
@@ -69,6 +75,10 @@ describe("Home page", () => {
     mockedListAssets.mockResolvedValue(ok([]));
     mockedDeleteCourse.mockResolvedValue(ok(undefined));
     mockedListSections.mockResolvedValue(ok([]));
+    mockedGetReviewSummary.mockResolvedValue(
+      ok({ courses: [], due_total: 0, daily_throughput: 0, backlog_warning: false }),
+    );
+    mockedGetStudyNext.mockResolvedValue(ok([]));
   });
 
   afterEach(() => {
@@ -154,6 +164,77 @@ describe("Home page", () => {
 
     await screen.findByText("Distributed Systems");
     expect(screen.queryByText(/continue reading/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a Review card linking straight into a due-now session when the primary course has cards due", async () => {
+    mockedListCourses.mockResolvedValue(
+      ok([
+        makeCourse({
+          id: "a",
+          progress: { section_id: "sec-1", scroll_pos: 0.5, updated_at: "2026-01-01T00:00:00Z" },
+        }),
+      ]),
+    );
+    mockedGetReviewSummary.mockResolvedValue(
+      ok({
+        courses: [{ course_id: "a", title: "Distributed Systems", due_count: 7, new_count: 2 }],
+        due_total: 7,
+        daily_throughput: 3,
+        backlog_warning: false,
+      }),
+    );
+    render(<Home />);
+
+    const link = await screen.findByRole("link", { name: /7 cards due/i });
+    expect(link).toHaveAttribute("href", "/review?course=a&start=due");
+  });
+
+  it("hides the Review card when nothing is due anywhere", async () => {
+    mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", progress: null })]));
+    render(<Home />);
+
+    await screen.findByText("Distributed Systems");
+    expect(screen.queryByText(/cards due/i)).not.toBeInTheDocument();
+  });
+
+  it("shows up to 3 Study next suggestions for the primary course, each linking out with its reason", async () => {
+    mockedListCourses.mockResolvedValue(
+      ok([
+        makeCourse({
+          id: "a",
+          progress: { section_id: "sec-1", scroll_pos: 0.5, updated_at: "2026-01-01T00:00:00Z" },
+        }),
+      ]),
+    );
+    mockedGetStudyNext.mockResolvedValue(
+      ok([
+        { chapter_label: "Ch 1", reason: "low_test_score", detail: { best_score: 0.4 } },
+        { chapter_label: "Ch 2", reason: "due_cards", detail: { due_count: 12 } },
+        { chapter_label: "Ch 3", reason: "unread", detail: {} },
+        { chapter_label: "Ch 4", reason: "stale", detail: { days_since: 9 } },
+      ]),
+    );
+    render(<Home />);
+
+    await screen.findByText(/study next/i);
+    expect(screen.getByText("Ch 1")).toBeInTheDocument();
+    expect(screen.getByText("Ch 2")).toBeInTheDocument();
+    expect(screen.getByText("Ch 3")).toBeInTheDocument();
+    expect(screen.queryByText("Ch 4")).not.toBeInTheDocument();
+    expect(screen.getByText("low test score (40%)")).toBeInTheDocument();
+
+    expect(screen.getByRole("link", { name: /ch 1.*low test score/i })).toHaveAttribute(
+      "href",
+      "/course/a/chapter/Ch%201/test",
+    );
+    expect(screen.getByRole("link", { name: /ch 2.*12 cards piling up/i })).toHaveAttribute(
+      "href",
+      "/review?course=a&start=due",
+    );
+    expect(screen.getByRole("link", { name: /ch 3.*unread/i })).toHaveAttribute(
+      "href",
+      "/course/a",
+    );
   });
 
   it("deleting a course via its card removes it from the grid", async () => {

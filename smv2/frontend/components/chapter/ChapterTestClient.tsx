@@ -14,8 +14,9 @@ import {
   getSection,
   listChapters,
   listTests,
+  retakeTest,
   type ChapterOut,
-  type TestAttemptSummaryOut,
+  type TestSummaryOut,
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
@@ -77,10 +78,12 @@ async function loadChapter(courseId: string, chapterLabel: string): Promise<Load
 export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTestClientProps) {
   const router = useRouter();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
-  const [attempts, setAttempts] = useState<TestAttemptSummaryOut[] | null>(null);
+  const [tests, setTests] = useState<TestSummaryOut[] | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [retakingTestId, setRetakingTestId] = useState<string | null>(null);
+  const [retakeError, setRetakeError] = useState<string | null>(null);
   const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
     null,
   );
@@ -118,29 +121,46 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     };
   }, [courseId, chapterLabel]);
 
-  const loadAttempts = useCallback(() => {
+  const loadTests = useCallback(() => {
     listTests(courseId).then(({ data }) => {
-      if (data) setAttempts(data.filter((attempt) => attempt.chapter_label === chapterLabel));
+      if (data) setTests(data.filter((test) => test.chapter_label === chapterLabel));
     });
   }, [courseId, chapterLabel]);
 
   useEffect(() => {
-    loadAttempts();
-  }, [loadAttempts]);
+    loadTests();
+  }, [loadTests]);
 
-  // Job settled successfully: refetch this chapter's attempts and jump
+  // Job settled successfully: refetch this chapter's tests and jump
   // straight into taking the new one via the existing TestAttemptClient
   // route — this page's own job is generation + history, not re-taking.
   useEffect(() => {
     if (!done || job?.status !== "succeeded") return;
     listTests(courseId).then(({ data }) => {
       if (!data) return;
-      const forChapter = data.filter((attempt) => attempt.chapter_label === chapterLabel);
-      setAttempts(forChapter);
-      const fresh = forChapter.find((attempt) => !knownAttemptIdsRef.current.has(attempt.id));
-      if (fresh) router.push(`/course/${courseId}/test/${fresh.id}`);
+      const forChapter = data.filter((test) => test.chapter_label === chapterLabel);
+      setTests(forChapter);
+      const freshAttempt = forChapter
+        .flatMap((test) => test.attempts)
+        .find((attempt) => !knownAttemptIdsRef.current.has(attempt.id));
+      if (freshAttempt) router.push(`/course/${courseId}/test/${freshAttempt.id}`);
     });
   }, [done, job?.status, courseId, chapterLabel, router]);
+
+  const handleRetake = useCallback(
+    async (testId: string) => {
+      setRetakingTestId(testId);
+      setRetakeError(null);
+      const { data, status } = await retakeTest(testId);
+      setRetakingTestId(null);
+      if (data) {
+        router.push(`/course/${courseId}/test/${data.attempt_id}`);
+        return;
+      }
+      setRetakeError(describeError(status, "Starting a retake").message);
+    },
+    [courseId, router],
+  );
 
   // JobEvent (the SSE snapshot) carries no error text — only {id, status,
   // progress} — so surfacing the actual failure message needs a follow-up
@@ -159,7 +179,9 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
   async function handleGenerate() {
     setStarting(true);
     setStartError(null);
-    knownAttemptIdsRef.current = new Set((attempts ?? []).map((attempt) => attempt.id));
+    knownAttemptIdsRef.current = new Set(
+      (tests ?? []).flatMap((test) => test.attempts.map((attempt) => attempt.id)),
+    );
     const { data, status } = await generateTest(courseId, { chapterLabel });
     setStarting(false);
     if (data) {
@@ -253,9 +275,14 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
                 type="button"
                 onClick={() => void handleGenerate()}
                 disabled={starting}
+                title={
+                  tests && tests.length > 0
+                    ? "Generates a brand-new set of questions — costs an LLM call"
+                    : undefined
+                }
                 className="self-start rounded-md bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-black"
               >
-                Take chapter test
+                {tests && tests.length > 0 ? "New test (regenerates)" : "Take chapter test"}
               </button>
             )
           )}
@@ -263,25 +290,49 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
         </div>
 
         <div className="flex flex-col gap-2">
-          <h2 className="text-base font-semibold">Attempt history</h2>
-          {attempts === null && (
+          <h2 className="text-base font-semibold">Test history</h2>
+          {tests === null && (
             <p role="status" className="text-sm text-muted-foreground">
-              Loading attempts…
+              Loading tests…
             </p>
           )}
-          {attempts !== null && attempts.length > 0 && (
-            <ul className="flex flex-col gap-1">
-              {attempts.map((attempt) => (
-                <li key={attempt.id}>
-                  <Link
-                    href={`/course/${courseId}/test/${attempt.id}`}
-                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-sm hover:bg-muted-foreground/10"
-                  >
-                    <span>{new Date(attempt.created_at).toLocaleDateString()}</span>
-                    <span className="text-muted-foreground">
-                      {attempt.score !== null ? `${Math.round(attempt.score * 100)}%` : "In progress"}
+          {retakeError && <p className="text-xs text-red-600 dark:text-red-400">{retakeError}</p>}
+          {tests !== null && tests.length > 0 && (
+            <ul className="flex flex-col gap-3">
+              {tests.map((test) => (
+                <li key={test.id} className="rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium">
+                      {new Date(test.created_at).toLocaleDateString()} · {test.question_count}{" "}
+                      questions
                     </span>
-                  </Link>
+                    <button
+                      type="button"
+                      onClick={() => void handleRetake(test.id)}
+                      disabled={retakingTestId === test.id}
+                      title="Same questions, no generation cost"
+                      className="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium disabled:opacity-50"
+                    >
+                      Retake
+                    </button>
+                  </div>
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {test.attempts.map((attempt) => (
+                      <li key={attempt.id}>
+                        <Link
+                          href={`/course/${courseId}/test/${attempt.id}`}
+                          className="flex w-full items-center justify-between rounded px-2 py-1.5 text-sm hover:bg-muted-foreground/10"
+                        >
+                          <span>{new Date(attempt.created_at).toLocaleDateString()}</span>
+                          <span className="text-muted-foreground">
+                            {attempt.score !== null
+                              ? `${Math.round(attempt.score * 100)}%`
+                              : "In progress"}
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
                 </li>
               ))}
             </ul>

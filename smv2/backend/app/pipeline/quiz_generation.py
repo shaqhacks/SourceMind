@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Course, Job, Section, TestAttempt
+from app.db.models import Course, Job, Section, Test, TestAttempt
 from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
@@ -178,19 +178,26 @@ def run_test_generation(
         raise ValueError("quiz generation produced zero usable questions")
 
     questions = questions[:_QUESTION_COUNT]
-    attempt = TestAttempt(
+    # ADR-022 deck/attempt split: Test is the persisted deck (questions,
+    # generated once); TestAttempt is just this first attempt against it.
+    # Retaking (tests_service.retake_test) creates further TestAttempts
+    # against this SAME Test, zero further LLM calls.
+    test = Test(
         course_id=course_id,
         section_id=section_ids[0] if section_ids and len(section_ids) == 1 else None,
-        payload={"questions": questions},
-        score=None,
-        prompt_version=prompt_version,
         chapter_label=chapter_label,
+        questions=questions,
+        prompt_version=prompt_version,
+        model=result.model,
     )
+    session.add(test)
+    session.flush()  # test.id must exist before the attempt references it
+    attempt = TestAttempt(test_id=test.id, course_id=course_id)
     session.add(attempt)
-    # In-session (not report_progress): the TestAttempt insert above is
-    # already pending on this session — see report_progress_in_session's
+    # In-session (not report_progress): the Test/TestAttempt inserts above
+    # are already pending on this session — see report_progress_in_session's
     # docstring.
     _report_progress_in_session(job, stage="done", pct=100, message="quiz ready")
     session.commit()
 
-    return {"attempt_id": attempt.id, "question_count": len(questions)}
+    return {"test_id": test.id, "attempt_id": attempt.id, "question_count": len(questions)}

@@ -20,11 +20,12 @@ from app.db.models import (
     ReviewLog,
     ReviewState,
     Section,
+    Test,
     TestAttempt,
 )
 
 # Deleted and regenerated wholesale every time a course is re-ingested.
-REPLACED_ON_REINGEST = [Asset, Section, Chunk, Card, ChatTurn, TestAttempt]
+REPLACED_ON_REINGEST = [Asset, Section, Chunk, Card, ChatTurn, Test, TestAttempt]
 
 # Survive re-ingest by remapping onto the new content-addressed ids (spaced
 # repetition history must not reset just because the PDF was re-uploaded).

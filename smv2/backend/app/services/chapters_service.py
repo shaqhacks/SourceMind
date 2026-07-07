@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.db.engine import get_session
-from app.db.models import Section, TestAttempt
+from app.db.models import Section, Test, TestAttempt
 
 
 def get_chapters(course_id: str) -> list[dict[str, Any]]:
@@ -39,18 +39,23 @@ def get_chapters(course_id: str) -> list[dict[str, Any]]:
             else:
                 group["section_ids"].append(s.id)
 
+        # ADR-022: chapter_label moved off TestAttempt onto its parent Test
+        # (the deck's own scope, shared by every attempt against it) — join
+        # through Test to group attempts by chapter the same way sections
+        # already are.
         attempts = (
-            session.query(TestAttempt)
+            session.query(TestAttempt.score, Test.chapter_label)
+            .join(Test, TestAttempt.test_id == Test.id)
             .filter(TestAttempt.course_id == course_id)
             .order_by(TestAttempt.created_at.asc())
             .all()
         )
         stats_by_label: dict[str | None, dict[str, Any]] = {}
-        for a in attempts:
-            stats = stats_by_label.setdefault(a.chapter_label, {"attempts": 0, "graded_scores": []})
+        for score, chapter_label in attempts:
+            stats = stats_by_label.setdefault(chapter_label, {"attempts": 0, "graded_scores": []})
             stats["attempts"] += 1
-            if a.score is not None:
-                stats["graded_scores"].append(a.score)
+            if score is not None:
+                stats["graded_scores"].append(score)
 
         result = []
         for label, group in groups.items():

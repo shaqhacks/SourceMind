@@ -9,6 +9,7 @@ import {
   listTests,
   type JobOut,
   type TestAttemptSummaryOut,
+  type TestSummaryOut,
 } from "@/lib/api/client";
 
 import { ok } from "./support/api-result";
@@ -32,14 +33,27 @@ const mockedListTests = vi.mocked(listTests);
 const mockedGenerateTest = vi.mocked(generateTest);
 const mockedGetJob = vi.mocked(getJob);
 
-function makeAttempt(overrides: Partial<TestAttemptSummaryOut> = {}): TestAttemptSummaryOut {
+function makeAttemptSummary(
+  overrides: Partial<TestAttemptSummaryOut> = {},
+): TestAttemptSummaryOut {
   return {
-    chapter_label: null,
     id: "attempt-1",
-    course_id: "course-1",
     score: null,
+    created_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+// One test/deck with a single (latest) attempt, the common case in these
+// tests — QuizzesPanel only ever surfaces each test's newest attempt.
+function makeTest(overrides: Partial<TestSummaryOut> = {}): TestSummaryOut {
+  return {
+    id: "test-1",
+    chapter_label: null,
+    course_id: "course-1",
     question_count: 5,
     created_at: "2026-01-01T00:00:00Z",
+    attempts: [makeAttemptSummary()],
     ...overrides,
   };
 }
@@ -79,7 +93,10 @@ describe("QuizzesPanel", () => {
     mockedListTests.mockResolvedValue({
       status: 200,
       ok: true,
-      data: [makeAttempt({ id: "a1", score: 0.8 }), makeAttempt({ id: "a2", score: null })],
+      data: [
+        makeTest({ id: "t1", attempts: [makeAttemptSummary({ id: "a1", score: 0.8 })] }),
+        makeTest({ id: "t2", attempts: [makeAttemptSummary({ id: "a2", score: null })] }),
+      ],
     });
     const user = userEvent.setup();
 
@@ -104,7 +121,7 @@ describe("QuizzesPanel", () => {
     mockedListTests.mockResolvedValue({
       status: 200,
       ok: true,
-      data: [makeAttempt({ id: "attempt-9", score: 0.6 })],
+      data: [makeTest({ attempts: [makeAttemptSummary({ id: "attempt-9", score: 0.6 })] })],
     });
     const user = userEvent.setup();
 
@@ -119,7 +136,7 @@ describe("QuizzesPanel", () => {
   it("'Generate quiz' starts a job, renders SSE progress, and refetches the list on settle", async () => {
     mockedListTests
       .mockResolvedValueOnce(ok([]))
-      .mockResolvedValueOnce(ok([makeAttempt({ id: "new-attempt" })]));
+      .mockResolvedValueOnce(ok([makeTest({ attempts: [makeAttemptSummary({ id: "new-attempt" })] })]));
     mockedGenerateTest.mockResolvedValue(ok({ job_id: "job-1" }, 202));
     const user = userEvent.setup();
 

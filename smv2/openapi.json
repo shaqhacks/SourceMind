@@ -1012,6 +1012,19 @@
         "title": "ReorderOp",
         "type": "object"
       },
+      "RetakeTestOut": {
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt_id"
+        ],
+        "title": "RetakeTestOut",
+        "type": "object"
+      },
       "ReviewQueueCardOut": {
         "properties": {
           "back_md": {
@@ -1408,6 +1421,44 @@
         "title": "SplitOp",
         "type": "object"
       },
+      "StudyNextItemOut": {
+        "description": "One deterministic study suggestion (ADR-022, app.services.study_service).\n`detail` holds whatever raw numbers back `reason` \u2014 {\"best_score\":\n...} for low_test_score, {\"due_count\": ...} for due_cards, {} for\nunread, {\"days_since\": ...} for stale.",
+        "properties": {
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "reason": {
+            "enum": [
+              "low_test_score",
+              "due_cards",
+              "unread",
+              "stale"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chapter_label",
+          "reason",
+          "detail"
+        ],
+        "title": "StudyNextItemOut",
+        "type": "object"
+      },
       "SubmitTestIn": {
         "properties": {
           "answers": {
@@ -1433,6 +1484,10 @@
             "title": "Added Card Ids",
             "type": "array"
           },
+          "due_now_count": {
+            "title": "Due Now Count",
+            "type": "integer"
+          },
           "results": {
             "items": {
               "$ref": "#/components/schemas/SubmitTestQuestionResultOut"
@@ -1448,7 +1503,8 @@
         "required": [
           "score",
           "results",
-          "added_card_ids"
+          "added_card_ids",
+          "due_now_count"
         ],
         "title": "SubmitTestOut",
         "type": "object"
@@ -1489,7 +1545,22 @@
         "type": "object"
       },
       "TestAttemptOut": {
+        "description": "One attempt at a Test deck's persisted questions (ADR-022) \u2014\nquestions are redacted to {question, choices} until this attempt is\nsubmitted (score is None); answers/results are None until then too.",
         "properties": {
+          "answers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answers"
+          },
           "chapter_label": {
             "anyOf": [
               {
@@ -1521,6 +1592,20 @@
             "title": "Questions",
             "type": "array"
           },
+          "results": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SubmitTestQuestionResultOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results"
+          },
           "score": {
             "anyOf": [
               {
@@ -1531,14 +1616,21 @@
               }
             ],
             "title": "Score"
+          },
+          "test_id": {
+            "title": "Test Id",
+            "type": "string"
           }
         },
         "required": [
           "id",
+          "test_id",
           "course_id",
-          "score",
           "chapter_label",
+          "score",
           "questions",
+          "answers",
+          "results",
           "created_at"
         ],
         "title": "TestAttemptOut",
@@ -1546,21 +1638,6 @@
       },
       "TestAttemptSummaryOut": {
         "properties": {
-          "chapter_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Chapter Label"
-          },
-          "course_id": {
-            "title": "Course Id",
-            "type": "string"
-          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1570,10 +1647,6 @@
             "title": "Id",
             "type": "string"
           },
-          "question_count": {
-            "title": "Question Count",
-            "type": "integer"
-          },
           "score": {
             "anyOf": [
               {
@@ -1588,10 +1661,7 @@
         },
         "required": [
           "id",
-          "course_id",
           "score",
-          "chapter_label",
-          "question_count",
           "created_at"
         ],
         "title": "TestAttemptSummaryOut",
@@ -1638,6 +1708,56 @@
           "choices"
         ],
         "title": "TestQuestionOut",
+        "type": "object"
+      },
+      "TestSummaryOut": {
+        "description": "One generated deck plus its full attempt history, newest first \u2014\nretaking a test (ADR-022) adds another entry to `attempts` rather than\na whole new top-level row.",
+        "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/TestAttemptSummaryOut"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
+          "course_id": {
+            "title": "Course Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "question_count": {
+            "title": "Question Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "course_id",
+          "chapter_label",
+          "question_count",
+          "created_at",
+          "attempts"
+        ],
+        "title": "TestSummaryOut",
         "type": "object"
       },
       "ValidationError": {
@@ -2668,6 +2788,52 @@
         ]
       }
     },
+    "/api/courses/{course_id}/study-next": {
+      "get": {
+        "operationId": "study_next",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StudyNextItemOut"
+                  },
+                  "title": "Response Study Next",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Study Next",
+        "tags": [
+          "chapters"
+        ]
+      }
+    },
     "/api/courses/{course_id}/tests": {
       "get": {
         "operationId": "list_tests",
@@ -2688,7 +2854,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/TestAttemptSummaryOut"
+                    "$ref": "#/components/schemas/TestSummaryOut"
                   },
                   "title": "Response List Tests",
                   "type": "array"
@@ -3291,6 +3457,48 @@
           }
         },
         "summary": "Submit Test",
+        "tags": [
+          "tests"
+        ]
+      }
+    },
+    "/api/tests/{test_id}/attempts": {
+      "post": {
+        "operationId": "retake_test",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "test_id",
+            "required": true,
+            "schema": {
+              "title": "Test Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetakeTestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retake Test",
         "tags": [
           "tests"
         ]

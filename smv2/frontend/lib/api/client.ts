@@ -39,9 +39,12 @@ export type GenerateTestOut = components["schemas"]["GenerateTestOut"];
 export type GenerateTestIn = components["schemas"]["GenerateTestIn"];
 export type ChapterOut = components["schemas"]["ChapterOut"];
 export type ChapterTestStatsOut = components["schemas"]["ChapterTestStatsOut"];
+export type StudyNextItemOut = components["schemas"]["StudyNextItemOut"];
 export type TestAttemptOut = components["schemas"]["TestAttemptOut"];
 export type TestQuestionOut = components["schemas"]["TestQuestionOut"];
 export type TestAttemptSummaryOut = components["schemas"]["TestAttemptSummaryOut"];
+export type TestSummaryOut = components["schemas"]["TestSummaryOut"];
+export type RetakeTestOut = components["schemas"]["RetakeTestOut"];
 export type SubmitTestOut = components["schemas"]["SubmitTestOut"];
 export type SubmitTestQuestionResultOut = components["schemas"]["SubmitTestQuestionResultOut"];
 export type ChatOut = components["schemas"]["ChatOut"];
@@ -415,6 +418,17 @@ export function getReviewSummary() {
   return request(client.GET("/api/review/summary"));
 }
 
+/** Ordered "what to study next" suggestions for a course (ADR-022, at most
+ * 3, already prioritized by the backend — low test score, then due-card
+ * backlog, then never-opened, then stale). */
+export function getStudyNext(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/study-next", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
 /**
  * Course-wide by default; pass exactly one of `sectionIds` (an explicit
  * subset) or `chapterLabel` (a single chapter's own practice+content, minus
@@ -468,6 +482,29 @@ export function submitTest(attemptId: string, answers: number[]) {
       body: { answers },
     }),
   );
+}
+
+/** Zero-LLM retake: a fresh TestAttempt on the same questions as `testId`
+ * (the persisted Test/deck), no generation job involved. */
+export function retakeTest(testId: string) {
+  return request(
+    client.POST("/api/tests/{test_id}/attempts", {
+      params: { path: { test_id: testId } },
+    }),
+  );
+}
+
+/**
+ * How many cards are due right now for a course — reuses the
+ * already-typed review-queue endpoint (its due/new/total counts are
+ * computed independently of `limit`, which only caps the returned
+ * `cards` array) rather than needing a new field on submit_test's
+ * response; a small limit keeps this call cheap since only the count is
+ * used, not the cards themselves.
+ */
+export async function getDueCountForCourse(courseId: string): Promise<number> {
+  const { data } = await getReviewQueue(courseId, 1);
+  return data?.due ?? 0;
 }
 
 /** Same rediscovery need as findActiveLessonJob, for test generation. */

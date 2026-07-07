@@ -303,6 +303,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/study-next": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Study Next */
+        get: operations["study_next"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/tests": {
         parameters: {
             query?: never;
@@ -504,6 +521,23 @@ export interface paths {
         put?: never;
         /** Submit Test */
         post: operations["submit_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tests/{test_id}/attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retake Test */
+        post: operations["retake_test"];
         delete?: never;
         options?: never;
         head?: never;
@@ -895,6 +929,11 @@ export interface components {
              */
             type: "reorder";
         };
+        /** RetakeTestOut */
+        RetakeTestOut: {
+            /** Attempt Id */
+            attempt_id: string;
+        };
         /** ReviewQueueCardOut */
         ReviewQueueCardOut: {
             /** Back Md */
@@ -1037,6 +1076,26 @@ export interface components {
              */
             type: "split";
         };
+        /**
+         * StudyNextItemOut
+         * @description One deterministic study suggestion (ADR-022, app.services.study_service).
+         *     `detail` holds whatever raw numbers back `reason` — {"best_score":
+         *     ...} for low_test_score, {"due_count": ...} for due_cards, {} for
+         *     unread, {"days_since": ...} for stale.
+         */
+        StudyNextItemOut: {
+            /** Chapter Label */
+            chapter_label: string | null;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "low_test_score" | "due_cards" | "unread" | "stale";
+        };
         /** SubmitTestIn */
         SubmitTestIn: {
             /** Answers */
@@ -1046,6 +1105,8 @@ export interface components {
         SubmitTestOut: {
             /** Added Card Ids */
             added_card_ids: string[];
+            /** Due Now Count */
+            due_now_count: number;
             /** Results */
             results: components["schemas"]["SubmitTestQuestionResultOut"][];
             /** Score */
@@ -1062,8 +1123,15 @@ export interface components {
             /** Your Answer */
             your_answer: number | null;
         };
-        /** TestAttemptOut */
+        /**
+         * TestAttemptOut
+         * @description One attempt at a Test deck's persisted questions (ADR-022) —
+         *     questions are redacted to {question, choices} until this attempt is
+         *     submitted (score is None); answers/results are None until then too.
+         */
         TestAttemptOut: {
+            /** Answers */
+            answers: number[] | null;
             /** Chapter Label */
             chapter_label: string | null;
             /** Course Id */
@@ -1077,15 +1145,15 @@ export interface components {
             id: string;
             /** Questions */
             questions: components["schemas"]["TestQuestionOut"][];
+            /** Results */
+            results: components["schemas"]["SubmitTestQuestionResultOut"][] | null;
             /** Score */
             score: number | null;
+            /** Test Id */
+            test_id: string;
         };
         /** TestAttemptSummaryOut */
         TestAttemptSummaryOut: {
-            /** Chapter Label */
-            chapter_label: string | null;
-            /** Course Id */
-            course_id: string;
             /**
              * Created At
              * Format: date-time
@@ -1093,8 +1161,6 @@ export interface components {
             created_at: string;
             /** Id */
             id: string;
-            /** Question Count */
-            question_count: number;
             /** Score */
             score: number | null;
         };
@@ -1108,6 +1174,29 @@ export interface components {
             explanation?: string | null;
             /** Question */
             question: string;
+        };
+        /**
+         * TestSummaryOut
+         * @description One generated deck plus its full attempt history, newest first —
+         *     retaking a test (ADR-022) adds another entry to `attempts` rather than
+         *     a whole new top-level row.
+         */
+        TestSummaryOut: {
+            /** Attempts */
+            attempts: components["schemas"]["TestAttemptSummaryOut"][];
+            /** Chapter Label */
+            chapter_label: string | null;
+            /** Course Id */
+            course_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Question Count */
+            question_count: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -1826,6 +1915,37 @@ export interface operations {
             };
         };
     };
+    study_next: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyNextItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_tests: {
         parameters: {
             query?: never;
@@ -1843,7 +1963,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TestAttemptSummaryOut"][];
+                    "application/json": components["schemas"]["TestSummaryOut"][];
                 };
             };
             /** @description Validation Error */
@@ -2268,6 +2388,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubmitTestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retake_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                test_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetakeTestOut"];
                 };
             };
             /** @description Validation Error */

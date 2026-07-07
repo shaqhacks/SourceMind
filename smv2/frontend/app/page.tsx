@@ -5,10 +5,12 @@ import type { DragEvent } from "react";
 
 import ContinueCard from "@/components/dashboard/ContinueCard";
 import CourseCard from "@/components/dashboard/CourseCard";
+import ReviewCard from "@/components/dashboard/ReviewCard";
+import StudyNextList from "@/components/dashboard/StudyNextList";
 import ErrorBanner from "@/components/ErrorBanner";
 import UploadFlow from "@/components/upload/UploadFlow";
 import { describeError, type FetchError } from "@/lib/api/errors";
-import { listCourses, type CourseOut } from "@/lib/api/client";
+import { getReviewSummary, listCourses, type CourseOut, type ReviewSummaryOut } from "@/lib/api/client";
 import { pickMostRecentCourse } from "@/lib/dashboard/continue";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
 import { useSampleHintDismissed } from "@/lib/hooks/useSampleHint";
@@ -21,6 +23,7 @@ export default function Home() {
   const [courses, setCourses] = useState<CourseOut[]>([]);
   const [coursesError, setCoursesError] = useState<FetchError | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [reviewSummary, setReviewSummary] = useState<ReviewSummaryOut | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
   const dragDepth = useRef(0);
@@ -53,6 +56,18 @@ export default function Home() {
         setCoursesError(describeError(status, "Loading courses"));
       }
       setLoaded(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // The Review card is a "nice to have" nudge, not core dashboard data —
+  // a failure here just means the card doesn't show, no error banner.
+  useEffect(() => {
+    let active = true;
+    getReviewSummary().then(({ data }) => {
+      if (active && data) setReviewSummary(data);
     });
     return () => {
       active = false;
@@ -95,6 +110,21 @@ export default function Home() {
   }
 
   const continueCourse = pickMostRecentCourse(courses);
+  // Honest about what one click actually delivers: due_total (cross-course)
+  // only gates whether a review card shows at all; the count shown and the
+  // session it links to are scoped to continueCourse specifically (the
+  // same course ContinueCard is about), falling back to the generic hub
+  // when there's no course to scope a direct session link to.
+  const continueCourseDueCount = continueCourse
+    ? (reviewSummary?.courses.find((c) => c.course_id === continueCourse.id)?.due_count ?? 0)
+    : 0;
+  const showReviewCard = (reviewSummary?.due_total ?? 0) > 0;
+  const reviewCardHref =
+    continueCourse && continueCourseDueCount > 0
+      ? `/review?course=${continueCourse.id}&start=due`
+      : "/review";
+  const reviewCardDueCount =
+    continueCourseDueCount > 0 ? continueCourseDueCount : (reviewSummary?.due_total ?? 0);
   const isEmpty = loaded && !coursesError && courses.length === 0;
   // The backend seeds a single "Welcome to SourceMind" sample course on
   // first launch — this hint only ever applies to that exact moment (one
@@ -183,7 +213,16 @@ export default function Home() {
         </div>
       ) : (
         <div className="flex flex-col gap-6">
-          {continueCourse && <ContinueCard course={continueCourse} />}
+          {(continueCourse || showReviewCard) && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {continueCourse && <ContinueCard course={continueCourse} />}
+              {showReviewCard && (
+                <ReviewCard dueCount={reviewCardDueCount} href={reviewCardHref} />
+              )}
+            </div>
+          )}
+
+          {continueCourse && <StudyNextList courseId={continueCourse.id} />}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {courses.map((course) => (

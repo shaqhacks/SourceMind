@@ -25,23 +25,31 @@ def parse_prompt_version(version: str) -> int:
 
 
 def load_prompt(name: str) -> tuple[str, str]:
-    """Loads the latest version of backend/prompts/vN/{name}.md.
+    """Loads backend/prompts/vN/{name}.md from the HIGHEST vN directory
+    that actually CONTAINS that file — per-file resolution, not "the one
+    highest vN overall" (ADR-022). This lets a new prompts/v3/ directory
+    hold just ONE changed prompt (e.g. only chat.md) without silently
+    bumping every other prompt's effective version too: lesson/cards/quiz
+    keep resolving to their own highest version that actually has their
+    file (v2, unchanged) even once v3 exists, since their content hasn't
+    changed and a wholesale version bump would flip lesson_stale for
+    every section for no reason.
 
     Returns (text, version) where version is the directory name (e.g.
-    'v1') — always the highest vN present, so adding a new prompts/v2/
-    directory picks it up automatically without a code change.
+    'v2') of the highest vN directory containing {name}.md specifically.
     """
     prompts_root = _BACKEND_ROOT / "prompts"
     versions = sorted(
         (d for d in prompts_root.iterdir() if d.is_dir() and d.name.startswith("v")),
         key=lambda d: parse_prompt_version(d.name),
+        reverse=True,
     )
     if not versions:
         raise FileNotFoundError(f"no prompt versions found under {prompts_root}")
 
-    latest = versions[-1]
-    prompt_path = latest / f"{name}.md"
-    if not prompt_path.exists():
-        raise FileNotFoundError(f"prompt not found: {prompt_path}")
+    for version_dir in versions:
+        prompt_path = version_dir / f"{name}.md"
+        if prompt_path.exists():
+            return prompt_path.read_text(), version_dir.name
 
-    return prompt_path.read_text(), latest.name
+    raise FileNotFoundError(f"{name}.md not found in any version directory under {prompts_root}")

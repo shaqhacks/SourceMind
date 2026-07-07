@@ -280,28 +280,6 @@ class TestQuestionOut(BaseModel):
     explanation: str | None = None
 
 
-class TestAttemptOut(BaseModel):
-    id: str
-    course_id: str
-    score: float | None
-    chapter_label: str | None
-    questions: list[TestQuestionOut]
-    created_at: datetime
-
-
-class TestAttemptSummaryOut(BaseModel):
-    id: str
-    course_id: str
-    score: float | None
-    chapter_label: str | None
-    question_count: int
-    created_at: datetime
-
-
-class SubmitTestIn(BaseModel):
-    answers: list[int]
-
-
 class SubmitTestQuestionResultOut(BaseModel):
     correct: bool
     correct_index: int
@@ -309,10 +287,56 @@ class SubmitTestQuestionResultOut(BaseModel):
     your_answer: int | None
 
 
+class TestAttemptOut(BaseModel):
+    """One attempt at a Test deck's persisted questions (ADR-022) —
+    questions are redacted to {question, choices} until this attempt is
+    submitted (score is None); answers/results are None until then too.
+    """
+
+    id: str
+    test_id: str
+    course_id: str
+    chapter_label: str | None
+    score: float | None
+    questions: list[TestQuestionOut]
+    answers: list[int] | None
+    results: list[SubmitTestQuestionResultOut] | None
+    created_at: datetime
+
+
+class TestAttemptSummaryOut(BaseModel):
+    id: str
+    score: float | None
+    created_at: datetime
+
+
+class TestSummaryOut(BaseModel):
+    """One generated deck plus its full attempt history, newest first —
+    retaking a test (ADR-022) adds another entry to `attempts` rather than
+    a whole new top-level row.
+    """
+
+    id: str
+    course_id: str
+    chapter_label: str | None
+    question_count: int
+    created_at: datetime
+    attempts: list[TestAttemptSummaryOut]
+
+
+class RetakeTestOut(BaseModel):
+    attempt_id: str
+
+
+class SubmitTestIn(BaseModel):
+    answers: list[int]
+
+
 class SubmitTestOut(BaseModel):
     score: float
     results: list[SubmitTestQuestionResultOut]
     added_card_ids: list[str]
+    due_now_count: int
 
 
 # --- Chapters --------------------------------------------------------------
@@ -330,6 +354,18 @@ class ChapterOut(BaseModel):
     practice_section_ids: list[str]
     answers_section_ids: list[str]
     test_stats: ChapterTestStatsOut | None
+
+
+class StudyNextItemOut(BaseModel):
+    """One deterministic study suggestion (ADR-022, app.services.study_service).
+    `detail` holds whatever raw numbers back `reason` — {"best_score":
+    ...} for low_test_score, {"due_count": ...} for due_cards, {} for
+    unread, {"days_since": ...} for stale.
+    """
+
+    chapter_label: str | None
+    reason: Literal["low_test_score", "due_cards", "unread", "stale"]
+    detail: dict[str, Any]
 
 
 # --- Chat ------------------------------------------------------------

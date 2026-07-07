@@ -15,6 +15,7 @@ from app.db.models import (
     ReviewLog,
     ReviewState,
     Section,
+    Test,
     TestAttempt,
 )
 from app.services.courses_service import delete_course
@@ -85,9 +86,10 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         )
         progress = ProgressState(course_id=course.id, section_id=section.id, scroll_pos=0.5)
         chat_turn = ChatTurn(id=str(uuid.uuid4()), course_id=course.id, role="user", content="hi")
-        test_attempt = TestAttempt(
-            id=str(uuid.uuid4()), course_id=course.id, section_id=section.id, payload={"q": 1}
+        test = Test(
+            id=str(uuid.uuid4()), course_id=course.id, section_id=section.id, questions=[{"q": 1}]
         )
+        test_attempt = TestAttempt(id=str(uuid.uuid4()), test_id=test.id, course_id=course.id)
         llm_call = LlmCall(
             id=str(uuid.uuid4()),
             ts=datetime.now(timezone.utc),
@@ -99,7 +101,7 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
             status="ok",
             course_id=course.id,
         )
-        session.add_all([review_state, review_log, progress, chat_turn, test_attempt, llm_call])
+        session.add_all([review_state, review_log, progress, chat_turn, test, test_attempt, llm_call])
         session.commit()
 
         course_id = course.id
@@ -121,6 +123,7 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         assert session.query(ReviewLog).filter_by(course_id=course_id).count() == 0
         assert session.query(ProgressState).filter_by(course_id=course_id).count() == 0
         assert session.query(ChatTurn).filter_by(course_id=course_id).count() == 0
+        assert session.query(Test).filter_by(course_id=course_id).count() == 0
         assert session.query(TestAttempt).filter_by(course_id=course_id).count() == 0
 
         surviving_llm_call = session.get(LlmCall, llm_call_id)
