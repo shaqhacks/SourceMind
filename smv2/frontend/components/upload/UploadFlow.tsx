@@ -41,6 +41,11 @@ const STEPS = ["Name", "Upload", "Ingest"] as const;
  * prerequisite, not a step a user perceives); "starting-ingest" folds into
  * Ingest (it's that phase's own kickoff); "fatal" (course creation itself
  * failed) stays at Name since the flow never actually left it.
+ * "ingest-failed" shows Ingest (where the failure happened) — but note that
+ * its retry path (retryIngest -> runUploadsAndIngest) re-runs the uploads,
+ * whose first setStep is "uploading", so on retry the indicator visibly
+ * regresses to Upload before returning to Ingest. That's accurate: the
+ * files really are re-uploaded.
  */
 function currentStepFor(step: Step): 0 | 1 | 2 {
   switch (step.kind) {

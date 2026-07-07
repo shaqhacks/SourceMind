@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -234,5 +234,57 @@ describe("UploadFlow", () => {
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/course/course-1"));
     expect(screen.queryByRole("button", { name: /accept outline/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/confirm chapter outline/i)).not.toBeInTheDocument();
+  });
+
+  it("advances the step indicator Name → Upload → Ingest, marking completed steps with ✓", async () => {
+    const user = userEvent.setup();
+    // Hold the upload open so the "uploading" phase is observable instead of
+    // resolving synchronously through to ingest.
+    let resolveUpload!: (result: Awaited<ReturnType<typeof uploadAsset>>) => void;
+    mockedUploadAsset.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
+
+    render(<UploadFlow files={[pdfFile("book.pdf")]} onClose={vi.fn()} />);
+
+    // The numbered circle sits immediately before its label inside each <li>.
+    function stepCircle(label: "Name" | "Upload" | "Ingest"): HTMLElement {
+      const indicator = screen.getByRole("list", { name: /upload progress/i });
+      const circle = within(indicator).getByText(label).previousElementSibling;
+      if (!(circle instanceof HTMLElement)) throw new Error(`no step circle for "${label}"`);
+      return circle;
+    }
+
+    // Title phase: Name is the current step, nothing completed yet.
+    expect(stepCircle("Name")).toHaveAttribute("aria-current", "step");
+    expect(stepCircle("Name")).toHaveTextContent("1");
+    expect(stepCircle("Upload")).not.toHaveAttribute("aria-current");
+    expect(stepCircle("Upload")).toHaveTextContent("2");
+    expect(stepCircle("Ingest")).not.toHaveAttribute("aria-current");
+    expect(stepCircle("Ingest")).toHaveTextContent("3");
+
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+
+    // Uploading phase (uploadAsset still pending): Upload is current, Name done.
+    await waitFor(() => expect(stepCircle("Upload")).toHaveAttribute("aria-current", "step"));
+    expect(stepCircle("Name")).not.toHaveAttribute("aria-current");
+    expect(stepCircle("Name")).toHaveTextContent("✓");
+    expect(stepCircle("Ingest")).not.toHaveAttribute("aria-current");
+    expect(stepCircle("Ingest")).toHaveTextContent("3");
+
+    // Finish the upload: startIngest fires and the SSE stream opens.
+    await act(async () => {
+      resolveUpload(ok(makeAsset("book.pdf"), 201));
+    });
+
+    // Ingesting phase: Ingest is current, Name and Upload both done.
+    await waitFor(() => expect(stepCircle("Ingest")).toHaveAttribute("aria-current", "step"));
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(stepCircle("Name")).toHaveTextContent("✓");
+    expect(stepCircle("Upload")).not.toHaveAttribute("aria-current");
+    expect(stepCircle("Upload")).toHaveTextContent("✓");
   });
 });
