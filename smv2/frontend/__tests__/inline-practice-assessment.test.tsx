@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -113,6 +113,41 @@ describe("InlinePracticeAssessment", () => {
     render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
 
     expect(await screen.findByText(/preparing practice questions/i)).toBeInTheDocument();
+  });
+
+  it("continues polling while extraction remains generating until questions are ready", async () => {
+    vi.useFakeTimers();
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "generating", questions: undefined })))
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "generating", questions: undefined })))
+      .mockResolvedValueOnce(ok(makeAssessment()));
+
+    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(/preparing practice questions/i)).toBeInTheDocument();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/preparing practice questions/i)).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Newton's second law")).toBeInTheDocument();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(3);
   });
 
   it("starts extraction with POST when read-only status is not_started", async () => {

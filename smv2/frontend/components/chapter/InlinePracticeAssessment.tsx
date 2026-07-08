@@ -163,24 +163,35 @@ export default function InlinePracticeAssessment({
     }
 
     let active = true;
-    const timeout = window.setTimeout(async () => {
-      const result = await getPracticeAssessment(courseId, sectionId);
-      if (!active) {
-        return;
-      }
-      if (!result.ok || !result.data) {
-        setLoadError({
-          message: "Could not refresh practice questions.",
-          status: result.status,
-        });
-        return;
-      }
-      applyAssessment(result.data);
-    }, POLL_MS);
+    let timeout: number | null = null;
+
+    const schedulePoll = () => {
+      timeout = window.setTimeout(async () => {
+        const result = await getPracticeAssessment(courseId, sectionId);
+        if (!active) {
+          return;
+        }
+        if (!result.ok || !result.data) {
+          setLoadError({
+            message: "Could not refresh practice questions.",
+            status: result.status,
+          });
+          return;
+        }
+        applyAssessment(result.data);
+        if (result.data.status === "generating") {
+          schedulePoll();
+        }
+      }, POLL_MS);
+    };
+
+    schedulePoll();
 
     return () => {
       active = false;
-      window.clearTimeout(timeout);
+      if (timeout !== null) {
+        window.clearTimeout(timeout);
+      }
     };
   }, [applyAssessment, assessment?.status, courseId, sectionId]);
 
