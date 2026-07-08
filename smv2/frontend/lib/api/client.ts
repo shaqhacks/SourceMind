@@ -48,6 +48,12 @@ export type TestSummaryOut = components["schemas"]["TestSummaryOut"];
 export type RetakeTestOut = components["schemas"]["RetakeTestOut"];
 export type SubmitTestOut = components["schemas"]["SubmitTestOut"];
 export type SubmitTestQuestionResultOut = components["schemas"]["SubmitTestQuestionResultOut"];
+export type PracticeAssessmentOut = components["schemas"]["PracticeAssessmentOut"];
+export type PracticeQuestionOut = components["schemas"]["PracticeQuestionOut"];
+export type PracticeConceptOut = components["schemas"]["PracticeConceptOut"];
+export type PracticeAnsweredOut = components["schemas"]["PracticeAnsweredOut"];
+export type SubmitPracticeAnswerIn = components["schemas"]["SubmitPracticeAnswerIn"];
+export type SubmitPracticeAnswerOut = components["schemas"]["SubmitPracticeAnswerOut"];
 export type ChatOut = components["schemas"]["ChatOut"];
 export type ChatCitationOut = components["schemas"]["ChatCitationOut"];
 export type ChatTurnOut = components["schemas"]["ChatTurnOut"];
@@ -181,6 +187,31 @@ export function listSections(courseId: string) {
 export function getSection(sectionId: string) {
   return request(
     client.GET("/api/sections/{section_id}", { params: { path: { section_id: sectionId } } }),
+  );
+}
+
+export function getPracticeAssessment(courseId: string, sectionId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/sections/{section_id}/practice-assessment", {
+      params: { path: { course_id: courseId, section_id: sectionId } },
+    }),
+  );
+}
+
+export function startPracticeAssessment(courseId: string, sectionId: string) {
+  return request(
+    client.POST("/api/courses/{course_id}/sections/{section_id}/practice-assessment", {
+      params: { path: { course_id: courseId, section_id: sectionId } },
+    }),
+  );
+}
+
+export function submitPracticeAnswer(courseId: string, questionId: string, selectedIndex: number) {
+  return request(
+    client.POST("/api/courses/{course_id}/practice-questions/{question_id}/answer", {
+      params: { path: { course_id: courseId, question_id: questionId } },
+      body: { selected_index: selectedIndex },
+    }),
   );
 }
 

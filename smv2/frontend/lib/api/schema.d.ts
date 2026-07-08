@@ -269,6 +269,23 @@ export interface paths {
         patch: operations["edit_outline"];
         trace?: never;
     };
+    "/api/courses/{course_id}/practice-questions/{question_id}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Practice Answer */
+        post: operations["submit_practice_answer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/progress": {
         parameters: {
             query?: never;
@@ -315,6 +332,24 @@ export interface paths {
         get: operations["list_sections"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/{course_id}/sections/{section_id}/practice-assessment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Practice Assessment */
+        get: operations["get_practice_assessment"];
+        put?: never;
+        /** Start Practice Assessment */
+        post: operations["start_practice_assessment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -900,6 +935,68 @@ export interface components {
             /** Operations */
             operations: (components["schemas"]["RenameOp"] | components["schemas"]["ReorderOp"] | components["schemas"]["DeleteOp"] | components["schemas"]["MergeOp"] | components["schemas"]["SplitOp"])[];
         };
+        /** PracticeAnsweredOut */
+        PracticeAnsweredOut: {
+            /**
+             * Answered At
+             * Format: date-time
+             */
+            answered_at: string;
+            /** Correct */
+            correct: boolean;
+            /** Correct Index */
+            correct_index: number;
+            /** Explanation Md */
+            explanation_md: string;
+            /** Mastery Points */
+            mastery_points: number;
+            /** Points Delta */
+            points_delta: number;
+            /** Selected Index */
+            selected_index: number;
+        };
+        /** PracticeAssessmentOut */
+        PracticeAssessmentOut: {
+            /** Job Id */
+            job_id?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Questions */
+            questions?: components["schemas"]["PracticeQuestionOut"][];
+            /** Run Id */
+            run_id?: string | null;
+            /** Section Id */
+            section_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "generating" | "failed" | "not_started";
+        };
+        /** PracticeConceptOut */
+        PracticeConceptOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Slug */
+            slug: string;
+        };
+        /** PracticeQuestionOut */
+        PracticeQuestionOut: {
+            answered: components["schemas"]["PracticeAnsweredOut"] | null;
+            /** Choices */
+            choices: string[];
+            concept: components["schemas"]["PracticeConceptOut"];
+            /** Id */
+            id: string;
+            /** Problem Number */
+            problem_number: string;
+            /** Source Ref */
+            source_ref: string;
+            /** Stem Md */
+            stem_md: string;
+        };
         /** ProgressIn */
         ProgressIn: {
             /**
@@ -1118,6 +1215,31 @@ export interface components {
              * @enum {string}
              */
             reason: "low_test_score" | "due_cards" | "unread" | "stale";
+        };
+        /** SubmitPracticeAnswerIn */
+        SubmitPracticeAnswerIn: {
+            /** Selected Index */
+            selected_index: number;
+        };
+        /** SubmitPracticeAnswerOut */
+        SubmitPracticeAnswerOut: {
+            /** Already Answered */
+            already_answered: boolean;
+            concept: components["schemas"]["PracticeConceptOut"];
+            /** Correct */
+            correct: boolean;
+            /** Correct Index */
+            correct_index: number;
+            /** Explanation Md */
+            explanation_md: string;
+            /** Mastery Points */
+            mastery_points: number;
+            /** Points Delta */
+            points_delta: number;
+            /** Question Id */
+            question_id: string;
+            /** Selected Index */
+            selected_index: number;
         };
         /** SubmitTestIn */
         SubmitTestIn: {
@@ -1879,6 +2001,42 @@ export interface operations {
             };
         };
     };
+    submit_practice_answer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+                question_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitPracticeAnswerIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitPracticeAnswerOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_progress: {
         parameters: {
             query?: never;
@@ -1996,6 +2154,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SectionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_practice_assessment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PracticeAssessmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_practice_assessment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+                section_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PracticeAssessmentOut"];
                 };
             };
             /** @description Validation Error */

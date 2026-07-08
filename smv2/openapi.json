@@ -872,6 +872,188 @@
         "title": "OutlineEditRequest",
         "type": "object"
       },
+      "PracticeAnsweredOut": {
+        "properties": {
+          "answered_at": {
+            "format": "date-time",
+            "title": "Answered At",
+            "type": "string"
+          },
+          "correct": {
+            "title": "Correct",
+            "type": "boolean"
+          },
+          "correct_index": {
+            "title": "Correct Index",
+            "type": "integer"
+          },
+          "explanation_md": {
+            "title": "Explanation Md",
+            "type": "string"
+          },
+          "mastery_points": {
+            "title": "Mastery Points",
+            "type": "integer"
+          },
+          "points_delta": {
+            "title": "Points Delta",
+            "type": "integer"
+          },
+          "selected_index": {
+            "title": "Selected Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selected_index",
+          "correct",
+          "correct_index",
+          "explanation_md",
+          "points_delta",
+          "mastery_points",
+          "answered_at"
+        ],
+        "title": "PracticeAnsweredOut",
+        "type": "object"
+      },
+      "PracticeAssessmentOut": {
+        "properties": {
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/PracticeQuestionOut"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "generating",
+              "failed",
+              "not_started"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "section_id"
+        ],
+        "title": "PracticeAssessmentOut",
+        "type": "object"
+      },
+      "PracticeConceptOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "label"
+        ],
+        "title": "PracticeConceptOut",
+        "type": "object"
+      },
+      "PracticeQuestionOut": {
+        "properties": {
+          "answered": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PracticeAnsweredOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "concept": {
+            "$ref": "#/components/schemas/PracticeConceptOut"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "problem_number": {
+            "title": "Problem Number",
+            "type": "string"
+          },
+          "source_ref": {
+            "title": "Source Ref",
+            "type": "string"
+          },
+          "stem_md": {
+            "title": "Stem Md",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "problem_number",
+          "source_ref",
+          "stem_md",
+          "choices",
+          "concept",
+          "answered"
+        ],
+        "title": "PracticeQuestionOut",
+        "type": "object"
+      },
       "ProgressIn": {
         "properties": {
           "scroll_pos": {
@@ -1466,6 +1648,71 @@
           "detail"
         ],
         "title": "StudyNextItemOut",
+        "type": "object"
+      },
+      "SubmitPracticeAnswerIn": {
+        "properties": {
+          "selected_index": {
+            "title": "Selected Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "selected_index"
+        ],
+        "title": "SubmitPracticeAnswerIn",
+        "type": "object"
+      },
+      "SubmitPracticeAnswerOut": {
+        "properties": {
+          "already_answered": {
+            "title": "Already Answered",
+            "type": "boolean"
+          },
+          "concept": {
+            "$ref": "#/components/schemas/PracticeConceptOut"
+          },
+          "correct": {
+            "title": "Correct",
+            "type": "boolean"
+          },
+          "correct_index": {
+            "title": "Correct Index",
+            "type": "integer"
+          },
+          "explanation_md": {
+            "title": "Explanation Md",
+            "type": "string"
+          },
+          "mastery_points": {
+            "title": "Mastery Points",
+            "type": "integer"
+          },
+          "points_delta": {
+            "title": "Points Delta",
+            "type": "integer"
+          },
+          "question_id": {
+            "title": "Question Id",
+            "type": "string"
+          },
+          "selected_index": {
+            "title": "Selected Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "question_id",
+          "selected_index",
+          "correct",
+          "correct_index",
+          "explanation_md",
+          "concept",
+          "points_delta",
+          "mastery_points",
+          "already_answered"
+        ],
+        "title": "SubmitPracticeAnswerOut",
         "type": "object"
       },
       "SubmitTestIn": {
@@ -2708,6 +2955,67 @@
         ]
       }
     },
+    "/api/courses/{course_id}/practice-questions/{question_id}/answer": {
+      "post": {
+        "operationId": "submit_practice_answer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "question_id",
+            "required": true,
+            "schema": {
+              "title": "Question Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitPracticeAnswerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitPracticeAnswerOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Practice Answer",
+        "tags": [
+          "practice"
+        ]
+      }
+    },
     "/api/courses/{course_id}/progress": {
       "get": {
         "operationId": "get_progress",
@@ -2897,6 +3205,106 @@
         "summary": "List Sections",
         "tags": [
           "sections"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/sections/{section_id}/practice-assessment": {
+      "get": {
+        "operationId": "get_practice_assessment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "section_id",
+            "required": true,
+            "schema": {
+              "title": "Section Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PracticeAssessmentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Practice Assessment",
+        "tags": [
+          "practice"
+        ]
+      },
+      "post": {
+        "operationId": "start_practice_assessment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "section_id",
+            "required": true,
+            "schema": {
+              "title": "Section Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PracticeAssessmentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Practice Assessment",
+        "tags": [
+          "practice"
         ]
       }
     },
