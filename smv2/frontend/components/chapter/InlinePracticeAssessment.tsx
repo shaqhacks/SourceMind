@@ -44,17 +44,17 @@ function choiceClassName(
   answer?: AnswerState,
 ) {
   if (!answer) {
-    return "justify-start text-left";
+    return "w-full text-left";
   }
   if (choiceIndex === answer.correct_index) {
-    return "justify-start border-status-good/60 bg-status-good-soft text-left";
+    return "w-full border-status-good/60 bg-status-good-soft text-left";
   }
   if (choiceIndex === answer.selected_index && !answer.correct) {
-    return "justify-start border-status-serious/60 bg-status-serious-soft text-left";
+    return "w-full border-status-serious/60 bg-status-serious-soft text-left";
   }
   return question.choices.length > 2
-    ? "justify-start text-left opacity-70"
-    : "justify-start text-left";
+    ? "w-full text-left opacity-70"
+    : "w-full text-left";
 }
 
 export default function InlinePracticeAssessment({
@@ -90,12 +90,19 @@ export default function InlinePracticeAssessment({
   const loadAssessment = useCallback(
     async ({
       resetStart = false,
+      resetState = false,
       showLoading = false,
-    }: { resetStart?: boolean; showLoading?: boolean } = {}) => {
+    }: { resetStart?: boolean; resetState?: boolean; showLoading?: boolean } = {}) => {
       const loadSeq = loadSeqRef.current + 1;
       loadSeqRef.current = loadSeq;
       if (resetStart) {
         startedForRef.current = null;
+      }
+      if (resetState) {
+        setAssessment(null);
+        setAnswers({});
+        setSubmitting({});
+        setSubmitErrors({});
       }
       if (showLoading) {
         setLoading(true);
@@ -149,12 +156,15 @@ export default function InlinePracticeAssessment({
   );
 
   useEffect(() => {
-    setAssessment(null);
-    setAnswers({});
-    setSubmitting({});
-    setSubmitErrors({});
-    startedForRef.current = null;
-    void loadAssessment({ showLoading: true });
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        void loadAssessment({ resetStart: true, resetState: true, showLoading: true });
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [loadAssessment]);
 
   useEffect(() => {
@@ -286,7 +296,9 @@ export default function InlinePracticeAssessment({
                   onClick={() => void handleSubmit(question, choiceIndex)}
                   variant="secondary"
                 >
-                  {choice}
+                  <span className="prose prose-sm block max-w-none text-inherit dark:prose-invert [&_*]:text-inherit [&>p]:m-0">
+                    <Markdown>{choice}</Markdown>
+                  </span>
                 </Button>
               ))}
             </div>
@@ -299,7 +311,7 @@ export default function InlinePracticeAssessment({
               <div className="mt-4 rounded-md border border-border bg-muted-foreground/5 p-3">
                 <div className="mb-2 flex flex-wrap items-center gap-3 text-sm font-medium">
                   <span>{answerSummary(answer)}</span>
-                  <span>Concept points {answer.points_delta}</span>
+                  <span>Concept points {answer.mastery_points}</span>
                 </div>
                 <div className="prose prose-sm max-w-none dark:prose-invert">
                   <Markdown>{answer.explanation_md}</Markdown>

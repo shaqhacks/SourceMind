@@ -101,8 +101,22 @@ describe("InlinePracticeAssessment", () => {
 
     expect(mockedSubmitPracticeAnswer).toHaveBeenCalledWith("course-1", "question-1", 0);
     expect(await screen.findByText("Incorrect")).toBeInTheDocument();
-    expect(screen.getByText("Concept points -1")).toBeInTheDocument();
+    expect(screen.getByText("Concept points 4")).toBeInTheDocument();
     expect(screen.getByText(/textbook relationship/)).toBeInTheDocument();
+  });
+
+  it("renders choice content through Markdown", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ questions: [makeQuestion({ choices: ["$x^2$", "**bold**"] })] })),
+    );
+
+    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+
+    await screen.findByText("Newton's second law");
+
+    const choiceButtons = screen.getAllByRole("button");
+    expect(choiceButtons[0].querySelector(".katex")).not.toBeNull();
+    expect(choiceButtons[1].querySelector("strong")).not.toBeNull();
   });
 
   it("shows a generating state while extraction is pending", async () => {
@@ -166,6 +180,32 @@ describe("InlinePracticeAssessment", () => {
     expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
   });
 
+  it("shows failed extraction through ErrorBanner and retries", async () => {
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(
+        ok(
+          makeAssessment({
+            status: "failed",
+            questions: undefined,
+            message: "Extraction failed for this section.",
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(ok(makeAssessment()));
+
+    const user = userEvent.setup();
+    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Extraction failed for this section.",
+    );
+
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(2);
+  });
+
   it("renders answered summaries as locked without resubmitting", async () => {
     mockedGetPracticeAssessment.mockResolvedValue(
       ok(
@@ -178,7 +218,7 @@ describe("InlinePracticeAssessment", () => {
     render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
 
     expect(await screen.findByText("Correct")).toBeInTheDocument();
-    expect(screen.getByText("Concept points -1")).toBeInTheDocument();
+    expect(screen.getByText("Concept points 4")).toBeInTheDocument();
     expect(screen.getByText(/textbook relationship/)).toBeInTheDocument();
     for (const button of screen.getAllByRole("button", { name: /^[468] N$/ })) {
       expect(button).toBeDisabled();
