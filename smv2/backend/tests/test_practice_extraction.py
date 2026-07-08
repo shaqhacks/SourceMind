@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import uuid
 
+import pytest
+
 from app.db.engine import get_session
 from app.db.models import Concept, Course, Job, PracticeExtractionRun, PracticeQuestion, Section
 from app.jobs.worker import run_due_jobs_once
@@ -97,6 +99,20 @@ def test_parse_practice_questions_drops_unmapped_answer():
     assert "textbook_answer_md" not in questions[0]
 
 
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_parse_practice_questions_rejects_non_finite_confidence_constants(constant):
+    payload = json.dumps(_valid_question_payload()).replace("0.95", constant)
+
+    with pytest.raises(ValueError, match="invalid JSON constant"):
+        parse_practice_questions(f"[{payload}]")
+
+
+def test_parse_practice_questions_drops_confidence_above_one():
+    payload = {**_valid_question_payload(), "confidence": 1.2}
+
+    assert parse_practice_questions(json.dumps([payload])) == []
+
+
 def test_practice_extraction_job_persists_ready_questions(client, stub_provider):
     session = get_session()
     try:
@@ -135,6 +151,65 @@ def test_practice_extraction_job_persists_ready_questions(client, stub_provider)
         assert question.answer_source_ref == "0.2 Answers - Fractions #1"
         assert question.concept_id == concept.id
         assert concept.slug == "fractions.simplify"
+    finally:
+        session.close()
+
+
+def test_practice_extraction_job_dedupes_duplicate_source_fingerprints(client, stub_provider):
+    session = get_session()
+    try:
+        _course, _practice, _answers, run, job = _seed_practice_run(session)
+    finally:
+        session.close()
+
+    stub_provider.responses = [
+        CompletionResult(
+            text=json.dumps([_valid_question_payload(), _valid_question_payload()]),
+            input_tokens=100,
+            output_tokens=50,
+            model="stub-model",
+        )
+    ]
+
+    assert run_due_jobs_once() is True
+
+    session = get_session()
+    try:
+        stored_job = session.get(Job, job.id)
+        stored_run = session.get(PracticeExtractionRun, run.id)
+        assert stored_job is not None
+        assert stored_job.result == {"question_count": 1}
+        assert stored_run is not None
+        assert stored_run.question_count == 1
+        assert session.query(PracticeQuestion).count() == 1
+    finally:
+        session.close()
+
+
+def test_practice_extraction_commits_progress_before_provider_call(client, stub_provider):
+    session = get_session()
+    try:
+        _course, _practice, _answers, run, job = _seed_practice_run(session)
+    finally:
+        session.close()
+
+    stub_provider.exceptions = [RuntimeError("provider down")]
+
+    assert run_due_jobs_once() is True
+
+    session = get_session()
+    try:
+        stored_job = session.get(Job, job.id)
+        stored_run = session.get(PracticeExtractionRun, run.id)
+        assert stored_job is not None
+        assert stored_job.status == "failed"
+        assert stored_job.progress == {
+            "stage": "extracting",
+            "pct": 10,
+            "message": "extracting practice",
+        }
+        assert stored_run is not None
+        assert stored_run.status == "queued"
     finally:
         session.close()
 

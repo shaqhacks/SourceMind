@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -18,6 +19,7 @@ from app.db.models import Concept, Job, PracticeExtractionRun, PracticeQuestion,
 from app.llm.ledger import ensure_spend_cap
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
+from app.pipeline._common import report_progress as _report_progress
 from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 
@@ -27,7 +29,7 @@ _MAX_TOKENS = 4096
 
 
 def parse_practice_questions(text: str) -> list[dict[str, Any]]:
-    data = json.loads(_strip_leading_fence(text))
+    data = json.loads(_strip_leading_fence(text), parse_constant=_reject_json_constant)
     if not isinstance(data, list):
         raise ValueError("expected a JSON array of practice questions")
 
@@ -81,7 +83,7 @@ def _parse_practice_question_item(item: Any) -> dict[str, Any] | None:
         return None
     if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
         return None
-    if confidence < 0.7:
+    if not math.isfinite(float(confidence)) or not 0.7 <= confidence <= 1.0:
         return None
 
     return {
@@ -102,6 +104,10 @@ def _non_empty_str(value: Any) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
 
 
 def run_practice_extraction(
@@ -134,9 +140,9 @@ def run_practice_extraction(
         .all()
     )
 
+    _report_progress(job.id, stage="extracting", pct=10, message="extracting practice")
     run.status = "running"
     run.error = None
-    _report_progress_in_session(job, stage="extracting", pct=10, message="extracting practice")
 
     if not answer_sections:
         raise ValueError("no answer key sections found for practice section")
@@ -161,10 +167,9 @@ def run_practice_extraction(
         raise ValueError("practice assessment extraction produced zero usable questions")
 
     answer_section = answer_sections[0]
-    ready_count = 0
-    for item in questions:
+    unique_items = _dedupe_by_source_fingerprint(section, questions, prompt_version)
+    for source_fingerprint, item in unique_items:
         concept = _upsert_concept(session, section, item)
-        source_fingerprint = _source_fingerprint(section, item, prompt_version)
         question = (
             session.query(PracticeQuestion)
             .filter(
@@ -186,13 +191,12 @@ def run_practice_extraction(
             prompt_version=prompt_version,
             source_fingerprint=source_fingerprint,
         )
-        ready_count += 1
 
     run.status = "ready"
-    run.question_count = ready_count
+    run.question_count = len(unique_items)
     run.error = None
     _report_progress_in_session(job, stage="done", pct=100, message="practice ready")
-    return {"question_count": ready_count}
+    return {"question_count": len(unique_items)}
 
 
 def _build_user_message(section: Section, answer_sections: list[Section]) -> str:
@@ -267,6 +271,22 @@ def _source_fingerprint(section: Section, item: dict[str, Any], prompt_version: 
         digest.update(str(value).encode("utf-8"))
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _dedupe_by_source_fingerprint(
+    section: Section,
+    questions: list[dict[str, Any]],
+    prompt_version: str,
+) -> list[tuple[str, dict[str, Any]]]:
+    seen: set[str] = set()
+    unique_items: list[tuple[str, dict[str, Any]]] = []
+    for item in questions:
+        source_fingerprint = _source_fingerprint(section, item, prompt_version)
+        if source_fingerprint in seen:
+            continue
+        seen.add(source_fingerprint)
+        unique_items.append((source_fingerprint, item))
+    return unique_items
 
 
 def _apply_question_fields(
