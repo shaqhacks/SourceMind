@@ -27,6 +27,33 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/course/course-1/chapter/Chapter%201/test",
 }));
 
+vi.mock("next/dynamic", () => ({
+  default: () =>
+    function DynamicPagesViewMock({
+      courseId,
+      assetId,
+      pageStart,
+      pageEnd,
+    }: {
+      courseId: string;
+      assetId: string;
+      pageStart: number;
+      pageEnd: number;
+    }) {
+      return (
+        <div
+          data-testid="pages-view"
+          data-course-id={courseId}
+          data-asset-id={assetId}
+          data-page-start={pageStart}
+          data-page-end={pageEnd}
+        >
+          Original pages
+        </div>
+      );
+    },
+}));
+
 vi.mock("@/components/reader/PagesView", () => ({
   default: ({
     courseId,
