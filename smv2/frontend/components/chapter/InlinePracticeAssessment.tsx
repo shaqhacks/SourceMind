@@ -1,6 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import rehypeKatex from "rehype-katex";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
@@ -33,6 +38,56 @@ type AnswerMap = Record<string, AnswerState>;
 type SubmitErrorMap = Record<string, string | undefined>;
 
 const POLL_MS = 1500;
+
+const choiceSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [["className", /^language-./, "math-inline", "math-display"]],
+  },
+};
+
+function Inline({ children }: { children?: ReactNode }) {
+  return <span>{children}</span>;
+}
+
+const choiceMarkdownComponents: Components = {
+  p: Inline,
+  a: Inline,
+  h1: Inline,
+  h2: Inline,
+  h3: Inline,
+  h4: Inline,
+  h5: Inline,
+  h6: Inline,
+  ul: Inline,
+  ol: Inline,
+  li: Inline,
+  table: Inline,
+  thead: Inline,
+  tbody: Inline,
+  tr: Inline,
+  th: Inline,
+  td: Inline,
+  pre: Inline,
+  blockquote: Inline,
+  img: () => null,
+};
+
+function ChoiceMarkdown({ children }: { children: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[
+        [rehypeSanitize, choiceSchema],
+        [rehypeKatex, { trust: false, strict: "warn" }],
+      ]}
+      components={choiceMarkdownComponents}
+    >
+      {children}
+    </ReactMarkdown>
+  );
+}
 
 function answerSummary(answer: AnswerState) {
   return answer.correct ? "Correct" : "Incorrect";
@@ -70,8 +125,12 @@ export default function InlinePracticeAssessment({
   const [submitErrors, setSubmitErrors] = useState<SubmitErrorMap>({});
   const startedForRef = useRef<string | null>(null);
   const loadSeqRef = useRef(0);
+  const mountedRef = useRef(false);
 
   const applyAssessment = useCallback((next: PracticeAssessmentOut) => {
+    if (!mountedRef.current) {
+      return;
+    }
     setAssessment(next);
     setLoadError(null);
     if (next.status === "ready") {
@@ -85,6 +144,10 @@ export default function InlinePracticeAssessment({
         return merged;
       });
     }
+  }, []);
+
+  const isCurrentLoad = useCallback((loadSeq: number) => {
+    return mountedRef.current && loadSeqRef.current === loadSeq;
   }, []);
 
   const loadAssessment = useCallback(
@@ -103,6 +166,7 @@ export default function InlinePracticeAssessment({
         setAnswers({});
         setSubmitting({});
         setSubmitErrors({});
+        setStarting(false);
       }
       if (showLoading) {
         setLoading(true);
@@ -110,7 +174,7 @@ export default function InlinePracticeAssessment({
       setLoadError(null);
 
       const result = await getPracticeAssessment(courseId, sectionId);
-      if (loadSeqRef.current !== loadSeq) {
+      if (!isCurrentLoad(loadSeq)) {
         return;
       }
       setLoading(false);
@@ -137,7 +201,7 @@ export default function InlinePracticeAssessment({
       startedForRef.current = startKey;
       setStarting(true);
       const startResult = await startPracticeAssessment(courseId, sectionId);
-      if (loadSeqRef.current !== loadSeq) {
+      if (!isCurrentLoad(loadSeq)) {
         return;
       }
       setStarting(false);
@@ -152,8 +216,16 @@ export default function InlinePracticeAssessment({
 
       applyAssessment(startResult.data);
     },
-    [applyAssessment, courseId, sectionId],
+    [applyAssessment, courseId, isCurrentLoad, sectionId],
   );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      loadSeqRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -164,6 +236,7 @@ export default function InlinePracticeAssessment({
     });
     return () => {
       active = false;
+      loadSeqRef.current += 1;
     };
   }, [loadAssessment]);
 
@@ -230,7 +303,11 @@ export default function InlinePracticeAssessment({
 
   if (loading || starting) {
     return (
-      <section className="rounded-md border border-border px-4 py-3 text-sm text-muted-foreground">
+      <section
+        aria-live="polite"
+        className="rounded-md border border-border px-4 py-3 text-sm text-muted-foreground"
+        role="status"
+      >
         Preparing practice questions...
       </section>
     );
@@ -252,7 +329,11 @@ export default function InlinePracticeAssessment({
 
   if (assessment.status === "generating") {
     return (
-      <section className="rounded-md border border-border px-4 py-3 text-sm text-muted-foreground">
+      <section
+        aria-live="polite"
+        className="rounded-md border border-border px-4 py-3 text-sm text-muted-foreground"
+        role="status"
+      >
         Preparing practice questions...
       </section>
     );
@@ -297,7 +378,7 @@ export default function InlinePracticeAssessment({
                   variant="secondary"
                 >
                   <span className="prose prose-sm block max-w-none text-inherit dark:prose-invert [&_*]:text-inherit [&>p]:m-0">
-                    <Markdown>{choice}</Markdown>
+                    <ChoiceMarkdown>{choice}</ChoiceMarkdown>
                   </span>
                 </Button>
               ))}

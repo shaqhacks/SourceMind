@@ -25,6 +25,14 @@ const mockedGetPracticeAssessment = vi.mocked(getPracticeAssessment);
 const mockedStartPracticeAssessment = vi.mocked(startPracticeAssessment);
 const mockedSubmitPracticeAnswer = vi.mocked(submitPracticeAnswer);
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 function makeAnswered(overrides: Partial<PracticeAnsweredOut> = {}): PracticeAnsweredOut {
   return {
     answered_at: "2026-01-01T00:00:00Z",
@@ -105,18 +113,49 @@ describe("InlinePracticeAssessment", () => {
     expect(screen.getByText(/textbook relationship/)).toBeInTheDocument();
   });
 
-  it("renders choice content through Markdown", async () => {
+  it("renders choice content through safe inline Markdown inside accessible buttons", async () => {
     mockedGetPracticeAssessment.mockResolvedValue(
-      ok(makeAssessment({ questions: [makeQuestion({ choices: ["$x^2$", "**bold**"] })] })),
+      ok(
+        makeAssessment({
+          questions: [
+            makeQuestion({
+              choices: [
+                "[linked](https://example.com)",
+                "| A | B |\n| - | - |\n| `one` | two |",
+                "```ts\nconst unsafe = true;\n```",
+              ],
+            }),
+          ],
+        }),
+      ),
     );
 
     render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
 
     await screen.findByText("Newton's second law");
 
-    const choiceButtons = screen.getAllByRole("button");
-    expect(choiceButtons[0].querySelector(".katex")).not.toBeNull();
-    expect(choiceButtons[1].querySelector("strong")).not.toBeNull();
+    const choiceButtons = screen.getAllByRole("button", { name: /linked|one|unsafe/i });
+    for (const button of choiceButtons) {
+      expect(button.querySelector("a, table, thead, tbody, tr, th, td, pre, h1, h2, h3")).toBeNull();
+    }
+    expect(choiceButtons[0]).toHaveAccessibleName("linked");
+    expect(choiceButtons[1]).toHaveAccessibleName(/one.*two/i);
+    expect(choiceButtons[1].querySelector("code")).not.toBeNull();
+    expect(choiceButtons[2]).toHaveAccessibleName(/const unsafe = true/i);
+  });
+
+  it("renders LaTeX choice content without raw text fallback", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ questions: [makeQuestion({ choices: ["$x^2$"] })] })),
+    );
+
+    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+
+    await screen.findByText("Newton's second law");
+
+    const mathChoice = screen.getAllByRole("button")[0];
+    expect(mathChoice).not.toHaveTextContent("$x^2$");
+    expect(mathChoice.querySelector(".katex")).not.toBeNull();
   });
 
   it("shows a generating state while extraction is pending", async () => {
@@ -126,7 +165,7 @@ describe("InlinePracticeAssessment", () => {
 
     render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
 
-    expect(await screen.findByText(/preparing practice questions/i)).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent(/preparing practice questions/i);
   });
 
   it("continues polling while extraction remains generating until questions are ready", async () => {
@@ -143,7 +182,7 @@ describe("InlinePracticeAssessment", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText(/preparing practice questions/i)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/preparing practice questions/i);
     expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -152,7 +191,7 @@ describe("InlinePracticeAssessment", () => {
       await Promise.resolve();
     });
     expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(2);
-    expect(screen.getByText(/preparing practice questions/i)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/preparing practice questions/i);
 
     await act(async () => {
       vi.advanceTimersByTime(1500);
@@ -178,6 +217,57 @@ describe("InlinePracticeAssessment", () => {
       expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1"),
     );
     expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a stale not_started start after props change", async () => {
+    const oldStart = deferred<Awaited<ReturnType<typeof startPracticeAssessment>>>();
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "not_started", questions: undefined })))
+      .mockResolvedValueOnce(ok(makeAssessment({ section_id: "section-2" })));
+    mockedStartPracticeAssessment.mockReturnValueOnce(oldStart.promise);
+
+    const { rerender } = render(
+      <InlinePracticeAssessment courseId="course-1" sectionId="section-1" />,
+    );
+
+    await waitFor(() =>
+      expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1"),
+    );
+
+    rerender(<InlinePracticeAssessment courseId="course-1" sectionId="section-2" />);
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
+
+    oldStart.resolve(ok(makeAssessment({ status: "generating", questions: undefined })));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Newton's second law")).toBeInTheDocument();
+    expect(screen.queryByText(/preparing practice questions/i)).not.toBeInTheDocument();
+  });
+
+  it("does not update state after unmount during start", async () => {
+    const oldStart = deferred<Awaited<ReturnType<typeof startPracticeAssessment>>>();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "not_started", questions: undefined })),
+    );
+    mockedStartPracticeAssessment.mockReturnValue(oldStart.promise);
+
+    const { unmount } = render(
+      <InlinePracticeAssessment courseId="course-1" sectionId="section-1" />,
+    );
+
+    await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1));
+    unmount();
+
+    oldStart.resolve(ok(makeAssessment({ status: "generating", questions: undefined })));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 
   it("shows failed extraction through ErrorBanner and retries", async () => {
