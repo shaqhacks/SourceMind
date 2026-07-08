@@ -345,6 +345,60 @@ class SubmitTestOut(BaseModel):
     due_now_count: int
 
 
+# --- Practice assessments -------------------------------------------------
+
+
+class PracticeConceptOut(BaseModel):
+    id: str
+    slug: str
+    label: str
+
+
+class PracticeAnsweredOut(BaseModel):
+    selected_index: int
+    correct: bool
+    correct_index: int
+    explanation_md: str
+    points_delta: int
+    mastery_points: int
+    answered_at: datetime
+
+
+class PracticeQuestionOut(BaseModel):
+    id: str
+    problem_number: str
+    source_ref: str
+    stem_md: str
+    choices: list[str]
+    concept: PracticeConceptOut
+    answered: PracticeAnsweredOut | None
+
+
+class PracticeAssessmentOut(BaseModel):
+    status: Literal["ready", "generating", "failed", "not_started"]
+    section_id: str
+    questions: list[PracticeQuestionOut] = Field(default_factory=list)
+    run_id: str | None = None
+    job_id: str | None = None
+    message: str | None = None
+
+
+class SubmitPracticeAnswerIn(BaseModel):
+    selected_index: int
+
+
+class SubmitPracticeAnswerOut(BaseModel):
+    question_id: str
+    selected_index: int
+    correct: bool
+    correct_index: int
+    explanation_md: str
+    concept: PracticeConceptOut
+    points_delta: int
+    mastery_points: int
+    already_answered: bool
+
+
 # --- Chapters --------------------------------------------------------------
 
 

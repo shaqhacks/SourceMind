@@ -74,6 +74,10 @@ def _generate_test_handler(session: Session, job: Job) -> dict[str, Any]:
     return {"course_id": course_id, **extra}
 
 
+def _generate_practice_assessment_handler(session: Session, job: Job) -> dict[str, Any]:
+    raise ValueError("practice assessment extraction is not wired yet")
+
+
 def _embed_course_handler(session: Session, job: Job) -> dict[str, Any]:
     course_id = (job.payload or {}).get("course_id")
     if not course_id:
@@ -97,6 +101,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "generate_lesson": _generate_lesson_handler,
     "generate_cards": _generate_cards_handler,
     "generate_test": _generate_test_handler,
+    "generate_practice_assessment": _generate_practice_assessment_handler,
     "embed_course": _embed_course_handler,
     "convert_html": _convert_html_handler,
 }

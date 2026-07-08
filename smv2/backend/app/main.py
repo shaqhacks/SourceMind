@@ -25,6 +25,7 @@ from app.routers import (
     jobs,
     lessons,
     llm_usage,
+    practice,
     review,
     sections,
     tests,
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(llm_usage.router)
     app.include_router(cards.router)
     app.include_router(review.router)
+    app.include_router(practice.router)
     app.include_router(tests.router)
     app.include_router(chat.router)
 
