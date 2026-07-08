@@ -27,6 +27,42 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/course/course-1/chapter/Chapter%201/test",
 }));
 
+vi.mock("@/components/reader/PagesView", () => ({
+  default: ({
+    courseId,
+    assetId,
+    pageStart,
+    pageEnd,
+  }: {
+    courseId: string;
+    assetId: string;
+    pageStart: number;
+    pageEnd: number;
+  }) => (
+    <div
+      data-testid="pages-view"
+      data-course-id={courseId}
+      data-asset-id={assetId}
+      data-page-start={pageStart}
+      data-page-end={pageEnd}
+    >
+      Original pages
+    </div>
+  ),
+}));
+
+vi.mock("@/components/chapter/InlinePracticeAssessment", () => ({
+  default: ({ courseId, sectionId }: { courseId: string; sectionId: string }) => (
+    <div
+      data-testid="inline-practice-assessment"
+      data-course-id={courseId}
+      data-section-id={sectionId}
+    >
+      Inline practice assessment
+    </div>
+  ),
+}));
+
 vi.mock("@/lib/api/client", () => ({
   API_BASE: "http://localhost:8000",
   TERMINAL_JOB_STATUSES: new Set(["succeeded", "failed"]),
@@ -151,34 +187,72 @@ describe("ChapterTestClient", () => {
     globalThis.EventSource = originalEventSource;
   });
 
-  it("renders the chapter's practice sections in order", async () => {
+  it("renders an inline assessment and collapsed textbook source for each practice section", async () => {
     mockedListChapters.mockResolvedValue(ok([makeChapter()]));
     mockedGetSection.mockImplementation(mockGetSectionById);
     mockedListTests.mockResolvedValue(ok([]));
 
     render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
 
-    expect(await screen.findByText("Practice question: what is 2+2?")).toBeInTheDocument();
+    const assessment = await screen.findByTestId("inline-practice-assessment");
+    expect(assessment).toHaveAttribute("data-course-id", "course-1");
+    expect(assessment).toHaveAttribute("data-section-id", "c1-practice");
+
+    const summary = screen.getByText("View textbook source");
+    const details = summary.closest("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    expect(screen.getByText("Practice question: what is 2+2?")).toBeInTheDocument();
     expect(mockedGetSection).toHaveBeenCalledWith("c1-practice");
   });
 
-  it("renders the chapter's answer key in a collapsed disclosure, revealed on click", async () => {
+  it("renders original pages inside the source disclosure when page metadata is available", async () => {
     mockedListChapters.mockResolvedValue(ok([makeChapter()]));
-    mockedGetSection.mockImplementation(mockGetSectionById);
+    mockedGetSection.mockImplementation((id: string) =>
+      Promise.resolve(
+        ok(
+          makeSectionDetail({
+            id,
+            body_md: "1) <sup><u>42</u></sup>\n12",
+            asset_id: "asset-1",
+            page_start: 16,
+            page_end: 17,
+          }),
+        ),
+      ),
+    );
     mockedListTests.mockResolvedValue(ok([]));
 
-    const user = userEvent.setup();
     render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
-    await screen.findByText("Practice question: what is 2+2?");
 
-    const summary = screen.getByText("Answer key");
+    const assessment = await screen.findByTestId("inline-practice-assessment");
+    expect(assessment).toHaveAttribute("data-section-id", "c1-practice");
+    const summary = screen.getByText("View textbook source");
     const details = summary.closest("details");
     expect(details).not.toBeNull();
     expect(details).not.toHaveAttribute("open");
 
-    await user.click(summary);
-    expect(details).toHaveAttribute("open");
-    expect(screen.getByText("Answer: 4")).toBeInTheDocument();
+    const pages = screen.getByTestId("pages-view");
+    expect(pages).toHaveAttribute("data-course-id", "course-1");
+    expect(pages).toHaveAttribute("data-asset-id", "asset-1");
+    expect(pages).toHaveAttribute("data-page-start", "16");
+    expect(pages).toHaveAttribute("data-page-end", "17");
+    expect(pages.closest("details")).toBe(details);
+    expect(screen.queryByText(/42/)).not.toBeInTheDocument();
+  });
+
+  it("does not fetch or render learner-facing answer key sections", async () => {
+    mockedListChapters.mockResolvedValue(ok([makeChapter()]));
+    mockedGetSection.mockImplementation(mockGetSectionById);
+    mockedListTests.mockResolvedValue(ok([]));
+
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+    await screen.findByTestId("inline-practice-assessment");
+
+    expect(mockedGetSection).toHaveBeenCalledWith("c1-practice");
+    expect(mockedGetSection).not.toHaveBeenCalledWith("c1-answers");
+    expect(screen.queryByText("Answer key")).not.toBeInTheDocument();
+    expect(screen.queryByText("Answer: 4")).not.toBeInTheDocument();
   });
 
   it("shows the 'no practice sections' empty state when the chapter has none", async () => {

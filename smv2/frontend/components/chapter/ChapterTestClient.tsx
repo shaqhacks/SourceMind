@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 
 import ChapterMasteryBar from "@/components/chapter/ChapterMasteryBar";
+import InlinePracticeAssessment from "@/components/chapter/InlinePracticeAssessment";
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
 import Badge from "@/components/ui/Badge";
@@ -26,6 +28,8 @@ import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
 import { formatJobProgress } from "@/lib/jobs/format";
 
+const PagesView = dynamic(() => import("@/components/reader/PagesView"), { ssr: false });
+
 export interface ChapterTestClientProps {
   courseId: string;
   chapterLabel: string;
@@ -34,6 +38,9 @@ export interface ChapterTestClientProps {
 interface PracticeSection {
   id: string;
   body: string;
+  assetId: string | null;
+  pageStart: number | null;
+  pageEnd: number | null;
 }
 
 type LoadState =
@@ -44,21 +51,37 @@ type LoadState =
       kind: "ready";
       chapter: ChapterOut;
       practiceSections: PracticeSection[];
-      answerSections: PracticeSection[];
     };
 
-// Both practice exercises and their answer key are source text (the
-// textbook's own printed material), fetched the same way — this isn't the
-// same thing as an auto-generated TestAttempt's correct_index/explanation
-// redaction (tests_service.get_test), which only applies to quizzes this
-// app generates and grades itself.
 async function loadSections(ids: string[]): Promise<PracticeSection[]> {
   const results = await Promise.all(ids.map((id) => getSection(id)));
   const sections: PracticeSection[] = [];
   results.forEach((result, index) => {
-    if (result.data) sections.push({ id: ids[index], body: result.data.body_md });
+    if (result.data) {
+      sections.push({
+        id: ids[index],
+        body: result.data.body_md,
+        assetId: result.data.asset_id,
+        pageStart: result.data.page_start,
+        pageEnd: result.data.page_end,
+      });
+    }
   });
   return sections;
+}
+
+function PracticeMaterial({ courseId, section }: { courseId: string; section: PracticeSection }) {
+  if (section.assetId && section.pageStart !== null && section.pageEnd !== null) {
+    return (
+      <PagesView
+        courseId={courseId}
+        assetId={section.assetId}
+        pageStart={section.pageStart}
+        pageEnd={section.pageEnd}
+      />
+    );
+  }
+  return <Markdown>{section.body}</Markdown>;
 }
 
 async function loadChapter(courseId: string, chapterLabel: string): Promise<LoadState> {
@@ -71,12 +94,9 @@ async function loadChapter(courseId: string, chapterLabel: string): Promise<Load
   // Per-section failure isolation: one bad get_section shouldn't block the
   // rest of the chapter's practice material from rendering, same
   // philosophy as GenerateAllLessons' per-job handling.
-  const [practiceSections, answerSections] = await Promise.all([
-    loadSections(chapter.practice_section_ids),
-    loadSections(chapter.answers_section_ids),
-  ]);
+  const practiceSections = await loadSections(chapter.practice_section_ids);
 
-  return { kind: "ready", chapter, practiceSections, answerSections };
+  return { kind: "ready", chapter, practiceSections };
 }
 
 export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTestClientProps) {
@@ -219,7 +239,7 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     );
   }
 
-  const { chapter, practiceSections, answerSections } = state;
+  const { chapter, practiceSections } = state;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -245,22 +265,21 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
           ) : (
             <div className="flex flex-col gap-6">
               {practiceSections.map((section) => (
-                <Markdown key={section.id}>{section.body}</Markdown>
+                <div key={section.id} className="flex flex-col gap-3">
+                  <InlinePracticeAssessment courseId={courseId} sectionId={section.id} />
+                  <details className="rounded-md border border-border p-3">
+                    <summary className="cursor-pointer text-sm font-medium">
+                      View textbook source
+                    </summary>
+                    <div className="mt-3">
+                      <PracticeMaterial courseId={courseId} section={section} />
+                    </div>
+                  </details>
+                </div>
               ))}
             </div>
           )}
         </div>
-
-        {answerSections.length > 0 && (
-          <details className="rounded-lg border border-border p-4">
-            <summary className="cursor-pointer text-base font-semibold">Answer key</summary>
-            <div className="mt-3 flex flex-col gap-6">
-              {answerSections.map((section) => (
-                <Markdown key={section.id}>{section.body}</Markdown>
-              ))}
-            </div>
-          </details>
-        )}
 
         <div className="flex flex-col gap-2">
           {jobFailed && (
