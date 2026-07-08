@@ -222,74 +222,80 @@ def submit_answer(
 ) -> dict[str, Any]:
     session = get_session()
     try:
-        question = (
-            session.query(PracticeQuestion)
-            .filter(
-                PracticeQuestion.id == question_id,
-                PracticeQuestion.course_id == course_id,
-            )
-            .one_or_none()
-        )
-        if question is None:
-            raise PracticeQuestionNotFoundError("practice question not found")
+        for attempt in range(2):
+            try:
+                question = (
+                    session.query(PracticeQuestion)
+                    .filter(
+                        PracticeQuestion.id == question_id,
+                        PracticeQuestion.course_id == course_id,
+                    )
+                    .one_or_none()
+                )
+                if question is None:
+                    raise PracticeQuestionNotFoundError("practice question not found")
 
-        if type(selected_index) is not int or not 0 <= selected_index < len(question.choices):
-            raise InvalidChoiceError("selected_index is out of range")
+                if type(selected_index) is not int or not 0 <= selected_index < len(
+                    question.choices
+                ):
+                    raise InvalidChoiceError("selected_index is out of range")
 
-        existing = _load_existing_answer_payload(session, question, learner_key)
-        if existing is not None:
-            return existing
+                existing = _load_existing_answer_payload(session, question, learner_key)
+                if existing is not None:
+                    return existing
 
-        correct = selected_index == question.correct_index
-        delta = 1 if correct else -1
-        answer = PracticeAnswer(
-            course_id=course_id,
-            question_id=question.id,
-            learner_key=learner_key,
-            selected_index=selected_index,
-            correct=correct,
-            points_delta=delta,
-        )
-        session.add(answer)
-        session.flush()
+                correct = selected_index == question.correct_index
+                delta = 1 if correct else -1
+                answer = PracticeAnswer(
+                    course_id=course_id,
+                    question_id=question.id,
+                    learner_key=learner_key,
+                    selected_index=selected_index,
+                    correct=correct,
+                    points_delta=delta,
+                )
+                session.add(answer)
+                session.flush()
 
-        mastery = _get_mastery(session, course_id, question.concept_id, learner_key)
-        mastery.points += delta
-        if correct:
-            mastery.correct_count += 1
-        else:
-            mastery.wrong_count += 1
+                mastery = _get_mastery(session, course_id, question.concept_id, learner_key)
+                mastery.points += delta
+                if correct:
+                    mastery.correct_count += 1
+                else:
+                    mastery.wrong_count += 1
 
-        session.add(
-            ConceptMasteryEvent(
-                course_id=course_id,
-                concept_id=question.concept_id,
-                question_id=question.id,
-                practice_answer_id=answer.id,
-                learner_key=learner_key,
-                delta=delta,
-            )
-        )
-        session.commit()
-        return _answer_payload(
-            session, question, answer, mastery.points, already_answered=False
-        )
-    except IntegrityError:
-        session.rollback()
-        question = (
-            session.query(PracticeQuestion)
-            .filter(
-                PracticeQuestion.id == question_id,
-                PracticeQuestion.course_id == course_id,
-            )
-            .one_or_none()
-        )
-        if question is None:
-            raise PracticeQuestionNotFoundError("practice question not found")
-        existing = _load_existing_answer_payload(session, question, learner_key)
-        if existing is None:
-            raise
-        return existing
+                session.add(
+                    ConceptMasteryEvent(
+                        course_id=course_id,
+                        concept_id=question.concept_id,
+                        question_id=question.id,
+                        practice_answer_id=answer.id,
+                        learner_key=learner_key,
+                        delta=delta,
+                    )
+                )
+                session.commit()
+                return _answer_payload(
+                    session, question, answer, mastery.points, already_answered=False
+                )
+            except IntegrityError:
+                session.rollback()
+                question = (
+                    session.query(PracticeQuestion)
+                    .filter(
+                        PracticeQuestion.id == question_id,
+                        PracticeQuestion.course_id == course_id,
+                    )
+                    .one_or_none()
+                )
+                if question is None:
+                    raise PracticeQuestionNotFoundError("practice question not found")
+                existing = _load_existing_answer_payload(session, question, learner_key)
+                if existing is not None:
+                    return existing
+                if attempt == 1:
+                    raise
+        raise RuntimeError("unreachable practice answer retry state")
     finally:
         session.close()
 
