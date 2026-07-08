@@ -151,6 +151,7 @@ _GET_PROVIDER_PATCH_TARGETS = (
     "app.pipeline.generation.get_provider",
     "app.pipeline.cards_generation.get_provider",
     "app.pipeline.quiz_generation.get_provider",
+    "app.pipeline.practice_extraction.get_provider",
     "app.pipeline.embedding.get_provider",
     "app.pipeline.retrieval.get_provider",
     "app.services.chat_service.get_provider",

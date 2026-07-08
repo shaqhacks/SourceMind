@@ -21,6 +21,7 @@ from app.pipeline.embedding import run_embed_course
 from app.pipeline.generation import run_lesson_generation
 from app.pipeline.html_conversion import run_html_conversion
 from app.pipeline.ingest import run_ingest
+from app.pipeline.practice_extraction import run_practice_extraction
 from app.pipeline.quiz_generation import run_test_generation
 from app.services.backup_service import run_backup
 
@@ -75,7 +76,17 @@ def _generate_test_handler(session: Session, job: Job) -> dict[str, Any]:
 
 
 def _generate_practice_assessment_handler(session: Session, job: Job) -> dict[str, Any]:
-    raise ValueError("practice assessment extraction is not wired yet")
+    payload = job.payload or {}
+    course_id = payload.get("course_id")
+    section_id = payload.get("section_id")
+    run_id = payload.get("run_id")
+    if not course_id:
+        raise ValueError("generate_practice_assessment job payload missing course_id")
+    if not section_id:
+        raise ValueError("generate_practice_assessment job payload missing section_id")
+    if not run_id:
+        raise ValueError("generate_practice_assessment job payload missing run_id")
+    return run_practice_extraction(session, job, course_id, section_id, run_id)
 
 
 def _embed_course_handler(session: Session, job: Job) -> dict[str, Any]:

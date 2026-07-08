@@ -42,7 +42,7 @@ def test_load_prompt_picks_v2_now_that_it_exists():
 
 
 def test_load_prompt_resolves_per_file_not_globally():
-    """ADR-022: prompts/v3/ holds ONLY chat.md -- load_prompt must resolve
+    """ADR-022: prompts/v3/ may hold selected changed prompts -- load_prompt must resolve
     each file to the highest version directory that actually CONTAINS it,
     not "the single highest vN overall" (which would wrongly report v3
     for lesson/cards/quiz too, even though neither file exists there and
@@ -55,12 +55,10 @@ def test_load_prompt_resolves_per_file_not_globally():
     v3_dir = _BACKEND_ROOT / "prompts" / "v3"
     assert os.path.isdir(v3_dir)
     v3_files = {p.name for p in v3_dir.iterdir()}
-    assert v3_files == {"chat.md"}, (
-        "v3 is expected to hold only chat.md -- if this fails, either v3 grew a "
-        "new file (update this test) or something regressed"
-    )
+    assert v3_files == {"chat.md", "practice_assessment.md"}
 
     assert load_prompt("chat")[1] == "v3"
+    assert load_prompt("practice_assessment")[1] == "v3"
     assert load_prompt("lesson")[1] == "v2"
     assert load_prompt("cards")[1] == "v2"
     assert load_prompt("quiz")[1] == "v2"
