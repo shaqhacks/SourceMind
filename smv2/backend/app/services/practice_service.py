@@ -427,6 +427,15 @@ def _matching_run(
     )
 
 
+def _run_is_retryable(session: Session, run: PracticeExtractionRun) -> bool:
+    if run.status == "failed":
+        return True
+    if run.job_id is None:
+        return False
+    job = session.get(Job, run.job_id)
+    return job is not None and job.status == "failed"
+
+
 def start_assessment(course_id: str, section_id: str) -> tuple[int, dict[str, Any]]:
     for attempt in range(3):
         session = get_session()
@@ -436,7 +445,7 @@ def start_assessment(course_id: str, section_id: str) -> tuple[int, dict[str, An
 
             run = _matching_run(session, course_id, section_id, fingerprint)
             if run is not None:
-                if run.status == "failed":
+                if _run_is_retryable(session, run):
                     job = create_job_in_session(
                         session,
                         "generate_practice_assessment",

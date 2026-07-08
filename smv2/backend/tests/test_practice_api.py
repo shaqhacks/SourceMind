@@ -117,6 +117,10 @@ def test_start_practice_assessment_starts_lazy_generation(client):
     response = client.post(f"/api/courses/{course.id}/sections/{practice.id}/practice-assessment")
 
     assert response.status_code == 202
+    cookie = response.headers["set-cookie"]
+    assert "smv2_learner=" in cookie
+    assert "HttpOnly" in cookie
+    assert "SameSite=lax" in cookie
     body = response.json()
     assert body["status"] == "generating"
     assert body["section_id"] == practice.id
@@ -153,6 +157,11 @@ def test_start_practice_assessment_reuses_existing_run(client):
 
     assert first.status_code == 202
     assert second.status_code == 202
+    learner_key = client.cookies.get("smv2_learner")
+    assert learner_key is not None
+    assert "set-cookie" in first.headers
+    assert "set-cookie" not in second.headers
+    assert client.cookies.get("smv2_learner") == learner_key
     assert second.json()["run_id"] == first.json()["run_id"]
     assert second.json()["job_id"] == first.json()["job_id"]
 
@@ -288,7 +297,7 @@ def test_get_practice_assessment_reports_failed_linked_job_without_mutating_run(
         session.close()
 
 
-def test_start_practice_assessment_retries_failed_run_with_new_job(client):
+def test_start_practice_assessment_retries_failed_linked_job_with_new_job(client):
     session = get_session()
     try:
         course, practice, _answers, _content = _seed_practice_chapter(session)
@@ -305,8 +314,6 @@ def test_start_practice_assessment_retries_failed_run_with_new_job(client):
         assert run is not None
         job = session.get(Job, first_body["job_id"])
         assert job is not None
-        run.status = "failed"
-        run.error = "provider unavailable"
         job.status = "failed"
         job.error = "provider unavailable"
         session.commit()
