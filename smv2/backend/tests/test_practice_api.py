@@ -230,7 +230,7 @@ def test_get_ready_practice_assessment_redacts_correct_index(client):
     assert "correct_index" not in body["questions"][0]
 
 
-def test_get_practice_assessment_sets_httponly_learner_cookie(client):
+def test_get_practice_assessment_does_not_set_learner_cookie(client):
     session = get_session()
     try:
         course, practice, _answers, _content = _seed_practice_chapter(session)
@@ -239,13 +239,11 @@ def test_get_practice_assessment_sets_httponly_learner_cookie(client):
 
     response = client.get(f"/api/courses/{course.id}/sections/{practice.id}/practice-assessment")
 
-    cookie = response.headers["set-cookie"]
-    assert "smv2_learner=" in cookie
-    assert "HttpOnly" in cookie
-    assert "SameSite=lax" in cookie
+    assert response.status_code == 200
+    assert "set-cookie" not in response.headers
 
 
-def test_get_practice_assessment_reports_failed_linked_job(client):
+def test_get_practice_assessment_reports_failed_linked_job_without_mutating_run(client):
     session = get_session()
     try:
         course, practice, _answers, _content = _seed_practice_chapter(session)
@@ -278,13 +276,67 @@ def test_get_practice_assessment_reports_failed_linked_job(client):
     assert body["run_id"] == run_id
     assert body["job_id"] == job.id
     assert body["message"] == "Practice question extraction failed."
+    assert "set-cookie" not in response.headers
 
     session = get_session()
     try:
         stored_run = session.get(PracticeExtractionRun, run_id)
         assert stored_run is not None
-        assert stored_run.status == "failed"
-        assert stored_run.error == "provider unavailable"
+        assert stored_run.status == "queued"
+        assert stored_run.error is None
+    finally:
+        session.close()
+
+
+def test_start_practice_assessment_retries_failed_run_with_new_job(client):
+    session = get_session()
+    try:
+        course, practice, _answers, _content = _seed_practice_chapter(session)
+    finally:
+        session.close()
+
+    first = client.post(f"/api/courses/{course.id}/sections/{practice.id}/practice-assessment")
+    assert first.status_code == 202
+    first_body = first.json()
+
+    session = get_session()
+    try:
+        run = session.get(PracticeExtractionRun, first_body["run_id"])
+        assert run is not None
+        job = session.get(Job, first_body["job_id"])
+        assert job is not None
+        run.status = "failed"
+        run.error = "provider unavailable"
+        job.status = "failed"
+        job.error = "provider unavailable"
+        session.commit()
+    finally:
+        session.close()
+
+    second = client.post(f"/api/courses/{course.id}/sections/{practice.id}/practice-assessment")
+
+    assert second.status_code == 202
+    second_body = second.json()
+    assert second_body["status"] == "generating"
+    assert second_body["run_id"] == first_body["run_id"]
+    assert second_body["job_id"] != first_body["job_id"]
+
+    session = get_session()
+    try:
+        assert session.query(PracticeExtractionRun).count() == 1
+        assert session.query(Job).count() == 2
+        stored_run = session.get(PracticeExtractionRun, first_body["run_id"])
+        assert stored_run is not None
+        assert stored_run.status == "queued"
+        assert stored_run.error is None
+        assert stored_run.job_id == second_body["job_id"]
+        retry_job = session.get(Job, second_body["job_id"])
+        assert retry_job is not None
+        assert retry_job.payload == {
+            "course_id": course.id,
+            "section_id": practice.id,
+            "run_id": first_body["run_id"],
+        }
     finally:
         session.close()
 

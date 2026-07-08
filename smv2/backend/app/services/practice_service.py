@@ -89,32 +89,35 @@ def _fingerprint_for(section: Section, answer_sections: list[Section]) -> str:
 
 
 def _serialize_questions(
-    session: Session, questions: list[PracticeQuestion], learner_key: str
+    session: Session, questions: list[PracticeQuestion], learner_key: str | None
 ) -> list[dict[str, Any]]:
     concept_ids = {question.concept_id for question in questions}
     concepts = {
         concept.id: concept
         for concept in session.query(Concept).filter(Concept.id.in_(concept_ids)).all()
     }
-    question_ids = [question.id for question in questions]
-    answers = {
-        answer.question_id: answer
-        for answer in session.query(PracticeAnswer)
-        .filter(
-            PracticeAnswer.learner_key == learner_key,
-            PracticeAnswer.question_id.in_(question_ids),
-        )
-        .all()
-    }
-    mastery_points = {
-        mastery.concept_id: mastery.points
-        for mastery in session.query(ConceptMastery)
-        .filter(
-            ConceptMastery.learner_key == learner_key,
-            ConceptMastery.concept_id.in_(concept_ids),
-        )
-        .all()
-    }
+    answers: dict[str, PracticeAnswer] = {}
+    mastery_points: dict[str, int] = {}
+    if learner_key is not None:
+        question_ids = [question.id for question in questions]
+        answers = {
+            answer.question_id: answer
+            for answer in session.query(PracticeAnswer)
+            .filter(
+                PracticeAnswer.learner_key == learner_key,
+                PracticeAnswer.question_id.in_(question_ids),
+            )
+            .all()
+        }
+        mastery_points = {
+            mastery.concept_id: mastery.points
+            for mastery in session.query(ConceptMastery)
+            .filter(
+                ConceptMastery.learner_key == learner_key,
+                ConceptMastery.concept_id.in_(concept_ids),
+            )
+            .all()
+        }
     serialized: list[dict[str, Any]] = []
     for question in questions:
         concept = concepts[question.concept_id]
@@ -368,7 +371,9 @@ def _run_response(run: PracticeExtractionRun, status: str, message: str) -> dict
     }
 
 
-def get_assessment(course_id: str, section_id: str, learner_key: str) -> tuple[int, dict[str, Any]]:
+def get_assessment(
+    course_id: str, section_id: str, learner_key: str | None
+) -> tuple[int, dict[str, Any]]:
     session = get_session()
     try:
         section = _load_practice_section(session, course_id, section_id)
@@ -401,9 +406,6 @@ def get_assessment(course_id: str, section_id: str, learner_key: str) -> tuple[i
         if run.job_id is not None:
             job = session.get(Job, run.job_id)
             if job is not None and job.status == "failed":
-                run.status = "failed"
-                run.error = job.error
-                session.commit()
                 return 200, _run_response(run, "failed", FAILED_MESSAGE)
 
         return 202, _run_response(run, "generating", GENERATING_MESSAGE)
@@ -435,7 +437,18 @@ def start_assessment(course_id: str, section_id: str) -> tuple[int, dict[str, An
             run = _matching_run(session, course_id, section_id, fingerprint)
             if run is not None:
                 if run.status == "failed":
-                    return 200, _run_response(run, "failed", FAILED_MESSAGE)
+                    job = create_job_in_session(
+                        session,
+                        "generate_practice_assessment",
+                        {"course_id": course_id, "section_id": section_id, "run_id": run.id},
+                    )
+                    session.flush()
+                    run.status = "queued"
+                    run.error = None
+                    run.question_count = 0
+                    run.job_id = job.id
+                    session.commit()
+                    return 202, _run_response(run, "generating", GENERATING_MESSAGE)
                 return 202, _run_response(run, "generating", GENERATING_MESSAGE)
 
             run = PracticeExtractionRun(

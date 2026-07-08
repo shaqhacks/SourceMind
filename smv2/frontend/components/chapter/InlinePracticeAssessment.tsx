@@ -219,6 +219,32 @@ export default function InlinePracticeAssessment({
     [applyAssessment, courseId, isCurrentLoad, sectionId],
   );
 
+  const retryFailedAssessment = useCallback(async () => {
+    const loadSeq = loadSeqRef.current + 1;
+    loadSeqRef.current = loadSeq;
+    startedForRef.current = `${courseId}:${sectionId}`;
+    setLoading(true);
+    setStarting(true);
+    setLoadError(null);
+
+    const startResult = await startPracticeAssessment(courseId, sectionId);
+    if (!isCurrentLoad(loadSeq)) {
+      return;
+    }
+    setStarting(false);
+    setLoading(false);
+
+    if (!startResult.ok || !startResult.data) {
+      setLoadError({
+        message: "Could not restart practice questions.",
+        status: startResult.status,
+      });
+      return;
+    }
+
+    applyAssessment(startResult.data);
+  }, [applyAssessment, courseId, isCurrentLoad, sectionId]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -347,7 +373,7 @@ export default function InlinePracticeAssessment({
     return (
       <ErrorBanner
         message={assessment.message ?? "Practice question extraction failed."}
-        onRetry={() => void loadAssessment({ resetStart: true, showLoading: true })}
+        onRetry={() => void retryFailedAssessment()}
       />
     );
   }

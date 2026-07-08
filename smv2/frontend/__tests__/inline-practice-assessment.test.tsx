@@ -270,18 +270,17 @@ describe("InlinePracticeAssessment", () => {
     consoleError.mockRestore();
   });
 
-  it("shows failed extraction through ErrorBanner and retries", async () => {
-    mockedGetPracticeAssessment
-      .mockResolvedValueOnce(
-        ok(
-          makeAssessment({
-            status: "failed",
-            questions: undefined,
-            message: "Extraction failed for this section.",
-          }),
-        ),
-      )
-      .mockResolvedValueOnce(ok(makeAssessment()));
+  it("shows failed extraction through ErrorBanner and retries with POST", async () => {
+    mockedGetPracticeAssessment.mockResolvedValueOnce(
+      ok(
+        makeAssessment({
+          status: "failed",
+          questions: undefined,
+          message: "Extraction failed for this section.",
+        }),
+      ),
+    );
+    mockedStartPracticeAssessment.mockResolvedValueOnce(ok(makeAssessment()));
 
     const user = userEvent.setup();
     render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
@@ -293,7 +292,8 @@ describe("InlinePracticeAssessment", () => {
     await user.click(screen.getByRole("button", { name: /retry/i }));
 
     expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
-    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(2);
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1");
   });
 
   it("renders answered summaries as locked without resubmitting", async () => {

@@ -10,7 +10,11 @@ from app.services import practice_service
 router = APIRouter(tags=["practice"])
 
 
-def _learner_key(request: Request, response: Response) -> str:
+def _existing_learner_key(request: Request) -> str | None:
+    return request.cookies.get(practice_service.LEARNER_COOKIE)
+
+
+def _ensure_learner_key(request: Request, response: Response) -> str:
     learner_key = request.cookies.get(practice_service.LEARNER_COOKIE)
     if learner_key is not None:
         return learner_key
@@ -34,9 +38,10 @@ def _learner_key(request: Request, response: Response) -> str:
 def get_practice_assessment(
     course_id: str, section_id: str, request: Request, response: Response
 ) -> PracticeAssessmentOut:
-    learner_key = _learner_key(request, response)
     try:
-        status_code, result = practice_service.get_assessment(course_id, section_id, learner_key)
+        status_code, result = practice_service.get_assessment(
+            course_id, section_id, _existing_learner_key(request)
+        )
     except practice_service.SectionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except practice_service.NotPracticeSectionError as exc:
@@ -55,7 +60,7 @@ def get_practice_assessment(
 def start_practice_assessment(
     course_id: str, section_id: str, request: Request, response: Response
 ) -> PracticeAssessmentOut:
-    _learner_key(request, response)
+    _ensure_learner_key(request, response)
     try:
         status_code, result = practice_service.start_assessment(course_id, section_id)
     except practice_service.SectionNotFoundError as exc:
@@ -79,7 +84,7 @@ def submit_practice_answer(
     request: Request,
     response: Response,
 ) -> SubmitPracticeAnswerOut:
-    learner_key = _learner_key(request, response)
+    learner_key = _ensure_learner_key(request, response)
     try:
         result = practice_service.submit_answer(
             course_id, question_id, learner_key, body.selected_index
