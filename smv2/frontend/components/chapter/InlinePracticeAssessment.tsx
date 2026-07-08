@@ -283,10 +283,14 @@ export default function InlinePracticeAssessment({
       return;
     }
 
+    const submitSeq = loadSeqRef.current;
     setSubmitting((current) => ({ ...current, [question.id]: true }));
     setSubmitErrors((current) => ({ ...current, [question.id]: undefined }));
 
     const result = await submitPracticeAnswer(courseId, question.id, selectedIndex);
+    if (!isCurrentLoad(submitSeq)) {
+      return;
+    }
     setSubmitting((current) => ({ ...current, [question.id]: false }));
 
     if (!result.ok || !result.data) {

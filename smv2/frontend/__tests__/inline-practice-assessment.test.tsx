@@ -345,4 +345,55 @@ describe("InlinePracticeAssessment", () => {
     expect(await screen.findByText(/could not submit answer/i)).toBeInTheDocument();
     expect(choice).not.toBeDisabled();
   });
+
+  it("ignores a stale submit response after props change", async () => {
+    const oldSubmit = deferred<Awaited<ReturnType<typeof submitPracticeAnswer>>>();
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(ok(makeAssessment()))
+      .mockResolvedValueOnce(ok(makeAssessment({ section_id: "section-2" })));
+    mockedSubmitPracticeAnswer.mockReturnValueOnce(oldSubmit.promise);
+
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <InlinePracticeAssessment courseId="course-1" sectionId="section-1" />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "4 N" }));
+    expect(mockedSubmitPracticeAnswer).toHaveBeenCalledWith("course-1", "question-1", 0);
+
+    rerender(<InlinePracticeAssessment courseId="course-1" sectionId="section-2" />);
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
+
+    oldSubmit.resolve(ok(makeSubmitAnswer()));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Incorrect")).not.toBeInTheDocument();
+    expect(screen.queryByText(/textbook relationship/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "4 N" })).not.toBeDisabled();
+  });
+
+  it("does not update state after unmount during submit", async () => {
+    const oldSubmit = deferred<Awaited<ReturnType<typeof submitPracticeAnswer>>>();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockedGetPracticeAssessment.mockResolvedValue(ok(makeAssessment()));
+    mockedSubmitPracticeAnswer.mockReturnValueOnce(oldSubmit.promise);
+
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <InlinePracticeAssessment courseId="course-1" sectionId="section-1" />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "4 N" }));
+    unmount();
+
+    oldSubmit.resolve(ok(makeSubmitAnswer()));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
 });
