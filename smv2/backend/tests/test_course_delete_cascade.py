@@ -9,8 +9,14 @@ from app.db.models import (
     Card,
     ChatTurn,
     Chunk,
+    Concept,
+    ConceptMastery,
+    ConceptMasteryEvent,
     Course,
     LlmCall,
+    PracticeAnswer,
+    PracticeExtractionRun,
+    PracticeQuestion,
     ProgressState,
     ReviewLog,
     ReviewState,
@@ -90,6 +96,62 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
             id=str(uuid.uuid4()), course_id=course.id, section_id=section.id, questions=[{"q": 1}]
         )
         test_attempt = TestAttempt(id=str(uuid.uuid4()), test_id=test.id, course_id=course.id)
+        concept = Concept(
+            course_id=course.id,
+            slug="cascade.concept",
+            label="Cascade Concept",
+            section_id=section.id,
+        )
+        session.add(concept)
+        session.flush()
+        practice_question = PracticeQuestion(
+            course_id=course.id,
+            section_id=section.id,
+            concept_id=concept.id,
+            problem_number="1",
+            source_ref="Practice #1",
+            stem_md="2 + 2?",
+            choices=["3", "4"],
+            correct_index=1,
+            explanation_md="2 + 2 = 4.",
+            source_fingerprint="cascade-practice-question",
+            extraction_version="test",
+            confidence=1.0,
+        )
+        extraction_run = PracticeExtractionRun(
+            course_id=course.id,
+            section_id=section.id,
+            input_fingerprint="cascade-practice-run",
+            question_count=1,
+        )
+        session.add_all([practice_question, extraction_run])
+        session.flush()
+        practice_answer = PracticeAnswer(
+            course_id=course.id,
+            question_id=practice_question.id,
+            learner_key="learner",
+            selected_index=1,
+            correct=True,
+            points_delta=1,
+        )
+        mastery = ConceptMastery(
+            course_id=course.id,
+            concept_id=concept.id,
+            learner_key="learner",
+            points=1,
+            correct_count=1,
+            wrong_count=0,
+        )
+        session.add_all([practice_answer, mastery])
+        session.flush()
+        mastery_event = ConceptMasteryEvent(
+            course_id=course.id,
+            concept_id=concept.id,
+            question_id=practice_question.id,
+            practice_answer_id=practice_answer.id,
+            learner_key="learner",
+            delta=1,
+        )
         llm_call = LlmCall(
             id=str(uuid.uuid4()),
             ts=datetime.now(timezone.utc),
@@ -101,7 +163,18 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
             status="ok",
             course_id=course.id,
         )
-        session.add_all([review_state, review_log, progress, chat_turn, test, test_attempt, llm_call])
+        session.add_all(
+            [
+                review_state,
+                review_log,
+                progress,
+                chat_turn,
+                test,
+                test_attempt,
+                mastery_event,
+                llm_call,
+            ]
+        )
         session.commit()
 
         course_id = course.id
@@ -125,6 +198,12 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         assert session.query(ChatTurn).filter_by(course_id=course_id).count() == 0
         assert session.query(Test).filter_by(course_id=course_id).count() == 0
         assert session.query(TestAttempt).filter_by(course_id=course_id).count() == 0
+        assert session.query(Concept).filter_by(course_id=course_id).count() == 0
+        assert session.query(PracticeQuestion).filter_by(course_id=course_id).count() == 0
+        assert session.query(PracticeExtractionRun).filter_by(course_id=course_id).count() == 0
+        assert session.query(PracticeAnswer).filter_by(course_id=course_id).count() == 0
+        assert session.query(ConceptMastery).filter_by(course_id=course_id).count() == 0
+        assert session.query(ConceptMasteryEvent).filter_by(course_id=course_id).count() == 0
 
         surviving_llm_call = session.get(LlmCall, llm_call_id)
         assert surviving_llm_call is not None

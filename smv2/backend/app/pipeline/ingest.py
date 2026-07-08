@@ -36,7 +36,22 @@ from sqlalchemy.orm import Session
 from app.config import data_dir, html_conversion_enabled, pages_per_window
 from app.config import skip_front_matter as _skip_front_matter_enabled
 from app.db.identity import content_hash_for, normalize_text, section_id_for
-from app.db.models import Asset, ChatTurn, Chunk, Course, Job, Section, Test, TestAttempt
+from app.db.models import (
+    Asset,
+    ChatTurn,
+    Chunk,
+    Concept,
+    ConceptMastery,
+    ConceptMasteryEvent,
+    Course,
+    Job,
+    PracticeAnswer,
+    PracticeExtractionRun,
+    PracticeQuestion,
+    Section,
+    Test,
+    TestAttempt,
+)
 from app.pipeline._common import report_progress as _report_progress
 from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline.chunking import chunk_pages
@@ -395,6 +410,14 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     # relying on cascade ordering to do it implicitly.
     session.query(TestAttempt).filter(TestAttempt.course_id == course_id).delete()
     session.query(Test).filter(Test.course_id == course_id).delete()
+    session.query(PracticeAnswer).filter(PracticeAnswer.course_id == course_id).delete()
+    session.query(ConceptMasteryEvent).filter(ConceptMasteryEvent.course_id == course_id).delete()
+    session.query(ConceptMastery).filter(ConceptMastery.course_id == course_id).delete()
+    session.query(PracticeQuestion).filter(PracticeQuestion.course_id == course_id).delete()
+    session.query(PracticeExtractionRun).filter(
+        PracticeExtractionRun.course_id == course_id
+    ).delete()
+    session.query(Concept).filter(Concept.course_id == course_id).delete()
 
     for existing_id, existing in list(existing_sections.items()):
         if existing_id not in new_ids:

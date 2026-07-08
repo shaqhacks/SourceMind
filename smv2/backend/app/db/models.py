@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     JSON,
     DateTime,
     Float,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     event,
 )
 from sqlalchemy import inspect as sa_inspect
@@ -321,6 +323,167 @@ class TestAttempt(Base):
     answers: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     results: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class Concept(Base):
+    __tablename__ = "concepts"
+    __table_args__ = (UniqueConstraint("course_id", "slug", name="uq_concepts_course_slug"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    slug: Mapped[str] = mapped_column(String, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    chapter_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    section_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("sections.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class PracticeQuestion(Base):
+    __tablename__ = "practice_questions"
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id",
+            "section_id",
+            "source_fingerprint",
+            name="uq_practice_questions_source",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    chapter_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    section_id: Mapped[str] = mapped_column(
+        String, ForeignKey("sections.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    source_asset_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("assets.id", ondelete="SET NULL"), nullable=True
+    )
+    source_page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    problem_number: Mapped[str] = mapped_column(String, nullable=False)
+    source_ref: Mapped[str] = mapped_column(String, nullable=False)
+    answer_section_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("sections.id", ondelete="SET NULL"), nullable=True
+    )
+    answer_source_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    stem_md: Mapped[str] = mapped_column(Text, nullable=False)
+    choices: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    correct_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    explanation_md: Mapped[str] = mapped_column(Text, nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    extraction_version: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="ready")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class PracticeExtractionRun(Base):
+    __tablename__ = "practice_extraction_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id",
+            "section_id",
+            "input_fingerprint",
+            name="uq_practice_runs_input",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    section_id: Mapped[str] = mapped_column(
+        String, ForeignKey("sections.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="queued")
+    job_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True
+    )
+    input_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    question_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class PracticeAnswer(Base):
+    __tablename__ = "practice_answers"
+    __table_args__ = (
+        UniqueConstraint(
+            "learner_key",
+            "question_id",
+            name="uq_practice_answers_learner_question",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    question_id: Mapped[str] = mapped_column(
+        String, ForeignKey("practice_questions.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    learner_key: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    selected_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    points_delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    answered_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class ConceptMastery(Base):
+    __tablename__ = "concept_masteries"
+
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), primary_key=True
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), primary_key=True
+    )
+    learner_key: Mapped[str] = mapped_column(String, primary_key=True)
+    points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    correct_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    wrong_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class ConceptMasteryEvent(Base):
+    __tablename__ = "concept_mastery_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    question_id: Mapped[str] = mapped_column(
+        String, ForeignKey("practice_questions.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    practice_answer_id: Mapped[str] = mapped_column(
+        String, ForeignKey("practice_answers.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    learner_key: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    delta: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 

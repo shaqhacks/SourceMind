@@ -15,7 +15,13 @@ from app.db.models import (
     Card,
     ChatTurn,
     Chunk,
+    Concept,
+    ConceptMastery,
+    ConceptMasteryEvent,
     LlmCall,
+    PracticeAnswer,
+    PracticeExtractionRun,
+    PracticeQuestion,
     ProgressState,
     ReviewLog,
     ReviewState,
@@ -25,7 +31,21 @@ from app.db.models import (
 )
 
 # Deleted and regenerated wholesale every time a course is re-ingested.
-REPLACED_ON_REINGEST = [Asset, Section, Chunk, Card, ChatTurn, Test, TestAttempt]
+REPLACED_ON_REINGEST = [
+    Asset,
+    Section,
+    Chunk,
+    Card,
+    ChatTurn,
+    Test,
+    TestAttempt,
+    PracticeAnswer,
+    ConceptMasteryEvent,
+    ConceptMastery,
+    PracticeQuestion,
+    PracticeExtractionRun,
+    Concept,
+]
 
 # Survive re-ingest by remapping onto the new content-addressed ids (spaced
 # repetition history must not reset just because the PDF was re-uploaded).
