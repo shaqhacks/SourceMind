@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.engine import get_session
@@ -239,6 +240,93 @@ def test_submit_answer_retries_mastery_collision_for_different_question(client, 
     assert result["mastery_points"] == 2
     assert result["already_answered"] is False
     assert calls == 2
+
+    session = get_session()
+    try:
+        assert session.query(PracticeAnswer).count() == 2
+        assert session.query(ConceptMasteryEvent).count() == 2
+        mastery = session.query(ConceptMastery).one()
+        assert mastery.correct_count == 2
+        assert mastery.wrong_count == 0
+        assert mastery.points == 2
+    finally:
+        session.close()
+
+
+def test_submit_answer_uses_atomic_mastery_increment_for_existing_row(client, monkeypatch):
+    first_question_id, second_question_id, course_id = (
+        seed_two_ready_practice_questions_same_concept()
+    )
+    learner_key = "learner-1"
+
+    session = get_session()
+    try:
+        first_question = session.get(PracticeQuestion, first_question_id)
+        assert first_question is not None
+        mastery = ConceptMastery(
+            course_id=course_id,
+            concept_id=first_question.concept_id,
+            learner_key=learner_key,
+            points=0,
+            correct_count=0,
+            wrong_count=0,
+        )
+        session.add(mastery)
+        session.commit()
+    finally:
+        session.close()
+
+    original_get_mastery = practice_service._get_mastery
+    simulated_once = False
+
+    def simulate_concurrent_increment(session, course_id, concept_id, learner_key):
+        nonlocal simulated_once
+        mastery = original_get_mastery(session, course_id, concept_id, learner_key)
+        if not simulated_once:
+            simulated_once = True
+            answer = PracticeAnswer(
+                course_id=course_id,
+                question_id=first_question_id,
+                learner_key=learner_key,
+                selected_index=0,
+                correct=True,
+                points_delta=1,
+            )
+            session.add(answer)
+            session.flush()
+            session.add(
+                ConceptMasteryEvent(
+                    course_id=course_id,
+                    concept_id=concept_id,
+                    question_id=first_question_id,
+                    practice_answer_id=answer.id,
+                    learner_key=learner_key,
+                    delta=1,
+                )
+            )
+            session.execute(
+                update(ConceptMastery)
+                .where(
+                    ConceptMastery.course_id == course_id,
+                    ConceptMastery.concept_id == concept_id,
+                    ConceptMastery.learner_key == learner_key,
+                )
+                .values(
+                    points=ConceptMastery.points + 1,
+                    correct_count=ConceptMastery.correct_count + 1,
+                )
+                .execution_options(synchronize_session=False)
+            )
+        return mastery
+
+    monkeypatch.setattr(practice_service, "_get_mastery", simulate_concurrent_increment)
+
+    result = practice_service.submit_answer(course_id, second_question_id, learner_key, 0)
+
+    assert result["question_id"] == second_question_id
+    assert result["correct"] is True
+    assert result["points_delta"] == 1
+    assert result["mastery_points"] == 2
 
     session = get_session()
     try:

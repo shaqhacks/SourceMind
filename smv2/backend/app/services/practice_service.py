@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,7 @@ from app.db.models import (
     PracticeExtractionRun,
     PracticeQuestion,
     Section,
+    utcnow,
 )
 from app.services.jobs_service import create_job_in_session
 
@@ -166,6 +168,34 @@ def _get_mastery(
     return mastery
 
 
+def _apply_mastery_delta(
+    session: Session,
+    course_id: str,
+    concept_id: str,
+    learner_key: str,
+    delta: int,
+    correct: bool,
+) -> ConceptMastery:
+    mastery = _get_mastery(session, course_id, concept_id, learner_key)
+    session.execute(
+        update(ConceptMastery)
+        .where(
+            ConceptMastery.course_id == course_id,
+            ConceptMastery.concept_id == concept_id,
+            ConceptMastery.learner_key == learner_key,
+        )
+        .values(
+            points=ConceptMastery.points + delta,
+            correct_count=ConceptMastery.correct_count + (1 if correct else 0),
+            wrong_count=ConceptMastery.wrong_count + (0 if correct else 1),
+            updated_at=utcnow(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    session.refresh(mastery)
+    return mastery
+
+
 def _answer_payload(
     session: Session,
     question: PracticeQuestion,
@@ -257,12 +287,14 @@ def submit_answer(
                 session.add(answer)
                 session.flush()
 
-                mastery = _get_mastery(session, course_id, question.concept_id, learner_key)
-                mastery.points += delta
-                if correct:
-                    mastery.correct_count += 1
-                else:
-                    mastery.wrong_count += 1
+                mastery = _apply_mastery_delta(
+                    session,
+                    course_id,
+                    question.concept_id,
+                    learner_key,
+                    delta,
+                    correct,
+                )
 
                 session.add(
                     ConceptMasteryEvent(
