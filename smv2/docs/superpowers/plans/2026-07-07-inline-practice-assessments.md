@@ -434,10 +434,22 @@ def _course_with_practice_section() -> tuple[str, str]:
         session.close()
 
 
-def test_get_practice_assessment_starts_lazy_generation(client):
+def test_get_practice_assessment_reports_not_started_without_side_effect(client):
     course_id, section_id = _course_with_practice_section()
 
     response = client.get(f"/api/courses/{course_id}/sections/{section_id}/practice-assessment")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "not_started"
+    assert body["run_id"] is None
+    assert body["job_id"] is None
+
+
+def test_start_practice_assessment_starts_lazy_generation(client):
+    course_id, section_id = _course_with_practice_section()
+
+    response = client.post(f"/api/courses/{course_id}/sections/{section_id}/practice-assessment")
 
     assert response.status_code == 202
     body = response.json()
@@ -515,7 +527,7 @@ class PracticeQuestionOut(BaseModel):
 
 
 class PracticeAssessmentOut(BaseModel):
-    status: Literal["ready", "generating", "failed"]
+    status: Literal["ready", "generating", "failed", "not_started"]
     section_id: str
     questions: list[PracticeQuestionOut] = Field(default_factory=list)
     run_id: str | None = None
@@ -597,7 +609,7 @@ def _answer_sections(session: Session, section: Section) -> list[Section]:
     )
 
 
-def get_or_start_assessment(course_id: str, section_id: str, learner_key: str) -> tuple[int, dict[str, Any]]:
+def get_assessment(course_id: str, section_id: str, learner_key: str) -> tuple[int, dict[str, Any]]:
     session = get_session()
     try:
         section = session.get(Section, section_id)
@@ -623,34 +635,22 @@ def get_or_start_assessment(course_id: str, section_id: str, learner_key: str) -
                 "questions": _serialize_questions(session, questions, learner_key),
             }
 
-        answers = _answer_sections(session, section)
-        fingerprint = _fingerprint_for(section, answers)
         run = (
             session.query(PracticeExtractionRun)
             .filter(
                 PracticeExtractionRun.course_id == course_id,
                 PracticeExtractionRun.section_id == section_id,
-                PracticeExtractionRun.input_fingerprint == fingerprint,
             )
+            .order_by(PracticeExtractionRun.created_at.desc())
             .first()
         )
         if run is None:
-            run = PracticeExtractionRun(
-                course_id=course_id,
-                section_id=section_id,
-                status="queued",
-                input_fingerprint=fingerprint,
-            )
-            session.add(run)
-            session.flush()
-            job = create_job_in_session(
-                session,
-                "generate_practice_assessment",
-                {"course_id": course_id, "section_id": section_id, "run_id": run.id},
-            )
-            run.job_id = job.id
-            session.commit()
-        elif run.status == "failed":
+            return 200, {
+                "status": "not_started",
+                "section_id": section_id,
+                "message": "Practice questions have not been extracted yet.",
+            }
+        if run.status == "failed":
             return 200, {
                 "status": "failed",
                 "section_id": section_id,
@@ -678,9 +678,55 @@ def get_or_start_assessment(course_id: str, section_id: str, learner_key: str) -
             "job_id": run.job_id,
             "message": "Practice questions are being extracted from the textbook.",
         }
+    finally:
+        session.close()
+
+
+def start_assessment(course_id: str, section_id: str) -> tuple[int, dict[str, Any]]:
+    session = get_session()
+    try:
+        section = session.get(Section, section_id)
+        if section is None or section.course_id != course_id:
+            raise SectionNotFoundError("section not found")
+        if section.kind != "practice":
+            raise NotPracticeSectionError("section is not a practice section")
+        answers = _answer_sections(session, section)
+        fingerprint = _fingerprint_for(section, answers)
+        run = (
+            session.query(PracticeExtractionRun)
+            .filter(
+                PracticeExtractionRun.course_id == course_id,
+                PracticeExtractionRun.section_id == section_id,
+                PracticeExtractionRun.input_fingerprint == fingerprint,
+            )
+            .first()
+        )
+        if run is None:
+            run = PracticeExtractionRun(
+                course_id=course_id,
+                section_id=section_id,
+                status="queued",
+                input_fingerprint=fingerprint,
+            )
+            session.add(run)
+            session.flush()
+            job = create_job_in_session(
+                session,
+                "generate_practice_assessment",
+                {"course_id": course_id, "section_id": section_id, "run_id": run.id},
+            )
+            run.job_id = job.id
+            session.commit()
+        return 202, {
+            "status": "generating",
+            "section_id": section_id,
+            "run_id": run.id,
+            "job_id": run.job_id,
+            "message": "Practice questions are being extracted from the textbook.",
+        }
     except IntegrityError:
         session.rollback()
-        return get_or_start_assessment(course_id, section_id, learner_key)
+        return start_assessment(course_id, section_id)
     finally:
         session.close()
 ```
@@ -730,12 +776,31 @@ def get_practice_assessment(
 ) -> PracticeAssessmentOut:
     learner_key = _learner_key(request, response)
     try:
-        status_code, payload = practice_service.get_or_start_assessment(course_id, section_id, learner_key)
+        status_code, payload = practice_service.get_assessment(course_id, section_id, learner_key)
     except practice_service.SectionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except practice_service.NotPracticeSectionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     response.status_code = status_code
+    return PracticeAssessmentOut.model_validate(payload)
+
+
+@router.post(
+    "/api/courses/{course_id}/sections/{section_id}/practice-assessment",
+    operation_id="start_practice_assessment",
+    status_code=202,
+    response_model=PracticeAssessmentOut,
+)
+def start_practice_assessment(
+    course_id: str,
+    section_id: str,
+) -> PracticeAssessmentOut:
+    try:
+        status_code, payload = practice_service.start_assessment(course_id, section_id)
+    except practice_service.SectionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except practice_service.NotPracticeSectionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return PracticeAssessmentOut.model_validate(payload)
 ```
 
@@ -1072,7 +1137,7 @@ In `backend/tests/conftest.py`, add `"app.pipeline.practice_extraction.get_provi
 
 - [ ] **Step 5: Add failed run polling behavior**
 
-Do not try to mark `PracticeExtractionRun` as failed inside the job handler immediately before re-raising. The worker rolls back the handler session when an exception escapes, so that update would be lost. Instead, keep the raised exception so the linked `Job` becomes `failed`, and make `practice_service.get_or_start_assessment` detect a linked failed job on the next poll:
+Do not try to mark `PracticeExtractionRun` as failed inside the job handler immediately before re-raising. The worker rolls back the handler session when an exception escapes, so that update would be lost. Instead, keep the raised exception so the linked `Job` becomes `failed`, and make `practice_service.get_assessment` detect a linked failed job on the next poll:
 
 ```python
 job = session.get(Job, run.job_id) if run.job_id else None
@@ -1354,6 +1419,14 @@ export function getPracticeAssessment(courseId: string, sectionId: string) {
   );
 }
 
+export function startPracticeAssessment(courseId: string, sectionId: string) {
+  return request(
+    client.POST("/api/courses/{course_id}/sections/{section_id}/practice-assessment", {
+      params: { path: { course_id: courseId, section_id: sectionId } },
+    }),
+  );
+}
+
 export function submitPracticeAnswer(courseId: string, questionId: string, selectedIndex: number) {
   return request(
     client.POST("/api/courses/{course_id}/practice-questions/{question_id}/answer", {
@@ -1399,16 +1472,18 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import InlinePracticeAssessment from "@/components/chapter/InlinePracticeAssessment";
-import { getPracticeAssessment, submitPracticeAnswer } from "@/lib/api/client";
+import { getPracticeAssessment, startPracticeAssessment, submitPracticeAnswer } from "@/lib/api/client";
 
 import { ok } from "./support/api-result";
 
 vi.mock("@/lib/api/client", () => ({
   getPracticeAssessment: vi.fn(),
+  startPracticeAssessment: vi.fn(),
   submitPracticeAnswer: vi.fn(),
 }));
 
 const mockedGetPracticeAssessment = vi.mocked(getPracticeAssessment);
+const mockedStartPracticeAssessment = vi.mocked(startPracticeAssessment);
 const mockedSubmitPracticeAnswer = vi.mocked(submitPracticeAnswer);
 
 describe("InlinePracticeAssessment", () => {
@@ -1478,6 +1553,44 @@ describe("InlinePracticeAssessment", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent(/extracted from the textbook/i);
   });
+
+  it("starts extraction with POST when the read-only status is not_started", async () => {
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(
+        ok({
+          status: "not_started",
+          section_id: "section-1",
+          questions: [],
+          run_id: null,
+          job_id: null,
+          message: "Practice questions have not been extracted yet.",
+        }),
+      )
+      .mockResolvedValueOnce(
+        ok({
+          status: "generating",
+          section_id: "section-1",
+          questions: [],
+          run_id: "run-1",
+          job_id: "job-1",
+          message: "Practice questions are being extracted from the textbook.",
+        }, 202),
+      );
+    mockedStartPracticeAssessment.mockResolvedValue(
+      ok({
+        status: "generating",
+        section_id: "section-1",
+        questions: [],
+        run_id: "run-1",
+        job_id: "job-1",
+        message: "Practice questions are being extracted from the textbook.",
+      }, 202),
+    );
+
+    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+
+    await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1"));
+  });
 });
 ```
 
@@ -1505,6 +1618,7 @@ import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   getPracticeAssessment,
+  startPracticeAssessment,
   submitPracticeAnswer,
   type PracticeAssessmentOut,
   type SubmitPracticeAnswerOut,
@@ -1525,15 +1639,10 @@ export default function InlinePracticeAssessment({ courseId, sectionId }: Inline
   const [answers, setAnswers] = useState<Record<string, SubmitPracticeAnswerOut>>({});
   const [submittingId, setSubmittingId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const { data, status } = await getPracticeAssessment(courseId, sectionId);
-    if (!data) {
-      setState({ kind: "error", error: describeError(status, "Loading practice questions") });
-      return;
-    }
-    setState({ kind: "ready", assessment: data });
+  const applyAssessment = useCallback((assessment: PracticeAssessmentOut) => {
+    setState({ kind: "ready", assessment });
     const restored: Record<string, SubmitPracticeAnswerOut> = {};
-    for (const question of data.questions) {
+    for (const question of assessment.questions) {
       if (question.answered) {
         restored[question.id] = {
           question_id: question.id,
@@ -1549,7 +1658,16 @@ export default function InlinePracticeAssessment({ courseId, sectionId }: Inline
       }
     }
     setAnswers(restored);
-  }, [courseId, sectionId]);
+  }, []);
+
+  const load = useCallback(async () => {
+    const { data, status } = await getPracticeAssessment(courseId, sectionId);
+    if (!data) {
+      setState({ kind: "error", error: describeError(status, "Loading practice questions") });
+      return;
+    }
+    applyAssessment(data);
+  }, [applyAssessment, courseId, sectionId]);
 
   useEffect(() => {
     let active = true;
@@ -1558,13 +1676,24 @@ export default function InlinePracticeAssessment({ courseId, sectionId }: Inline
       if (!data) {
         setState({ kind: "error", error: describeError(status, "Loading practice questions") });
       } else {
-        setState({ kind: "ready", assessment: data });
+        applyAssessment(data);
       }
     });
     return () => {
       active = false;
     };
-  }, [courseId, sectionId]);
+  }, [applyAssessment, courseId, sectionId]);
+
+  useEffect(() => {
+    if (state.kind !== "ready" || state.assessment.status !== "not_started") return;
+    let active = true;
+    startPracticeAssessment(courseId, sectionId).then(({ data }) => {
+      if (active && data) applyAssessment(data);
+    });
+    return () => {
+      active = false;
+    };
+  }, [applyAssessment, courseId, sectionId, state]);
 
   useEffect(() => {
     if (state.kind !== "ready" || state.assessment.status !== "generating") return;
@@ -1587,6 +1716,9 @@ export default function InlinePracticeAssessment({ courseId, sectionId }: Inline
   }
   if (state.assessment.status === "generating") {
     return <p role="status" className="text-sm text-muted-foreground">{state.assessment.message ?? "Extracting practice questions..."}</p>;
+  }
+  if (state.assessment.status === "not_started") {
+    return <p role="status" className="text-sm text-muted-foreground">Preparing practice questions...</p>;
   }
   if (state.assessment.status === "failed") {
     return <ErrorBanner message={state.assessment.message ?? "Practice extraction failed."} onRetry={() => void load()} />;

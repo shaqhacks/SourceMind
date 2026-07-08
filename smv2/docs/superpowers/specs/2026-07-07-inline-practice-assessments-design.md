@@ -151,16 +151,18 @@ The aggregate `concept_masteries.points` is updated from these events. Version o
 1. The frontend requests practice assessment data for a section.
 2. The backend checks for `ready` `practice_questions` for that course and section.
 3. If questions exist, return them without correct answers.
-4. If questions do not exist, compute an input fingerprint from:
+4. If questions do not exist and no extraction run exists, return `not_started`.
+5. The frontend starts extraction with a state-changing `POST`.
+6. The backend computes an input fingerprint from:
    - practice section id and `content_hash`
    - practice source page range
    - chapter answer sections and their `content_hash`
    - extraction version
-5. If a matching extraction run is already `queued` or `running`, return `generating`.
-6. If no active run exists, create a `practice_extraction_runs` row and enqueue a job.
-7. The job extracts only the problems and matching answers needed for the requested section.
-8. The job stores `concepts` and `practice_questions`.
-9. The frontend polls until the status is `ready`, then displays the questions.
+7. If a matching extraction run is already `queued` or `running`, return `generating`.
+8. If no active run exists, create a `practice_extraction_runs` row and enqueue a job.
+9. The job extracts only the problems and matching answers needed for the requested section.
+10. The job stores `concepts` and `practice_questions`.
+11. The frontend polls the read-only `GET` endpoint until the status is `ready`, then displays the questions.
 
 The extractor may use an LLM to structure messy textbook text, assign concepts, generate explanations, and create distractor choices. The correct answer must come from the textbook answer-key mapping. If the answer key cannot be mapped with acceptable confidence, that problem is excluded from gradeable questions or marked `low_confidence` for later review.
 
@@ -168,7 +170,7 @@ The extractor may use an LLM to structure messy textbook text, assign concepts, 
 
 ### `GET /api/courses/{course_id}/sections/{section_id}/practice-assessment`
 
-Returns the current lazy extraction state.
+Returns the current extraction state. This endpoint is read-only and must not create jobs or mutate database state.
 
 Ready response:
 
@@ -194,7 +196,24 @@ Failed response:
 - `status: "failed"`
 - `message`
 
+Not-started response:
+
+- `status: "not_started"`
+- `message`
+
 This endpoint must never include `correct_index` for unanswered questions.
+
+### `POST /api/courses/{course_id}/sections/{section_id}/practice-assessment`
+
+Idempotently starts lazy extraction for a practice section. If an equivalent extraction run already exists, returns that run instead of creating another. This state-changing endpoint replaces the earlier side-effecting GET design so page loads, crawlers, and prefetches cannot create jobs.
+
+Response:
+
+- `status: "generating"` or `status: "failed"`
+- `section_id`
+- `run_id`
+- `job_id`
+- `message`
 
 ### `POST /api/courses/{course_id}/practice-questions/{question_id}/answer`
 
