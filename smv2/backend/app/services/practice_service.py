@@ -13,7 +13,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.engine import get_session
-from app.db.models import Concept, Job, PracticeExtractionRun, PracticeQuestion, Section
+from app.db.models import (
+    Concept,
+    ConceptMastery,
+    ConceptMasteryEvent,
+    Job,
+    PracticeAnswer,
+    PracticeExtractionRun,
+    PracticeQuestion,
+    Section,
+)
 from app.services.jobs_service import create_job_in_session
 
 EXTRACTION_VERSION = "v3"
@@ -29,6 +38,14 @@ class SectionNotFoundError(ValueError):
 
 
 class NotPracticeSectionError(ValueError):
+    pass
+
+
+class PracticeQuestionNotFoundError(ValueError):
+    pass
+
+
+class InvalidChoiceError(ValueError):
     pass
 
 
@@ -72,15 +89,45 @@ def _fingerprint_for(section: Section, answer_sections: list[Section]) -> str:
 def _serialize_questions(
     session: Session, questions: list[PracticeQuestion], learner_key: str
 ) -> list[dict[str, Any]]:
-    _ = learner_key
     concept_ids = {question.concept_id for question in questions}
     concepts = {
         concept.id: concept
         for concept in session.query(Concept).filter(Concept.id.in_(concept_ids)).all()
     }
+    question_ids = [question.id for question in questions]
+    answers = {
+        answer.question_id: answer
+        for answer in session.query(PracticeAnswer)
+        .filter(
+            PracticeAnswer.learner_key == learner_key,
+            PracticeAnswer.question_id.in_(question_ids),
+        )
+        .all()
+    }
+    mastery_points = {
+        mastery.concept_id: mastery.points
+        for mastery in session.query(ConceptMastery)
+        .filter(
+            ConceptMastery.learner_key == learner_key,
+            ConceptMastery.concept_id.in_(concept_ids),
+        )
+        .all()
+    }
     serialized: list[dict[str, Any]] = []
     for question in questions:
         concept = concepts[question.concept_id]
+        answer = answers.get(question.id)
+        answered = None
+        if answer is not None:
+            answered = {
+                "selected_index": answer.selected_index,
+                "correct": answer.correct,
+                "correct_index": question.correct_index,
+                "explanation_md": question.explanation_md,
+                "points_delta": answer.points_delta,
+                "mastery_points": mastery_points.get(question.concept_id, 0),
+                "answered_at": answer.answered_at,
+            }
         serialized.append(
             {
                 "id": question.id,
@@ -93,10 +140,158 @@ def _serialize_questions(
                     "slug": concept.slug,
                     "label": concept.label,
                 },
-                "answered": None,
+                "answered": answered,
             }
         )
     return serialized
+
+
+def _get_mastery(
+    session: Session, course_id: str, concept_id: str, learner_key: str
+) -> ConceptMastery:
+    mastery = session.get(ConceptMastery, (course_id, concept_id, learner_key))
+    if mastery is not None:
+        return mastery
+
+    mastery = ConceptMastery(
+        course_id=course_id,
+        concept_id=concept_id,
+        learner_key=learner_key,
+        points=0,
+        correct_count=0,
+        wrong_count=0,
+    )
+    session.add(mastery)
+    session.flush()
+    return mastery
+
+
+def _answer_payload(
+    session: Session,
+    question: PracticeQuestion,
+    answer: PracticeAnswer,
+    mastery_points: int,
+    already_answered: bool,
+) -> dict[str, Any]:
+    concept = session.get(Concept, question.concept_id)
+    if concept is None:
+        raise PracticeQuestionNotFoundError("practice question not found")
+    return {
+        "question_id": question.id,
+        "selected_index": answer.selected_index,
+        "correct": answer.correct,
+        "correct_index": question.correct_index,
+        "explanation_md": question.explanation_md,
+        "concept": {
+            "id": concept.id,
+            "slug": concept.slug,
+            "label": concept.label,
+        },
+        "points_delta": answer.points_delta,
+        "mastery_points": mastery_points,
+        "already_answered": already_answered,
+    }
+
+
+def _load_existing_answer_payload(
+    session: Session, question: PracticeQuestion, learner_key: str
+) -> dict[str, Any] | None:
+    answer = (
+        session.query(PracticeAnswer)
+        .filter(
+            PracticeAnswer.learner_key == learner_key,
+            PracticeAnswer.question_id == question.id,
+        )
+        .one_or_none()
+    )
+    if answer is None:
+        return None
+
+    mastery = session.get(ConceptMastery, (question.course_id, question.concept_id, learner_key))
+    return _answer_payload(
+        session,
+        question,
+        answer,
+        mastery.points if mastery is not None else 0,
+        already_answered=True,
+    )
+
+
+def submit_answer(
+    course_id: str, question_id: str, learner_key: str, selected_index: int
+) -> dict[str, Any]:
+    session = get_session()
+    try:
+        question = (
+            session.query(PracticeQuestion)
+            .filter(
+                PracticeQuestion.id == question_id,
+                PracticeQuestion.course_id == course_id,
+            )
+            .one_or_none()
+        )
+        if question is None:
+            raise PracticeQuestionNotFoundError("practice question not found")
+
+        if type(selected_index) is not int or not 0 <= selected_index < len(question.choices):
+            raise InvalidChoiceError("selected_index is out of range")
+
+        existing = _load_existing_answer_payload(session, question, learner_key)
+        if existing is not None:
+            return existing
+
+        correct = selected_index == question.correct_index
+        delta = 1 if correct else -1
+        answer = PracticeAnswer(
+            course_id=course_id,
+            question_id=question.id,
+            learner_key=learner_key,
+            selected_index=selected_index,
+            correct=correct,
+            points_delta=delta,
+        )
+        session.add(answer)
+        session.flush()
+
+        mastery = _get_mastery(session, course_id, question.concept_id, learner_key)
+        mastery.points += delta
+        if correct:
+            mastery.correct_count += 1
+        else:
+            mastery.wrong_count += 1
+
+        session.add(
+            ConceptMasteryEvent(
+                course_id=course_id,
+                concept_id=question.concept_id,
+                question_id=question.id,
+                practice_answer_id=answer.id,
+                learner_key=learner_key,
+                delta=delta,
+            )
+        )
+        session.commit()
+        return _answer_payload(
+            session, question, answer, mastery.points, already_answered=False
+        )
+    except IntegrityError:
+        session.rollback()
+        question = (
+            session.query(PracticeQuestion)
+            .filter(
+                PracticeQuestion.id == question_id,
+                PracticeQuestion.course_id == course_id,
+            )
+            .one_or_none()
+        )
+        if question is None:
+            raise PracticeQuestionNotFoundError("practice question not found")
+        existing = _load_existing_answer_payload(session, question, learner_key)
+        if existing is None:
+            raise
+        return existing
+    finally:
+        session.close()
 
 
 def _ready_questions(session: Session, course_id: str, section_id: str) -> list[PracticeQuestion]:

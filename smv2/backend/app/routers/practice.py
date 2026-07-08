@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from app.schemas import PracticeAssessmentOut
+from app.schemas import PracticeAssessmentOut, SubmitPracticeAnswerIn, SubmitPracticeAnswerOut
 from app.services import practice_service
 
 router = APIRouter(tags=["practice"])
@@ -65,3 +65,28 @@ def start_practice_assessment(
 
     response.status_code = status_code
     return PracticeAssessmentOut.model_validate(result)
+
+
+@router.post(
+    "/api/courses/{course_id}/practice-questions/{question_id}/answer",
+    operation_id="submit_practice_answer",
+    response_model=SubmitPracticeAnswerOut,
+)
+def submit_practice_answer(
+    course_id: str,
+    question_id: str,
+    body: SubmitPracticeAnswerIn,
+    request: Request,
+    response: Response,
+) -> SubmitPracticeAnswerOut:
+    learner_key = _learner_key(request, response)
+    try:
+        result = practice_service.submit_answer(
+            course_id, question_id, learner_key, body.selected_index
+        )
+    except practice_service.PracticeQuestionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except practice_service.InvalidChoiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return SubmitPracticeAnswerOut.model_validate(result)

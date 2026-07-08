@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 
+from fastapi.testclient import TestClient
+
 from app.db.engine import get_session
 from app.db.models import Concept, Course, Job, PracticeExtractionRun, PracticeQuestion, Section
 
@@ -44,6 +46,38 @@ def _seed_practice_chapter(session):
     session.add_all([practice, answers, content])
     session.commit()
     return course, practice, answers, content
+
+
+def _seed_ready_question(session, *, correct_index=0):
+    course, practice, answers, content = _seed_practice_chapter(session)
+    concept = Concept(
+        course_id=course.id,
+        slug="fractions.simplify",
+        label="Simplifying Fractions",
+        chapter_label=practice.chapter_label,
+        section_id=practice.id,
+    )
+    session.add(concept)
+    session.flush()
+    question = PracticeQuestion(
+        course_id=course.id,
+        chapter_label=practice.chapter_label,
+        section_id=practice.id,
+        concept_id=concept.id,
+        problem_number="1",
+        source_ref="0.2 Practice - Fractions #1",
+        stem_md="Simplify $42/12$.",
+        choices=["$7/2$", "$2/7$", "$3/4$", "$14/3$"],
+        correct_index=correct_index,
+        explanation_md="$42/12 = 7/2$.",
+        source_fingerprint="fingerprint-1",
+        extraction_version="v3",
+        confidence=0.99,
+        status="ready",
+    )
+    session.add(question)
+    session.commit()
+    return course, practice, answers, content, concept, question
 
 
 def test_get_practice_assessment_reports_not_started_without_side_effect(client):
@@ -253,3 +287,111 @@ def test_get_practice_assessment_reports_failed_linked_job(client):
         assert stored_run.error == "provider unavailable"
     finally:
         session.close()
+
+
+def test_answer_endpoint_sets_learner_cookie_and_reveals_answer(client):
+    session = get_session()
+    try:
+        course, _practice, _answers, _content, _concept, question = _seed_ready_question(session)
+    finally:
+        session.close()
+
+    response = client.post(
+        f"/api/courses/{course.id}/practice-questions/{question.id}/answer",
+        json={"selected_index": 1},
+    )
+
+    assert response.status_code == 200
+    cookie = response.headers["set-cookie"]
+    assert "smv2_learner=" in cookie
+    assert "HttpOnly" in cookie
+    assert "SameSite=lax" in cookie
+    body = response.json()
+    assert body["question_id"] == question.id
+    assert body["correct"] is False
+    assert body["correct_index"] == 0
+    assert body["points_delta"] == -1
+    assert body["explanation_md"] == "$42/12 = 7/2$."
+
+
+def test_answer_endpoint_rejects_out_of_range_choice(client):
+    session = get_session()
+    try:
+        course, _practice, _answers, _content, _concept, question = _seed_ready_question(session)
+    finally:
+        session.close()
+
+    response = client.post(
+        f"/api/courses/{course.id}/practice-questions/{question.id}/answer",
+        json={"selected_index": 4},
+    )
+
+    assert response.status_code == 422
+
+
+def test_answer_endpoint_rejects_boolean_choice(client):
+    session = get_session()
+    try:
+        course, _practice, _answers, _content, _concept, question = _seed_ready_question(session)
+    finally:
+        session.close()
+
+    response = client.post(
+        f"/api/courses/{course.id}/practice-questions/{question.id}/answer",
+        json={"selected_index": True},
+    )
+
+    assert response.status_code == 422
+
+
+def test_ready_assessment_includes_answered_summary_for_same_learner_only(client):
+    session = get_session()
+    try:
+        course, practice, _answers, _content, _concept, question = _seed_ready_question(session)
+    finally:
+        session.close()
+
+    answer_response = client.post(
+        f"/api/courses/{course.id}/practice-questions/{question.id}/answer",
+        json={"selected_index": 1},
+    )
+    assert answer_response.status_code == 200
+
+    same_learner = client.get(
+        f"/api/courses/{course.id}/sections/{practice.id}/practice-assessment"
+    )
+    assert same_learner.status_code == 200
+    answered = same_learner.json()["questions"][0]["answered"]
+    assert answered["selected_index"] == 1
+    assert answered["correct"] is False
+    assert answered["correct_index"] == 0
+    assert answered["explanation_md"] == "$42/12 = 7/2$."
+    assert answered["points_delta"] == -1
+    assert answered["mastery_points"] == -1
+    assert answered["answered_at"]
+
+    with TestClient(client.app) as fresh_client:
+        fresh_response = fresh_client.get(
+            f"/api/courses/{course.id}/sections/{practice.id}/practice-assessment"
+        )
+    assert fresh_response.status_code == 200
+    assert fresh_response.json()["questions"][0]["answered"] is None
+
+
+def test_answer_endpoint_does_not_grade_wrong_course_question(client):
+    session = get_session()
+    try:
+        _course, _practice, _answers, _content, _concept, question = _seed_ready_question(session)
+        other_course = Course(title="Other Course")
+        session.add(other_course)
+        session.commit()
+        other_course_id = other_course.id
+    finally:
+        session.close()
+
+    response = client.post(
+        f"/api/courses/{other_course_id}/practice-questions/{question.id}/answer",
+        json={"selected_index": 0},
+    )
+
+    assert response.status_code == 404

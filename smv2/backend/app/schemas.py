@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 
 
 class JobCreate(BaseModel):
@@ -384,7 +384,7 @@ class PracticeAssessmentOut(BaseModel):
 
 
 class SubmitPracticeAnswerIn(BaseModel):
-    selected_index: int
+    selected_index: StrictInt
 
 
 class SubmitPracticeAnswerOut(BaseModel):
