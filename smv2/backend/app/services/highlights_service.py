@@ -1,5 +1,5 @@
 """Highlights: user-created text-quote annotations on a section's source
-text (ADR-011). The anchor (exact/prefix/suffix/occurrence) is stored
+text (ADR-024). The anchor (exact/prefix/suffix/occurrence) is stored
 opaquely — the frontend matcher owns its semantics. Page numbers cross
 this boundary 1-based (API) <-> 0-based (DB), the same single-conversion
 rule as sections_service.
