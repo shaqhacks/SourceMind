@@ -428,6 +428,49 @@ class StudyNextItemOut(BaseModel):
     detail: dict[str, Any]
 
 
+# --- Highlights ------------------------------------------------------------
+
+
+HighlightColor = Literal["yellow", "green", "blue", "pink"]
+
+
+class HighlightIn(BaseModel):
+    """Anchor fields are opaque to the backend — the frontend's quote
+    matcher owns their semantics. page is 1-based here like every page in
+    this API surface (see module docstring)."""
+
+    section_id: str
+    exact: str = Field(min_length=1, max_length=2000)
+    prefix: str = Field(default="", max_length=64)
+    suffix: str = Field(default="", max_length=64)
+    occurrence: int = Field(default=0, ge=0)
+    page: int | None = Field(default=None, ge=1)
+    color: HighlightColor = "yellow"
+
+
+class HighlightUpdateIn(BaseModel):
+    """PATCH semantics via model_dump(exclude_unset=True): an omitted field
+    is left alone; an explicit null note_md clears the note."""
+
+    note_md: str | None = Field(default=None, max_length=20000)
+    color: HighlightColor | None = None
+
+
+class HighlightOut(BaseModel):
+    id: str
+    course_id: str
+    section_id: str
+    exact: str
+    prefix: str
+    suffix: str
+    occurrence: int
+    page: int | None
+    color: HighlightColor
+    note_md: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
 # --- Chat ------------------------------------------------------------
 
 

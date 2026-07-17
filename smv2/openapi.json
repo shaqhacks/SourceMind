@@ -621,6 +621,194 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HighlightIn": {
+        "description": "Anchor fields are opaque to the backend \u2014 the frontend's quote\nmatcher owns their semantics. page is 1-based here like every page in\nthis API surface (see module docstring).",
+        "properties": {
+          "color": {
+            "default": "yellow",
+            "enum": [
+              "yellow",
+              "green",
+              "blue",
+              "pink"
+            ],
+            "title": "Color",
+            "type": "string"
+          },
+          "exact": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Exact",
+            "type": "string"
+          },
+          "occurrence": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Occurrence",
+            "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "prefix": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Prefix",
+            "type": "string"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "suffix": {
+            "default": "",
+            "maxLength": 64,
+            "title": "Suffix",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_id",
+          "exact"
+        ],
+        "title": "HighlightIn",
+        "type": "object"
+      },
+      "HighlightOut": {
+        "properties": {
+          "color": {
+            "enum": [
+              "yellow",
+              "green",
+              "blue",
+              "pink"
+            ],
+            "title": "Color",
+            "type": "string"
+          },
+          "course_id": {
+            "title": "Course Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "exact": {
+            "title": "Exact",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "note_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Md"
+          },
+          "occurrence": {
+            "title": "Occurrence",
+            "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "suffix": {
+            "title": "Suffix",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "course_id",
+          "section_id",
+          "exact",
+          "prefix",
+          "suffix",
+          "occurrence",
+          "page",
+          "color",
+          "note_md",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "HighlightOut",
+        "type": "object"
+      },
+      "HighlightUpdateIn": {
+        "description": "PATCH semantics via model_dump(exclude_unset=True): an omitted field\nis left alone; an explicit null note_md clears the note.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "enum": [
+                  "yellow",
+                  "green",
+                  "blue",
+                  "pink"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "note_md": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Md"
+          }
+        },
+        "title": "HighlightUpdateIn",
+        "type": "object"
+      },
       "IngestStartOut": {
         "properties": {
           "job_id": {
@@ -2766,6 +2954,102 @@
         ]
       }
     },
+    "/api/courses/{course_id}/highlights": {
+      "get": {
+        "operationId": "list_highlights",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HighlightOut"
+                  },
+                  "title": "Response List Highlights",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Highlights",
+        "tags": [
+          "highlights"
+        ]
+      },
+      "post": {
+        "operationId": "create_highlight",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HighlightIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HighlightOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Highlight",
+        "tags": [
+          "highlights"
+        ]
+      }
+    },
     "/api/courses/{course_id}/images/{filename}": {
       "get": {
         "operationId": "get_course_image",
@@ -3447,6 +3731,91 @@
         "summary": "Generate Test",
         "tags": [
           "tests"
+        ]
+      }
+    },
+    "/api/highlights/{highlight_id}": {
+      "delete": {
+        "operationId": "delete_highlight",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "highlight_id",
+            "required": true,
+            "schema": {
+              "title": "Highlight Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Highlight",
+        "tags": [
+          "highlights"
+        ]
+      },
+      "patch": {
+        "operationId": "update_highlight",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "highlight_id",
+            "required": true,
+            "schema": {
+              "title": "Highlight Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HighlightUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HighlightOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Highlight",
+        "tags": [
+          "highlights"
         ]
       }
     },

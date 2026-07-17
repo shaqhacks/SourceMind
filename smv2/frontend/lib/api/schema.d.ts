@@ -201,6 +201,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/highlights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Highlights */
+        get: operations["list_highlights"];
+        put?: never;
+        /** Create Highlight */
+        post: operations["create_highlight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/images/{filename}": {
         parameters: {
             query?: never;
@@ -389,6 +407,24 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/highlights/{highlight_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Highlight */
+        delete: operations["delete_highlight"];
+        options?: never;
+        head?: never;
+        /** Update Highlight */
+        patch: operations["update_highlight"];
         trace?: never;
     };
     "/api/jobs": {
@@ -850,6 +886,88 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HighlightIn
+         * @description Anchor fields are opaque to the backend — the frontend's quote
+         *     matcher owns their semantics. page is 1-based here like every page in
+         *     this API surface (see module docstring).
+         */
+        HighlightIn: {
+            /**
+             * Color
+             * @default yellow
+             * @enum {string}
+             */
+            color: "yellow" | "green" | "blue" | "pink";
+            /** Exact */
+            exact: string;
+            /**
+             * Occurrence
+             * @default 0
+             */
+            occurrence: number;
+            /** Page */
+            page?: number | null;
+            /**
+             * Prefix
+             * @default
+             */
+            prefix: string;
+            /** Section Id */
+            section_id: string;
+            /**
+             * Suffix
+             * @default
+             */
+            suffix: string;
+        };
+        /** HighlightOut */
+        HighlightOut: {
+            /**
+             * Color
+             * @enum {string}
+             */
+            color: "yellow" | "green" | "blue" | "pink";
+            /** Course Id */
+            course_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Exact */
+            exact: string;
+            /** Id */
+            id: string;
+            /** Note Md */
+            note_md: string | null;
+            /** Occurrence */
+            occurrence: number;
+            /** Page */
+            page: number | null;
+            /** Prefix */
+            prefix: string;
+            /** Section Id */
+            section_id: string;
+            /** Suffix */
+            suffix: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * HighlightUpdateIn
+         * @description PATCH semantics via model_dump(exclude_unset=True): an omitted field
+         *     is left alone; an explicit null note_md clears the note.
+         */
+        HighlightUpdateIn: {
+            /** Color */
+            color?: ("yellow" | "green" | "blue" | "pink") | null;
+            /** Note Md */
+            note_md?: string | null;
         };
         /** IngestStartOut */
         IngestStartOut: {
@@ -1872,6 +1990,72 @@ export interface operations {
             };
         };
     };
+    list_highlights: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HighlightOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_highlight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HighlightIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HighlightOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_course_image: {
         parameters: {
             query?: never;
@@ -2315,6 +2499,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenerateTestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_highlight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                highlight_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_highlight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                highlight_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HighlightUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HighlightOut"];
                 };
             };
             /** @description Validation Error */
