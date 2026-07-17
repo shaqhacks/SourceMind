@@ -285,6 +285,16 @@
           "message": {
             "title": "Message",
             "type": "string"
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatSelectionIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -312,6 +322,27 @@
           "citations"
         ],
         "title": "ChatOut",
+        "type": "object"
+      },
+      "ChatSelectionIn": {
+        "description": "A passage the student selected in the reader \u2014 same 2000-char cap as\nHighlightIn.exact. Grounds this turn in that passage (ADR-024 feature).",
+        "properties": {
+          "exact": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Exact",
+            "type": "string"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_id",
+          "exact"
+        ],
+        "title": "ChatSelectionIn",
         "type": "object"
       },
       "ChatTurnOut": {

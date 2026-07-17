@@ -13,7 +13,13 @@ router = APIRouter(tags=["chat"])
 @router.post("/api/courses/{course_id}/chat", operation_id="send_chat", response_model=ChatOut)
 def send_chat(course_id: str, body: ChatIn) -> ChatOut:
     try:
-        result = chat_service.send_chat(course_id, body.message)
+        result = chat_service.send_chat(
+            course_id,
+            body.message,
+            selection=body.selection.model_dump() if body.selection else None,
+        )
+    except chat_service.SelectionSectionMismatchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except chat_service.CourseNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ProviderTimeoutError as exc:

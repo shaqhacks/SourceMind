@@ -474,8 +474,17 @@ class HighlightOut(BaseModel):
 # --- Chat ------------------------------------------------------------
 
 
+class ChatSelectionIn(BaseModel):
+    """A passage the student selected in the reader — same 2000-char cap as
+    HighlightIn.exact. Grounds this turn in that passage (ADR-024 feature)."""
+
+    section_id: str
+    exact: str = Field(min_length=1, max_length=2000)
+
+
 class ChatIn(BaseModel):
     message: str
+    selection: ChatSelectionIn | None = None
 
 
 class ChatCitationOut(BaseModel):

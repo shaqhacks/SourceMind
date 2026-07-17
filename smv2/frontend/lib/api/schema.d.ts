@@ -754,6 +754,7 @@ export interface components {
         ChatIn: {
             /** Message */
             message: string;
+            selection?: components["schemas"]["ChatSelectionIn"] | null;
         };
         /** ChatOut */
         ChatOut: {
@@ -761,6 +762,17 @@ export interface components {
             citations: components["schemas"]["ChatCitationOut"][];
             /** Reply Md */
             reply_md: string;
+        };
+        /**
+         * ChatSelectionIn
+         * @description A passage the student selected in the reader — same 2000-char cap as
+         *     HighlightIn.exact. Grounds this turn in that passage (ADR-024 feature).
+         */
+        ChatSelectionIn: {
+            /** Exact */
+            exact: string;
+            /** Section Id */
+            section_id: string;
         };
         /** ChatTurnOut */
         ChatTurnOut: {

@@ -31,6 +31,10 @@ class CourseNotFoundError(ValueError):
     pass
 
 
+class SelectionSectionMismatchError(ValueError):
+    pass
+
+
 def _has_any_embeddings(session, course_id: str) -> bool:
     return (
         session.query(Chunk)
@@ -68,6 +72,35 @@ def _maybe_trigger_embed_course(session, course_id: str, provider) -> None:
 def _build_excerpts_block(ranked) -> str:
     lines = [f"[{i}] (source: {rc.chunk.source_ref})\n{rc.chunk.text}" for i, rc in enumerate(ranked, start=1)]
     return "\n\n".join(lines)
+
+
+_SELECTION_CONTEXT_CHARS = 1000
+
+
+def _quoted_md(text: str) -> str:
+    return "\n".join(f"> {line}" for line in text.splitlines())
+
+
+def _build_selection_block(section: Section, exact: str) -> str:
+    """Deterministic passage grounding: the quote plus up to
+    _SELECTION_CONTEXT_CHARS of surrounding body_md on each side
+    (first-occurrence match). A verbatim miss should be impossible —
+    body_md is immutable and the client sends the text it read — so on a
+    miss (stale/forged anchor) degrade to the quote alone, never error.
+    """
+    body = section.body_md or ""
+    idx = body.find(exact)
+    if idx == -1:
+        surrounding = exact
+    else:
+        start = max(0, idx - _SELECTION_CONTEXT_CHARS)
+        end = min(len(body), idx + len(exact) + _SELECTION_CONTEXT_CHARS)
+        surrounding = body[start:end]
+    return (
+        f'The student selected this passage in section "{section.title}" and is asking about it:\n'
+        f"<selected_text>\n{exact}\n</selected_text>\n"
+        f"<surrounding_source>\n{surrounding}\n</surrounding_source>"
+    )
 
 
 def _distinct_chapter_labels_hit(session, ranked) -> list[str]:
@@ -202,12 +235,21 @@ def _build_history_messages(session, course_id: str, limit: int) -> list[dict]:
     return [{"role": t.role, "content": t.content} for t in reversed(turns)]
 
 
-def send_chat(course_id: str, message: str) -> dict[str, Any]:
+def send_chat(course_id: str, message: str, selection: dict | None = None) -> dict[str, Any]:
     session = get_session()
     try:
         course = session.get(Course, course_id)
         if course is None:
             raise CourseNotFoundError(f"course not found: {course_id}")
+
+        selection_block = None
+        if selection is not None:
+            sel_section = session.get(Section, selection["section_id"])
+            if sel_section is None or sel_section.course_id != course_id:
+                raise SelectionSectionMismatchError(
+                    f"section {selection['section_id']} does not belong to course {course_id}"
+                )
+            selection_block = _build_selection_block(sel_section, selection["exact"])
 
         provider = get_provider()
         _maybe_trigger_embed_course(session, course_id, provider)
@@ -223,7 +265,10 @@ def send_chat(course_id: str, message: str) -> dict[str, Any]:
 
         system_prompt, prompt_version = load_prompt("chat")
         history_messages = _build_history_messages(session, course_id, chat_history_turns())
-        user_parts = [f"<excerpts>\n{excerpts_block}\n</excerpts>"]
+        user_parts = []
+        if selection_block:
+            user_parts.append(f"<selected_passage>\n{selection_block}\n</selected_passage>")
+        user_parts.append(f"<excerpts>\n{excerpts_block}\n</excerpts>")
         if learner_state_block:
             user_parts.append(f"<learner_state>\n{learner_state_block}\n</learner_state>")
         if study_suggestions_block:
@@ -269,7 +314,10 @@ def send_chat(course_id: str, message: str) -> dict[str, Any]:
             if 1 <= n <= len(ranked)
         ]
 
-        session.add(ChatTurn(course_id=course_id, role="user", content=message))
+        stored_user_content = (
+            f"{_quoted_md(selection['exact'])}\n\n{message}" if selection is not None else message
+        )
+        session.add(ChatTurn(course_id=course_id, role="user", content=stored_user_content))
         session.add(
             ChatTurn(course_id=course_id, role="assistant", content=result.text, citations=citations)
         )
