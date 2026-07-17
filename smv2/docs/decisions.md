@@ -874,3 +874,17 @@ skips the insert and preserves the user's card and its graded state.
 
 No `_EXTRACTOR_ALGO_VERSION` bump — nothing in extraction/outline changed
 this round.
+
+## ADR-024 — Highlights are wiped on re-ingest; text-quote anchors (2026-07-17)
+
+The `highlights` table (student highlights/notes: exact/prefix/suffix/
+occurrence text-quote anchor + optional 0-based page + note_md) is
+classified REPLACED_ON_REINGEST — re-uploading a course's PDF deletes its
+highlights, and the upload UI must warn. Owner explicitly chose this over
+remap-survival for the first build (spec:
+docs/superpowers/specs/2026-07-17-highlights-notes-design.md); upgrading
+to remap-survival later is additive. Anchors are text-quote based, not
+CFI/DOM-position or char-offset based, because the same source text
+renders in multiple DOMs (react-markdown, pdf.js text layer). The feature
+is readest-inspired but uses zero readest code — readest's UI is AGPL-3.0
+and must never be copied into this repo.

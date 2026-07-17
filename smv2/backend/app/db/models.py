@@ -271,6 +271,40 @@ class ChatTurn(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
+class Highlight(Base):
+    """A user-created highlight/note anchored to a section's body_md by
+    text quote (exact/prefix/suffix/occurrence), never by DOM position or
+    char offset — the same selection must be locatable in more than one
+    rendering of the text (markdown DOM, pdf.js text layer). The anchor is
+    opaque to the backend; the frontend matcher owns its semantics.
+    Wiped on re-ingest (REPLACED bucket, ADR-024): re-uploading a course's
+    PDF deletes its highlights — the upload UI must warn.
+    page is 0-based per-asset storage, converted at the service boundary
+    like Section.page_start.
+    """
+
+    __tablename__ = "highlights"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    section_id: Mapped[str] = mapped_column(
+        String, ForeignKey("sections.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    exact: Mapped[str] = mapped_column(Text, nullable=False)
+    prefix: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    suffix: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    occurrence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    color: Mapped[str] = mapped_column(String, nullable=False, default="yellow")
+    note_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
 class Test(Base):
     """A generated quiz deck — the persisted questions, generated once.
     Retaking a test (ADR-022) creates a new TestAttempt against this SAME
