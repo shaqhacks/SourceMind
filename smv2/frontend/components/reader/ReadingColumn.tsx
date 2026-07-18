@@ -1,17 +1,20 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
 import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
-import { selectorFromRange, type QuoteSelector } from "@/lib/annotations/anchors";
+import { rangeForSelector, selectorFromRange, type QuoteSelector } from "@/lib/annotations/anchors";
+import { highlightAtPoint } from "@/lib/annotations/hitTest";
 import { isHighlightApiSupported, useHighlightPainter } from "@/lib/annotations/useHighlightPainter";
+import type { HighlightOut, HighlightUpdateIn } from "@/lib/api/client";
 import { useHighlights, type HighlightColor } from "@/lib/hooks/useHighlights";
 import { prefsToCssVars, type TypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import type { ReaderSection, SectionBodyState, ViewMode } from "@/lib/reader/types";
 
 import CardsCTA from "./CardsCTA";
+import HighlightEditPopover from "./HighlightEditPopover";
 import LessonPane, { type LessonDisplayStatus } from "./LessonPane";
 import PagesView from "./PagesView";
 import SectionCards from "./SectionCards";
@@ -83,7 +86,7 @@ export default function ReadingColumn({
   // Mounted unconditionally (not gated on mode) so switching INTO source
   // view shows correct highlights immediately, without waiting on a fresh
   // fetch that a mode switch alone wouldn't trigger.
-  const { highlights, createFromSelector } = useHighlights(courseId, section.id);
+  const { highlights, createFromSelector, updateOne, deleteOne } = useHighlights(courseId, section.id);
   // useHighlights re-syncs its `highlights` array ASYNCHRONOUSLY (only once
   // its course-wide fetch for the new section resolves), but `body.kind`
   // can flip to "ready" for the new section before that fetch lands. In
@@ -170,6 +173,93 @@ export default function ReadingColumn({
     setSelectionPopover(null);
   }, [selectionPopover, onExplainSelection, section.id]);
 
+  // The edit popover for an EXISTING (already-painted) highlight, opened by
+  // clicking it — as opposed to `selectionPopover` above, which is for
+  // CREATING a new one from a live drag-selection. The two are mutually
+  // exclusive by construction: `handleArticleClick` below only ever hit-
+  // tests when the click's own selection is collapsed (see its comment),
+  // which is never true for the mouseup that opens `selectionPopover`.
+  const [editPopover, setEditPopover] = useState<{ highlight: HighlightOut; anchorRect: DOMRect } | null>(
+    null,
+  );
+
+  const closeEditPopover = useCallback(() => setEditPopover(null), []);
+
+  // Scoped to the article wrapper via React's onClick (same bubble-scoping
+  // rationale as handleArticleMouseUp above). Fires AFTER mouseup, so by
+  // the time this runs, a just-completed drag-selection (which
+  // handleArticleMouseUp already turned into `selectionPopover`) is still
+  // reflected in `window.getSelection()` — checking it's collapsed here is
+  // what keeps a click that ends a drag-select from ALSO opening the edit
+  // popover underneath/instead of the selection popover. A plain click
+  // (no drag) always leaves the selection collapsed, so it falls through
+  // to the hit-test.
+  //
+  // Bails on the same CSS Custom Highlight API support check as the
+  // create-selection path: on an unsupported browser nothing is ever
+  // painted (useHighlightPainter's own gate), so there is nothing a click
+  // could be hit-testing against.
+  const handleArticleClick = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (!isHighlightApiSupported()) return;
+      const container = articleBodyRef.current;
+      if (!container) return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+
+      const hit = highlightAtPoint(container, paintable, event.clientX, event.clientY);
+      if (!hit) return;
+
+      // Re-resolve the hit highlight's own range for its bounding rect
+      // (the anchor SelectionPopover-style popovers use) — highlightAtPoint
+      // only returns the highlight itself, not the Range it matched
+      // against, so this is a second (cheap, single-highlight) resolve
+      // rather than widening that function's return type for one caller.
+      const range = rangeForSelector(container, {
+        exact: hit.exact,
+        prefix: hit.prefix,
+        suffix: hit.suffix,
+        occurrence: hit.occurrence,
+      });
+      const anchorRect: DOMRect = range
+        ? range.getBoundingClientRect()
+        : ({
+            top: event.clientY,
+            bottom: event.clientY,
+            left: event.clientX,
+            right: event.clientX,
+            width: 0,
+            height: 0,
+          } as DOMRect);
+      setEditPopover({ highlight: hit, anchorRect });
+    },
+    [paintable],
+  );
+
+  const handleEditSave = useCallback(
+    (patch: HighlightUpdateIn) => {
+      if (!editPopover) return;
+      // Fire-and-forget, same convention as handleSelectionColor above:
+      // updateOne surfaces failures via useHighlights' own `error` state
+      // and the painter repaints automatically once state settles.
+      void updateOne(editPopover.highlight.id, patch);
+      setEditPopover(null);
+    },
+    [editPopover, updateOne],
+  );
+
+  const handleEditDelete = useCallback(() => {
+    if (!editPopover) return;
+    void deleteOne(editPopover.highlight.id);
+    setEditPopover(null);
+  }, [editPopover, deleteOne]);
+
+  const handleEditExplain = useCallback(() => {
+    if (!editPopover) return;
+    onExplainSelection({ sectionId: section.id, exact: editPopover.highlight.exact });
+    setEditPopover(null);
+  }, [editPopover, onExplainSelection, section.id]);
+
   return (
     <div className="relative flex min-h-0 flex-1">
       {previousTitle !== null && (
@@ -240,7 +330,12 @@ export default function ReadingColumn({
               // old Range objects against nodes React mutated in place,
               // painting a highlight onto the wrong section's text instead
               // of harmlessly pointing at detached nodes.
-              <div ref={articleBodyRef} key={section.id} onMouseUp={handleArticleMouseUp}>
+              <div
+                ref={articleBodyRef}
+                key={section.id}
+                onMouseUp={handleArticleMouseUp}
+                onClick={handleArticleClick}
+              >
                 <Markdown>{body.body}</Markdown>
               </div>
             )
@@ -304,6 +399,18 @@ export default function ReadingColumn({
           onColor={handleSelectionColor}
           onExplain={handleSelectionExplain}
           onClose={closeSelectionPopover}
+        />
+      )}
+      {editPopover && (
+        // Same "plain sibling, not nested in the scrolling column" placement
+        // rationale as SelectionPopover above.
+        <HighlightEditPopover
+          highlight={editPopover.highlight}
+          anchorRect={editPopover.anchorRect}
+          onSave={handleEditSave}
+          onDelete={handleEditDelete}
+          onExplain={handleEditExplain}
+          onClose={closeEditPopover}
         />
       )}
     </div>
