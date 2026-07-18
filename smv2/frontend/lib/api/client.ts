@@ -57,6 +57,10 @@ export type SubmitPracticeAnswerOut = components["schemas"]["SubmitPracticeAnswe
 export type ChatOut = components["schemas"]["ChatOut"];
 export type ChatCitationOut = components["schemas"]["ChatCitationOut"];
 export type ChatTurnOut = components["schemas"]["ChatTurnOut"];
+export type ChatSelectionIn = components["schemas"]["ChatSelectionIn"];
+export type HighlightOut = components["schemas"]["HighlightOut"];
+export type HighlightIn = components["schemas"]["HighlightIn"];
+export type HighlightUpdateIn = components["schemas"]["HighlightUpdateIn"];
 export type OutlineOp =
   | components["schemas"]["RenameOp"]
   | components["schemas"]["ReorderOp"]
@@ -576,11 +580,45 @@ export async function findActiveTestJob(courseId: string): Promise<JobOut | null
   );
 }
 
-export function sendChat(courseId: string, message: string) {
+export function listHighlights(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/highlights", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function createHighlight(courseId: string, body: HighlightIn) {
+  return request(
+    client.POST("/api/courses/{course_id}/highlights", {
+      params: { path: { course_id: courseId } },
+      body,
+    }),
+  );
+}
+
+export function updateHighlight(highlightId: string, body: HighlightUpdateIn) {
+  return request(
+    client.PATCH("/api/highlights/{highlight_id}", {
+      params: { path: { highlight_id: highlightId } },
+      body,
+    }),
+  );
+}
+
+export function deleteHighlight(highlightId: string) {
+  return request(
+    client.DELETE("/api/highlights/{highlight_id}", {
+      params: { path: { highlight_id: highlightId } },
+    }),
+  );
+}
+
+export function sendChat(courseId: string, message: string, selection?: ChatSelectionIn) {
   return request(
     client.POST("/api/courses/{course_id}/chat", {
       params: { path: { course_id: courseId } },
-      body: { message },
+      body: { message, selection: selection ?? null },
     }),
   );
 }
