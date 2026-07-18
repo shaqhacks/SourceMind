@@ -11,6 +11,7 @@ import {
   getSection,
   listCards,
   listChapters,
+  listHighlights,
   listSections,
   saveProgress,
   type CourseOut,
@@ -41,6 +42,10 @@ vi.mock("@/lib/api/client", () => ({
   generateCards: vi.fn(),
   listChapters: vi.fn(),
   buildAssetFileUrl: vi.fn(),
+  listHighlights: vi.fn(),
+  createHighlight: vi.fn(),
+  updateHighlight: vi.fn(),
+  deleteHighlight: vi.fn(),
 }));
 
 // The reader tree imports PdfPagesView, which imports pdfjs-dist at
@@ -62,6 +67,7 @@ const mockedGetLlmUsage = vi.mocked(getLlmUsage);
 const mockedListCards = vi.mocked(listCards);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 const mockedListChapters = vi.mocked(listChapters);
+const mockedListHighlights = vi.mocked(listHighlights);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
@@ -138,6 +144,11 @@ describe("CourseReaderClient", () => {
     mockedListCards.mockResolvedValue(ok([]));
     mockedFindActiveCardsJob.mockResolvedValue(null);
     mockedListChapters.mockResolvedValue(ok([]));
+    // useHighlights (mounted unconditionally by ReadingColumn, see Task 5)
+    // fetches the course's highlights on mount/section change; no test in
+    // this file exercises highlight content, so an empty list is enough to
+    // keep it out of the way.
+    mockedListHighlights.mockResolvedValue(ok([]));
   });
 
   afterEach(() => {

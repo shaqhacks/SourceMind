@@ -1,10 +1,12 @@
 "use client";
 
-import type { RefObject } from "react";
+import { useMemo, useRef, type RefObject } from "react";
 import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import { useHighlightPainter } from "@/lib/annotations/useHighlightPainter";
+import { useHighlights } from "@/lib/hooks/useHighlights";
 import { prefsToCssVars, type TypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import type { ReaderSection, SectionBodyState, ViewMode } from "@/lib/reader/types";
 
@@ -60,6 +62,35 @@ export default function ReadingColumn({
   previousTitle,
 }: ReadingColumnProps) {
   const pages = pageRange(section);
+
+  // Mounted unconditionally (not gated on mode) so switching INTO source
+  // view shows correct highlights immediately, without waiting on a fresh
+  // fetch that a mode switch alone wouldn't trigger.
+  const { highlights } = useHighlights(courseId, section.id);
+  // useHighlights re-syncs its `highlights` array ASYNCHRONOUSLY (only once
+  // its course-wide fetch for the new section resolves), but `body.kind`
+  // can flip to "ready" for the new section before that fetch lands. In
+  // that window `highlights` can still hold the PREVIOUS section's rows.
+  // `section.id` is a plain prop with no such lag, so filtering on it here
+  // drops stale rows (whose `section_id` won't match) until the correct
+  // fetch catches up — closing the race without touching useHighlights or
+  // the painter itself. rangeForSelector matches by exact text + occurrence
+  // only (no section_id check), so leaving stale rows in would let a phrase
+  // that also appears in the new section's text get painted as a highlight
+  // that doesn't belong there.
+  const paintable = useMemo(
+    () => highlights.filter((highlight) => highlight.section_id === section.id),
+    [highlights, section.id],
+  );
+  const articleBodyRef = useRef<HTMLDivElement>(null);
+  // Gated on body readiness, not just `mode === "source"`: the wrapper div
+  // below only exists in the DOM once body.kind is "ready" (loading/error
+  // render something else entirely), and a ref's `.current` mutating from
+  // null to a node does NOT by itself re-trigger a dependency-array effect.
+  // Tying `enabled` to body.kind flips it false -> true exactly when the
+  // container (and its text) newly exists, which is what actually needs to
+  // retrigger the painter.
+  useHighlightPainter(articleBodyRef, paintable, mode === "source" && body.kind === "ready");
 
   return (
     <div className="relative flex min-h-0 flex-1">
@@ -122,7 +153,18 @@ export default function ReadingColumn({
             ) : body.kind === "error" ? (
               <ErrorBanner message={body.message} />
             ) : (
-              <Markdown>{body.body}</Markdown>
+              // Keyed on section id (same convention as PagesView/LessonPane
+              // below): forces a fresh DOM subtree per section rather than
+              // React patching text into the SAME nodes in place. Without
+              // this, a stale painter effect run (its highlights/enabled
+              // deps unchanged across a section switch — see
+              // useHighlightPainter's caller comment above) could resolve
+              // old Range objects against nodes React mutated in place,
+              // painting a highlight onto the wrong section's text instead
+              // of harmlessly pointing at detached nodes.
+              <div ref={articleBodyRef} key={section.id}>
+                <Markdown>{body.body}</Markdown>
+              </div>
             )
           ) : mode === "pages" ? (
             section.asset_id && section.page_start !== null && section.page_end !== null ? (

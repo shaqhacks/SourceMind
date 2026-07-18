@@ -14,6 +14,7 @@ import {
   listAssets,
   listCards,
   listChapters,
+  listHighlights,
   listSections,
   saveProgress,
 } from "@/lib/api/client";
@@ -42,6 +43,10 @@ vi.mock("@/lib/api/client", () => ({
   editOutline: vi.fn(),
   listChapters: vi.fn(),
   listAssets: vi.fn(),
+  listHighlights: vi.fn(),
+  createHighlight: vi.fn(),
+  updateHighlight: vi.fn(),
+  deleteHighlight: vi.fn(),
   buildAssetFileUrl: vi.fn((assetId: string) => `https://mock/api/assets/${assetId}/file`),
   buildAssetHtmlPageUrl: vi.fn(
     (assetId: string, page: number) => `https://mock/api/assets/${assetId}/html/${page}`,
@@ -70,6 +75,7 @@ const mockedEditOutline = vi.mocked(editOutline);
 const mockedListChapters = vi.mocked(listChapters);
 const mockedGetDocument = vi.mocked(getDocument);
 const mockedListAssets = vi.mocked(listAssets);
+const mockedListHighlights = vi.mocked(listHighlights);
 
 // A minimal 3-section fixture keeps these assertions about
 // active-chapter bookkeeping (not content) easy to follow.
@@ -176,6 +182,11 @@ describe("CourseReader", () => {
     mockedListSections.mockResolvedValue(ok(COURSE.sections));
     mockedEditOutline.mockResolvedValue(ok(COURSE.sections));
     mockedListChapters.mockResolvedValue(ok([]));
+    // useHighlights (mounted unconditionally by ReadingColumn, see Task 5)
+    // fetches the course's highlights on mount/section change; no test in
+    // this file exercises highlight content, so an empty list is enough to
+    // keep it out of the way.
+    mockedListHighlights.mockResolvedValue(ok([]));
   });
 
   afterEach(() => {
