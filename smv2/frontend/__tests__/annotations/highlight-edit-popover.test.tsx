@@ -380,5 +380,8 @@ describe("ReadingColumn click-to-edit integration", () => {
 
     expect(await screen.findByRole("complementary", { name: "Course chat" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Highlight actions" })).not.toBeInTheDocument();
+    // Task 9: firing Explain from a painted (existing) highlight carries
+    // its exact text through the same path as a fresh selection.
+    expect(screen.getByText(/asking about/i)).toHaveTextContent(/example passage/i);
   });
 });

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import CourseChatDrawer from "@/components/reader/CourseChatDrawer";
-import { getChatHistory, sendChat } from "@/lib/api/client";
+import { getChatHistory, sendChat, type ChatSelectionIn } from "@/lib/api/client";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 
 import { err, ok } from "./support/api-result";
@@ -32,6 +32,31 @@ function Harness({ courseId }: { courseId: string }) {
   const [open, setOpen] = useState(false);
   useKeyboardShortcuts({ c: () => setOpen((value) => !value) });
   return <CourseChatDrawer courseId={courseId} open={open} onClose={() => setOpen(false)} />;
+}
+
+// Mimics how CourseReader owns pendingSelection: a real, settable piece of
+// state passed down as a prop, with onConsumeSelection wired back to clear
+// it — needed to exercise "the selection attaches to exactly one turn"
+// across two sends within a single render tree.
+function SelectionHarness({
+  courseId,
+  initialSelection,
+}: {
+  courseId: string;
+  initialSelection: ChatSelectionIn | null;
+}) {
+  const [pendingSelection, setPendingSelection] = useState<ChatSelectionIn | null>(
+    initialSelection,
+  );
+  return (
+    <CourseChatDrawer
+      courseId={courseId}
+      open
+      onClose={vi.fn()}
+      pendingSelection={pendingSelection}
+      onConsumeSelection={() => setPendingSelection(null)}
+    />
+  );
 }
 
 describe("CourseChatDrawer", () => {
@@ -174,5 +199,149 @@ describe("CourseChatDrawer", () => {
       await screen.findByText(/assistant is busy — try again in a moment/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("sends without a selection by default — the no-selection path stays byte-identical", async () => {
+    mockedGetChatHistory.mockResolvedValue(ok([]));
+    mockedSendChat.mockResolvedValue(ok({ reply_md: "Hi", citations: [] }));
+    const user = userEvent.setup();
+
+    render(<CourseChatDrawer courseId="course-1" open onClose={vi.fn()} />);
+    await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
+
+    await user.type(screen.getByLabelText(/message/i), "Hello?");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(mockedSendChat).toHaveBeenCalledWith("course-1", "Hello?"));
+    expect(screen.queryByText(/asking about/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a dismissible chip quoting the pending selection", async () => {
+    mockedGetChatHistory.mockResolvedValue(ok([]));
+
+    render(
+      <CourseChatDrawer
+        courseId="course-1"
+        open
+        onClose={vi.fn()}
+        pendingSelection={{ section_id: "s1", exact: "some text" }}
+        onConsumeSelection={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
+
+    expect(screen.getByText(/asking about/i)).toHaveTextContent(/some text/i);
+    expect(screen.getByRole("button", { name: /clear selected passage/i })).toBeInTheDocument();
+  });
+
+  it("truncates a long selection to roughly the first 60 characters in the chip", async () => {
+    mockedGetChatHistory.mockResolvedValue(ok([]));
+    const longExact = "abcdefghij".repeat(10); // 100 chars
+
+    render(
+      <CourseChatDrawer
+        courseId="course-1"
+        open
+        onClose={vi.fn()}
+        pendingSelection={{ section_id: "s1", exact: longExact }}
+        onConsumeSelection={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
+
+    const chip = screen.getByText(/asking about/i);
+    expect(chip).not.toHaveTextContent(longExact);
+    expect(chip.textContent?.length ?? 0).toBeLessThan(longExact.length);
+  });
+
+  it("the chip's ✕ calls onConsumeSelection without sending anything", async () => {
+    mockedGetChatHistory.mockResolvedValue(ok([]));
+    const onConsumeSelection = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <CourseChatDrawer
+        courseId="course-1"
+        open
+        onClose={vi.fn()}
+        pendingSelection={{ section_id: "s1", exact: "some text" }}
+        onConsumeSelection={onConsumeSelection}
+      />,
+    );
+    await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
+
+    await user.click(screen.getByRole("button", { name: /clear selected passage/i }));
+
+    expect(onConsumeSelection).toHaveBeenCalledTimes(1);
+    expect(mockedSendChat).not.toHaveBeenCalled();
+  });
+
+  it("sends the pending selection with the next message, consumes it, and a second send carries none", async () => {
+    mockedGetChatHistory.mockResolvedValue(ok([]));
+    mockedSendChat.mockResolvedValue(ok({ reply_md: "Reply", citations: [] }));
+    const user = userEvent.setup();
+
+    render(
+      <SelectionHarness
+        courseId="course-1"
+        initialSelection={{ section_id: "s1", exact: "some text" }}
+      />,
+    );
+    await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
+    expect(screen.getByText(/asking about/i)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/message/i), "Explain this");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() =>
+      expect(mockedSendChat).toHaveBeenNthCalledWith(1, "course-1", "Explain this", {
+        section_id: "s1",
+        exact: "some text",
+      }),
+    );
+    // Consumed after the successful send — the chip disappears.
+    await waitFor(() => expect(screen.queryByText(/asking about/i)).not.toBeInTheDocument());
+
+    await user.type(screen.getByLabelText(/message/i), "Second message");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() =>
+      expect(mockedSendChat).toHaveBeenNthCalledWith(2, "course-1", "Second message"),
+    );
+  });
+
+  it("a failed send does not consume the pending selection — retry still carries it", async () => {
+    mockedGetChatHistory.mockResolvedValue(ok([]));
+    mockedSendChat.mockResolvedValueOnce(err(429));
+    mockedSendChat.mockResolvedValueOnce(ok({ reply_md: "Reply", citations: [] }));
+    const onConsumeSelection = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <CourseChatDrawer
+        courseId="course-1"
+        open
+        onClose={vi.fn()}
+        pendingSelection={{ section_id: "s1", exact: "some text" }}
+        onConsumeSelection={onConsumeSelection}
+      />,
+    );
+    await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
+
+    await user.type(screen.getByLabelText(/message/i), "Explain this");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(await screen.findByText(/assistant is busy/i)).toBeInTheDocument();
+    expect(onConsumeSelection).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+
+    await waitFor(() =>
+      expect(mockedSendChat).toHaveBeenNthCalledWith(2, "course-1", "Explain this", {
+        section_id: "s1",
+        exact: "some text",
+      }),
+    );
+    expect(onConsumeSelection).toHaveBeenCalledTimes(1);
   });
 });

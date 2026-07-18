@@ -315,6 +315,9 @@ describe("ReadingColumn selection popover integration", () => {
     expect(await screen.findByRole("complementary", { name: "Course chat" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Selection actions" })).not.toBeInTheDocument();
     expect(mockedCreateHighlight).not.toHaveBeenCalled();
+    // Task 9: the selection is carried through, mapped to snake_case, and
+    // shown as a chip above the composer, not silently dropped.
+    expect(screen.getByText(/asking about/i)).toHaveTextContent(/example passage/i);
   });
 
   it("Escape closes the popover without creating a highlight", async () => {

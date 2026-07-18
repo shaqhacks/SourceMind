@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 import Chat, { type ChatCitation, type ChatSendResult, type ChatTurn } from "@/components/Chat";
-import { getChatHistory, sendChat, type ChatTurnOut } from "@/lib/api/client";
+import { getChatHistory, sendChat, type ChatSelectionIn, type ChatTurnOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 import { useNarrowViewport } from "@/lib/hooks/useNarrowViewport";
@@ -18,6 +18,19 @@ export interface CourseChatDrawerProps {
   courseId: string;
   open: boolean;
   onClose: () => void;
+  /** Set by CourseReader when "Explain" fires on a selected/highlighted
+   * passage (Task 9). Carried into the *next* sendChat call, then cleared
+   * via onConsumeSelection so it attaches to exactly one turn. */
+  pendingSelection?: ChatSelectionIn | null;
+  onConsumeSelection?: () => void;
+}
+
+const EXPLAIN_CHIP_QUOTE_LENGTH = 60;
+
+function truncateExact(exact: string): string {
+  return exact.length > EXPLAIN_CHIP_QUOTE_LENGTH
+    ? `${exact.slice(0, EXPLAIN_CHIP_QUOTE_LENGTH)}…`
+    : exact;
 }
 
 /** ChatTurnOut.citations is `{[key:string]: unknown}[] | null` (untyped —
@@ -68,7 +81,13 @@ function describeSendError(status: number | undefined): { message: string; retry
  * citation click into a reader navigation (using the structured
  * section_id field — source_ref is display-only and never parsed).
  */
-export default function CourseChatDrawer({ courseId, open, onClose }: CourseChatDrawerProps) {
+export default function CourseChatDrawer({
+  courseId,
+  open,
+  onClose,
+  pendingSelection = null,
+  onConsumeSelection,
+}: CourseChatDrawerProps) {
   const router = useRouter();
   const isNarrow = useNarrowViewport(NARROW_VIEWPORT_BREAKPOINT_PX);
 
@@ -89,10 +108,23 @@ export default function CourseChatDrawer({ courseId, open, onClose }: CourseChat
     return data.map(mapTurn);
   }, [courseId]);
 
+  // Closes over `pendingSelection` rather than widening Chat's own sendFn
+  // signature — Chat's history-loading effect keys on `loadHistory` only
+  // (never `sendFn`), so this reference changing whenever pendingSelection
+  // changes cannot retrigger the v1 transcript-reset bug documented on
+  // Chat itself. No-selection path calls sendChat with exactly the same
+  // two arguments as before (not a third explicit `undefined`), so that
+  // behavior stays byte-identical.
   const sendFn = useCallback(
     async (message: string): Promise<ChatSendResult> => {
-      const { data, status } = await sendChat(courseId, message);
+      const { data, status } = pendingSelection
+        ? await sendChat(courseId, message, pendingSelection)
+        : await sendChat(courseId, message);
       if (data) {
+        // Attach the selection to exactly one turn: only consumed once the
+        // send actually succeeds, so a failed/retryable send doesn't lose
+        // it out from under a later retry.
+        onConsumeSelection?.();
         return {
           ok: true,
           content: data.reply_md,
@@ -106,7 +138,7 @@ export default function CourseChatDrawer({ courseId, open, onClose }: CourseChat
       }
       return { ok: false, ...describeSendError(status) };
     },
-    [courseId],
+    [courseId, pendingSelection, onConsumeSelection],
   );
 
   const handleCitationClick = useCallback(
@@ -148,6 +180,21 @@ export default function CourseChatDrawer({ courseId, open, onClose }: CourseChat
           Close
         </button>
       </div>
+      {pendingSelection && (
+        <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+          <span className="truncate">
+            Asking about: &ldquo;{truncateExact(pendingSelection.exact)}&rdquo;
+          </span>
+          <button
+            type="button"
+            onClick={() => onConsumeSelection?.()}
+            aria-label="Clear selected passage"
+            className="shrink-0 rounded-md px-1.5 py-0.5 text-sm hover:bg-muted-foreground/10"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <Chat loadHistory={loadHistory} sendFn={sendFn} onCitationClick={handleCitationClick} />
     </div>
   );

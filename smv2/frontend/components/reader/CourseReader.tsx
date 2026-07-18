@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import HintRow from "@/components/HintRow";
 import ShortcutsOverlay, { type ShortcutHint } from "@/components/ShortcutsOverlay";
-import { getSection, listChapters, type SectionOut } from "@/lib/api/client";
+import { getSection, listChapters, type ChatSelectionIn, type SectionOut } from "@/lib/api/client";
 import { useChatOpenPref } from "@/lib/hooks/useChatOpenPref";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 import { useProgressSync } from "@/lib/hooks/useProgressSync";
@@ -26,16 +26,10 @@ import CourseChatDrawer from "./CourseChatDrawer";
 import type { LessonDisplayStatus } from "./LessonPane";
 import NotesPanel from "./NotesPanel";
 import OutlineEditorModal from "./OutlineEditorModal";
-import ReadingColumn from "./ReadingColumn";
+import ReadingColumn, { type ExplainSelection } from "./ReadingColumn";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
 import UsageFooter from "./UsageFooter";
-
-// Task 6 (SelectionPopover "Explain") only opens the chat drawer — the
-// selected text itself (`ExplainSelection`) isn't threaded any further
-// yet. Task 9 is what adds a `pendingSelection` state here and feeds it
-// into CourseChatDrawer/sendChat; wiring that up now would leave a prop
-// with no consumer, so it's deliberately left out until Task 9 needs it.
 
 const SHORTCUT_HINTS: ShortcutHint[] = [
   { keys: "← / → or j / k", description: "Next / previous chapter" },
@@ -106,6 +100,13 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   // reading column (docked chat) for no benefit — simplest is one slot,
   // shared.
   const [notesOpen, setNotesOpen] = useState(false);
+  // Set when "Explain" fires on a selection/highlight (ReadingColumn's
+  // ExplainSelection, camelCase) and mapped to the wire-shaped
+  // ChatSelectionIn (snake_case) right here — the one bridge point between
+  // this component's internal naming and the backend schema. Carried into
+  // CourseChatDrawer, which attaches it to the next sendChat call and then
+  // calls onConsumeSelection (consumeSelection below) to clear it.
+  const [pendingSelection, setPendingSelection] = useState<ChatSelectionIn | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [outlineEditorOpen, setOutlineEditorOpen] = useState(false);
   const [chapterStats, setChapterStats] = useState<Record<string, ChapterTestStats>>({});
@@ -332,10 +333,19 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   );
   const openOutlineEditor = useCallback(() => setOutlineEditorOpen(true), []);
   const closeOutlineEditor = useCallback(() => setOutlineEditorOpen(false), []);
-  // "Explain" on a selection just opens chat for now — see the
-  // module-level comment on why the selection itself isn't threaded
-  // through yet.
-  const handleExplainSelection = useCallback(() => setChatOpen(true), [setChatOpen]);
+  // "Explain" (SelectionPopover or HighlightEditPopover, via ReadingColumn)
+  // maps camelCase -> snake_case into pendingSelection, closes Notes so the
+  // mutual-exclusion render (chatRenderedOpen) actually shows the drawer,
+  // and opens it.
+  const handleExplainSelection = useCallback(
+    (sel: ExplainSelection) => {
+      setPendingSelection({ section_id: sel.sectionId, exact: sel.exact });
+      setNotesOpen(false);
+      setChatOpen(true);
+    },
+    [setChatOpen],
+  );
+  const consumeSelection = useCallback(() => setPendingSelection(null), []);
   const handleOutlineApplied = useCallback((updated: SectionOut[]) => {
     setSectionsOverride(updated);
   }, []);
@@ -434,7 +444,13 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
           previousTitle={previousSection?.title ?? null}
           onExplainSelection={handleExplainSelection}
         />
-        <CourseChatDrawer courseId={course.id} open={chatRenderedOpen} onClose={closeChat} />
+        <CourseChatDrawer
+          courseId={course.id}
+          open={chatRenderedOpen}
+          onClose={closeChat}
+          pendingSelection={pendingSelection}
+          onConsumeSelection={consumeSelection}
+        />
         <NotesPanel
           courseId={course.id}
           open={notesOpen}
