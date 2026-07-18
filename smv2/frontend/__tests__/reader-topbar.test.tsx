@@ -49,6 +49,7 @@ function makeProps(overrides: Partial<TopBarProps> = {}): TopBarProps {
     onLessonSectionSettled: vi.fn(),
     chatOpen: false,
     onToggleChat: vi.fn(),
+    notesSupported: true,
     notesOpen: false,
     onToggleNotes: vi.fn(),
     onOpenOutlineEditor: vi.fn(),
@@ -109,6 +110,16 @@ describe("reader TopBar", () => {
 
     const notesButton = screen.getByRole("button", { name: /close notes/i });
     expect(notesButton).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("hides the Notes toggle entirely when notesSupported is false", () => {
+    mockViewport(false);
+    render(<TopBar {...makeProps({ notesSupported: false })} />);
+
+    expect(screen.queryByRole("button", { name: /open notes/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /close notes/i })).not.toBeInTheDocument();
+    // Chat stays unaffected — only Notes is gated on highlight API support.
+    expect(screen.getByRole("button", { name: /open chat/i })).toBeInTheDocument();
   });
 
   it("collapses the mid-bar actions into an overflow menu below lg", async () => {

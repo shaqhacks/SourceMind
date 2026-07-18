@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import HintRow from "@/components/HintRow";
 import ShortcutsOverlay, { type ShortcutHint } from "@/components/ShortcutsOverlay";
+import { isHighlightApiSupported } from "@/lib/annotations/useHighlightPainter";
 import { getSection, listChapters, type ChatSelectionIn, type SectionOut } from "@/lib/api/client";
 import { useChatOpenPref } from "@/lib/hooks/useChatOpenPref";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
@@ -100,6 +101,14 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   // reading column (docked chat) for no benefit — simplest is one slot,
   // shared.
   const [notesOpen, setNotesOpen] = useState(false);
+  // Global Constraint: when the CSS Custom Highlight API isn't supported, ALL
+  // annotation UI is hidden — including Notes, which is nothing but a list
+  // of highlights nobody on this browser can ever create. Computed once
+  // (browser support doesn't change mid-session, same rationale as
+  // useHighlightPainter's own module-level `supported` flag) and passed down
+  // to gate both the TopBar toggle button and the panel itself, rather than
+  // each of them calling the detector independently.
+  const notesSupported = useMemo(() => isHighlightApiSupported(), []);
   // Set when "Explain" fires on a selection/highlight (ReadingColumn's
   // ExplainSelection, camelCase) and mapped to the wire-shaped
   // ChatSelectionIn (snake_case) right here — the one bridge point between
@@ -411,6 +420,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
         onLessonSectionSettled={patchLessonStatus}
         chatOpen={chatOpen}
         onToggleChat={toggleChat}
+        notesSupported={notesSupported}
         notesOpen={notesOpen}
         onToggleNotes={toggleNotes}
         onOpenOutlineEditor={openOutlineEditor}
@@ -451,13 +461,15 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
           pendingSelection={pendingSelection}
           onConsumeSelection={consumeSelection}
         />
-        <NotesPanel
-          courseId={course.id}
-          open={notesOpen}
-          sections={sections}
-          onClose={closeNotes}
-          onNavigate={handleNotesNavigate}
-        />
+        {notesSupported && (
+          <NotesPanel
+            courseId={course.id}
+            open={notesOpen}
+            sections={sections}
+            onClose={closeNotes}
+            onNavigate={handleNotesNavigate}
+          />
+        )}
       </div>
       <UsageFooter key={usageRefreshKey} courseId={course.id} />
       <HintRow

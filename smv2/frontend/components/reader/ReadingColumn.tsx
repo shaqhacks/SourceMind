@@ -86,7 +86,7 @@ export default function ReadingColumn({
   // Mounted unconditionally (not gated on mode) so switching INTO source
   // view shows correct highlights immediately, without waiting on a fresh
   // fetch that a mode switch alone wouldn't trigger.
-  const { highlights, createFromSelector, updateOne, deleteOne } = useHighlights(courseId, section.id);
+  const { highlights, error, createFromSelector, updateOne, deleteOne } = useHighlights(courseId, section.id);
   // useHighlights re-syncs its `highlights` array ASYNCHRONOUSLY (only once
   // its course-wide fetch for the new section resolves), but `body.kind`
   // can flip to "ready" for the new section before that fetch lands. In
@@ -155,10 +155,11 @@ export default function ReadingColumn({
   const handleSelectionColor = useCallback(
     (color: HighlightColor) => {
       if (!selectionPopover) return;
-      // Fire-and-forget: useHighlights.createFromSelector already surfaces
-      // failures via its own `error` state and the painter repaints from
-      // that hook's state automatically once the row lands — nothing here
-      // needs to await the result.
+      // Fire-and-forget: useHighlights.createFromSelector sets its own
+      // `error` state on failure, which this component renders via
+      // ErrorBanner below — nothing here needs to await the result. The
+      // painter repaints from that hook's state automatically once the row
+      // lands.
       void createFromSelector(selectionPopover.selector, color, section.page_start ?? null);
       window.getSelection()?.removeAllRanges();
       setSelectionPopover(null);
@@ -240,8 +241,9 @@ export default function ReadingColumn({
     (patch: HighlightUpdateIn) => {
       if (!editPopover) return;
       // Fire-and-forget, same convention as handleSelectionColor above:
-      // updateOne surfaces failures via useHighlights' own `error` state
-      // and the painter repaints automatically once state settles.
+      // updateOne's failure surfaces through useHighlights' own `error`
+      // state, rendered via ErrorBanner below, and the painter repaints
+      // automatically once state settles.
       void updateOne(editPopover.highlight.id, patch);
       setEditPopover(null);
     },
@@ -281,6 +283,17 @@ export default function ReadingColumn({
         style={prefsToCssVars(typography)}
       >
         <article className="reading-measure mx-auto px-6 py-10 font-serif">
+          {/* Surfaces a failed highlight create/update/delete — useHighlights
+              sets `error` to a human string (via describeError) on any of
+              those, and clears it again once a later mutation succeeds. This
+              is the only place that error is ever shown: a failed create has
+              no optimistic row to visibly not-appear, and a failed
+              update/delete rolls back silently otherwise. */}
+          {error && (
+            <div className="mb-6">
+              <ErrorBanner message={error} />
+            </div>
+          )}
           {/* Reached only via an explicit deep link (Sidebar/keyboard nav
               never select these, see chapterGroups.ts and CourseReader's
               goToOffset) — surfaced so it isn't a silent, unexplained

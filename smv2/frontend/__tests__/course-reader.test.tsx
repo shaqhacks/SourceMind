@@ -1078,5 +1078,34 @@ describe("CourseReader", () => {
       expect(await screen.findByRole("complementary", { name: /course chat/i })).toBeInTheDocument();
       expect(screen.queryByRole("complementary", { name: /course notes/i })).not.toBeInTheDocument();
     });
+
+    it("hides the Notes button and panel entirely when the CSS Custom Highlight API is unsupported", async () => {
+      // Same guarded delete/restore pattern as
+      // annotations/selection-popover.test.tsx's own unsupported-browser
+      // test: deleting the global Highlight constructor fails
+      // isHighlightApiSupported()'s `typeof Highlight !== "undefined"` check
+      // without touching CSS.highlights itself. Restored in `finally` so no
+      // later test in the suite observes the unsupported state.
+      const globalRecord = globalThis as Record<string, unknown>;
+      const originalHighlightCtor = globalRecord.Highlight;
+      delete globalRecord.Highlight;
+
+      try {
+        render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+        await screen.findByText(/first body/i);
+
+        // No highlight can ever be created on this browser (ReadingColumn's
+        // own selection handlers already bail on the same check), so the
+        // Notes entry point — button and panel alike — must not render at
+        // all rather than open onto a permanently-empty list.
+        expect(screen.queryByRole("button", { name: /open notes/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /close notes/i })).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("complementary", { name: /course notes/i }),
+        ).not.toBeInTheDocument();
+      } finally {
+        globalRecord.Highlight = originalHighlightCtor;
+      }
+    });
   });
 });

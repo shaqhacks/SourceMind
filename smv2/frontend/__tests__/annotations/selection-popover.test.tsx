@@ -19,7 +19,7 @@ import {
 } from "@/lib/api/client";
 import type { ReaderCourse, ReaderProgress } from "@/lib/reader/types";
 
-import { ok } from "../support/api-result";
+import { err, ok } from "../support/api-result";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -253,6 +253,31 @@ describe("ReadingColumn selection popover integration", () => {
     // Popover closes and the live selection is cleared once a color is chosen.
     expect(screen.queryByRole("dialog", { name: "Selection actions" })).not.toBeInTheDocument();
     expect(window.getSelection()?.isCollapsed ?? true).toBe(true);
+  });
+
+  it("surfaces a failed highlight creation via an error banner instead of failing silently", async () => {
+    const user = userEvent.setup();
+    mockedCreateHighlight.mockResolvedValue(err(500));
+
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    const paragraph = await screen.findByText(/read the example passage/i);
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    selectPhrase(paragraph, "example passage");
+    fireEvent.mouseUp(paragraph);
+    expect(await screen.findByRole("dialog", { name: "Selection actions" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Highlight green" }));
+
+    await waitFor(() => {
+      expect(mockedCreateHighlight).toHaveBeenCalled();
+    });
+
+    // No optimistic row exists for a create (see useHighlights' own
+    // comment), so without this banner a failed create is a pure no-op:
+    // the popover closes, the selection clears, and nothing ever appears.
+    expect(await screen.findByRole("alert")).toHaveTextContent(/creating highlight failed/i);
   });
 
   it("does not open a popover for a plain click (collapsed selection)", async () => {

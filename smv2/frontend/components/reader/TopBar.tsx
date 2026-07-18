@@ -33,6 +33,13 @@ export interface TopBarProps {
   onLessonSectionSettled: (sectionId: string, status: "ready" | "failed") => void;
   chatOpen: boolean;
   onToggleChat: () => void;
+  /** Whether the CSS Custom Highlight API is supported — the reader's
+   * Global Constraint is that ALL annotation UI (including the Notes
+   * panel, which is nothing but a list of highlights) is hidden when it
+   * isn't. Computed once by CourseReader (see
+   * lib/annotations/useHighlightPainter's isHighlightApiSupported) and
+   * passed down so this component stays presentational. */
+  notesSupported: boolean;
   notesOpen: boolean;
   onToggleNotes: () => void;
   onOpenOutlineEditor: () => void;
@@ -55,6 +62,7 @@ export default function TopBar({
   onLessonSectionSettled,
   chatOpen,
   onToggleChat,
+  notesSupported,
   notesOpen,
   onToggleNotes,
   onOpenOutlineEditor,
@@ -168,15 +176,17 @@ export default function TopBar({
       >
         Chat
       </button>
-      <button
-        type="button"
-        onClick={onToggleNotes}
-        aria-pressed={notesOpen}
-        aria-label={notesOpen ? "Close notes" : "Open notes"}
-        className="rounded-md border border-border px-2 py-1 text-sm"
-      >
-        Notes
-      </button>
+      {notesSupported && (
+        <button
+          type="button"
+          onClick={onToggleNotes}
+          aria-pressed={notesOpen}
+          aria-label={notesOpen ? "Close notes" : "Open notes"}
+          className="rounded-md border border-border px-2 py-1 text-sm"
+        >
+          Notes
+        </button>
+      )}
       <TypographyControls />
     </div>
   );
