@@ -36,6 +36,10 @@
   --status-warning-soft: #fef3c7;
   --status-serious: #b91c1c;
   --status-serious-soft: #fee2e2;
+  --highlight-yellow: #fef3c7;
+  --highlight-green: #dcfce7;
+  --highlight-blue: #dbeafe;
+  --highlight-pink: #fce7f3;
 
   /* Reading-column typography defaults (WCAG AA target: 4.5:1+ for body
      text). Overridden per-user as inline CSS vars by TypographyControls.
@@ -90,6 +94,10 @@
     --status-warning-soft: #2b2412;
     --status-serious: #f87171;
     --status-serious-soft: #2f1a1a;
+    --highlight-yellow: rgba(250, 204, 21, 0.28);
+    --highlight-green: rgba(34, 197, 94, 0.28);
+    --highlight-blue: rgba(59, 130, 246, 0.28);
+    --highlight-pink: rgba(236, 72, 153, 0.28);
   }
 }
 
@@ -107,6 +115,10 @@
   --status-warning-soft: #fef3c7;
   --status-serious: #b91c1c;
   --status-serious-soft: #fee2e2;
+  --highlight-yellow: #fef3c7;
+  --highlight-green: #dcfce7;
+  --highlight-blue: #dbeafe;
+  --highlight-pink: #fce7f3;
 }
 
 :root[data-theme="dark"] {
@@ -123,6 +135,29 @@
   --status-warning-soft: #2b2412;
   --status-serious: #f87171;
   --status-serious-soft: #2f1a1a;
+  --highlight-yellow: rgba(250, 204, 21, 0.28);
+  --highlight-green: rgba(34, 197, 94, 0.28);
+  --highlight-blue: rgba(59, 130, 246, 0.28);
+  --highlight-pink: rgba(236, 72, 153, 0.28);
+}
+
+/* CSS Custom Highlight API — paint rules for ::highlight() pseudo-element.
+   Each rule uses the corresponding --highlight-* token defined above in
+   light/dark blocks. */
+::highlight(hl-yellow) {
+  background-color: var(--highlight-yellow);
+}
+
+::highlight(hl-green) {
+  background-color: var(--highlight-green);
+}
+
+::highlight(hl-blue) {
+  background-color: var(--highlight-blue);
+}
+
+::highlight(hl-pink) {
+  background-color: var(--highlight-pink);
 }
 
 body {

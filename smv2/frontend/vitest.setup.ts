@@ -104,3 +104,45 @@ if (typeof Element.prototype.scrollTo !== "function") {
 if (typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = function scrollIntoView(): void {};
 }
+
+// CSS Custom Highlight API — absent in jsdom. Minimal registry so components
+// that paint highlights don't throw under test. Behaviour (actual painting)
+// is a browser concern; tests assert we CALL the registry correctly.
+class HighlightPolyfill {
+  private ranges: Set<Range>;
+  constructor(...ranges: Range[]) {
+    this.ranges = new Set(ranges);
+  }
+  add(r: Range) {
+    this.ranges.add(r);
+  }
+  clear() {
+    this.ranges.clear();
+  }
+  get size() {
+    return this.ranges.size;
+  }
+}
+
+if (typeof (globalThis as Record<string, unknown>).Highlight !== "function") {
+  Object.defineProperty(globalThis, "Highlight", {
+    value: HighlightPolyfill,
+    configurable: true,
+    writable: true,
+    enumerable: false,
+  });
+}
+
+if (typeof (globalThis as Record<string, unknown>).CSS !== "object" || (globalThis as Record<string, unknown>).CSS == null) {
+  Object.defineProperty(globalThis, "CSS", {
+    value: {},
+    configurable: true,
+    writable: true,
+    enumerable: false,
+  });
+}
+
+const globalCSS = (globalThis as Record<string, unknown>).CSS as Record<string, unknown>;
+if (globalCSS.highlights == null) {
+  globalCSS.highlights = new Map();
+}
