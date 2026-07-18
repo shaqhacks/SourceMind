@@ -24,6 +24,7 @@ import { nextViewMode } from "@/lib/reader/viewMode";
 
 import CourseChatDrawer from "./CourseChatDrawer";
 import type { LessonDisplayStatus } from "./LessonPane";
+import NotesPanel from "./NotesPanel";
 import OutlineEditorModal from "./OutlineEditorModal";
 import ReadingColumn from "./ReadingColumn";
 import Sidebar from "./Sidebar";
@@ -97,6 +98,14 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const { open: chatOpen, setOpen: setChatOpen, toggle: toggleChatOpen } = useChatOpenPref(
     course.id,
   );
+  // Plain useState (not a per-course pref like chat's) — the notes panel is
+  // a glance-and-dismiss list, not a preference worth persisting across
+  // sessions. Mutually exclusive with chat (see toggleChat/toggleNotes
+  // below): both are right-side slide-overs, and letting both be open at
+  // once would either overlap (narrow viewport) or needlessly squeeze the
+  // reading column (docked chat) for no benefit — simplest is one slot,
+  // shared.
+  const [notesOpen, setNotesOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [outlineEditorOpen, setOutlineEditorOpen] = useState(false);
   const [chapterStats, setChapterStats] = useState<Record<string, ChapterTestStats>>({});
@@ -258,6 +267,21 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const goNext = useCallback(() => goToOffset(1), [goToOffset]);
   const goPrevious = useCallback(() => goToOffset(-1), [goToOffset]);
 
+  // Direct id-based navigation (as opposed to goToOffset's relative
+  // stepping) — the same id->index resolution `activeIndex`'s own useState
+  // initializer already does for a resumed/deep-linked section_id above,
+  // generalized into a callback so NotesPanel (and any other id-based
+  // navigation source) can jump straight to a section. A miss (id no
+  // longer exists — outline edit) is a no-op rather than clamping to
+  // something arbitrary.
+  const goToSection = useCallback(
+    (sectionId: string) => {
+      const index = sections.findIndex((section) => section.id === sectionId);
+      if (index !== -1) setActiveIndex(index);
+    },
+    [sections],
+  );
+
   // Chevron visibility/labels: whether a next/previous content section
   // actually exists from here, and what it's titled — null means "don't
   // render that chevron at all" (matches the clamp above: nothing to
@@ -275,8 +299,37 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   }, [mode, pagesAvailable, setStoredMode]);
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
-  const toggleChat = toggleChatOpen;
+  // Mutually exclusive with notes: toggling chat always closes notes first
+  // (a no-op if it's already closed) rather than branching on direction —
+  // simpler, and harmless either way. NOT symmetric with toggleNotes below:
+  // that one only flips notesOpen and deliberately leaves the persisted
+  // chat pref alone (see its comment) — chatRenderedOpen is what hides the
+  // chat drawer while notes is open.
+  const toggleChat = useCallback(() => {
+    setNotesOpen(false);
+    toggleChatOpen();
+  }, [toggleChatOpen]);
   const closeChat = useCallback(() => setChatOpen(false), [setChatOpen]);
+  // Deliberately does NOT touch the persisted chat pref (setChatOpen) —
+  // chatOpen is a cross-session preference (see useChatOpenPref), and
+  // opening Notes is a transient view choice, not the user closing chat.
+  // Mutual exclusion with chat is handled purely at render time via
+  // chatRenderedOpen below, so the persisted pref survives a Notes visit
+  // untouched.
+  const toggleNotes = useCallback(() => {
+    setNotesOpen((open) => !open);
+  }, []);
+  const closeNotes = useCallback(() => setNotesOpen(false), []);
+  // Clicking a note in NotesPanel both navigates AND dismisses the panel —
+  // "go read that highlight" is the whole point of the click, so there's no
+  // reason to leave the list open covering the section it just jumped to.
+  const handleNotesNavigate = useCallback(
+    (sectionId: string) => {
+      goToSection(sectionId);
+      closeNotes();
+    },
+    [goToSection, closeNotes],
+  );
   const openOutlineEditor = useCallback(() => setOutlineEditorOpen(true), []);
   const closeOutlineEditor = useCallback(() => setOutlineEditorOpen(false), []);
   // "Explain" on a selection just opens chat for now — see the
@@ -322,6 +375,15 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     headingRef.current?.focus();
   }, [activeIndex]);
 
+  // What CourseChatDrawer actually renders: chatOpen is the persisted
+  // cross-session pref (see useChatOpenPref / toggleNotes above), which
+  // must survive a Notes visit untouched. This derived value is what
+  // implements the mutual-exclusion visually — Notes hides chat without
+  // ever writing to the pref — and is intentionally NOT what TopBar's
+  // Chat button reflects (that button shows toggle *intent*, i.e. the
+  // persisted pref, not momentary visibility).
+  const chatRenderedOpen = chatOpen && !notesOpen;
+
   const bodyState: SectionBodyState =
     sectionBodies[activeSection.id] !== undefined
       ? { kind: "ready", body: sectionBodies[activeSection.id] }
@@ -339,6 +401,8 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
         onLessonSectionSettled={patchLessonStatus}
         chatOpen={chatOpen}
         onToggleChat={toggleChat}
+        notesOpen={notesOpen}
+        onToggleNotes={toggleNotes}
         onOpenOutlineEditor={openOutlineEditor}
         viewMode={mode}
         pagesAvailable={pagesAvailable}
@@ -370,7 +434,14 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
           previousTitle={previousSection?.title ?? null}
           onExplainSelection={handleExplainSelection}
         />
-        <CourseChatDrawer courseId={course.id} open={chatOpen} onClose={closeChat} />
+        <CourseChatDrawer courseId={course.id} open={chatRenderedOpen} onClose={closeChat} />
+        <NotesPanel
+          courseId={course.id}
+          open={notesOpen}
+          sections={sections}
+          onClose={closeNotes}
+          onNavigate={handleNotesNavigate}
+        />
       </div>
       <UsageFooter key={usageRefreshKey} courseId={course.id} />
       <HintRow

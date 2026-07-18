@@ -49,6 +49,8 @@ function makeProps(overrides: Partial<TopBarProps> = {}): TopBarProps {
     onLessonSectionSettled: vi.fn(),
     chatOpen: false,
     onToggleChat: vi.fn(),
+    notesOpen: false,
+    onToggleNotes: vi.fn(),
     onOpenOutlineEditor: vi.fn(),
     viewMode: "source",
     pagesAvailable: false,
@@ -86,6 +88,27 @@ describe("reader TopBar", () => {
     expect(screen.getByRole("button", { name: /generate all lessons/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /quizzes/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /more actions/i })).not.toBeInTheDocument();
+  });
+
+  it("renders a Notes toggle next to Chat — always inline, never tucked into the overflow menu", async () => {
+    mockViewport(true); // even collapsed, Notes (like Chat) stays outside the "more actions" menu
+    const user = userEvent.setup();
+    const onToggleNotes = vi.fn();
+    render(<TopBar {...makeProps({ notesOpen: false, onToggleNotes })} />);
+
+    const notesButton = screen.getByRole("button", { name: /open notes/i });
+    expect(notesButton).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(notesButton);
+    expect(onToggleNotes).toHaveBeenCalledTimes(1);
+  });
+
+  it("reflects an open notes panel via aria-pressed and label", () => {
+    mockViewport(false);
+    render(<TopBar {...makeProps({ notesOpen: true })} />);
+
+    const notesButton = screen.getByRole("button", { name: /close notes/i });
+    expect(notesButton).toHaveAttribute("aria-pressed", "true");
   });
 
   it("collapses the mid-bar actions into an overflow menu below lg", async () => {

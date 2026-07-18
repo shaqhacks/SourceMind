@@ -33,6 +33,8 @@ export interface TopBarProps {
   onLessonSectionSettled: (sectionId: string, status: "ready" | "failed") => void;
   chatOpen: boolean;
   onToggleChat: () => void;
+  notesOpen: boolean;
+  onToggleNotes: () => void;
   onOpenOutlineEditor: () => void;
   viewMode: ViewMode;
   pagesAvailable: boolean;
@@ -53,6 +55,8 @@ export default function TopBar({
   onLessonSectionSettled,
   chatOpen,
   onToggleChat,
+  notesOpen,
+  onToggleNotes,
   onOpenOutlineEditor,
   viewMode,
   pagesAvailable,
@@ -163,6 +167,15 @@ export default function TopBar({
         className="rounded-md border border-border px-2 py-1 text-sm"
       >
         Chat
+      </button>
+      <button
+        type="button"
+        onClick={onToggleNotes}
+        aria-pressed={notesOpen}
+        aria-label={notesOpen ? "Close notes" : "Open notes"}
+        className="rounded-md border border-border px-2 py-1 text-sm"
+      >
+        Notes
       </button>
       <TypographyControls />
     </div>

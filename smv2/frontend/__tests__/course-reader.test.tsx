@@ -967,5 +967,116 @@ describe("CourseReader", () => {
       render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
       expect(await screen.findByRole("complementary", { name: /course chat/i })).toBeInTheDocument();
     });
+
+    it("opening and closing Notes hides/restores the chat drawer without clobbering the persisted pref", async () => {
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.click(screen.getByRole("button", { name: /open chat/i }));
+      expect(await screen.findByRole("complementary", { name: /course chat/i })).toBeInTheDocument();
+      expect(window.localStorage.getItem("smv2.chatOpen.course-1")).toBe("true");
+
+      // Opening Notes must visually hide chat (mutual exclusion) but must
+      // NOT flip the user's persisted chat-open preference — regression
+      // test for the bug where toggleNotes routed the close through the
+      // persisted setChatOpen, silently overwriting the pref.
+      await user.click(screen.getByRole("button", { name: /open notes/i }));
+      const notesPanel = await screen.findByRole("complementary", { name: /course notes/i });
+      expect(screen.queryByRole("complementary", { name: /course chat/i })).not.toBeInTheDocument();
+      expect(window.localStorage.getItem("smv2.chatOpen.course-1")).toBe("true");
+
+      await user.click(within(notesPanel).getByRole("button", { name: /close/i }));
+      expect(screen.queryByRole("complementary", { name: /course notes/i })).not.toBeInTheDocument();
+      expect(await screen.findByRole("complementary", { name: /course chat/i })).toBeInTheDocument();
+      expect(window.localStorage.getItem("smv2.chatOpen.course-1")).toBe("true");
+    });
+  });
+
+  describe("notes panel", () => {
+    const HIGHLIGHT_IN_CHAPTER_TWO = {
+      id: "hl-1",
+      course_id: "course-1",
+      section_id: "sec-2",
+      exact: "a highlighted phrase",
+      prefix: "",
+      suffix: "",
+      occurrence: 0,
+      page: null,
+      color: "yellow" as const,
+      note_md: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+
+    it("opens via the TopBar 'Notes' button and lists highlights", async () => {
+      mockedListHighlights.mockResolvedValue(ok([HIGHLIGHT_IN_CHAPTER_TWO]));
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.click(screen.getByRole("button", { name: /open notes/i }));
+
+      expect(
+        await screen.findByRole("complementary", { name: /course notes/i }),
+      ).toBeInTheDocument();
+      expect(await screen.findByText(/a highlighted phrase/i)).toBeInTheDocument();
+    });
+
+    it("clicking a highlight row navigates to its section (reusing the same setActiveIndex path as the sidebar) and closes the panel", async () => {
+      mockedListHighlights.mockResolvedValue(ok([HIGHLIGHT_IN_CHAPTER_TWO]));
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.click(screen.getByRole("button", { name: /open notes/i }));
+      const row = await screen.findByRole("button", { name: /a highlighted phrase/i });
+      await user.click(row);
+
+      expect(screen.getByRole("button", { name: /chapter two/i })).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      expect(
+        screen.queryByRole("complementary", { name: /course notes/i }),
+      ).not.toBeInTheDocument();
+      await screen.findByText(/second body/i);
+    });
+
+    // Split from a single "opening notes closes chat, and opening chat
+    // closes notes" test: the TopBar Chat button's label/aria-pressed
+    // tracks the persisted chat-open *preference* (toggle intent), not
+    // momentary visibility (see chatRenderedOpen in CourseReader) — once
+    // notes hides an already-open chat panel, the pref is left "on" and
+    // the button reads "Close chat", not "Open chat". Re-querying by
+    // "open chat" from that state is no longer a valid action (clicking
+    // it would toggle the still-on pref *off*), so each direction now
+    // starts from its own clean, closed state instead of chaining off the
+    // other's end state.
+    it("opening notes hides an already-open chat panel", async () => {
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.click(screen.getByRole("button", { name: /open chat/i }));
+      expect(await screen.findByRole("complementary", { name: /course chat/i })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /open notes/i }));
+      expect(await screen.findByRole("complementary", { name: /course notes/i })).toBeInTheDocument();
+      expect(screen.queryByRole("complementary", { name: /course chat/i })).not.toBeInTheDocument();
+    });
+
+    it("opening chat closes an already-open notes panel", async () => {
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.click(screen.getByRole("button", { name: /open notes/i }));
+      expect(await screen.findByRole("complementary", { name: /course notes/i })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /open chat/i }));
+      expect(await screen.findByRole("complementary", { name: /course chat/i })).toBeInTheDocument();
+      expect(screen.queryByRole("complementary", { name: /course notes/i })).not.toBeInTheDocument();
+    });
   });
 });
