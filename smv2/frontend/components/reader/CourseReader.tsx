@@ -30,6 +30,12 @@ import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
 import UsageFooter from "./UsageFooter";
 
+// Task 6 (SelectionPopover "Explain") only opens the chat drawer — the
+// selected text itself (`ExplainSelection`) isn't threaded any further
+// yet. Task 9 is what adds a `pendingSelection` state here and feeds it
+// into CourseChatDrawer/sendChat; wiring that up now would leave a prop
+// with no consumer, so it's deliberately left out until Task 9 needs it.
+
 const SHORTCUT_HINTS: ShortcutHint[] = [
   { keys: "← / → or j / k", description: "Next / previous chapter" },
   { keys: "s", description: "Cycle source / pages / lesson view" },
@@ -273,6 +279,10 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const closeChat = useCallback(() => setChatOpen(false), [setChatOpen]);
   const openOutlineEditor = useCallback(() => setOutlineEditorOpen(true), []);
   const closeOutlineEditor = useCallback(() => setOutlineEditorOpen(false), []);
+  // "Explain" on a selection just opens chat for now — see the
+  // module-level comment on why the selection itself isn't threaded
+  // through yet.
+  const handleExplainSelection = useCallback(() => setChatOpen(true), [setChatOpen]);
   const handleOutlineApplied = useCallback((updated: SectionOut[]) => {
     setSectionsOverride(updated);
   }, []);
@@ -358,6 +368,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
           onPrevious={goPrevious}
           nextTitle={nextSection?.title ?? null}
           previousTitle={previousSection?.title ?? null}
+          onExplainSelection={handleExplainSelection}
         />
         <CourseChatDrawer courseId={course.id} open={chatOpen} onClose={closeChat} />
       </div>

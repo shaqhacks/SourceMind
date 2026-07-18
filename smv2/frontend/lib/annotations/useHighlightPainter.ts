@@ -12,12 +12,28 @@ function registryName(color: HighlightColor): string {
   return `hl-${color}`;
 }
 
+/**
+ * Feature-test for the CSS Custom Highlight API
+ * (https://developer.mozilla.org/docs/Web/API/CSS_Custom_Highlight_API).
+ * `typeof CSS`/`typeof Highlight` guard the SSR/build-time module graph (no
+ * `CSS`/`Highlight` global exists in Node) as well as real unsupported
+ * browsers (older Safari/Firefox).
+ *
+ * Exported as the single source of truth: this module's own paint gate
+ * (`supported`, below) AND ReadingColumn's selection->popover trigger must
+ * agree on this check. Without that, a browser lacking the API could still
+ * open the popover, create a highlight row via `createFromSelector`, and
+ * have painting silently no-op — the row would exist and be listed
+ * elsewhere (NotesPanel), but the selection the user just made would
+ * simply vanish with nothing shown for it.
+ */
+export function isHighlightApiSupported(): boolean {
+  return typeof CSS !== "undefined" && !!CSS.highlights && typeof Highlight !== "undefined";
+}
+
 // Computed once at module load, not per effect run: browser support for the
-// CSS Custom Highlight API doesn't change during a session. `typeof CSS`/
-// `typeof Highlight` guard the SSR/build-time module graph (no `CSS`/
-// `Highlight` global exists in Node) as well as real unsupported browsers.
-const supported =
-  typeof CSS !== "undefined" && !!CSS.highlights && typeof Highlight !== "undefined";
+// CSS Custom Highlight API doesn't change during a session.
+const supported = isHighlightApiSupported();
 
 /**
  * Deletes all four color registry names. `CSS.highlights` is a single

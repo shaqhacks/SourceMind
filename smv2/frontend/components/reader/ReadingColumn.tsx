@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useRef, type RefObject } from "react";
+import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
-import { useHighlightPainter } from "@/lib/annotations/useHighlightPainter";
-import { useHighlights } from "@/lib/hooks/useHighlights";
+import { selectorFromRange, type QuoteSelector } from "@/lib/annotations/anchors";
+import { isHighlightApiSupported, useHighlightPainter } from "@/lib/annotations/useHighlightPainter";
+import { useHighlights, type HighlightColor } from "@/lib/hooks/useHighlights";
 import { prefsToCssVars, type TypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import type { ReaderSection, SectionBodyState, ViewMode } from "@/lib/reader/types";
 
@@ -14,6 +15,16 @@ import CardsCTA from "./CardsCTA";
 import LessonPane, { type LessonDisplayStatus } from "./LessonPane";
 import PagesView from "./PagesView";
 import SectionCards from "./SectionCards";
+import SelectionPopover from "./SelectionPopover";
+
+/** What "Explain" bubbles up to CourseReader — a plain in-process payload
+ * (not a wire body), so camelCase matches this codebase's other
+ * frontend-internal selection shapes (e.g. Chat's `ChatCitation`) rather
+ * than the snake_case `HighlightIn` API-request convention. */
+export interface ExplainSelection {
+  sectionId: string;
+  exact: string;
+}
 
 export interface ReadingColumnProps {
   courseId: string;
@@ -32,7 +43,12 @@ export interface ReadingColumnProps {
    * chapter, matching the existing clamp-instead-of-wrap keyboard nav). */
   nextTitle: string | null;
   previousTitle: string | null;
+  /** Fired when the user picks "Explain" on a live text selection — the
+   * caller (CourseReader) owns what that means (opens chat, in Task 6). */
+  onExplainSelection: (sel: ExplainSelection) => void;
 }
+
+type OpenSelectionPopover = { selector: QuoteSelector; anchorRect: DOMRect };
 
 function pageRange(section: ReaderSection): string | null {
   if (section.page_start === null || section.page_end === null) return null;
@@ -60,13 +76,14 @@ export default function ReadingColumn({
   onPrevious,
   nextTitle,
   previousTitle,
+  onExplainSelection,
 }: ReadingColumnProps) {
   const pages = pageRange(section);
 
   // Mounted unconditionally (not gated on mode) so switching INTO source
   // view shows correct highlights immediately, without waiting on a fresh
   // fetch that a mode switch alone wouldn't trigger.
-  const { highlights } = useHighlights(courseId, section.id);
+  const { highlights, createFromSelector } = useHighlights(courseId, section.id);
   // useHighlights re-syncs its `highlights` array ASYNCHRONOUSLY (only once
   // its course-wide fetch for the new section resolves), but `body.kind`
   // can flip to "ready" for the new section before that fetch lands. In
@@ -91,6 +108,67 @@ export default function ReadingColumn({
   // container (and its text) newly exists, which is what actually needs to
   // retrigger the painter.
   useHighlightPainter(articleBodyRef, paintable, mode === "source" && body.kind === "ready");
+
+  // The live text-selection popover (create-highlight / explain). Only
+  // ever set from `handleArticleMouseUp` below, which already gates on
+  // source mode + a resolved body via `articleBodyRef` only existing in
+  // that branch — no separate `mode`/`body.kind` check needed here.
+  const [selectionPopover, setSelectionPopover] = useState<OpenSelectionPopover | null>(null);
+
+  const closeSelectionPopover = useCallback(() => setSelectionPopover(null), []);
+
+  // Scoped to the article wrapper via React's onMouseUp (fires on any
+  // mouseup that bubbles from a descendant of that div — the wrapper only
+  // exists in the DOM in the mode==="source" && body.kind==="ready"
+  // branch, so this can never observe pages/lesson-mode content). A plain
+  // click (no drag) collapses the selection, so this is a no-op then —
+  // dismissing an already-open popover on an unrelated click is handled
+  // separately by SelectionPopover's own useDismissOnOutsideOrEscape.
+  //
+  // Also bails when the CSS Custom Highlight API isn't supported (older
+  // Safari/Firefox): opening the popover there would let a user pick a
+  // color, POST a highlight row via createFromSelector, and then never see
+  // it painted (useHighlightPainter's own `supported` gate makes painting
+  // a no-op) — the selection would just vanish with nothing to show for
+  // it. Bailing here instead means selecting text on an unsupported
+  // browser is a genuine no-op: normal copy/selection still works, no
+  // annotation UI appears at all.
+  const handleArticleMouseUp = useCallback(() => {
+    if (!isHighlightApiSupported()) return;
+    const container = articleBodyRef.current;
+    if (!container) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+    const range = selection.getRangeAt(0);
+    if (range.collapsed) return;
+    if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
+      return;
+    }
+    const selector = selectorFromRange(container, range);
+    if (!selector) return;
+    setSelectionPopover({ selector, anchorRect: range.getBoundingClientRect() });
+  }, []);
+
+  const handleSelectionColor = useCallback(
+    (color: HighlightColor) => {
+      if (!selectionPopover) return;
+      // Fire-and-forget: useHighlights.createFromSelector already surfaces
+      // failures via its own `error` state and the painter repaints from
+      // that hook's state automatically once the row lands — nothing here
+      // needs to await the result.
+      void createFromSelector(selectionPopover.selector, color, section.page_start ?? null);
+      window.getSelection()?.removeAllRanges();
+      setSelectionPopover(null);
+    },
+    [selectionPopover, createFromSelector, section.page_start],
+  );
+
+  const handleSelectionExplain = useCallback(() => {
+    if (!selectionPopover) return;
+    onExplainSelection({ sectionId: section.id, exact: selectionPopover.selector.exact });
+    window.getSelection()?.removeAllRanges();
+    setSelectionPopover(null);
+  }, [selectionPopover, onExplainSelection, section.id]);
 
   return (
     <div className="relative flex min-h-0 flex-1">
@@ -162,7 +240,7 @@ export default function ReadingColumn({
               // old Range objects against nodes React mutated in place,
               // painting a highlight onto the wrong section's text instead
               // of harmlessly pointing at detached nodes.
-              <div ref={articleBodyRef} key={section.id}>
+              <div ref={articleBodyRef} key={section.id} onMouseUp={handleArticleMouseUp}>
                 <Markdown>{body.body}</Markdown>
               </div>
             )
@@ -211,6 +289,22 @@ export default function ReadingColumn({
             ›
           </span>
         </button>
+      )}
+      {selectionPopover && (
+        // Rendered outside the scrollable column deliberately: it's
+        // `position: fixed` (viewport-relative, matching
+        // `range.getBoundingClientRect()`), and no ancestor here sets a
+        // transform/filter that would turn it into a new containing block,
+        // so its DOM position doesn't matter beyond "somewhere in this
+        // subtree" — kept as a plain sibling rather than nested inside the
+        // scrolling column to avoid any future clipping/stacking surprises
+        // from that container's own `overflow-y-auto`.
+        <SelectionPopover
+          anchorRect={selectionPopover.anchorRect}
+          onColor={handleSelectionColor}
+          onExplain={handleSelectionExplain}
+          onClose={closeSelectionPopover}
+        />
       )}
     </div>
   );

@@ -105,6 +105,32 @@ if (typeof Element.prototype.scrollIntoView !== "function") {
   Element.prototype.scrollIntoView = function scrollIntoView(): void {};
 }
 
+// jsdom's Range doesn't implement getBoundingClientRect() at all (the
+// method is simply undefined, unlike Element's version which exists but
+// always returns a zero rect) — SelectionPopover positions itself off
+// `range.getBoundingClientRect()` for a live text selection. A zero-filled
+// DOMRect is enough for jsdom (no layout engine to measure against
+// anyway, same as the Element case) — production code never branches on
+// jsdom vs. a real browser, this just fills the method in so it doesn't
+// throw "is not a function".
+if (typeof Range.prototype.getBoundingClientRect !== "function") {
+  Range.prototype.getBoundingClientRect = function getBoundingClientRect(this: Range): DOMRect {
+    return {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      toJSON() {
+        return this;
+      },
+    } as DOMRect;
+  };
+}
+
 // CSS Custom Highlight API — absent in jsdom. Minimal registry so components
 // that paint highlights don't throw under test. Behaviour (actual painting)
 // is a browser concern; tests assert we CALL the registry correctly.
