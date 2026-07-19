@@ -3,6 +3,7 @@
 import { useLayoutEffect, type RefObject } from "react";
 
 import { rangeForSelector } from "@/lib/annotations/anchors";
+import { ensureHighlightStyles } from "@/lib/annotations/highlightStyles";
 import type { HighlightOut } from "@/lib/api/client";
 import type { HighlightColor } from "@/lib/hooks/useHighlights";
 
@@ -80,6 +81,12 @@ export function useHighlightPainter(
       clearRegistry();
       return undefined;
     }
+
+    // The ::highlight(hl-*) paint rules are injected at runtime, not via
+    // globals.css (Turbopack/Lightning-CSS chokes on the pseudo-element at
+    // build time — see highlightStyles.ts). Idempotent, so calling it on
+    // every effect run is fine.
+    ensureHighlightStyles();
 
     const rangesByColor = new Map<HighlightColor, Range[]>();
     for (const highlight of highlights) {
