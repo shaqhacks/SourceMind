@@ -42,12 +42,11 @@ describe("SelectionContextPill", () => {
     expect(pill.textContent).not.toContain("…");
   });
 
-  // Single-word edge case: always "words" (never "word") — the simplest
-  // form, chosen over a singular/plural branch for a cosmetic label.
-  it("uses plural 'words' even for a single-word passage", () => {
+  // Single-word edge case: singular "word".
+  it("uses singular 'word' for a single-word passage", () => {
     render(<SelectionContextPill exact="Word" onRemove={vi.fn()} />);
 
-    expect(screen.getByTitle("Word")).toHaveTextContent("1 words");
+    expect(screen.getByTitle("Word")).toHaveTextContent("1 word");
   });
 
   it("the × button calls onRemove", async () => {

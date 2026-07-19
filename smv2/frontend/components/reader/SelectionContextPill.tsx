@@ -26,19 +26,16 @@ function snippet(exact: string): string {
  * the old top-of-panel "Asking about: …" chip — same one-shot lifecycle
  * (CourseChatDrawer owns `pendingSelection`/`onConsumeSelection`), just
  * relocated next to the input it actually affects.
- *
- * Word count always uses the plural "words" (even for a single word) —
- * simplest form, no singular/plural branch to maintain for a cosmetic
- * label.
  */
 export default function SelectionContextPill({ exact, onRemove }: SelectionContextPillProps) {
+  const words = wordCount(exact);
   return (
     <div
       title={exact}
       className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground"
     >
       <span className="truncate">
-        <span aria-hidden="true">📄</span> {wordCount(exact)} words — &ldquo;{snippet(exact)}&rdquo;
+        <span aria-hidden="true">📄</span> {words} {words === 1 ? "word" : "words"} — &ldquo;{snippet(exact)}&rdquo;
       </span>
       <button
         type="button"

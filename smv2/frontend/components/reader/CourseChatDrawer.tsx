@@ -19,9 +19,9 @@ export interface CourseChatDrawerProps {
   courseId: string;
   open: boolean;
   onClose: () => void;
-  /** Set by CourseReader when "Explain" fires on a selected/highlighted
-   * passage (Task 9). Carried into the *next* sendChat call, then cleared
-   * via onConsumeSelection so it attaches to exactly one turn. */
+  /** Set by CourseReader when "Add to chat" fires on a selected/highlighted
+   * passage. Carried into the *next* sendChat call, then cleared via
+   * onConsumeSelection so it attaches to exactly one turn. */
   pendingSelection?: ChatSelectionIn | null;
   onConsumeSelection?: () => void;
 }
