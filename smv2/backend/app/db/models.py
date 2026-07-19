@@ -298,6 +298,9 @@ class Highlight(Base):
     occurrence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     color: Mapped[str] = mapped_column(String, nullable=False, default="yellow")
+    # source = anchored in body_md markdown DOM; pdf = anchored in the PDF
+    # text layer; the two never cross-map.
+    surface: Mapped[str] = mapped_column(String, nullable=False, default="source")
     note_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(

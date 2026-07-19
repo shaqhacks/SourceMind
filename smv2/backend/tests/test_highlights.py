@@ -142,10 +142,35 @@ def test_highlight_validation(client, ingest_course):
     )
     assert resp.status_code == 422
 
-    # Pydantic-level rejects: empty exact, unknown color, 0 page (1-based API).
+    # Pydantic-level rejects: empty exact, unknown color, 0 page (1-based API),
+    # unknown surface.
     for bad in (
         {"section_id": section_id, "exact": ""},
         {"section_id": section_id, "exact": "x", "color": "mauve"},
         {"section_id": section_id, "exact": "x", "page": 0},
+        {"section_id": section_id, "exact": "x", "surface": "pages"},
     ):
         assert client.post(f"/api/courses/{course_id}/highlights", json=bad).status_code == 422
+
+
+def test_highlight_surface_discriminator(client, ingest_course):
+    course_id, _, _, _ = ingest_course("with_bookmarks.pdf")
+    section_id = client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
+
+    # Explicit surface="pdf" round-trips through the list.
+    created = client.post(
+        f"/api/courses/{course_id}/highlights",
+        json={"section_id": section_id, "exact": "pdf anchored text", "surface": "pdf"},
+    )
+    assert created.status_code == 201
+    assert created.json()["surface"] == "pdf"
+    listed = client.get(f"/api/courses/{course_id}/highlights").json()
+    assert next(h["surface"] for h in listed if h["id"] == created.json()["id"]) == "pdf"
+
+    # Omitted surface defaults to "source".
+    default_created = client.post(
+        f"/api/courses/{course_id}/highlights",
+        json={"section_id": section_id, "exact": "default surface text"},
+    )
+    assert default_created.status_code == 201
+    assert default_created.json()["surface"] == "source"

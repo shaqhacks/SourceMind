@@ -446,6 +446,7 @@ class HighlightIn(BaseModel):
     occurrence: int = Field(default=0, ge=0)
     page: int | None = Field(default=None, ge=1)
     color: HighlightColor = "yellow"
+    surface: Literal["source", "pdf"] = "source"
 
 
 class HighlightUpdateIn(BaseModel):
@@ -466,6 +467,7 @@ class HighlightOut(BaseModel):
     occurrence: int
     page: int | None
     color: HighlightColor
+    surface: Literal["source", "pdf"]
     note_md: str | None
     created_at: datetime
     updated_at: datetime

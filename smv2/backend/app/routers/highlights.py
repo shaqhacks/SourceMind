@@ -41,6 +41,7 @@ def create_highlight(course_id: str, body: HighlightIn) -> HighlightOut:
             occurrence=body.occurrence,
             page=body.page,
             color=body.color,
+            surface=body.surface,
         )
     except highlights_service.InvalidSectionForCourseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

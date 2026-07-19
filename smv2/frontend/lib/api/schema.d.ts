@@ -933,6 +933,12 @@ export interface components {
              * @default
              */
             suffix: string;
+            /**
+             * Surface
+             * @default source
+             * @enum {string}
+             */
+            surface: "source" | "pdf";
         };
         /** HighlightOut */
         HighlightOut: {
@@ -964,6 +970,11 @@ export interface components {
             section_id: string;
             /** Suffix */
             suffix: string;
+            /**
+             * Surface
+             * @enum {string}
+             */
+            surface: "source" | "pdf";
             /**
              * Updated At
              * Format: date-time

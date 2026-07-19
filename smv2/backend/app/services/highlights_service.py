@@ -29,6 +29,7 @@ def _to_dict(h: Highlight) -> dict[str, Any]:
         "occurrence": h.occurrence,
         "page": to_display_page(h.page),
         "color": h.color,
+        "surface": h.surface,
         "note_md": h.note_md,
         "created_at": h.created_at,
         "updated_at": h.updated_at,
@@ -60,6 +61,7 @@ def create_highlight(
     occurrence: int,
     page: int | None,
     color: str,
+    surface: str,
 ) -> dict[str, Any]:
     session = get_session()
     try:
@@ -77,6 +79,7 @@ def create_highlight(
             occurrence=occurrence,
             page=page - 1 if page is not None else None,
             color=color,
+            surface=surface,
         )
         session.add(h)
         session.commit()

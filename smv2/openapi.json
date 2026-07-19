@@ -705,6 +705,15 @@
             "maxLength": 64,
             "title": "Suffix",
             "type": "string"
+          },
+          "surface": {
+            "default": "source",
+            "enum": [
+              "source",
+              "pdf"
+            ],
+            "title": "Surface",
+            "type": "string"
           }
         },
         "required": [
@@ -781,6 +790,14 @@
             "title": "Suffix",
             "type": "string"
           },
+          "surface": {
+            "enum": [
+              "source",
+              "pdf"
+            ],
+            "title": "Surface",
+            "type": "string"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -797,6 +814,7 @@
           "occurrence",
           "page",
           "color",
+          "surface",
           "note_md",
           "created_at",
           "updated_at"
