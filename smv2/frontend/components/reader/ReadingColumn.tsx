@@ -103,6 +103,16 @@ export default function ReadingColumn({
     () => highlights.filter((highlight) => highlight.section_id === section.id),
     [highlights, section.id],
   );
+  // Pages-mode's own slice, handed to PagesView -> PdfPagesView's
+  // aggregating painter: `surface === "pdf"` (a source-mode highlight's
+  // selector is anchored against the rendered Markdown, not the PDF's raw
+  // glyphs — painting it here would resolve against the wrong text
+  // entirely) filtered to this section, same stale-row rationale as
+  // `paintable` above.
+  const pdfHighlights = useMemo(
+    () => highlights.filter((highlight) => highlight.surface === "pdf" && highlight.section_id === section.id),
+    [highlights, section.id],
+  );
   const articleBodyRef = useRef<HTMLDivElement>(null);
   // Gated on body readiness, not just `mode === "source"`: the wrapper div
   // below only exists in the DOM once body.kind is "ready" (loading/error
@@ -417,6 +427,8 @@ export default function ReadingColumn({
                   assetId={section.asset_id}
                   pageStart={section.page_start}
                   pageEnd={section.page_end}
+                  highlights={pdfHighlights}
+                  enabled={mode === "pages"}
                 />
               </div>
             ) : (

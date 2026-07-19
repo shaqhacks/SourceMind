@@ -1,5 +1,6 @@
 "use client";
 
+import type { HighlightOut } from "@/lib/api/client";
 import { useAssetHtmlStatus } from "@/lib/reader/htmlPagesStatus";
 
 import HtmlPagesView from "./HtmlPagesView";
@@ -10,6 +11,13 @@ export interface PagesViewProps {
   assetId: string;
   pageStart: number;
   pageEnd: number;
+  /** The section's `surface:"pdf"` highlights — forwarded to PdfPagesView
+   * only (the pdf.js text-layer renderer this task paints onto).
+   * HtmlPagesView, the pdf2htmlEX-enhanced renderer, doesn't get a painter
+   * yet. */
+  highlights?: HighlightOut[];
+  /** Forwarded to PdfPagesView's painter gate. */
+  enabled?: boolean;
 }
 
 /**
@@ -21,7 +29,14 @@ export interface PagesViewProps {
  * asset that doesn't (or won't ever) have an enhanced view shouldn't nag
  * about it on every visit.
  */
-export default function PagesView({ courseId, assetId, pageStart, pageEnd }: PagesViewProps) {
+export default function PagesView({
+  courseId,
+  assetId,
+  pageStart,
+  pageEnd,
+  highlights,
+  enabled,
+}: PagesViewProps) {
   const status = useAssetHtmlStatus(courseId, assetId);
 
   if (status === "ready") {
@@ -33,7 +48,13 @@ export default function PagesView({ courseId, assetId, pageStart, pageEnd }: Pag
       {status === "converting" && (
         <p className="text-xs text-muted-foreground">Enhanced view is being prepared…</p>
       )}
-      <PdfPagesView assetId={assetId} pageStart={pageStart} pageEnd={pageEnd} />
+      <PdfPagesView
+        assetId={assetId}
+        pageStart={pageStart}
+        pageEnd={pageEnd}
+        highlights={highlights}
+        enabled={enabled}
+      />
     </div>
   );
 }

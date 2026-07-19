@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
-import { buildAssetFileUrl } from "@/lib/api/client";
+import { buildAssetFileUrl, type HighlightOut } from "@/lib/api/client";
+import { usePdfHighlightPainter, type PdfHighlightPage } from "@/lib/annotations/usePdfHighlightPainter";
 import { useNearViewport } from "@/lib/hooks/useNearViewport";
 import { GlobalWorkerOptions, TextLayer, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
 
@@ -64,9 +65,26 @@ export interface PdfPagesViewProps {
    * page_start/page_end are per-asset already, no offset needed). */
   pageStart: number;
   pageEnd: number;
+  /** The section's `surface:"pdf"` highlights (ReadingColumn's
+   * `pdfHighlights` slice) — sliced per-page (`h.page === pageNumber`) and
+   * handed to the aggregating painter once each page's text layer is
+   * ready. Defaults to empty so callers that don't care about highlights
+   * (existing tests, HtmlPagesView's sibling fallback usage) don't have to
+   * pass anything. */
+  highlights?: HighlightOut[];
+  /** Gates the painter — same convention as `useHighlightPainter`'s
+   * `enabled`: false (the default) means "don't paint, and clear whatever
+   * this painter's names currently hold in the registry." */
+  enabled?: boolean;
 }
 
-export default function PdfPagesView({ assetId, pageStart, pageEnd }: PdfPagesViewProps) {
+export default function PdfPagesView({
+  assetId,
+  pageStart,
+  pageEnd,
+  highlights = [],
+  enabled = false,
+}: PdfPagesViewProps) {
   const [state, setState] = useState<DocState>({ kind: "loading" });
 
   useEffect(() => {
@@ -105,6 +123,54 @@ export default function PdfPagesView({ assetId, pageStart, pageEnd }: PdfPagesVi
     return numbers;
   }, [pageStart, pageEnd]);
 
+  // Ready `.textLayer` containers, keyed by page number — populated by each
+  // PdfPage's onTextLayerReady/onTextLayerGone callbacks below as its own
+  // text layer finishes (or is torn down). This is the "ref collection"
+  // PdfPagesView owns per the task design: individual PdfPage instances
+  // never touch CSS.highlights themselves, they only report their container
+  // up here once it exists in the DOM with real text-layer spans.
+  const [readyPages, setReadyPages] = useState<Map<number, HTMLDivElement>>(() => new Map());
+
+  // Both callbacks return the SAME map reference when the reported change
+  // is a no-op (e.g. a redundant ready report for an already-ready page) —
+  // React bails out of re-rendering when a state updater returns the prior
+  // reference by identity, which keeps an unrelated re-render of this view
+  // from also re-triggering the aggregating painter below.
+  const handleTextLayerReady = useCallback((pageNumber: number, el: HTMLDivElement) => {
+    setReadyPages((prev) => {
+      if (prev.get(pageNumber) === el) return prev;
+      const next = new Map(prev);
+      next.set(pageNumber, el);
+      return next;
+    });
+  }, []);
+
+  const handleTextLayerGone = useCallback((pageNumber: number) => {
+    setReadyPages((prev) => {
+      if (!prev.has(pageNumber)) return prev;
+      const next = new Map(prev);
+      next.delete(pageNumber);
+      return next;
+    });
+  }, []);
+
+  // Rebuilt only when the ready-container set or the highlight list itself
+  // changes — both are stable references across an unrelated re-render
+  // (readyPages via the no-op setState guards above, highlights via the
+  // caller's own useMemo in ReadingColumn) — never on every render. That
+  // matters because usePdfHighlightPainter's effect is keyed on this
+  // array's identity: a fresh array every render would re-run the paint
+  // (clear + rebuild all four registry names) for no reason.
+  const pdfHighlightPages = useMemo<PdfHighlightPage[]>(() => {
+    const pages: PdfHighlightPage[] = [];
+    for (const [pageNumber, container] of readyPages) {
+      pages.push({ container, highlights: highlights.filter((h) => h.page === pageNumber) });
+    }
+    return pages;
+  }, [readyPages, highlights]);
+
+  usePdfHighlightPainter(pdfHighlightPages, enabled);
+
   if (effectiveState.kind === "loading") {
     return (
       <p role="status" className="text-sm text-muted-foreground">
@@ -120,7 +186,13 @@ export default function PdfPagesView({ assetId, pageStart, pageEnd }: PdfPagesVi
   return (
     <div className="flex flex-col gap-6">
       {pageNumbers.map((pageNumber) => (
-        <PdfPage key={pageNumber} doc={effectiveState.doc} pageNumber={pageNumber} />
+        <PdfPage
+          key={pageNumber}
+          doc={effectiveState.doc}
+          pageNumber={pageNumber}
+          onTextLayerReady={handleTextLayerReady}
+          onTextLayerGone={handleTextLayerGone}
+        />
       ))}
     </div>
   );
@@ -128,13 +200,29 @@ export default function PdfPagesView({ assetId, pageStart, pageEnd }: PdfPagesVi
 
 type PageStatus = "pending" | "rendered" | "error";
 
-function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: number }) {
+interface PdfPageProps {
+  doc: PDFDocumentProxy;
+  pageNumber: number;
+  /** Fired once this page's `.textLayer` container has real, selectable
+   * spans in it (`tl.render()` resolved) — the earliest point
+   * `rangeForSelector` can resolve anything against it. PdfPagesView uses
+   * this to add the container to the aggregating painter's ready set. */
+  onTextLayerReady?: (pageNumber: number, el: HTMLDivElement) => void;
+  /** Fired from the same effect's cleanup (re-run or unmount) — the
+   * container is about to be cleared/detached, so PdfPagesView must drop it
+   * from the ready set before a stale, now-empty container gets handed to
+   * the painter again. */
+  onTextLayerGone?: (pageNumber: number) => void;
+}
+
+function PdfPage({ doc, pageNumber, onTextLayerReady, onTextLayerGone }: PdfPageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const nearViewport = useNearViewport(containerRef);
   const [status, setStatus] = useState<PageStatus>("pending");
+  const [textLayerReady, setTextLayerReady] = useState(false);
 
   useEffect(() => {
     if (!nearViewport) return undefined;
@@ -218,12 +306,20 @@ function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: numbe
             // doesn't have, so it's set directly here instead. Confirmed
             // against the installed pdfjs-dist 6.1.200 sources.
             textLayerEl.style.setProperty("--total-scale-factor", String(viewport.scale));
-            tl.render().catch(() => {
-              // The selectable text layer is a progressive enhancement
-              // over the already-rendered canvas — a failure here (e.g.
-              // AbortException from a cancel racing this promise)
-              // shouldn't flip the page into its error state.
-            });
+            tl.render().then(
+              () => {
+                if (cancelled) return;
+                setTextLayerReady(true);
+                onTextLayerReady?.(pageNumber, textLayerEl);
+              },
+              () => {
+                // The selectable text layer is a progressive enhancement
+                // over the already-rendered canvas — a failure here (e.g.
+                // AbortException from a cancel racing this promise)
+                // shouldn't flip the page into its error state, and
+                // shouldn't report readiness either.
+              },
+            );
           },
           () => {
             // Same: a failed text-content fetch shouldn't blank/error the
@@ -241,8 +337,16 @@ function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: numbe
       renderTask?.cancel();
       textLayer?.cancel();
       textLayerContainer?.replaceChildren();
+      // Reset/report unconditionally (not gated on the `cancelled` flag
+      // this cleanup itself just set) — this covers both a real unmount
+      // (nothing reads `textLayerReady` again anyway) and this same
+      // instance's effect re-running for a new nearViewport/doc/pageNumber
+      // (where the container is about to be rebuilt from scratch and must
+      // not still be sitting in the parent's ready set while empty).
+      setTextLayerReady(false);
+      onTextLayerGone?.(pageNumber);
     };
-  }, [nearViewport, doc, pageNumber]);
+  }, [nearViewport, doc, pageNumber, onTextLayerReady, onTextLayerGone]);
 
   return (
     <div
@@ -259,7 +363,12 @@ function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: numbe
       ) : (
         <div ref={wrapperRef} style={{ position: "relative" }}>
           <canvas ref={canvasRef} aria-label={`Page ${pageNumber}`} className="block shadow-sm" />
-          <div ref={textLayerRef} className="textLayer" />
+          <div
+            ref={textLayerRef}
+            className="textLayer"
+            data-pdf-page={pageNumber}
+            data-text-layer-ready={textLayerReady}
+          />
         </div>
       )}
     </div>

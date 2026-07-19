@@ -3,54 +3,21 @@
 import { useLayoutEffect, type RefObject } from "react";
 
 import { rangeForSelector } from "@/lib/annotations/anchors";
+import {
+  clearHighlightRegistry,
+  HIGHLIGHT_API_SUPPORTED,
+  HIGHLIGHT_COLORS,
+  highlightRegistryName,
+  isHighlightApiSupported,
+} from "@/lib/annotations/highlightRegistry";
 import { ensureHighlightStyles } from "@/lib/annotations/highlightStyles";
 import type { HighlightOut } from "@/lib/api/client";
 import type { HighlightColor } from "@/lib/hooks/useHighlights";
 
-const COLORS: readonly HighlightColor[] = ["yellow", "green", "blue", "pink"];
-
-function registryName(color: HighlightColor): string {
-  return `hl-${color}`;
-}
-
-/**
- * Feature-test for the CSS Custom Highlight API
- * (https://developer.mozilla.org/docs/Web/API/CSS_Custom_Highlight_API).
- * `typeof CSS`/`typeof Highlight` guard the SSR/build-time module graph (no
- * `CSS`/`Highlight` global exists in Node) as well as real unsupported
- * browsers (older Safari/Firefox).
- *
- * Exported as the single source of truth: this module's own paint gate
- * (`supported`, below) AND ReadingColumn's selection->popover trigger must
- * agree on this check. Without that, a browser lacking the API could still
- * open the popover, create a highlight row via `createFromSelector`, and
- * have painting silently no-op — the row would exist and be listed
- * elsewhere (NotesPanel), but the selection the user just made would
- * simply vanish with nothing shown for it.
- */
-export function isHighlightApiSupported(): boolean {
-  return typeof CSS !== "undefined" && !!CSS.highlights && typeof Highlight !== "undefined";
-}
-
-// Computed once at module load, not per effect run: browser support for the
-// CSS Custom Highlight API doesn't change during a session.
-const supported = isHighlightApiSupported();
-
-/**
- * Deletes all four color registry names. `CSS.highlights` is a single
- * document-global registry, not scoped to this component instance — an
- * entry left behind from a previous render (a different section's ranges,
- * or the disabled/unsupported state) would otherwise keep painting on
- * whatever text now occupies the same names. Called on every effect
- * re-run's cleanup, on unmount, and on the disabled/unsupported branch —
- * always safe to call even when the API is unsupported.
- */
-function clearRegistry(): void {
-  if (!supported) return;
-  for (const color of COLORS) {
-    CSS.highlights.delete(registryName(color));
-  }
-}
+// Re-exported for existing importers (CourseReader.tsx, ReadingColumn.tsx) —
+// the live check itself now lives in highlightRegistry.ts alongside the
+// rest of the shared registry plumbing usePdfHighlightPainter also uses.
+export { isHighlightApiSupported };
 
 /**
  * Paints `highlights` into the CSS Custom Highlight API registry
@@ -77,8 +44,8 @@ export function useHighlightPainter(
 ): void {
   useLayoutEffect(() => {
     const container = containerRef.current;
-    if (!enabled || !supported || !container) {
-      clearRegistry();
+    if (!enabled || !HIGHLIGHT_API_SUPPORTED || !container) {
+      clearHighlightRegistry();
       return undefined;
     }
 
@@ -105,17 +72,17 @@ export function useHighlightPainter(
       }
     }
 
-    for (const color of COLORS) {
+    for (const color of HIGHLIGHT_COLORS) {
       const ranges = rangesByColor.get(color);
       if (ranges && ranges.length > 0) {
-        CSS.highlights.set(registryName(color), new Highlight(...ranges));
+        CSS.highlights.set(highlightRegistryName(color), new Highlight(...ranges));
       } else {
-        CSS.highlights.delete(registryName(color));
+        CSS.highlights.delete(highlightRegistryName(color));
       }
     }
 
     return () => {
-      clearRegistry();
+      clearHighlightRegistry();
     };
     // containerRef omitted deliberately: a useRef's object identity never
     // changes across renders, so including it would be inert.
