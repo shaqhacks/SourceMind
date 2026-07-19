@@ -168,7 +168,7 @@ describe("SelectionPopover", () => {
     await user.click(screen.getByRole("button", { name: "Highlight green" }));
     expect(onColor).toHaveBeenCalledWith("green");
 
-    await user.click(screen.getByRole("button", { name: "Explain" }));
+    await user.click(screen.getByRole("button", { name: "Add to chat" }));
     expect(onExplain).toHaveBeenCalledTimes(1);
 
     await user.keyboard("{Escape}");
@@ -328,7 +328,7 @@ describe("ReadingColumn selection popover integration", () => {
     }
   });
 
-  it("Explain opens the chat drawer and closes the popover", async () => {
+  it("Add to chat opens the chat drawer and closes the popover", async () => {
     const user = userEvent.setup();
     render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
     const paragraph = await screen.findByText(/read the example passage/i);
@@ -339,14 +339,14 @@ describe("ReadingColumn selection popover integration", () => {
     fireEvent.mouseUp(paragraph);
     expect(await screen.findByRole("dialog", { name: "Selection actions" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Explain" }));
+    await user.click(screen.getByRole("button", { name: "Add to chat" }));
 
     expect(await screen.findByRole("complementary", { name: "Course chat" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Selection actions" })).not.toBeInTheDocument();
     expect(mockedCreateHighlight).not.toHaveBeenCalled();
     // Task 9: the selection is carried through, mapped to snake_case, and
-    // shown as a chip above the composer, not silently dropped.
-    expect(screen.getByText(/asking about/i)).toHaveTextContent(/example passage/i);
+    // shown as a pill glued to the composer, not silently dropped.
+    expect(screen.getByTitle(/example passage/i)).toHaveTextContent(/example passage/i);
   });
 
   it("Escape closes the popover without creating a highlight", async () => {

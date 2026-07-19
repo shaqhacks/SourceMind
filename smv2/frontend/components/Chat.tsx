@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
@@ -31,6 +31,14 @@ export interface ChatProps {
   /** Never throws — reports failure via the `ok: false` branch instead. */
   sendFn: (message: string) => Promise<ChatSendResult>;
   onCitationClick?: (citation: ChatCitation) => void;
+  /** Rendered directly above the composer `<form>`, inside the same flex
+   * container so it sits glued to the input (e.g. a pill describing text
+   * that will attach to the next send). Purely presentational — Chat
+   * never reads or reacts to it, so it's not a dependency of the
+   * history-loading effect and can't retrigger the transcript-reset bug
+   * documented below. Absent by default: no change for any other Chat
+   * consumer. */
+  composerAccessory?: ReactNode;
 }
 
 const THINKING_WRITING_DELAY_MS = 1500;
@@ -47,7 +55,12 @@ const THINKING_WRITING_DELAY_MS = 1500;
  * Call sites MUST wrap both `loadHistory` and `sendFn` in `useCallback`
  * with stable dependencies.
  */
-export default function Chat({ loadHistory, sendFn, onCitationClick }: ChatProps) {
+export default function Chat({
+  loadHistory,
+  sendFn,
+  onCitationClick,
+  composerAccessory,
+}: ChatProps) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [historyState, setHistoryState] = useState<"loading" | "error" | "ready">("loading");
   const [input, setInput] = useState("");
@@ -203,20 +216,23 @@ export default function Chat({ loadHistory, sendFn, onCitationClick }: ChatProps
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-border p-3">
-        <input
-          type="text"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          disabled={sending}
-          placeholder="Ask about this course…"
-          aria-label="Message"
-          className="flex-1 rounded-md border border-border bg-transparent px-3 py-2 text-sm disabled:opacity-50"
-        />
-        <Button type="submit" variant="primary" disabled={sending || !input.trim()}>
-          Send
-        </Button>
-      </form>
+      <div className="border-t border-border">
+        {composerAccessory && <div className="px-3 pt-2">{composerAccessory}</div>}
+        <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3">
+          <input
+            type="text"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            disabled={sending}
+            placeholder="Ask about this course…"
+            aria-label="Message"
+            className="flex-1 rounded-md border border-border bg-transparent px-3 py-2 text-sm disabled:opacity-50"
+          />
+          <Button type="submit" variant="primary" disabled={sending || !input.trim()}>
+            Send
+          </Button>
+        </form>
+      </div>
     </div>
   );
 }

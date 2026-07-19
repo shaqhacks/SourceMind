@@ -140,7 +140,7 @@ describe("HighlightEditPopover", () => {
     cleanup();
   });
 
-  it("prefills the note textarea from note_md and wires Save/swatch/Delete/Explain/Escape", async () => {
+  it("prefills the note textarea from note_md and wires Save/swatch/Delete/Add to chat/Escape", async () => {
     const user = userEvent.setup();
     const highlight = makeHighlight({});
     const onSave = vi.fn();
@@ -174,7 +174,7 @@ describe("HighlightEditPopover", () => {
     await user.click(screen.getByRole("button", { name: "Delete" }));
     expect(onDelete).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: "Explain" }));
+    await user.click(screen.getByRole("button", { name: "Add to chat" }));
     expect(onExplain).toHaveBeenCalledTimes(1);
 
     await user.keyboard("{Escape}");
@@ -365,7 +365,7 @@ describe("ReadingColumn click-to-edit integration", () => {
     expect(screen.queryByRole("dialog", { name: "Highlight actions" })).not.toBeInTheDocument();
   });
 
-  it("Explain bubbles sectionId/exact up, opens the chat drawer, and closes the popover", async () => {
+  it("Add to chat bubbles sectionId/exact up, opens the chat drawer, and closes the popover", async () => {
     const user = userEvent.setup();
     const highlight = makeHighlight({});
     mockedListHighlights.mockResolvedValue(ok([highlight]));
@@ -380,12 +380,12 @@ describe("ReadingColumn click-to-edit integration", () => {
     fireEvent.click(paragraph, { clientX: 10, clientY: 10 });
     expect(await screen.findByRole("dialog", { name: "Highlight actions" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Explain" }));
+    await user.click(screen.getByRole("button", { name: "Add to chat" }));
 
     expect(await screen.findByRole("complementary", { name: "Course chat" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Highlight actions" })).not.toBeInTheDocument();
-    // Task 9: firing Explain from a painted (existing) highlight carries
+    // Task 9: firing Add to chat from a painted (existing) highlight carries
     // its exact text through the same path as a fresh selection.
-    expect(screen.getByText(/asking about/i)).toHaveTextContent(/example passage/i);
+    expect(screen.getByTitle(/example passage/i)).toHaveTextContent(/example passage/i);
   });
 });

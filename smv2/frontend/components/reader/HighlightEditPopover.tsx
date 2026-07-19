@@ -50,7 +50,7 @@ function popoverStyle(anchorRect: DOMRect): CSSProperties {
  * Mirrors SelectionPopover's structure/a11y (dismiss-on-outside-or-Escape,
  * focus-on-open, its own keyboard-shortcut scope) but edits a row instead
  * of creating one: a note textarea plus Delete, on top of SelectionPopover's
- * recolor swatches and Explain.
+ * recolor swatches and Add to chat.
  *
  * The note field is a real `<textarea>` (not a div/contentEditable) so the
  * reader shell's global single-key shortcuts (arrows, j/k/s/c/o) ignore it
@@ -141,7 +141,7 @@ export default function HighlightEditPopover({
             onClick={onExplain}
             className="whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium hover:bg-muted-foreground/10"
           >
-            Explain
+            Add to chat
           </button>
           <button
             type="button"

@@ -46,7 +46,7 @@ function popoverStyle(anchorRect: DOMRect): CSSProperties {
 
 /**
  * Floating toolbar for a live text selection in source-mode reading:
- * four highlight-color swatches plus "Explain" (send the selection to
+ * four highlight-color swatches plus "Add to chat" (send the selection to
  * chat). Mounted/unmounted by the caller (ReadingColumn) exactly while a
  * qualifying selection exists — there is no `open` prop, unlike the
  * modal/drawer overlays in this directory, because this component's own
@@ -96,7 +96,7 @@ export default function SelectionPopover({
         onClick={onExplain}
         className="whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium hover:bg-muted-foreground/10"
       >
-        Explain
+        Add to chat
       </button>
     </div>
   );

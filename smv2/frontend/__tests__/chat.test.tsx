@@ -157,6 +157,35 @@ describe("Chat", () => {
     expect(screen.getByText(/reply/i)).toBeInTheDocument();
   });
 
+  it("renders composerAccessory glued directly above the composer form, and omitting it changes nothing", async () => {
+    const loadHistory = vi.fn<() => Promise<ChatTurn[]>>().mockResolvedValue([]);
+    const sendFn = vi.fn<(message: string) => Promise<ChatSendResult>>();
+
+    const { rerender } = render(
+      <Chat
+        loadHistory={loadHistory}
+        sendFn={sendFn}
+        composerAccessory={<div data-testid="accessory">Accessory</div>}
+      />,
+    );
+    await waitFor(() => expect(loadHistory).toHaveBeenCalled());
+
+    const accessory = screen.getByTestId("accessory");
+    const input = screen.getByLabelText(/message/i);
+    const form = input.closest("form");
+    // "Glued to the composer": the accessory's own wrapper is the form's
+    // immediately preceding sibling, inside the same outer container — not
+    // floating elsewhere in the panel (e.g. above the transcript).
+    expect(accessory.parentElement?.nextElementSibling).toBe(form);
+    expect(accessory.parentElement?.parentElement).toBe(form?.parentElement);
+
+    // Absent by default — no change for call sites that don't pass it
+    // (e.g. every other Chat consumer today).
+    rerender(<Chat loadHistory={loadHistory} sendFn={sendFn} />);
+    expect(screen.queryByTestId("accessory")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/message/i)).toBeInTheDocument();
+  });
+
   it("resets the transcript (the v1 bug) when a call site passes a new loadHistory reference every render", async () => {
     const sendFn = vi.fn();
     const firstLoad = vi

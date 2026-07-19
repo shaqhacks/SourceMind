@@ -19,9 +19,9 @@ import type { ReaderCourse, ReaderProgress } from "@/lib/reader/types";
 
 import { ok } from "../support/api-result";
 
-// Task 9 end-to-end: a live text selection's "Explain" all the way through
-// to sendChat receiving the mapped {section_id, exact} payload, and the
-// chip clearing once that turn lands. The individual hops (SelectionPopover
+// Task 9 end-to-end: a live text selection's "Add to chat" all the way
+// through to sendChat receiving the mapped {section_id, exact} payload, and
+// the pill clearing once that turn lands. The individual hops (SelectionPopover
 // -> ReadingColumn -> CourseReader opens the drawer) are already covered in
 // selection-popover.test.tsx/highlight-edit-popover.test.tsx; this file is
 // the one that actually drives a message through to sendChat's arguments.
@@ -170,7 +170,7 @@ describe("Explain-in-chat wiring (CourseReader -> CourseChatDrawer -> sendChat)"
     window.getSelection()?.removeAllRanges();
   });
 
-  it("Explain on a live selection maps camelCase -> snake_case and sendChat receives it on the next message; a follow-up send carries none", async () => {
+  it("Add to chat on a live selection maps camelCase -> snake_case and sendChat receives it on the next message; a follow-up send carries none", async () => {
     mockedSendChat.mockResolvedValue(ok({ reply_md: "It means...", citations: [] }));
     const user = userEvent.setup();
 
@@ -183,10 +183,10 @@ describe("Explain-in-chat wiring (CourseReader -> CourseChatDrawer -> sendChat)"
     fireEvent.mouseUp(paragraph);
     expect(await screen.findByRole("dialog", { name: "Selection actions" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Explain" }));
+    await user.click(screen.getByRole("button", { name: "Add to chat" }));
 
     const drawer = await screen.findByRole("complementary", { name: "Course chat" });
-    expect(screen.getByText(/asking about/i)).toHaveTextContent(/example passage/i);
+    expect(screen.getByTitle(/example passage/i)).toHaveTextContent(/example passage/i);
 
     await user.type(screen.getByLabelText(/message/i), "What does this mean?");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -203,8 +203,8 @@ describe("Explain-in-chat wiring (CourseReader -> CourseChatDrawer -> sendChat)"
       ),
     );
 
-    // Attached to exactly one turn: the chip clears after the send lands.
-    await waitFor(() => expect(screen.queryByText(/asking about/i)).not.toBeInTheDocument());
+    // Attached to exactly one turn: the pill clears after the send lands.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Remove context" })).not.toBeInTheDocument());
 
     await user.type(screen.getByLabelText(/message/i), "A follow-up, unrelated question");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -217,7 +217,7 @@ describe("Explain-in-chat wiring (CourseReader -> CourseChatDrawer -> sendChat)"
       ),
     );
 
-    // Still open and docked — Explain never closes the drawer mid-flow.
+    // Still open and docked — Add to chat never closes the drawer mid-flow.
     expect(drawer).toBeInTheDocument();
   });
 });

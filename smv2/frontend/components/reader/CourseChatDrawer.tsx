@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 import Chat, { type ChatCitation, type ChatSendResult, type ChatTurn } from "@/components/Chat";
+import SelectionContextPill from "@/components/reader/SelectionContextPill";
 import { getChatHistory, sendChat, type ChatSelectionIn, type ChatTurnOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
@@ -23,14 +24,6 @@ export interface CourseChatDrawerProps {
    * via onConsumeSelection so it attaches to exactly one turn. */
   pendingSelection?: ChatSelectionIn | null;
   onConsumeSelection?: () => void;
-}
-
-const EXPLAIN_CHIP_QUOTE_LENGTH = 60;
-
-function truncateExact(exact: string): string {
-  return exact.length > EXPLAIN_CHIP_QUOTE_LENGTH
-    ? `${exact.slice(0, EXPLAIN_CHIP_QUOTE_LENGTH)}…`
-    : exact;
 }
 
 /** ChatTurnOut.citations is `{[key:string]: unknown}[] | null` (untyped —
@@ -180,22 +173,19 @@ export default function CourseChatDrawer({
           Close
         </button>
       </div>
-      {pendingSelection && (
-        <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
-          <span className="truncate">
-            Asking about: &ldquo;{truncateExact(pendingSelection.exact)}&rdquo;
-          </span>
-          <button
-            type="button"
-            onClick={() => onConsumeSelection?.()}
-            aria-label="Clear selected passage"
-            className="shrink-0 rounded-md px-1.5 py-0.5 text-sm hover:bg-muted-foreground/10"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-      <Chat loadHistory={loadHistory} sendFn={sendFn} onCitationClick={handleCitationClick} />
+      <Chat
+        loadHistory={loadHistory}
+        sendFn={sendFn}
+        onCitationClick={handleCitationClick}
+        composerAccessory={
+          pendingSelection ? (
+            <SelectionContextPill
+              exact={pendingSelection.exact}
+              onRemove={() => onConsumeSelection?.()}
+            />
+          ) : null
+        }
+      />
     </div>
   );
 }

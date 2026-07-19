@@ -213,10 +213,10 @@ describe("CourseChatDrawer", () => {
     await user.click(screen.getByRole("button", { name: /send/i }));
 
     await waitFor(() => expect(mockedSendChat).toHaveBeenCalledWith("course-1", "Hello?"));
-    expect(screen.queryByText(/asking about/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /remove context/i })).not.toBeInTheDocument();
   });
 
-  it("shows a dismissible chip quoting the pending selection", async () => {
+  it("shows a dismissible context pill glued to the composer, quoting the pending selection", async () => {
     mockedGetChatHistory.mockResolvedValue(ok([]));
 
     render(
@@ -230,11 +230,19 @@ describe("CourseChatDrawer", () => {
     );
     await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
 
-    expect(screen.getByText(/asking about/i)).toHaveTextContent(/some text/i);
-    expect(screen.getByRole("button", { name: /clear selected passage/i })).toBeInTheDocument();
+    // No more top-of-panel "Asking about" chip — replaced by the pill.
+    expect(screen.queryByText(/asking about/i)).not.toBeInTheDocument();
+
+    const pill = screen.getByTitle("some text");
+    expect(pill).toHaveTextContent(/2 words/i);
+    expect(pill).toHaveTextContent(/some text/i);
+    expect(screen.getByRole("button", { name: /remove context/i })).toBeInTheDocument();
+    // Glued to the composer, not floating above the whole panel: passed
+    // through as Chat's composerAccessory (see chat.test.tsx for the
+    // placement-above-the-form contract itself).
   });
 
-  it("truncates a long selection to roughly the first 60 characters in the chip", async () => {
+  it("truncates a long selection to roughly the first 50 characters in the pill, full text on hover", async () => {
     mockedGetChatHistory.mockResolvedValue(ok([]));
     const longExact = "abcdefghij".repeat(10); // 100 chars
 
@@ -249,12 +257,12 @@ describe("CourseChatDrawer", () => {
     );
     await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
 
-    const chip = screen.getByText(/asking about/i);
-    expect(chip).not.toHaveTextContent(longExact);
-    expect(chip.textContent?.length ?? 0).toBeLessThan(longExact.length);
+    const pill = screen.getByTitle(longExact);
+    expect(pill).not.toHaveTextContent(longExact);
+    expect(pill.textContent?.length ?? 0).toBeLessThan(longExact.length);
   });
 
-  it("the chip's ✕ calls onConsumeSelection without sending anything", async () => {
+  it("the pill's × calls onConsumeSelection without sending anything", async () => {
     mockedGetChatHistory.mockResolvedValue(ok([]));
     const onConsumeSelection = vi.fn();
     const user = userEvent.setup();
@@ -270,7 +278,7 @@ describe("CourseChatDrawer", () => {
     );
     await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
 
-    await user.click(screen.getByRole("button", { name: /clear selected passage/i }));
+    await user.click(screen.getByRole("button", { name: /remove context/i }));
 
     expect(onConsumeSelection).toHaveBeenCalledTimes(1);
     expect(mockedSendChat).not.toHaveBeenCalled();
@@ -288,7 +296,7 @@ describe("CourseChatDrawer", () => {
       />,
     );
     await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
-    expect(screen.getByText(/asking about/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remove context/i })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/message/i), "Explain this");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -299,8 +307,10 @@ describe("CourseChatDrawer", () => {
         exact: "some text",
       }),
     );
-    // Consumed after the successful send — the chip disappears.
-    await waitFor(() => expect(screen.queryByText(/asking about/i)).not.toBeInTheDocument());
+    // Consumed after the successful send — the pill disappears.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /remove context/i })).not.toBeInTheDocument(),
+    );
 
     await user.type(screen.getByLabelText(/message/i), "Second message");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -333,6 +343,8 @@ describe("CourseChatDrawer", () => {
 
     expect(await screen.findByText(/assistant is busy/i)).toBeInTheDocument();
     expect(onConsumeSelection).not.toHaveBeenCalled();
+    // A failed send doesn't consume the pill either — still there for retry.
+    expect(screen.getByRole("button", { name: /remove context/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /retry/i }));
 
