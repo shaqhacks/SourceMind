@@ -126,6 +126,7 @@ function makeHighlight(overrides: Partial<HighlightOut>): HighlightOut {
     occurrence: 0,
     page: 1,
     color: "green",
+    surface: "source",
     note_md: "Existing note",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",

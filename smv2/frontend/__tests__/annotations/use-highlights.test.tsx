@@ -35,6 +35,7 @@ function makeHighlight(overrides: Partial<HighlightOut> = {}): HighlightOut {
     occurrence: 0,
     page: 3,
     color: "yellow",
+    surface: "source",
     note_md: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -77,6 +78,7 @@ describe("useHighlights", () => {
         { exact: "new quote", prefix: "pre", suffix: "post", occurrence: 0 },
         "green",
         5,
+        "source",
       );
     });
 
@@ -88,6 +90,40 @@ describe("useHighlights", () => {
       occurrence: 0,
       page: 5,
       color: "green",
+      surface: "source",
+    });
+    expect(returned).toEqual(created);
+    expect(result.current.highlights).toContainEqual(created);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("createFromSelector POSTs surface \"pdf\" when called from the PDF surface", async () => {
+    mockedListHighlights.mockResolvedValue(ok([]));
+    const created = makeHighlight({ id: "hl-pdf", exact: "pdf quote", surface: "pdf" });
+    mockedCreateHighlight.mockResolvedValue(ok(created, 201));
+
+    const { result } = renderHook(() => useHighlights("course-1", "sec-1"));
+    await waitFor(() => expect(mockedListHighlights).toHaveBeenCalled());
+
+    let returned: HighlightOut | null = null;
+    await act(async () => {
+      returned = await result.current.createFromSelector(
+        { exact: "pdf quote", prefix: "pre", suffix: "post", occurrence: 0 },
+        "green",
+        5,
+        "pdf",
+      );
+    });
+
+    expect(mockedCreateHighlight).toHaveBeenCalledWith("course-1", {
+      section_id: "sec-1",
+      exact: "pdf quote",
+      prefix: "pre",
+      suffix: "post",
+      occurrence: 0,
+      page: 5,
+      color: "green",
+      surface: "pdf",
     });
     expect(returned).toEqual(created);
     expect(result.current.highlights).toContainEqual(created);
@@ -107,6 +143,7 @@ describe("useHighlights", () => {
         { exact: "x", prefix: "", suffix: "", occurrence: 0 },
         "yellow",
         null,
+        "source",
       );
     });
 

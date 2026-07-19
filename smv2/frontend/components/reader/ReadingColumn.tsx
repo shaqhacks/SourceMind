@@ -161,7 +161,7 @@ export default function ReadingColumn({
       // ErrorBanner below — nothing here needs to await the result. The
       // painter repaints from that hook's state automatically once the row
       // lands.
-      void createFromSelector(selectionPopover.selector, color, section.page_start ?? null);
+      void createFromSelector(selectionPopover.selector, color, section.page_start ?? null, "source");
       window.getSelection()?.removeAllRanges();
       setSelectionPopover(null);
     },

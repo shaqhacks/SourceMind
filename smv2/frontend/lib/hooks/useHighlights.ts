@@ -41,6 +41,7 @@ export interface UseHighlights {
     sel: QuoteSelector,
     color: HighlightColor,
     page: number | null,
+    surface: "source" | "pdf",
   ) => Promise<HighlightOut | null>;
   updateOne: (id: string, patch: HighlightUpdateIn) => Promise<void>;
   deleteOne: (id: string) => Promise<void>;
@@ -136,6 +137,7 @@ export function useHighlights(courseId: string, sectionId: string): UseHighlight
       sel: QuoteSelector,
       color: HighlightColor,
       page: number | null,
+      surface: "source" | "pdf",
     ): Promise<HighlightOut | null> => {
       const body: HighlightIn = {
         section_id: sectionId,
@@ -145,6 +147,7 @@ export function useHighlights(courseId: string, sectionId: string): UseHighlight
         occurrence: sel.occurrence,
         page,
         color,
+        surface,
       };
       const { data, status, ok } = await createHighlight(courseId, body);
       if (!ok || !data) {
