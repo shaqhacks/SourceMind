@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { selectorFromRange, rangeForSelector } from "@/lib/annotations/anchors";
+import { selectorFromRange, rangeForSelector, resolvePdfPageSelection } from "@/lib/annotations/anchors";
 
 function container(html: string): HTMLElement {
   const el = document.createElement("div");
@@ -142,5 +142,58 @@ describe("rangeForSelector round-trip", () => {
   it("returns null when occurrence is out of range", () => {
     const el = container("<p>once</p>");
     expect(rangeForSelector(el, { exact: "once", prefix: "", suffix: "", occurrence: 5 })).toBeNull();
+  });
+});
+
+describe("resolvePdfPageSelection", () => {
+  it("resolves the page number and a selector scoped to the [data-pdf-page] container", () => {
+    const root = container(
+      '<div data-pdf-page="3"><p>The mitochondria is the powerhouse of the cell.</p></div>',
+    );
+    const r = rangeOf(root, "powerhouse");
+    const result = resolvePdfPageSelection(r.startContainer, r.endContainer, r);
+    expect(result).not.toBeNull();
+    expect(result!.page).toBe(3);
+    expect(result!.selector.exact).toBe("powerhouse");
+  });
+
+  it("returns null when there is no [data-pdf-page] ancestor", () => {
+    const root = container("<p>The mitochondria is the powerhouse of the cell.</p>");
+    const r = rangeOf(root, "powerhouse");
+    expect(resolvePdfPageSelection(r.startContainer, r.endContainer, r)).toBeNull();
+  });
+
+  it("returns null when the focus node falls outside the anchor's page container (cross-page selection)", () => {
+    const root = container(
+      '<div data-pdf-page="1"><p id="a">alpha beta</p></div>' +
+        '<div data-pdf-page="2"><p id="b">gamma delta</p></div>',
+    );
+    const pageOneText = root.querySelector("#a")!.firstChild as Text;
+    const pageTwoText = root.querySelector("#b")!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(pageOneText, 0);
+    range.setEnd(pageTwoText, 5);
+    expect(resolvePdfPageSelection(pageOneText, pageTwoText, range)).toBeNull();
+  });
+
+  it("returns null for a non-numeric data-pdf-page value", () => {
+    const root = container('<div data-pdf-page="not-a-number"><p>hello world</p></div>');
+    const r = rangeOf(root, "hello");
+    expect(resolvePdfPageSelection(r.startContainer, r.endContainer, r)).toBeNull();
+  });
+
+  it("returns null for a collapsed range (selectorFromRange itself rejects it)", () => {
+    const root = container('<div data-pdf-page="1"><p>hello</p></div>');
+    const textNode = root.querySelector("p")!.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(textNode, 1);
+    range.collapse(true);
+    expect(resolvePdfPageSelection(textNode, textNode, range)).toBeNull();
+  });
+
+  it("returns null when anchorNode is null", () => {
+    const root = container('<div data-pdf-page="1"><p>hello</p></div>');
+    const r = rangeOf(root, "hello");
+    expect(resolvePdfPageSelection(null, r.endContainer, r)).toBeNull();
   });
 });

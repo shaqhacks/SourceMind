@@ -106,6 +106,43 @@ export function selectorFromRange(container: HTMLElement, range: Range): QuoteSe
   return { exact, prefix, suffix, occurrence };
 }
 
+/**
+ * Resolves a live pages-mode (PDF) selection to its page container: finds
+ * the nearest `[data-pdf-page]` ancestor — pdf.js's `.textLayer` div,
+ * tagged with `data-pdf-page={pageNumber}` by PdfPagesView's `PdfPage` —
+ * and computes a selector scoped to THAT container (not the whole
+ * multi-page wrapper), so `rangeForSelector` later resolves it back
+ * against the same page's text only.
+ *
+ * Returns null for anything that can't become a `surface:"pdf"`
+ * highlight: no `[data-pdf-page]` ancestor (e.g. HtmlPagesView's
+ * pdf2htmlEX-enhanced view doesn't tag one), a selection whose focus node
+ * falls outside that same container (a cross-page selection — MVP requires
+ * both ends on one page, per the anchor's own page), a non-numeric
+ * `data-pdf-page` value, or a selector `selectorFromRange` itself
+ * couldn't capture (e.g. a collapsed range).
+ *
+ * Pure and DOM-only (no `window.getSelection()` call) so it's testable
+ * without a live Selection — callers pass `selection.anchorNode`,
+ * `selection.focusNode`, and `selection.getRangeAt(0)` directly.
+ */
+export function resolvePdfPageSelection(
+  anchorNode: Node | null,
+  focusNode: Node | null,
+  range: Range,
+): { selector: QuoteSelector; page: number } | null {
+  const pageEl = anchorNode?.parentElement?.closest("[data-pdf-page]") as HTMLElement | null;
+  if (!pageEl || !focusNode || !pageEl.contains(focusNode)) return null;
+
+  const page = Number(pageEl.dataset.pdfPage);
+  if (!Number.isFinite(page)) return null;
+
+  const selector = selectorFromRange(pageEl, range);
+  if (!selector) return null;
+
+  return { selector, page };
+}
+
 export function rangeForSelector(container: HTMLElement, selector: QuoteSelector): Range | null {
   const { exact, occurrence } = selector;
   if (!exact) return null;

@@ -5,7 +5,12 @@ import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
-import { rangeForSelector, selectorFromRange, type QuoteSelector } from "@/lib/annotations/anchors";
+import {
+  rangeForSelector,
+  resolvePdfPageSelection,
+  selectorFromRange,
+  type QuoteSelector,
+} from "@/lib/annotations/anchors";
 import { highlightAtPoint } from "@/lib/annotations/hitTest";
 import { isHighlightApiSupported, useHighlightPainter } from "@/lib/annotations/useHighlightPainter";
 import type { HighlightOut, HighlightUpdateIn } from "@/lib/api/client";
@@ -273,18 +278,26 @@ export default function ReadingColumn({
     setEditPopover(null);
   }, [editPopover, onExplainSelection, section.id]);
 
-  // Pages-mode ("original PDF/HTML pages") selection -> "Add to chat".
-  // Deliberately separate state/ref from selectionPopover/articleBodyRef
-  // above: this is plain text selection for chat context, independent of
-  // the CSS Custom Highlight API and of persistence (no
-  // isHighlightApiSupported() gate, no selectorFromRange anchoring) — the
-  // two popovers must never interact, since they belong to mutually
-  // exclusive view modes (only one of the two wrapper divs is ever in the
-  // DOM at a time).
+  // Pages-mode ("original PDF/HTML pages") selection -> color highlight
+  // (surface:"pdf") or "Add to chat". Deliberately separate state/ref from
+  // selectionPopover/articleBodyRef above — the two popovers must never
+  // interact, since they belong to mutually exclusive view modes (only one
+  // of the two wrapper divs is ever in the DOM at a time). Unlike before
+  // this task, this DOES now touch the CSS Custom Highlight API and
+  // selectorFromRange anchoring for the color path: `selector`/`page` are
+  // null whenever a `surface:"pdf"` highlight can't be created for this
+  // selection (API unsupported, no `[data-pdf-page]` ancestor — e.g.
+  // HtmlPagesView's pdf2htmlEX-enhanced view doesn't tag one yet — or a
+  // cross-page selection), in which case the render below falls back to
+  // the exact-only AddToChatPopover, so Add to chat keeps working
+  // regardless of whether painting is possible.
   const pagesRef = useRef<HTMLDivElement>(null);
-  const [pagesPopover, setPagesPopover] = useState<{ anchorRect: DOMRect; exact: string } | null>(
-    null,
-  );
+  const [pagesPopover, setPagesPopover] = useState<{
+    anchorRect: DOMRect;
+    exact: string;
+    selector: QuoteSelector | null;
+    page: number | null;
+  } | null>(null);
 
   const closePagesPopover = useCallback(() => setPagesPopover(null), []);
 
@@ -311,8 +324,32 @@ export default function ReadingColumn({
       return;
     }
     const range = selection.getRangeAt(0);
-    setPagesPopover({ anchorRect: range.getBoundingClientRect(), exact });
+    // Page-scoped anchor for a `surface:"pdf"` highlight, attempted only
+    // when the CSS Custom Highlight API is supported — painting needs it,
+    // and an unsupported browser gets the Add-to-chat-only fallback below
+    // regardless, so resolving it would be wasted work (mirrors
+    // handleArticleMouseUp's own early bail on the same check).
+    const pdfAnchor = isHighlightApiSupported()
+      ? resolvePdfPageSelection(selection.anchorNode, selection.focusNode, range)
+      : null;
+    setPagesPopover({
+      anchorRect: range.getBoundingClientRect(),
+      exact,
+      selector: pdfAnchor?.selector ?? null,
+      page: pdfAnchor?.page ?? null,
+    });
   }, []);
+
+  const handlePagesColor = useCallback(
+    (color: HighlightColor) => {
+      if (!pagesPopover?.selector || pagesPopover.page === null) return;
+      // Fire-and-forget, same convention as handleSelectionColor above.
+      void createFromSelector(pagesPopover.selector, color, pagesPopover.page, "pdf");
+      window.getSelection()?.removeAllRanges();
+      setPagesPopover(null);
+    },
+    [pagesPopover, createFromSelector],
+  );
 
   const handlePagesAdd = useCallback(() => {
     if (!pagesPopover) return;
@@ -492,15 +529,30 @@ export default function ReadingColumn({
           onClose={closeEditPopover}
         />
       )}
-      {pagesPopover && (
-        // Same "plain sibling, not nested in the scrolling column" placement
-        // rationale as SelectionPopover/HighlightEditPopover above.
-        <AddToChatPopover
-          anchorRect={pagesPopover.anchorRect}
-          onAdd={handlePagesAdd}
-          onClose={closePagesPopover}
-        />
-      )}
+      {pagesPopover &&
+        (pagesPopover.selector && pagesPopover.page !== null ? (
+          // Full color-picker toolbar — same component the source view
+          // uses — whenever this selection resolved to a paintable
+          // `[data-pdf-page]` anchor (see handlePagesMouseUp's comment).
+          // Same "plain sibling, not nested in the scrolling column"
+          // placement rationale as SelectionPopover/HighlightEditPopover
+          // above.
+          <SelectionPopover
+            anchorRect={pagesPopover.anchorRect}
+            onColor={handlePagesColor}
+            onExplain={handlePagesAdd}
+            onClose={closePagesPopover}
+          />
+        ) : (
+          // Fallback for an unsupported browser or a selection that
+          // couldn't resolve to a page anchor: Add to chat only, since
+          // there's nothing to paint against.
+          <AddToChatPopover
+            anchorRect={pagesPopover.anchorRect}
+            onAdd={handlePagesAdd}
+            onClose={closePagesPopover}
+          />
+        ))}
     </div>
   );
 }
