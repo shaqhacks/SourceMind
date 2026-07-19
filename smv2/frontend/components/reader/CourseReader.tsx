@@ -5,7 +5,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import HintRow from "@/components/HintRow";
 import ShortcutsOverlay, { type ShortcutHint } from "@/components/ShortcutsOverlay";
 import { isHighlightApiSupported } from "@/lib/annotations/useHighlightPainter";
-import { getSection, listChapters, type ChatSelectionIn, type SectionOut } from "@/lib/api/client";
+import {
+  getSection,
+  listChapters,
+  type ChatSelectionIn,
+  type HighlightOut,
+  type SectionOut,
+} from "@/lib/api/client";
 import { useChatOpenPref } from "@/lib/hooks/useChatOpenPref";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 import { useProgressSync } from "@/lib/hooks/useProgressSync";
@@ -333,12 +339,20 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   // Clicking a note in NotesPanel both navigates AND dismisses the panel —
   // "go read that highlight" is the whole point of the click, so there's no
   // reason to leave the list open covering the section it just jumped to.
+  // A `surface:"pdf"` note additionally forces the view into "pages" — a
+  // PDF highlight is painted only there (useHighlightPainter's surface
+  // filter), so landing on the section in Source view would jump to the
+  // right chapter but show no trace of the highlight the user just clicked.
+  // A `surface:"source"` note leaves the current mode alone: it already
+  // renders in whatever view the reader is in (Source or Lesson), so there's
+  // nothing to switch.
   const handleNotesNavigate = useCallback(
-    (sectionId: string) => {
+    (sectionId: string, surface: HighlightOut["surface"]) => {
       goToSection(sectionId);
+      if (surface === "pdf") setStoredMode("pages");
       closeNotes();
     },
-    [goToSection, closeNotes],
+    [goToSection, setStoredMode, closeNotes],
   );
   const openOutlineEditor = useCallback(() => setOutlineEditorOpen(true), []);
   const closeOutlineEditor = useCallback(() => setOutlineEditorOpen(false), []);

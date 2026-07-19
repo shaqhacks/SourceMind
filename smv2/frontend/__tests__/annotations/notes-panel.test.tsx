@@ -55,6 +55,17 @@ const WITHOUT_NOTE = highlight({
   created_at: "2026-01-01T00:00:01Z",
 });
 
+const PDF_NOTE = highlight({
+  id: "h3",
+  section_id: "sec-1",
+  exact: "a diagram from the printed page",
+  note_md: null,
+  color: "blue",
+  surface: "pdf",
+  page: 12,
+  created_at: "2026-01-01T00:00:02Z",
+});
+
 describe("NotesPanel", () => {
   afterEach(() => {
     cleanup();
@@ -121,7 +132,34 @@ describe("NotesPanel", () => {
     const row = await screen.findByRole("button", { name: /jumps over the lazy dog/i });
     await user.click(row);
 
-    expect(onNavigate).toHaveBeenCalledWith("sec-2");
+    expect(onNavigate).toHaveBeenCalledWith("sec-2", "source");
+  });
+
+  it("shows a PDF badge only on surface:pdf rows, and passes the surface through to onNavigate", async () => {
+    mockedListHighlights.mockResolvedValue(ok([WITH_NOTE, PDF_NOTE]));
+    const onNavigate = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <NotesPanel
+        courseId="course-1"
+        open
+        sections={SECTIONS}
+        onClose={vi.fn()}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    const pdfRow = await screen.findByRole("button", { name: /a diagram from the printed page/i });
+    expect(within(pdfRow).getByText(/pdf p\.12/i)).toBeInTheDocument();
+
+    // The existing source-surface treatment is untouched: no PDF badge,
+    // and its own page display (when present) still reads "· p.N".
+    const sourceRow = screen.getByRole("button", { name: /the quick brown fox/i });
+    expect(within(sourceRow).queryByText(/pdf/i)).not.toBeInTheDocument();
+
+    await user.click(pdfRow);
+    expect(onNavigate).toHaveBeenCalledWith("sec-1", "pdf");
   });
 
   it("shows an empty state when the course has no highlights", async () => {

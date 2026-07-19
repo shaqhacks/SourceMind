@@ -27,7 +27,11 @@ export interface NotesPanelProps {
    * already has them loaded). */
   sections: NotesPanelSection[];
   onClose: () => void;
-  onNavigate: (sectionId: string) => void;
+  /** Hands back both the highlight's section (for goToSection) and its
+   * surface — a `"pdf"` note only ever painted in Pages view (see
+   * useHighlightPainter's surface filter), so the caller needs the surface
+   * to switch the reader into that view as part of navigating there. */
+  onNavigate: (sectionId: string, surface: HighlightOut["surface"]) => void;
 }
 
 type LoadState =
@@ -91,13 +95,13 @@ function HighlightRow({
   onNavigate,
 }: {
   highlight: HighlightOut;
-  onNavigate: (sectionId: string) => void;
+  onNavigate: (sectionId: string, surface: HighlightOut["surface"]) => void;
 }) {
   return (
     <li className="overflow-hidden rounded-md border border-border">
       <button
         type="button"
-        onClick={() => onNavigate(highlight.section_id)}
+        onClick={() => onNavigate(highlight.section_id, highlight.surface)}
         className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-muted-foreground/10"
       >
         <span
@@ -105,9 +109,19 @@ function HighlightRow({
           className="mt-1 h-3 w-3 shrink-0 rounded-full border border-border"
           style={{ backgroundColor: `var(--highlight-${highlight.color})` }}
         />
+        {/* PDF highlights only ever paint in Pages view (out of scope:
+         * cross-surface rendering) — this badge is the only place in the
+         * course-wide list that tells them apart from a source-view note,
+         * so it folds the page number in rather than repeating it via the
+         * source-only "· p.N" suffix below. */}
+        {highlight.surface === "pdf" && (
+          <span className="mt-0.5 shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            PDF{highlight.page !== null ? ` p.${highlight.page}` : ""}
+          </span>
+        )}
         <span className="min-w-0 flex-1 italic text-muted-foreground">
           &ldquo;{truncateExact(highlight.exact)}&rdquo;
-          {highlight.page !== null && (
+          {highlight.surface === "source" && highlight.page !== null && (
             <span className="ml-1 not-italic text-xs text-muted-foreground">· p.{highlight.page}</span>
           )}
         </span>
@@ -130,9 +144,10 @@ function HighlightRow({
  * scannability, mirroring CourseChatDrawer's slide-over open/close/dismiss
  * idiom (always a fixed overlay here — unlike chat, this panel doesn't need
  * a docked wide-viewport mode; it's a glance-and-dismiss list, not a
- * persistent companion). Clicking a row hands its section_id to `onNavigate`
- * (CourseReader's own section switch) and lets the caller decide whether to
- * also close the panel.
+ * persistent companion). Clicking a row hands its section_id and surface to
+ * `onNavigate` (CourseReader's own section switch, which also flips to Pages
+ * view for a `"pdf"` note) and lets the caller decide whether to also close
+ * the panel.
  *
  * Fetches fresh every time it opens (mount-effect gated on `open`, same
  * "refetch on open" intent as CourseChatDrawer's inner Chat component

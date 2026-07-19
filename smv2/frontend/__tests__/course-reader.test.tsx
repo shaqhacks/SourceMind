@@ -1048,6 +1048,62 @@ describe("CourseReader", () => {
       await screen.findByText(/second body/i);
     });
 
+    it("clicking a pdf highlight row navigates to its section and switches the reader into Pages view", async () => {
+      // Same shape as HIGHLIGHT_IN_CHAPTER_TWO but surface:"pdf" — a PDF
+      // highlight only ever paints in Pages view (useHighlightPainter's
+      // surface filter), so navigating to it must force the mode switch,
+      // unlike the surface:"source" case covered above.
+      const PDF_HIGHLIGHT_IN_CHAPTER_TWO = {
+        ...HIGHLIGHT_IN_CHAPTER_TWO,
+        id: "hl-2",
+        exact: "a diagram on the printed page",
+        surface: "pdf" as const,
+        page: 7,
+      };
+      // Chapter Two needs an asset_id for "pages" to actually resolve
+      // (CourseReader degrades a stored "pages" preference back to
+      // "source" when the active section has none) — cloned from COURSE
+      // rather than mutating the shared fixture other tests in this file
+      // rely on staying asset-less. page_start/page_end are narrowed to
+      // 1-2 (from COURSE's 6-10) to match the fake document's own pages
+      // below — PdfPagesView renders exactly that section range, and a
+      // page missing from the fake doc renders a "Could not render"
+      // error instead of a canvas.
+      const COURSE_WITH_PDF_SECTION: ReaderCourse = {
+        ...COURSE,
+        sections: COURSE.sections.map((section) =>
+          section.id === "sec-2"
+            ? { ...section, asset_id: "asset-2", page_start: 1, page_end: 2 }
+            : section,
+        ),
+      };
+      const doc = makeFakeDocument({ 1: makeFakePage(), 2: makeFakePage() });
+      mockedGetDocument.mockReturnValue({
+        promise: Promise.resolve(doc),
+      } as unknown as ReturnType<typeof getDocument>);
+      mockedListHighlights.mockResolvedValue(ok([PDF_HIGHLIGHT_IN_CHAPTER_TWO]));
+      const user = userEvent.setup();
+      render(<CourseReader course={COURSE_WITH_PDF_SECTION} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/first body/i);
+
+      await user.click(screen.getByRole("button", { name: /open notes/i }));
+      const row = await screen.findByRole("button", { name: /a diagram on the printed page/i });
+      await user.click(row);
+
+      expect(screen.getByRole("button", { name: /chapter two/i })).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      expect(
+        screen.queryByRole("complementary", { name: /course notes/i }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Pages" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(await screen.findByLabelText("Page 1")).toBeInTheDocument();
+    });
+
     // Split from a single "opening notes closes chat, and opening chat
     // closes notes" test: the TopBar Chat button's label/aria-pressed
     // tracks the persisted chat-open *preference* (toggle intent), not
