@@ -13,6 +13,7 @@ import { useHighlights, type HighlightColor } from "@/lib/hooks/useHighlights";
 import { prefsToCssVars, type TypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import type { ReaderSection, SectionBodyState, ViewMode } from "@/lib/reader/types";
 
+import AddToChatPopover from "./AddToChatPopover";
 import CardsCTA from "./CardsCTA";
 import HighlightEditPopover from "./HighlightEditPopover";
 import LessonPane, { type LessonDisplayStatus } from "./LessonPane";
@@ -262,6 +263,54 @@ export default function ReadingColumn({
     setEditPopover(null);
   }, [editPopover, onExplainSelection, section.id]);
 
+  // Pages-mode ("original PDF/HTML pages") selection -> "Add to chat".
+  // Deliberately separate state/ref from selectionPopover/articleBodyRef
+  // above: this is plain text selection for chat context, independent of
+  // the CSS Custom Highlight API and of persistence (no
+  // isHighlightApiSupported() gate, no selectorFromRange anchoring) — the
+  // two popovers must never interact, since they belong to mutually
+  // exclusive view modes (only one of the two wrapper divs is ever in the
+  // DOM at a time).
+  const pagesRef = useRef<HTMLDivElement>(null);
+  const [pagesPopover, setPagesPopover] = useState<{ anchorRect: DOMRect; exact: string } | null>(
+    null,
+  );
+
+  const closePagesPopover = useCallback(() => setPagesPopover(null), []);
+
+  // Scoped to the pages wrapper via React's onMouseUp, same bubble-scoping
+  // convention as handleArticleMouseUp — the wrapper only exists in the
+  // DOM in the mode==="pages" branch (and only once the section has
+  // original pages), so this can never observe source/lesson content.
+  const handlePagesMouseUp = useCallback(() => {
+    const container = pagesRef.current;
+    if (!container) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      setPagesPopover(null);
+      return;
+    }
+    // Guards against a stale/foreign selection this mouseup isn't actually
+    // about (mirrors handleArticleMouseUp's identical containment check).
+    if (!container.contains(selection.anchorNode) || !container.contains(selection.focusNode)) {
+      return;
+    }
+    const exact = selection.toString().replace(/\s+/g, " ").trim().slice(0, 2000);
+    if (!exact) {
+      setPagesPopover(null);
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    setPagesPopover({ anchorRect: range.getBoundingClientRect(), exact });
+  }, []);
+
+  const handlePagesAdd = useCallback(() => {
+    if (!pagesPopover) return;
+    onExplainSelection({ sectionId: section.id, exact: pagesPopover.exact });
+    window.getSelection()?.removeAllRanges();
+    setPagesPopover(null);
+  }, [pagesPopover, onExplainSelection, section.id]);
+
   return (
     <div className="relative flex min-h-0 flex-1">
       {previousTitle !== null && (
@@ -354,17 +403,22 @@ export default function ReadingColumn({
             )
           ) : mode === "pages" ? (
             section.asset_id && section.page_start !== null && section.page_end !== null ? (
-              // Keyed on section id: switching chapters is a fresh document
-              // view, not a state transition (PdfPagesView/HtmlPagesView's
-              // own per-assetId caches mean this remount is cheap when the
-              // new section shares the same book).
-              <PagesView
-                key={section.id}
-                courseId={courseId}
-                assetId={section.asset_id}
-                pageStart={section.page_start}
-                pageEnd={section.page_end}
-              />
+              // Keyed on section id (same convention as the source-mode
+              // article wrapper above): switching chapters is a fresh
+              // document view, not a state transition
+              // (PdfPagesView/HtmlPagesView's own per-assetId caches mean
+              // this remount is cheap when the new section shares the same
+              // book) — and it gives pagesRef a fresh node per section, so
+              // a leftover selection/popover from the previous chapter's
+              // pages can't outlive it.
+              <div key={section.id} ref={pagesRef} onMouseUp={handlePagesMouseUp}>
+                <PagesView
+                  courseId={courseId}
+                  assetId={section.asset_id}
+                  pageStart={section.page_start}
+                  pageEnd={section.page_end}
+                />
+              </div>
             ) : (
               <p className="text-sm text-muted-foreground">
                 Original pages aren&apos;t available for this section.
@@ -424,6 +478,15 @@ export default function ReadingColumn({
           onDelete={handleEditDelete}
           onExplain={handleEditExplain}
           onClose={closeEditPopover}
+        />
+      )}
+      {pagesPopover && (
+        // Same "plain sibling, not nested in the scrolling column" placement
+        // rationale as SelectionPopover/HighlightEditPopover above.
+        <AddToChatPopover
+          anchorRect={pagesPopover.anchorRect}
+          onAdd={handlePagesAdd}
+          onClose={closePagesPopover}
         />
       )}
     </div>
