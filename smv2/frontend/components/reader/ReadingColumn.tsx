@@ -358,6 +358,111 @@ export default function ReadingColumn({
     setPagesPopover(null);
   }, [pagesPopover, onExplainSelection, section.id]);
 
+  // The edit popover for an EXISTING (already-painted) pdf highlight,
+  // opened by clicking it — mirrors `editPopover` above for the source-view
+  // branch, but deliberately separate state: the two view modes render
+  // mutually exclusive DOM subtrees (only one wrapper div is ever mounted
+  // at a time), so there is never a reason for one branch's click to
+  // resolve against the other's popover. Also kept separate from
+  // `pagesPopover` (the DRAG-to-create popover for a live selection) for
+  // the same reason handleArticleClick/editPopover stay separate from
+  // handleArticleMouseUp/selectionPopover in the source branch:
+  // `handlePagesClick` below only ever hit-tests when the click's own
+  // selection is collapsed, which is never true for the mouseup that opens
+  // `pagesPopover`.
+  const [pagesEditPopover, setPagesEditPopover] = useState<{
+    highlight: HighlightOut;
+    anchorRect: DOMRect;
+  } | null>(null);
+
+  const closePagesEditPopover = useCallback(() => setPagesEditPopover(null), []);
+
+  // Scoped to the pages wrapper via React's onClick, same bubble-scoping
+  // and collapsed-selection-only convention as handleArticleClick above (a
+  // click that ends handlePagesMouseUp's drag-to-create flow leaves a
+  // non-collapsed selection, so it falls through here without ever
+  // reaching the hit-test).
+  //
+  // Unlike the source view's single article container, pages mode can
+  // render MULTIPLE `[data-pdf-page]` containers at once (one per rendered
+  // PDF page) — so the click's own point, not a fixed ref, decides which
+  // page's highlights to hit-test against. `document.elementFromPoint`
+  // finds whatever DOM node is actually under the cursor; its nearest
+  // `[data-pdf-page]` ancestor is that page's text-layer container (the
+  // same tagging PdfPage/resolvePdfPageSelection already rely on). No
+  // container under the point means the click landed outside any rendered
+  // page (e.g. the "Page N" placeholder shown before a page scrolls near
+  // viewport), so there's nothing to hit-test.
+  const handlePagesClick = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (!isHighlightApiSupported()) return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+
+      const pageEl = (document.elementFromPoint(event.clientX, event.clientY) as Element | null)?.closest(
+        "[data-pdf-page]",
+      ) as HTMLElement | null;
+      if (!pageEl) return;
+
+      const page = Number(pageEl.dataset.pdfPage);
+      if (!Number.isFinite(page)) return;
+
+      // The page's own slice of pdfHighlights — same surface:"pdf" +
+      // section scoping as `pdfHighlights` itself, narrowed further to
+      // just this page so a highlight painted on a different page never
+      // wins the hit-test here.
+      const pageHighlights = pdfHighlights.filter((highlight) => highlight.page === page);
+      const hit = highlightAtPoint(pageEl, pageHighlights, event.clientX, event.clientY);
+      if (!hit) return;
+
+      // Re-resolve the hit highlight's own range for its bounding rect,
+      // same convention as handleArticleClick above.
+      const range = rangeForSelector(pageEl, {
+        exact: hit.exact,
+        prefix: hit.prefix,
+        suffix: hit.suffix,
+        occurrence: hit.occurrence,
+      });
+      const anchorRect: DOMRect = range
+        ? range.getBoundingClientRect()
+        : ({
+            top: event.clientY,
+            bottom: event.clientY,
+            left: event.clientX,
+            right: event.clientX,
+            width: 0,
+            height: 0,
+          } as DOMRect);
+      setPagesEditPopover({ highlight: hit, anchorRect });
+    },
+    [pdfHighlights],
+  );
+
+  const handlePagesEditSave = useCallback(
+    (patch: HighlightUpdateIn) => {
+      if (!pagesEditPopover) return;
+      // Fire-and-forget, same convention as handleEditSave above.
+      void updateOne(pagesEditPopover.highlight.id, patch);
+      setPagesEditPopover(null);
+    },
+    [pagesEditPopover, updateOne],
+  );
+
+  const handlePagesEditDelete = useCallback(() => {
+    if (!pagesEditPopover) return;
+    void deleteOne(pagesEditPopover.highlight.id);
+    setPagesEditPopover(null);
+  }, [pagesEditPopover, deleteOne]);
+
+  const handlePagesEditExplain = useCallback(() => {
+    if (!pagesEditPopover) return;
+    onExplainSelection({
+      sectionId: pagesEditPopover.highlight.section_id,
+      exact: pagesEditPopover.highlight.exact,
+    });
+    setPagesEditPopover(null);
+  }, [pagesEditPopover, onExplainSelection]);
+
   return (
     <div className="relative flex min-h-0 flex-1">
       {previousTitle !== null && (
@@ -458,7 +563,7 @@ export default function ReadingColumn({
               // book) — and it gives pagesRef a fresh node per section, so
               // a leftover selection/popover from the previous chapter's
               // pages can't outlive it.
-              <div key={section.id} ref={pagesRef} onMouseUp={handlePagesMouseUp}>
+              <div key={section.id} ref={pagesRef} onMouseUp={handlePagesMouseUp} onClick={handlePagesClick}>
                 <PagesView
                   courseId={courseId}
                   assetId={section.asset_id}
@@ -553,6 +658,19 @@ export default function ReadingColumn({
             onClose={closePagesPopover}
           />
         ))}
+      {pagesEditPopover && (
+        // Same "plain sibling, not nested in the scrolling column" placement
+        // rationale as SelectionPopover/HighlightEditPopover/pagesPopover
+        // above.
+        <HighlightEditPopover
+          highlight={pagesEditPopover.highlight}
+          anchorRect={pagesEditPopover.anchorRect}
+          onSave={handlePagesEditSave}
+          onDelete={handlePagesEditDelete}
+          onExplain={handlePagesEditExplain}
+          onClose={closePagesEditPopover}
+        />
+      )}
     </div>
   );
 }
