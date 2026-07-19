@@ -56,6 +56,10 @@ vi.mock("@/lib/api/client", () => ({
 vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: { workerPort: null },
   getDocument: vi.fn(() => ({ promise: new Promise(() => {}) })),
+  TextLayer: class {
+    render = vi.fn(() => Promise.resolve());
+    cancel = vi.fn();
+  },
 }));
 
 const mockedGetCourse = vi.mocked(getCourse);

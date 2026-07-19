@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ErrorBanner from "@/components/ErrorBanner";
 import { buildAssetFileUrl } from "@/lib/api/client";
 import { useNearViewport } from "@/lib/hooks/useNearViewport";
-import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
+import { GlobalWorkerOptions, TextLayer, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
 
 // The reader subtree this mounts into is already ssr:false (see
 // CourseReaderClient.tsx) — pdf.js needs a real Worker/canvas, so this
@@ -130,7 +130,9 @@ type PageStatus = "pending" | "rendered" | "error";
 
 function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textLayerRef = useRef<HTMLDivElement>(null);
   const nearViewport = useNearViewport(containerRef);
   const [status, setStatus] = useState<PageStatus>("pending");
 
@@ -138,23 +140,41 @@ function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: numbe
     if (!nearViewport) return undefined;
     let cancelled = false;
     let renderTask: { cancel: () => void } | null = null;
+    // Captured directly rather than re-read from textLayerRef.current in
+    // cleanup: on unmount, React nulls out DOM refs before this (passive)
+    // effect's cleanup runs, so reading the ref there would already be
+    // null. The captured element itself stays a valid, mutable DOM node
+    // even after being detached, so clearing it here still works and
+    // still matters — same instance re-renders (nearViewport/doc/pageNumber
+    // deps unchanged) reuse the container node across effect runs.
+    let textLayer: TextLayer | null = null;
+    let textLayerContainer: HTMLDivElement | null = null;
 
     doc.getPage(pageNumber).then(
       (page) => {
         if (cancelled) return;
         const canvas = canvasRef.current;
-        if (!canvas) return;
+        const wrapper = wrapperRef.current;
+        if (!canvas || !wrapper) return;
 
         const containerWidth = containerRef.current?.clientWidth || 0;
         const baseViewport = page.getViewport({ scale: 1 });
         const scale = containerWidth > 0 ? containerWidth / baseViewport.width : 1;
+        // This is the CSS-px viewport — matches canvas.style.width/height
+        // below, not the DPR-scaled pixel buffer set on canvas.width/height.
+        // The text layer is built from this same viewport so its spans
+        // align with the canvas's on-screen box, not its backing buffer.
         const viewport = page.getViewport({ scale });
         const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 
+        const cssWidth = Math.floor(viewport.width);
+        const cssHeight = Math.floor(viewport.height);
         canvas.width = Math.floor(viewport.width * dpr);
         canvas.height = Math.floor(viewport.height * dpr);
-        canvas.style.width = `${Math.floor(viewport.width)}px`;
-        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
+        wrapper.style.width = `${cssWidth}px`;
+        wrapper.style.height = `${cssHeight}px`;
 
         // `canvas` (not the older, now-backwards-compat-only
         // `canvasContext`) is this version's primary render parameter —
@@ -177,6 +197,39 @@ function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: numbe
             if (!cancelled && !cancelledByUs) setStatus("error");
           },
         );
+
+        // Built in parallel with the canvas render (not chained after
+        // task.promise resolves) — same as pdf.js's own reference viewer,
+        // and there's no ordering dependency since the two paint
+        // different elements from the same already-computed viewport.
+        page.getTextContent().then(
+          (textContentSource) => {
+            if (cancelled) return;
+            const textLayerEl = textLayerRef.current;
+            if (!textLayerEl) return;
+            const tl = new TextLayer({ textContentSource, container: textLayerEl, viewport });
+            textLayer = tl;
+            textLayerContainer = textLayerEl;
+            // pdf.js's `setLayerDimensions` (called inside the `TextLayer`
+            // constructor below) and the `.textLayer` CSS (globals.css)
+            // both read `--total-scale-factor`, not `--scale-factor` —
+            // that's a derived var pdf.js's own stylesheet computes from
+            // `--scale-factor` on a `.pdfViewer .page` ancestor this app
+            // doesn't have, so it's set directly here instead. Confirmed
+            // against the installed pdfjs-dist 6.1.200 sources.
+            textLayerEl.style.setProperty("--total-scale-factor", String(viewport.scale));
+            tl.render().catch(() => {
+              // The selectable text layer is a progressive enhancement
+              // over the already-rendered canvas — a failure here (e.g.
+              // AbortException from a cancel racing this promise)
+              // shouldn't flip the page into its error state.
+            });
+          },
+          () => {
+            // Same: a failed text-content fetch shouldn't blank/error the
+            // canvas that already rendered successfully.
+          },
+        );
       },
       () => {
         if (!cancelled) setStatus("error");
@@ -186,6 +239,8 @@ function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: numbe
     return () => {
       cancelled = true;
       renderTask?.cancel();
+      textLayer?.cancel();
+      textLayerContainer?.replaceChildren();
     };
   }, [nearViewport, doc, pageNumber]);
 
@@ -202,7 +257,10 @@ function PdfPage({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: numbe
       ) : status === "error" ? (
         <ErrorBanner message={`Could not render page ${pageNumber}.`} />
       ) : (
-        <canvas ref={canvasRef} aria-label={`Page ${pageNumber}`} className="block shadow-sm" />
+        <div ref={wrapperRef} style={{ position: "relative" }}>
+          <canvas ref={canvasRef} aria-label={`Page ${pageNumber}`} className="block shadow-sm" />
+          <div ref={textLayerRef} className="textLayer" />
+        </div>
       )}
     </div>
   );

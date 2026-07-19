@@ -8,9 +8,15 @@ import { vi } from "vitest";
  * comment on this). Assign via `vi.mock("pdfjs-dist", () => ({...}))`.
  */
 
+export interface FakeTextContent {
+  items: unknown[];
+  styles: Record<string, unknown>;
+}
+
 export interface FakePdfPage {
   getViewport: ReturnType<typeof vi.fn>;
   render: ReturnType<typeof vi.fn>;
+  getTextContent: ReturnType<typeof vi.fn>;
 }
 
 export interface FakePdfDocument {
@@ -25,12 +31,21 @@ export interface FakePdfDocument {
  * to attach a handler to it (the component's render effect does so
  * synchronously); building it eagerly left a window where nothing had
  * subscribed yet, which Node/Vitest flags as an unhandled rejection even
- * though a real handler attaches moments later. */
-export function makeFakePage(overrides: { renderError?: unknown } = {}): FakePdfPage {
+ * though a real handler attaches moments later.
+ *
+ * `getTextContent` backs PdfPage's text-layer overlay — defaults to an
+ * empty-but-valid TextContent so any test that reaches the near-viewport
+ * render path (most of them, since jsdom has no real IntersectionObserver
+ * and PdfPage fails open) doesn't have to know about it; pass
+ * `textContent` to assert on specific items. */
+export function makeFakePage(
+  overrides: { renderError?: unknown; textContent?: FakeTextContent } = {},
+): FakePdfPage {
   return {
     getViewport: vi.fn(({ scale = 1 }: { scale?: number } = {}) => ({
       width: 600 * scale,
       height: 800 * scale,
+      scale,
     })),
     render: vi.fn(() => ({
       promise:
@@ -39,6 +54,9 @@ export function makeFakePage(overrides: { renderError?: unknown } = {}): FakePdf
           : Promise.resolve(),
       cancel: vi.fn(),
     })),
+    getTextContent: vi.fn(() =>
+      Promise.resolve(overrides.textContent ?? { items: [], styles: {} }),
+    ),
   };
 }
 

@@ -199,3 +199,111 @@ body {
 .reading-column .reading-measure {
   max-width: var(--reading-measure);
 }
+
+/* Selectable pdf.js text layer overlaid on PdfPagesView's canvas
+   (components/reader/PdfPagesView.tsx). Faithful copy of the
+   `.textLayer`-scoped rules from pdfjs-dist/web/pdf_viewer.css (6.1.200,
+   lines ~615-762) — that stylesheet can't be imported directly (Next App
+   Router rejects deep global CSS from node_modules) — kept bounded to
+   `.textLayer` itself rather than importing the whole file. This is not
+   a "trim the parts we don't need" subset: pdf.js's TextLayer runtime
+   sets per-span `--font-height`/`--scale-x`/`--rotate` custom properties
+   and relies on THIS rule set to turn them into real font-size/transform
+   — drop any of it and every span renders at an arbitrary inherited
+   font-size instead of the actual glyph size, breaking selection-box
+   alignment.
+
+   Deliberately excluded (each belongs to pdf.js machinery this app never
+   loads, so porting it would drag in more of pdf_viewer.css than a
+   bounded `.textLayer` block):
+   - `.highlight` — pdf.js's highlight-*annotation-editor* decoration
+     (unrelated to this app's own highlights feature); its vars
+     (--hcm-highlight-filter etc.) are defined on `.pdfViewer`, which
+     this app doesn't use.
+   - `.endOfContent`, `&.selecting`, `&.highlighting` — toggled/created
+     by the higher-level web/text_layer_builder.js `PDFPageView`/
+     `TextHighlighter` viewer classes. This app instantiates pdf.js's
+     low-level `TextLayer` display class directly (verified against
+     node_modules/pdfjs-dist/build/pdf.mjs), which never creates or
+     toggles these.
+   - `span[role="img"]` — only set by the optional `TextLayerImages`
+     handler, which this app doesn't pass to `TextLayer`.
+
+   `--total-scale-factor` is normally derived, in `.pdfViewer .page`, as
+   `--scale-factor * --user-unit`; this app has neither ancestor rule, so
+   PdfPagesView.tsx sets `--total-scale-factor` directly instead.
+   `--scale-round-x`/`--scale-round-y` (also normally defaulted in
+   `.pdfViewer .page`) are left undefined on purpose: pdf.js's TextLayer
+   constructor uses them only to set an inline width/height on this
+   container via a CSS `round()` expression, which — without those vars —
+   is invalid at computed-value time and simply falls back to `auto`;
+   that's fine, because `inset: 0` below, combined with this component's
+   own explicit wrapper sizing, already gives the layer the correct box,
+   without a second, independently-computed sizing path that could drift
+   from it. Spans stay transparent so the page looks unchanged; only the
+   user's selection highlight is visible. */
+.textLayer {
+  color-scheme: only light;
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  -webkit-text-size-adjust: none;
+  -moz-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 0;
+
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+}
+
+/* Direct-child spans/brs, plus spans nested inside a `.markedContent`
+   wrapper — mirrors pdf_viewer.css's
+   `.textLayer > :not(.markedContent), .markedContent span:not(.markedContent)`
+   selector list. `--font-height`/`--scale-x`/`--rotate` default here to
+   inert values; pdf.js's TextLayer sets the real per-span values as
+   inline styles, which override these. */
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.textLayer .markedContent {
+  display: contents;
+}
+
+.textLayer ::selection,
+.textLayer ::-moz-selection {
+  background: rgba(120, 160, 255, 0.4);
+  color: transparent;
+}
+
+.textLayer br::selection,
+.textLayer br::-moz-selection {
+  background: transparent;
+}
