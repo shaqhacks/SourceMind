@@ -72,6 +72,21 @@ const NON_CONTENT_BANNER_TEXT: Record<"practice" | "answers", string> = {
 const CHEVRON_ZONE_CLASSES =
   "group absolute inset-y-0 z-10 flex w-12 items-center justify-center text-muted-foreground/40 transition-colors hover:bg-muted-foreground/5 hover:text-foreground focus-visible:bg-muted-foreground/5 focus-visible:text-foreground";
 
+// A single stable (never-reallocated) empty array, shared by every non-source
+// render of `paintable` below. `useHighlightPainter`'s effect is keyed on
+// `paintable`'s own reference — in pages/lesson mode it's permanently
+// `enabled=false`, but `highlights.filter(...)` would still hand it a FRESH
+// array on every `highlights` change (any pdf-highlight create/update/
+// delete), re-running its disabled branch and calling
+// `clearHighlightRegistry()` — which deletes ALL FOUR `hl-*` registry
+// names, including whatever `usePdfHighlightPainter` (a descendant, whose
+// layout effect commits first) just painted in the very same commit.
+// Handing back this same constant instead means the disabled branch's
+// deps never change outside an actual mode switch, so it clears once (on
+// entering pages mode, correctly discarding a stale source paint) and then
+// leaves the PDF painter's own registry entries alone.
+const NO_HIGHLIGHTS: HighlightOut[] = [];
+
 export default function ReadingColumn({
   courseId,
   section,
@@ -104,9 +119,24 @@ export default function ReadingColumn({
   // only (no section_id check), so leaving stale rows in would let a phrase
   // that also appears in the new section's text get painted as a highlight
   // that doesn't belong there.
+  //
+  // Also filtered to `surface === "source"` — symmetric with `pdfHighlights`
+  // below, which filters `surface === "pdf"`. Without this, a `surface:
+  // "pdf"` highlight whose `exact` also happens to occur in this section's
+  // extracted Markdown would paint (and be click-editable) here too, in the
+  // wrong view, anchored against the wrong text.
+  //
+  // In any mode OTHER than "source" this is the shared `NO_HIGHLIGHTS`
+  // constant, not a fresh `.filter()` result — see its module-level comment
+  // for why that reference stability is load-bearing, not cosmetic.
   const paintable = useMemo(
-    () => highlights.filter((highlight) => highlight.section_id === section.id),
-    [highlights, section.id],
+    () =>
+      mode === "source"
+        ? highlights.filter(
+            (highlight) => highlight.surface === "source" && highlight.section_id === section.id,
+          )
+        : NO_HIGHLIGHTS,
+    [mode, highlights, section.id],
   );
   // Pages-mode's own slice, handed to PagesView -> PdfPagesView's
   // aggregating painter: `surface === "pdf"` (a source-mode highlight's

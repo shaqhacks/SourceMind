@@ -303,6 +303,36 @@ describe("ReadingColumn click-to-edit integration", () => {
     expect(screen.queryByRole("dialog", { name: "Highlight actions" })).not.toBeInTheDocument();
   });
 
+  // Regression for the "wrong surface" bug: `paintable` used to filter only
+  // by `section_id`, so a `surface:"pdf"` highlight whose `exact` also
+  // happens to occur in the section's extracted Markdown would paint (and
+  // be click-editable) in Source view too — the wrong surface, anchored
+  // against the wrong rendered text. `pdfHighlights` (fed to PagesView) has
+  // always filtered `surface === "pdf"`; `paintable` must symmetrically
+  // filter `surface === "source"`.
+  it('excludes a surface:"pdf" highlight from source-view painting and click hit-testing even when its exact text appears in the markdown', async () => {
+    const pdfHighlight = makeHighlight({ surface: "pdf", color: "blue", exact: "example passage" });
+    mockedListHighlights.mockResolvedValue(ok([pdfHighlight]));
+    mockedHighlightAtPoint.mockReturnValue(null);
+
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    const paragraph = await screen.findByText(/read the example passage/i);
+
+    // Painting: a pdf-surface highlight must never occupy a hl-<color>
+    // registry slot in source view.
+    expect(CSS.highlights.get("hl-blue")).toBeUndefined();
+
+    window.getSelection()?.removeAllRanges();
+    fireEvent.click(paragraph, { clientX: 10, clientY: 10 });
+
+    // Click hit-testing: ReadingColumn's own `paintable` (what it hands to
+    // highlightAtPoint) must already have excluded the pdf highlight —
+    // proving the surface filter, not just that this particular click
+    // geometry happened to miss.
+    expect(mockedHighlightAtPoint).toHaveBeenCalledWith(expect.any(HTMLElement), [], 10, 10);
+    expect(screen.queryByRole("dialog", { name: "Highlight actions" })).not.toBeInTheDocument();
+  });
+
   it("does not open the edit popover when highlightAtPoint finds nothing under the click", async () => {
     mockedListHighlights.mockResolvedValue(ok([]));
     mockedHighlightAtPoint.mockReturnValue(null);
