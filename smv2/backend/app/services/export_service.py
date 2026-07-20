@@ -22,6 +22,7 @@ from pathlib import Path
 
 from app.db.engine import get_session
 from app.db.models import Asset, Course, Section
+from app.services import highlights_service
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 # Exports over this size spill from memory to a temp file automatically.
@@ -96,6 +97,19 @@ def build_export_zip(course_id: str) -> tuple[tempfile.SpooledTemporaryFile, str
                 ],
             }
             zf.writestr("manifest.json", json.dumps(manifest, indent=2, default=str))
+
+            # User annotations travel with the export too — their own work must
+            # not be hostage to the app. Sourced from highlights_service (never
+            # a raw model re-query) so page stays 1-based like the API.
+            highlights_payload = {
+                "schema_version": 1,
+                "course_id": course.id,
+                "highlights": highlights_service.list_highlights(course_id),
+            }
+            zf.writestr(
+                "highlights.json",
+                json.dumps(highlights_payload, indent=2, default=str),
+            )
 
             for s in sections:
                 zf.writestr(_section_filename(s, width), s.body_md or "")

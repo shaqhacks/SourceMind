@@ -21,7 +21,7 @@ def test_export_zip_structure_and_content(client, ingest_course, tmp_path):
         assert "manifest.json" in names
         assert any(n.startswith("assets/") and n.endswith(".pdf") for n in names)
 
-        section_files = [n for n in names if n not in {"outline.md", "manifest.json"} and not n.startswith("assets/")]
+        section_files = [n for n in names if n not in {"outline.md", "manifest.json", "highlights.json"} and not n.startswith("assets/")]
         assert len(section_files) == 3
 
         outline_text = zf.read("outline.md").decode("utf-8")
@@ -111,3 +111,62 @@ def test_export_unchanged_for_course_with_no_lessons(client, ingest_course):
 
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
         assert all(s["lesson"] is None for s in manifest["sections"])
+
+
+def test_export_includes_highlights_json_round_trip(client, ingest_course):
+    from conftest import _first_section_id
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    create = client.post(
+        f"/api/courses/{course_id}/highlights",
+        json={
+            "section_id": section_id,
+            "exact": "Foundations",
+            "prefix": "Chapter 1: ",
+            "suffix": " and more",
+            "occurrence": 0,
+            "page": 3,
+            "color": "green",
+            "surface": "pdf",
+        },
+    )
+    assert create.status_code == 201
+    created = create.json()
+
+    patch = client.patch(f"/api/highlights/{created['id']}", json={"note_md": "my note"})
+    assert patch.status_code == 200
+
+    resp = client.get(f"/api/courses/{course_id}/export")
+    assert resp.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        assert "highlights.json" in zf.namelist()
+        data = json.loads(zf.read("highlights.json").decode("utf-8"))
+        assert data["schema_version"] == 1
+        assert data["course_id"] == course_id
+        assert len(data["highlights"]) == 1
+
+        h = data["highlights"][0]
+        assert h["id"] == created["id"]
+        assert h["section_id"] == section_id
+        assert h["exact"] == "Foundations"
+        assert h["page"] == 3  # 1-based, same as the API surface
+        assert h["surface"] == "pdf"
+        assert h["color"] == "green"
+        assert h["note_md"] == "my note"
+
+
+def test_export_highlights_json_empty_when_none(client, ingest_course):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    resp = client.get(f"/api/courses/{course_id}/export")
+    assert resp.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        assert "highlights.json" in zf.namelist()
+        data = json.loads(zf.read("highlights.json").decode("utf-8"))
+        assert data["schema_version"] == 1
+        assert data["course_id"] == course_id
+        assert data["highlights"] == []
