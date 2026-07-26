@@ -107,3 +107,65 @@ def test_import_rejects_foreign_section_with_422(client, ingest_course):
         f"/api/courses/{course_id}/skills/graph", json=_graph(foreign_section_id)
     )
     assert resp.status_code == 422
+
+
+def test_import_dedupes_duplicate_edge_pair(client, ingest_course):
+    from app.db.engine import get_session
+    from app.db.models import ConceptEdge
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    payload = {
+        "concepts": [
+            {"slug": "a", "label": "A", "section_refs": []},
+            {"slug": "b", "label": "B", "section_refs": []},
+        ],
+        "edges": [
+            {"from_slug": "a", "to_slug": "b"},
+            {"from_slug": "a", "to_slug": "b"},
+        ],
+    }
+    resp = client.put(f"/api/courses/{course_id}/skills/graph", json=payload)
+    assert resp.status_code == 200
+    assert resp.json() == {"concept_count": 2, "edge_count": 1, "link_count": 0}
+
+    session = get_session()
+    try:
+        assert session.query(ConceptEdge).filter_by(course_id=course_id).count() == 1
+    finally:
+        session.close()
+
+
+def test_import_dedupes_duplicate_section_ref(client, ingest_course):
+    from conftest import _first_section_id
+
+    from app.db.engine import get_session
+    from app.db.models import ConceptSectionLink
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    payload = {
+        "concepts": [
+            {
+                "slug": "tokenization",
+                "label": "Tokenization",
+                "section_refs": [
+                    {"section_id": section_id, "rank": 0, "relevance_md": "First."},
+                    {"section_id": section_id, "rank": 1, "relevance_md": "Second."},
+                ],
+            },
+        ],
+        "edges": [],
+    }
+    resp = client.put(f"/api/courses/{course_id}/skills/graph", json=payload)
+    assert resp.status_code == 200
+    assert resp.json() == {"concept_count": 1, "edge_count": 0, "link_count": 1}
+
+    session = get_session()
+    try:
+        links = session.query(ConceptSectionLink).filter_by(course_id=course_id).all()
+        assert len(links) == 1
+        assert links[0].relevance_md == "First."
+    finally:
+        session.close()

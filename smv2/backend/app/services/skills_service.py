@@ -175,6 +175,23 @@ class GraphValidationError(ValueError):
     doesn't belong to the course."""
 
 
+def _dedupe_by_key(items: list[dict[str, Any]], key) -> list[dict[str, Any]]:
+    """Drops exact duplicates by `key`, first occurrence wins. A repeated
+    edge pair or a concept's section_refs repeating the same section_id is
+    redundancy in the payload, not a contradiction — silently collapsing it
+    keeps import_graph idempotent instead of hitting the DB's unique
+    constraints (concept_edges / concept_section_links) with a 500."""
+    seen: set[Any] = set()
+    result = []
+    for item in items:
+        k = key(item)
+        if k in seen:
+            continue
+        seen.add(k)
+        result.append(item)
+    return result
+
+
 def import_graph(course_id: str, payload: dict[str, Any]) -> dict[str, int]:
     """Upserts concepts by (course_id, slug) — keeps existing ids, so
     ConceptMastery survives a re-import — then wholesale deletes and
@@ -183,10 +200,14 @@ def import_graph(course_id: str, payload: dict[str, Any]) -> dict[str, int]:
 
     Validates the incoming edge set with derive_levels() BEFORE touching
     the DB (cycle / unknown-slug -> GraphValidationError), then checks
-    every referenced section_id actually belongs to this course.
+    every referenced section_id actually belongs to this course. Exact
+    duplicate edges/section_refs are deduped (see _dedupe_by_key) rather
+    than rejected — counts in the response reflect the deduped totals.
     """
     concepts_in: list[dict[str, Any]] = payload.get("concepts", [])
-    edges_in: list[dict[str, Any]] = payload.get("edges", [])
+    edges_in = _dedupe_by_key(
+        payload.get("edges", []), key=lambda e: (e["from_slug"], e["to_slug"])
+    )
 
     slugs = [c["slug"] for c in concepts_in]
     if len(slugs) != len(set(slugs)):
@@ -198,9 +219,15 @@ def import_graph(course_id: str, payload: dict[str, Any]) -> dict[str, int]:
     except ValueError as exc:
         raise GraphValidationError(str(exc)) from exc
 
-    section_ids = {
-        ref["section_id"] for c in concepts_in for ref in c.get("section_refs", [])
+    # slug -> deduped section_refs, computed once and reused for both the
+    # section-ownership check below and the link-creation loop later, so
+    # link_count and the actually-inserted rows can never disagree.
+    refs_by_slug: dict[str, list[dict[str, Any]]] = {
+        c["slug"]: _dedupe_by_key(c.get("section_refs", []), key=lambda r: r["section_id"])
+        for c in concepts_in
     }
+
+    section_ids = {ref["section_id"] for refs in refs_by_slug.values() for ref in refs}
 
     session = get_session()
     try:
@@ -250,7 +277,7 @@ def import_graph(course_id: str, payload: dict[str, Any]) -> dict[str, int]:
         link_count = 0
         for c in concepts_in:
             concept_id = slug_to_id[c["slug"]]
-            for ref in c.get("section_refs", []):
+            for ref in refs_by_slug[c["slug"]]:
                 session.add(
                     ConceptSectionLink(
                         course_id=course_id,
