@@ -3,10 +3,22 @@ plus the graph import service (top half stays pure/DB-free per the plan)."""
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any
 
 from app.db.engine import get_session
-from app.db.models import Concept, ConceptEdge, ConceptSectionLink, Section, utcnow
+from app.db.models import (
+    Card,
+    Concept,
+    ConceptEdge,
+    ConceptMastery,
+    ConceptSectionLink,
+    ReviewState,
+    Section,
+    Test,
+    TestAttempt,
+    utcnow,
+)
 
 # Constants
 QUIZ_WEIGHT = 0.5
@@ -294,6 +306,294 @@ def import_graph(course_id: str, payload: dict[str, Any]) -> dict[str, int]:
             "concept_count": len(concepts_in),
             "edge_count": len(edges_in),
             "link_count": link_count,
+        }
+    finally:
+        session.close()
+
+
+# --- Read assembly (DB-backed) — map + competency detail ---------------
+
+
+def _test_scope_section_ids(
+    test: Test,
+    sections_by_chapter: dict[str | None, list[Section]],
+    all_section_ids: list[str],
+) -> list[str]:
+    """Mirrors tests_service's scope resolution (start_test_generation /
+    _resolve_missed_card_section_id): an explicit single-section test uses
+    just that section; a chapter-scoped test uses every non-answer-key
+    section of that chapter; otherwise every section in the course.
+    """
+    if test.section_id is not None:
+        return [test.section_id]
+    if test.chapter_label is not None:
+        return [
+            s.id for s in sections_by_chapter.get(test.chapter_label, []) if s.kind != "answers"
+        ]
+    return list(all_section_ids)
+
+
+def build_map(session, course_id: str) -> dict[str, Any]:
+    """Assembles the full competency graph for a course: nodes/edges (the
+    public map shape) plus the per-concept signal internals that
+    get_skill_detail reuses without re-querying. This is the single
+    shared assembly function both read endpoints delegate to.
+
+    Includes ALL concepts of the course, even ones with no edges or
+    section links (stale/unlinked concepts persist by design — the graph
+    import upserts, it never deletes a concept dropped from a later
+    import).
+    """
+    concepts = (
+        session.query(Concept).filter(Concept.course_id == course_id).order_by(Concept.slug).all()
+    )
+    by_id = {c.id: c for c in concepts}
+    concept_ids = [c.id for c in concepts]
+
+    edges = session.query(ConceptEdge).filter(ConceptEdge.course_id == course_id).all()
+    levels = derive_levels(concept_ids, [(e.from_concept_id, e.to_concept_id) for e in edges])
+
+    links = (
+        session.query(ConceptSectionLink).filter(ConceptSectionLink.course_id == course_id).all()
+    )
+    links_by_concept: dict[str, list[ConceptSectionLink]] = defaultdict(list)
+    for link in links:
+        links_by_concept[link.concept_id].append(link)
+    link_section_ids_by_concept = {
+        cid: {link.section_id for link in links_by_concept.get(cid, [])} for cid in concept_ids
+    }
+
+    practice_totals: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for m in session.query(ConceptMastery).filter(ConceptMastery.course_id == course_id).all():
+        totals = practice_totals[m.concept_id]
+        totals[0] += m.correct_count
+        totals[1] += m.wrong_count
+
+    cards_by_section: dict[str, list[Card]] = defaultdict(list)
+    for c in session.query(Card).filter(Card.course_id == course_id).all():
+        cards_by_section[c.section_id].append(c)
+    review_by_card = {
+        r.card_id: r
+        for r in session.query(ReviewState).filter(ReviewState.course_id == course_id).all()
+    }
+
+    sections = session.query(Section).filter(Section.course_id == course_id).all()
+    sections_by_chapter: dict[str | None, list[Section]] = defaultdict(list)
+    for s in sections:
+        sections_by_chapter[s.chapter_label].append(s)
+    all_section_ids = [s.id for s in sections]
+
+    # test_id -> (test, latest graded attempt, its scope section ids). Only
+    # graded (submitted) attempts carry a signal; when a test has none it
+    # contributes nothing. "Latest" resolves the brief's silence on which
+    # attempt feeds the tally the same way it's resolved for
+    # missed_questions, per the task's own controller ruling.
+    graded_attempts_by_test: dict[str, list[TestAttempt]] = defaultdict(list)
+    for a in (
+        session.query(TestAttempt)
+        .filter(TestAttempt.course_id == course_id, TestAttempt.results.isnot(None))
+        .all()
+    ):
+        graded_attempts_by_test[a.test_id].append(a)
+
+    latest_by_test: dict[str, tuple[Test, TestAttempt, set[str]]] = {}
+    for test in session.query(Test).filter(Test.course_id == course_id).all():
+        candidates = graded_attempts_by_test.get(test.id, [])
+        if not candidates:
+            continue
+        latest = max(candidates, key=lambda a: a.created_at)
+        scope_ids = set(_test_scope_section_ids(test, sections_by_chapter, all_section_ids))
+        latest_by_test[test.id] = (test, latest, scope_ids)
+
+    quiz_correct: dict[str, int] = defaultdict(int)
+    quiz_wrong: dict[str, int] = defaultdict(int)
+    quiz_tests_by_concept: dict[str, list[tuple[Test, TestAttempt]]] = defaultdict(list)
+    for concept_id, section_ids in link_section_ids_by_concept.items():
+        for test, latest, scope_ids in latest_by_test.values():
+            if not (section_ids & scope_ids):
+                continue
+            quiz_tests_by_concept[concept_id].append((test, latest))
+            for result in latest.results:
+                if result["correct"]:
+                    quiz_correct[concept_id] += 1
+                else:
+                    quiz_wrong[concept_id] += 1
+
+    mastery: dict[str, int] = {}
+    has_signal: dict[str, bool] = {}
+    cards_count: dict[str, int] = {}
+    for concept in concepts:
+        srs_section_ids = set(link_section_ids_by_concept[concept.id])
+        if concept.section_id:
+            srs_section_ids.add(concept.section_id)
+        concept_cards = [c for sid in srs_section_ids for c in cards_by_section.get(sid, [])]
+        cards_count[concept.id] = len(concept_cards)
+
+        grades = [
+            min(1.0, max(0.0, (review_by_card[c.id].last_grade - 1) / 3))
+            for c in concept_cards
+            if c.id in review_by_card and review_by_card[c.id].last_grade is not None
+        ]
+        srs = sum(grades) / len(grades) if grades else None
+
+        pt = practice_totals.get(concept.id)
+        practice = pt[0] / (pt[0] + pt[1]) if pt and (pt[0] + pt[1]) > 0 else None
+
+        qc, qw = quiz_correct.get(concept.id, 0), quiz_wrong.get(concept.id, 0)
+        quiz = qc / (qc + qw) if (qc + qw) > 0 else None
+
+        mastery[concept.id] = mastery_score(practice, srs, quiz)
+        has_signal[concept.id] = practice is not None or srs is not None or quiz is not None
+
+    edges_out = []
+    incoming_weak: dict[str, list[str]] = defaultdict(list)
+    outgoing_weak: dict[str, list[str]] = defaultdict(list)
+    for e in edges:
+        kind = "weak" if mastery[e.from_concept_id] < WEAK_PREREQ_BELOW else "met"
+        edges_out.append({"from_id": e.from_concept_id, "to_id": e.to_concept_id, "kind": kind})
+        if kind == "weak":
+            incoming_weak[e.to_concept_id].append(e.from_concept_id)
+            outgoing_weak[e.from_concept_id].append(e.to_concept_id)
+
+    nodes_out = []
+    weakest_prereq_by_concept: dict[str, Concept | None] = {}
+    for concept in concepts:
+        weak_prereq_ids = incoming_weak.get(concept.id, [])
+        status = status_for(mastery[concept.id], has_signal[concept.id], bool(weak_prereq_ids))
+        blocked = status == "locked"
+
+        weakest = None
+        if weak_prereq_ids:
+            weakest = min((by_id[pid] for pid in weak_prereq_ids), key=lambda p: (mastery[p.id], p.id))
+        weakest_prereq_by_concept[concept.id] = weakest
+
+        unlock_note = (
+            f"Unlocks at {WEAK_PREREQ_BELOW} mastery of {weakest.label}"
+            if blocked and weakest is not None
+            else None
+        )
+
+        nodes_out.append(
+            {
+                "id": concept.id,
+                "slug": concept.slug,
+                "label": concept.label,
+                "level": levels.get(concept.id, 1),
+                "mastery": mastery[concept.id],
+                "status": status,
+                "blocked": blocked,
+                "unlock_note": unlock_note,
+            }
+        )
+
+    return {
+        "nodes": nodes_out,
+        "edges": edges_out,
+        "by_id": by_id,
+        "cards_count": cards_count,
+        "quiz_correct": quiz_correct,
+        "quiz_wrong": quiz_wrong,
+        "quiz_tests_by_concept": quiz_tests_by_concept,
+        "outgoing_weak": outgoing_weak,
+        "weakest_prereq_by_concept": weakest_prereq_by_concept,
+    }
+
+
+def _taught_in(session, concept_id: str) -> list[dict[str, Any]]:
+    rows = (
+        session.query(ConceptSectionLink, Section)
+        .join(Section, ConceptSectionLink.section_id == Section.id)
+        .filter(ConceptSectionLink.concept_id == concept_id)
+        .order_by(ConceptSectionLink.rank)
+        .all()
+    )
+    return [
+        {
+            "section_id": link.section_id,
+            "chapter_label": section.chapter_label,
+            "title": section.title,
+            "rank": link.rank,
+            "relevance_md": link.relevance_md,
+        }
+        for link, section in rows
+    ]
+
+
+def get_skill_map(course_id: str) -> dict[str, Any]:
+    """Router-facing entry point for GET .../skills. Course existence is
+    checked by the router (same pattern as list_tests) before this is
+    called.
+    """
+    session = get_session()
+    try:
+        data = build_map(session, course_id)
+        return {"nodes": data["nodes"], "edges": data["edges"]}
+    finally:
+        session.close()
+
+
+def get_skill_detail(course_id: str, concept_id: str) -> dict[str, Any] | None:
+    """Router-facing entry point for GET .../skills/{concept_id}. Returns
+    None when the concept doesn't exist in this course (the router turns
+    that into a 404); course existence itself is checked by the router.
+    """
+    session = get_session()
+    try:
+        data = build_map(session, course_id)
+        concept = data["by_id"].get(concept_id)
+        if concept is None:
+            return None
+        node = next(n for n in data["nodes"] if n["id"] == concept_id)
+
+        missed_questions = []
+        for test, attempt in data["quiz_tests_by_concept"].get(concept_id, []):
+            for i, result in enumerate(attempt.results):
+                if result["correct"] is not False:
+                    continue
+                question = test.questions[i]
+                your_answer_idx = result.get("your_answer")
+                missed_questions.append(
+                    {
+                        "question": question["question"],
+                        "your_answer": (
+                            question["choices"][your_answer_idx]
+                            if your_answer_idx is not None
+                            else None
+                        ),
+                        "correct_answer": question["choices"][question["correct_index"]],
+                        "source_test_id": test.id,
+                        "attempted_at": attempt.created_at,
+                    }
+                )
+
+        blocked_skill_labels = sorted(
+            data["by_id"][to_id].label for to_id in data["outgoing_weak"].get(concept_id, [])
+        )
+
+        fix_plan = None
+        weakest = data["weakest_prereq_by_concept"].get(concept_id)
+        if weakest is not None:
+            top_link = (
+                session.query(ConceptSectionLink)
+                .filter(ConceptSectionLink.concept_id == weakest.id)
+                .order_by(ConceptSectionLink.rank)
+                .first()
+            )
+            fix_plan = {
+                "prereq_id": weakest.id,
+                "prereq_label": weakest.label,
+                "section_id": top_link.section_id if top_link is not None else weakest.section_id,
+            }
+
+        return {
+            "node": node,
+            "taught_in": _taught_in(session, concept_id),
+            "missed_questions": missed_questions,
+            "blocked_skill_labels": blocked_skill_labels,
+            "cards_count": data["cards_count"].get(concept_id, 0),
+            "quiz_correct": data["quiz_correct"].get(concept_id, 0),
+            "quiz_wrong": data["quiz_wrong"].get(concept_id, 0),
+            "fix_plan": fix_plan,
         }
     finally:
         session.close()

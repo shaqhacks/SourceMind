@@ -585,3 +585,58 @@ class SkillGraphImportOut(BaseModel):
     concept_count: int
     edge_count: int
     link_count: int
+
+
+class SkillNodeOut(BaseModel):
+    id: str
+    slug: str
+    label: str
+    level: int
+    mastery: int
+    status: str
+    blocked: bool
+    unlock_note: str | None = None
+
+
+class SkillEdgeOut(BaseModel):
+    from_id: str
+    to_id: str
+    kind: str  # "met" | "weak"
+
+
+class SkillMapOut(BaseModel):
+    nodes: list[SkillNodeOut]
+    edges: list[SkillEdgeOut]
+
+
+class SkillTaughtInOut(BaseModel):
+    section_id: str
+    chapter_label: str | None
+    title: str
+    rank: int
+    relevance_md: str | None
+
+
+class SkillMissedQuestionOut(BaseModel):
+    question: str
+    your_answer: str | None
+    correct_answer: str
+    source_test_id: str
+    attempted_at: datetime
+
+
+class SkillFixPlanOut(BaseModel):
+    prereq_id: str
+    prereq_label: str
+    section_id: str | None
+
+
+class SkillDetailOut(BaseModel):
+    node: SkillNodeOut
+    taught_in: list[SkillTaughtInOut]
+    missed_questions: list[SkillMissedQuestionOut]
+    blocked_skill_labels: list[str]
+    cards_count: int
+    quiz_correct: int
+    quiz_wrong: int
+    fix_plan: SkillFixPlanOut | None
