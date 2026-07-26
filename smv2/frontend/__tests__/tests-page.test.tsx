@@ -7,11 +7,13 @@ import {
   type ChapterOut,
   type CourseOut,
   type JobOut,
+  type SkillMapOut,
   type TestAttemptOut,
   type TestAttemptSummaryOut,
   type TestSummaryOut,
   generateTest,
   getJob,
+  getSkillMap,
   getTest,
   listChapters,
   listCourses,
@@ -43,6 +45,7 @@ vi.mock("@/lib/api/client", () => ({
   retakeTest: vi.fn(),
   generateTest: vi.fn(),
   getJob: vi.fn(),
+  getSkillMap: vi.fn(),
 }));
 
 const mockedListCourses = vi.mocked(listCourses);
@@ -53,6 +56,7 @@ const mockedGetTest = vi.mocked(getTest);
 const mockedRetakeTest = vi.mocked(retakeTest);
 const mockedGenerateTest = vi.mocked(generateTest);
 const mockedGetJob = vi.mocked(getJob);
+const mockedGetSkillMap = vi.mocked(getSkillMap);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
@@ -141,6 +145,7 @@ describe("TestsPage", () => {
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
     mockSearchParams = new URLSearchParams();
     mockedListJobs.mockResolvedValue(ok([]));
+    mockedGetSkillMap.mockResolvedValue(ok({ nodes: [], edges: [] }));
   });
 
   afterEach(() => {
@@ -284,7 +289,7 @@ describe("TestsPage", () => {
     expect(await screen.findByText(/generation failed: llm unavailable/i)).toBeInTheDocument();
   });
 
-  it("renders the score history bar chart and the sample-data diagnosis card", async () => {
+  it("renders the score history bar chart and a real-data diagnosis card", async () => {
     mockedListCourses.mockResolvedValue(ok([makeCourse()]));
     mockedListChapters.mockResolvedValue(
       ok([makeChapter({ chapter_label: "Chapter 1", test_stats: { attempts: 1, best_score: 0.6, latest_score: 0.6 } })]),
@@ -292,6 +297,18 @@ describe("TestsPage", () => {
     mockedListTests.mockResolvedValue(
       ok([makeTest({ id: "test-1", chapter_label: "Chapter 1", attempts: [makeAttemptSummary({ score: 0.6 })] })]),
     );
+    const diagnosisMap: SkillMapOut = {
+      nodes: [
+        { id: "tc", slug: "tc", label: "Token counting", level: 1, mastery: 31, status: "struggling", blocked: false, unlock_note: null },
+        { id: "ce", slug: "ce", label: "Cost estimation", level: 2, mastery: 24, status: "struggling", blocked: true, unlock_note: null },
+        { id: "cm", slug: "cm", label: "Context management", level: 2, mastery: 52, status: "growing", blocked: true, unlock_note: null },
+      ],
+      edges: [
+        { from_id: "tc", to_id: "ce", kind: "weak" },
+        { from_id: "tc", to_id: "cm", kind: "weak" },
+      ],
+    };
+    mockedGetSkillMap.mockResolvedValue(ok(diagnosisMap));
 
     render(<TestsPage />);
 
@@ -302,8 +319,52 @@ describe("TestsPage", () => {
     ).toBeInTheDocument();
 
     expect(screen.getByText("Diagnosis")).toBeInTheDocument();
-    expect(screen.getByText("Sample data")).toBeInTheDocument();
+    // Two assertions, not one regex spanning both: the message's prereq
+    // name sits inside its own <strong>, and RTL's getByText only matches
+    // an element's own direct text nodes, not text a nested element covers.
+    expect(screen.getByText(/misses cluster on/i)).toBeInTheDocument();
+    expect(screen.getByText("Token counting")).toBeInTheDocument();
+    expect(screen.getByText(/underpins 2 other skills/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /drill token counting/i })).toBeInTheDocument();
+  });
+
+  it("shows a quiet note instead of a diagnosis when nothing is both struggling and blocked", async () => {
+    mockedListCourses.mockResolvedValue(ok([makeCourse()]));
+    mockedListChapters.mockResolvedValue(
+      ok([makeChapter({ chapter_label: "Chapter 1", test_stats: { attempts: 1, best_score: 0.6, latest_score: 0.6 } })]),
+    );
+    mockedListTests.mockResolvedValue(
+      ok([makeTest({ id: "test-1", chapter_label: "Chapter 1", attempts: [makeAttemptSummary({ score: 0.6 })] })]),
+    );
+    mockedGetSkillMap.mockResolvedValue(
+      ok({
+        nodes: [
+          { id: "a", slug: "a", label: "Tokenization basics", level: 1, mastery: 86, status: "solid", blocked: false, unlock_note: null },
+        ],
+        edges: [],
+      }),
+    );
+
+    render(<TestsPage />);
+
+    await screen.findByText("Diagnosis");
+    expect(screen.getByText("No diagnosis available right now.")).toBeInTheDocument();
+  });
+
+  it("hides the diagnosis card entirely when the course has no skill graph yet", async () => {
+    mockedListCourses.mockResolvedValue(ok([makeCourse()]));
+    mockedListChapters.mockResolvedValue(
+      ok([makeChapter({ chapter_label: "Chapter 1", test_stats: { attempts: 1, best_score: 0.6, latest_score: 0.6 } })]),
+    );
+    mockedListTests.mockResolvedValue(
+      ok([makeTest({ id: "test-1", chapter_label: "Chapter 1", attempts: [makeAttemptSummary({ score: 0.6 })] })]),
+    );
+    mockedGetSkillMap.mockResolvedValue(ok({ nodes: [], edges: [] }));
+
+    render(<TestsPage />);
+
+    await screen.findByText("Score history");
+    expect(screen.queryByText("Diagnosis")).not.toBeInTheDocument();
   });
 
   it("shows a retryable error banner when courses fail to load", async () => {

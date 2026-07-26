@@ -1,43 +1,43 @@
 import Link from "next/link";
 
-import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
-import { blockedBy, rootCause, SAMPLE_DATA_LABEL } from "@/lib/skills/placeholder";
+import { useSkillMap } from "@/lib/hooks/useSkillMap";
+import { blockedBy, rootCause } from "@/lib/skills/derive";
 
 export interface DiagnosisCardProps {
   courseId: string;
 }
 
 /**
- * SAMPLE DATA — see lib/skills/placeholder.ts. The prereq-graph backend
- * doesn't exist yet, so this card reads from the same client-side
- * placeholder module as the Skill Map, visibly tagged as such, and does
- * not attempt to relate the sample skill graph to this specific course's
- * real test misses.
+ * Reads the real competency graph via useSkillMap. Renders nothing while
+ * loading, on error, or when the course has no skill graph yet (matches
+ * ReviewCard's own zero-due hide), same as SkillSnapshotCard.
  */
 export default function DiagnosisCard({ courseId }: DiagnosisCardProps) {
-  const diagnosis = rootCause();
+  const { map, error } = useSkillMap(courseId);
+
+  if (error || map === null || map.nodes.length === 0) return null;
+
+  const { nodes, edges } = map;
+  const diagnosis = rootCause(nodes, edges);
+  const blocksCount = diagnosis ? blockedBy(nodes, edges, diagnosis.prereq.id).length : 0;
 
   return (
     <Card className="flex flex-col gap-3 p-5">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-accent-800">
-          Diagnosis
-        </span>
-        <Badge tone="neutral">{SAMPLE_DATA_LABEL}</Badge>
-      </div>
+      <span className="text-xs font-semibold uppercase tracking-wide text-accent-800">
+        Diagnosis
+      </span>
       {diagnosis ? (
         <>
           <p className="text-sm leading-relaxed">
-            Misses cluster on <strong>{diagnosis.prereq.name}</strong>. It underpins{" "}
-            {blockedBy(diagnosis.prereq.id).length} other skill
-            {blockedBy(diagnosis.prereq.id).length === 1 ? "" : "s"} — drilling it now should lift
+            Misses cluster on <strong>{diagnosis.prereq.label}</strong>. It underpins{" "}
+            {blocksCount} other skill{blocksCount === 1 ? "" : "s"} — drilling it now should lift
             your other scores too.
           </p>
           <Link href={`/course/${courseId}/skills/${diagnosis.prereq.id}`}>
             <Button variant="primary" size="sm" className="self-start">
-              Drill {diagnosis.prereq.name}
+              Drill {diagnosis.prereq.label}
             </Button>
           </Link>
         </>

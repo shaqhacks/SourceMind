@@ -1955,6 +1955,413 @@
         "title": "SectionOut",
         "type": "object"
       },
+      "SkillDetailOut": {
+        "properties": {
+          "blocked_skill_labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked Skill Labels",
+            "type": "array"
+          },
+          "cards_count": {
+            "title": "Cards Count",
+            "type": "integer"
+          },
+          "fix_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillFixPlanOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missed_questions": {
+            "items": {
+              "$ref": "#/components/schemas/SkillMissedQuestionOut"
+            },
+            "title": "Missed Questions",
+            "type": "array"
+          },
+          "node": {
+            "$ref": "#/components/schemas/SkillNodeOut"
+          },
+          "quiz_correct": {
+            "title": "Quiz Correct",
+            "type": "integer"
+          },
+          "quiz_wrong": {
+            "title": "Quiz Wrong",
+            "type": "integer"
+          },
+          "taught_in": {
+            "items": {
+              "$ref": "#/components/schemas/SkillTaughtInOut"
+            },
+            "title": "Taught In",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node",
+          "taught_in",
+          "missed_questions",
+          "blocked_skill_labels",
+          "cards_count",
+          "quiz_correct",
+          "quiz_wrong",
+          "fix_plan"
+        ],
+        "title": "SkillDetailOut",
+        "type": "object"
+      },
+      "SkillEdgeOut": {
+        "properties": {
+          "from_id": {
+            "title": "From Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "to_id": {
+            "title": "To Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_id",
+          "to_id",
+          "kind"
+        ],
+        "title": "SkillEdgeOut",
+        "type": "object"
+      },
+      "SkillFixPlanOut": {
+        "properties": {
+          "prereq_id": {
+            "title": "Prereq Id",
+            "type": "string"
+          },
+          "prereq_label": {
+            "title": "Prereq Label",
+            "type": "string"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          }
+        },
+        "required": [
+          "prereq_id",
+          "prereq_label",
+          "section_id"
+        ],
+        "title": "SkillFixPlanOut",
+        "type": "object"
+      },
+      "SkillGraphConceptIn": {
+        "properties": {
+          "label": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "section_refs": {
+            "items": {
+              "$ref": "#/components/schemas/SkillGraphSectionRefIn"
+            },
+            "title": "Section Refs",
+            "type": "array"
+          },
+          "slug": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "label"
+        ],
+        "title": "SkillGraphConceptIn",
+        "type": "object"
+      },
+      "SkillGraphEdgeIn": {
+        "description": "from_slug must be learned before to_slug \u2014 both must reference a\nslug present in this same payload's concepts list.",
+        "properties": {
+          "from_slug": {
+            "title": "From Slug",
+            "type": "string"
+          },
+          "to_slug": {
+            "title": "To Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_slug",
+          "to_slug"
+        ],
+        "title": "SkillGraphEdgeIn",
+        "type": "object"
+      },
+      "SkillGraphImportOut": {
+        "properties": {
+          "concept_count": {
+            "title": "Concept Count",
+            "type": "integer"
+          },
+          "edge_count": {
+            "title": "Edge Count",
+            "type": "integer"
+          },
+          "link_count": {
+            "title": "Link Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "concept_count",
+          "edge_count",
+          "link_count"
+        ],
+        "title": "SkillGraphImportOut",
+        "type": "object"
+      },
+      "SkillGraphIn": {
+        "properties": {
+          "concepts": {
+            "items": {
+              "$ref": "#/components/schemas/SkillGraphConceptIn"
+            },
+            "title": "Concepts",
+            "type": "array"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/SkillGraphEdgeIn"
+            },
+            "title": "Edges",
+            "type": "array"
+          }
+        },
+        "required": [
+          "concepts"
+        ],
+        "title": "SkillGraphIn",
+        "type": "object"
+      },
+      "SkillGraphSectionRefIn": {
+        "description": "Where a concept is taught within the course; rank orders multiple\nappearances, relevance_md is a short hand-written blurb (not a full\nnote).",
+        "properties": {
+          "rank": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "relevance_md": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relevance Md"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_id"
+        ],
+        "title": "SkillGraphSectionRefIn",
+        "type": "object"
+      },
+      "SkillMapOut": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/SkillEdgeOut"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SkillNodeOut"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "SkillMapOut",
+        "type": "object"
+      },
+      "SkillMissedQuestionOut": {
+        "properties": {
+          "attempted_at": {
+            "format": "date-time",
+            "title": "Attempted At",
+            "type": "string"
+          },
+          "correct_answer": {
+            "title": "Correct Answer",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "source_test_id": {
+            "title": "Source Test Id",
+            "type": "string"
+          },
+          "your_answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Your Answer"
+          }
+        },
+        "required": [
+          "question",
+          "your_answer",
+          "correct_answer",
+          "source_test_id",
+          "attempted_at"
+        ],
+        "title": "SkillMissedQuestionOut",
+        "type": "object"
+      },
+      "SkillNodeOut": {
+        "properties": {
+          "blocked": {
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "integer"
+          },
+          "mastery": {
+            "title": "Mastery",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "unlock_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unlock Note"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "label",
+          "level",
+          "mastery",
+          "status",
+          "blocked"
+        ],
+        "title": "SkillNodeOut",
+        "type": "object"
+      },
+      "SkillTaughtInOut": {
+        "properties": {
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "relevance_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relevance Md"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_id",
+          "chapter_label",
+          "title",
+          "rank",
+          "relevance_md"
+        ],
+        "title": "SkillTaughtInOut",
+        "type": "object"
+      },
       "SplitOp": {
         "properties": {
           "at_page": {
@@ -3864,6 +4271,151 @@
         "summary": "Start Practice Assessment",
         "tags": [
           "practice"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/skills": {
+      "get": {
+        "operationId": "get_skill_map",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillMapOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Skill Map",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/skills/graph": {
+      "put": {
+        "operationId": "import_skill_graph",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillGraphIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillGraphImportOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Skill Graph",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/skills/{concept_id}": {
+      "get": {
+        "operationId": "get_skill_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "concept_id",
+            "required": true,
+            "schema": {
+              "title": "Concept Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Skill Detail",
+        "tags": [
+          "skills"
         ]
       }
     },

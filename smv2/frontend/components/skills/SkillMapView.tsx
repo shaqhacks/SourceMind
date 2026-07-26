@@ -6,17 +6,13 @@ import { useState } from "react";
 import ErrorBanner from "@/components/ErrorBanner";
 import Badge from "@/components/ui/Badge";
 import Card from "@/components/ui/Card";
+import EmptyState from "@/components/ui/EmptyState";
 import ProgressBar from "@/components/ui/ProgressBar";
 import Skeleton from "@/components/ui/Skeleton";
-import {
-  SAMPLE_DATA_LABEL,
-  SKILL_EDGES,
-  SKILL_NODES,
-  blockedBy,
-  rootCause,
-} from "@/lib/skills/placeholder";
+import { useSkillMap } from "@/lib/hooks/useSkillMap";
+import { blockedBy, describeNode, rootCause } from "@/lib/skills/derive";
 
-import { STATUS_BADGE_TONE, STATUS_BAR_TONE, STATUS_LABEL, joinNames } from "./format";
+import { STATUS_BADGE_TONE, STATUS_BAR_TONE, STATUS_LABEL, joinNames, type SkillStatus } from "./format";
 import { computeSkillMapLayout } from "./layout";
 import LinkButton from "./LinkButton";
 import { useCourseTitle } from "./useCourseTitle";
@@ -26,28 +22,30 @@ export interface SkillMapViewProps {
 }
 
 /**
- * Per-course skill map (design handoff §7). Renders SKILL_NODES/SKILL_EDGES
- * from lib/skills/placeholder.ts — see that module's header comment for why
- * (no prereq-graph backend yet). Only the course title comes from the real
- * API; everything skill-related is synchronous sample data.
+ * Per-course skill map (design handoff §7) — reads the real competency
+ * graph via GET /api/courses/{course_id}/skills. Only the course title and
+ * the skill map are separate fetches (useCourseTitle / useSkillMap); the
+ * layout/root-cause/blocked-by math below is all derived client-side from
+ * whichever resolves.
  */
 export default function SkillMapView({ courseId }: SkillMapViewProps) {
-  const { title: courseTitle, error, reload } = useCourseTitle(courseId);
-  const layout = computeSkillMapLayout(SKILL_NODES, SKILL_EDGES);
-  const fix = rootCause();
-  // blockedBy(fix.prereq.id) already includes fix.skill by construction of
-  // rootCause() — reuse it rather than re-deriving the same relationship.
-  const fixBlocked = fix ? blockedBy(fix.prereq.id) : [];
+  const { title: courseTitle, error: titleError, reload: reloadTitle } = useCourseTitle(courseId);
+  const { map, error: mapError, reload: reloadMap } = useSkillMap(courseId);
 
+  const error = titleError ?? mapError;
   if (error) {
     return (
       <div className="mx-auto w-full max-w-[1100px] px-9 py-8">
-        <ErrorBanner status={error.status} message={error.message} onRetry={reload} />
+        <ErrorBanner
+          status={error.status}
+          message={error.message}
+          onRetry={titleError ? reloadTitle : reloadMap}
+        />
       </div>
     );
   }
 
-  if (courseTitle === null) {
+  if (courseTitle === null || map === null) {
     return (
       <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-4 px-9 py-8">
         <Skeleton className="h-4 w-40" />
@@ -56,6 +54,24 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
       </div>
     );
   }
+
+  const { nodes, edges } = map;
+
+  if (nodes.length === 0) {
+    return (
+      <div className="mx-auto w-full max-w-[1100px] px-9 py-8">
+        <EmptyState
+          icon="🧭"
+          title="No skill graph yet"
+          body="Run backend/prompts/v1/prereq_extraction.md against this course and import the JSON via PUT /api/courses/{id}/skills/graph"
+        />
+      </div>
+    );
+  }
+
+  const layout = computeSkillMapLayout(nodes, edges);
+  const fix = rootCause(nodes, edges);
+  const fixBlocked = fix ? blockedBy(nodes, edges, fix.prereq.id) : [];
 
   return (
     <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 px-9 py-8">
@@ -68,10 +84,7 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
             <span className="text-muted-foreground opacity-60"> / </span>
             <span className="text-muted-foreground">Skill map</span>
           </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-[34px]">Skill map — {courseTitle}</h1>
-            <Badge tone="neutral">{SAMPLE_DATA_LABEL}</Badge>
-          </div>
+          <h1 className="text-[34px]">Skill map — {courseTitle}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Built from this course&apos;s chapters, tests and reviews · click a skill to see what
             to review · skills build left to right
@@ -130,30 +143,29 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
             </p>
           ))}
 
-          {SKILL_NODES.map((node) => {
+          {nodes.map((node) => {
             const pos = layout.nodePositions[node.id];
             if (!pos) return null;
+            const status = node.status as SkillStatus;
             return (
               <Link
                 key={node.id}
                 href={`/course/${courseId}/skills/${node.id}`}
                 style={{ left: pos.leftPx, top: pos.topPx }}
                 className={`absolute flex h-[118px] w-[260px] flex-col gap-[7px] rounded-lg bg-surface-raised p-[14px_16px] text-foreground shadow-sm transition-[box-shadow,translate] hover:-translate-y-px hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
-                  node.status === "struggling" ? "border-[1.5px] border-accent" : "border border-divider"
+                  status === "struggling" ? "border-[1.5px] border-accent" : "border border-divider"
                 }`}
               >
                 <span className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-bold">{node.name}</span>
-                  <Badge tone={STATUS_BADGE_TONE[node.status]}>{STATUS_LABEL[node.status]}</Badge>
+                  <span className="text-sm font-bold">{node.label}</span>
+                  <Badge tone={STATUS_BADGE_TONE[status]}>{STATUS_LABEL[status]}</Badge>
                 </span>
                 <ProgressBar
                   percent={node.mastery}
-                  label={`${node.name} mastery`}
-                  tone={STATUS_BAR_TONE[node.status]}
+                  label={`${node.label} mastery`}
+                  tone={STATUS_BAR_TONE[status]}
                 />
-                <span className="text-xs text-muted-foreground">
-                  {node.status === "locked" && node.unlockNote ? node.unlockNote : node.note}
-                </span>
+                <span className="text-xs text-muted-foreground">{describeNode(node, nodes, edges)}</span>
               </Link>
             );
           })}
@@ -181,9 +193,9 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
               Recommended fix
             </span>
             <p className="mt-1.5 text-[15px] leading-relaxed">
-              <strong>{fix.prereq.name}</strong> is weak and is the root cause blocking{" "}
-              <strong>{joinNames(fixBlocked.map((n) => n.name))}</strong>. A focused review of{" "}
-              {fix.prereq.name} should unblock {fixBlocked.length > 1 ? "them" : "it"}.
+              <strong>{fix.prereq.label}</strong> is weak and is the root cause blocking{" "}
+              <strong>{joinNames(fixBlocked.map((n) => n.label))}</strong>. A focused review of{" "}
+              {fix.prereq.label} should unblock {fixBlocked.length > 1 ? "them" : "it"}.
             </p>
           </div>
           <LinkButton href={`/course/${courseId}/skills/${fix.prereq.id}`} variant="primary">

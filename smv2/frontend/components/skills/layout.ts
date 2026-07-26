@@ -1,4 +1,4 @@
-import type { SkillEdge, SkillNode } from "@/lib/skills/placeholder";
+import type { SkillEdgeOut, SkillNodeOut } from "@/lib/api/client";
 
 /**
  * Skill map geometry — ported from the design handoff's prototype
@@ -34,7 +34,7 @@ export interface NodePosition {
 export interface EdgeLayout {
   from: string;
   to: string;
-  kind: SkillEdge["kind"];
+  kind: SkillEdgeOut["kind"];
   /** SVG path `d` attribute — straight line when source/target share a row,
    * cubic Bézier otherwise. */
   d: string;
@@ -57,7 +57,7 @@ export interface SkillMapLayout {
   canvasHeight: number;
 }
 
-export function computeSkillMapLayout(nodes: SkillNode[], edges: SkillEdge[]): SkillMapLayout {
+export function computeSkillMapLayout(nodes: SkillNodeOut[], edges: SkillEdgeOut[]): SkillMapLayout {
   const levels = Array.from(new Set(nodes.map((n) => n.level))).sort((a, b) => a - b);
 
   const lanes: LaneLayout[] = levels.map((level, laneIndex) => ({
@@ -81,20 +81,20 @@ export function computeSkillMapLayout(nodes: SkillNode[], edges: SkillEdge[]): S
 
   // Spread multiple edges landing on one node so their dots/curves don't
   // overlap — mirrors the mock's `incoming` map + index-based offset.
-  const incoming = new Map<string, SkillEdge[]>();
+  const incoming = new Map<string, SkillEdgeOut[]>();
   edges.forEach((e) => {
-    const list = incoming.get(e.to) ?? [];
+    const list = incoming.get(e.to_id) ?? [];
     list.push(e);
-    incoming.set(e.to, list);
+    incoming.set(e.to_id, list);
   });
 
   const edgeLayouts: EdgeLayout[] = [];
   edges.forEach((e) => {
-    const a = nodePositions[e.from];
-    const b = nodePositions[e.to];
+    const a = nodePositions[e.from_id];
+    const b = nodePositions[e.to_id];
     if (!a || !b) return; // defensive: an edge referencing an unknown node id
 
-    const sibs = incoming.get(e.to) ?? [];
+    const sibs = incoming.get(e.to_id) ?? [];
     const idx = sibs.indexOf(e);
     const spread = sibs.length > 1 ? (idx - (sibs.length - 1) / 2) * FAN_SPREAD : 0;
 
@@ -108,7 +108,7 @@ export function computeSkillMapLayout(nodes: SkillNode[], edges: SkillEdge[]): S
         ? `M ${x1} ${y1} L ${x2} ${y2}`
         : `M ${x1} ${y1} C ${x1 + CURVE_CONTROL_OFFSET} ${y1}, ${x2 - CURVE_CONTROL_OFFSET} ${y2}, ${x2} ${y2}`;
 
-    edgeLayouts.push({ from: e.from, to: e.to, kind: e.kind, d, tx: x2, ty: y2 });
+    edgeLayouts.push({ from: e.from_id, to: e.to_id, kind: e.kind, d, tx: x2, ty: y2 });
   });
 
   const canvasWidth = levels.length * LANE_PITCH - (LANE_PITCH - CARD_W);

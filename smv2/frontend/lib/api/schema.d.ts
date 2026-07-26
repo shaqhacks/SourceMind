@@ -392,6 +392,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Skill Map */
+        get: operations["get_skill_map"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/{course_id}/skills/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Import Skill Graph */
+        put: operations["import_skill_graph"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/{course_id}/skills/{concept_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Skill Detail */
+        get: operations["get_skill_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/study-next": {
         parameters: {
             query?: never;
@@ -1422,6 +1473,149 @@ export interface components {
             title: string;
             /** Word Count */
             word_count: number;
+        };
+        /** SkillDetailOut */
+        SkillDetailOut: {
+            /** Blocked Skill Labels */
+            blocked_skill_labels: string[];
+            /** Cards Count */
+            cards_count: number;
+            fix_plan: components["schemas"]["SkillFixPlanOut"] | null;
+            /** Missed Questions */
+            missed_questions: components["schemas"]["SkillMissedQuestionOut"][];
+            node: components["schemas"]["SkillNodeOut"];
+            /** Quiz Correct */
+            quiz_correct: number;
+            /** Quiz Wrong */
+            quiz_wrong: number;
+            /** Taught In */
+            taught_in: components["schemas"]["SkillTaughtInOut"][];
+        };
+        /** SkillEdgeOut */
+        SkillEdgeOut: {
+            /** From Id */
+            from_id: string;
+            /** Kind */
+            kind: string;
+            /** To Id */
+            to_id: string;
+        };
+        /** SkillFixPlanOut */
+        SkillFixPlanOut: {
+            /** Prereq Id */
+            prereq_id: string;
+            /** Prereq Label */
+            prereq_label: string;
+            /** Section Id */
+            section_id: string | null;
+        };
+        /** SkillGraphConceptIn */
+        SkillGraphConceptIn: {
+            /** Label */
+            label: string;
+            /** Section Refs */
+            section_refs?: components["schemas"]["SkillGraphSectionRefIn"][];
+            /** Slug */
+            slug: string;
+        };
+        /**
+         * SkillGraphEdgeIn
+         * @description from_slug must be learned before to_slug — both must reference a
+         *     slug present in this same payload's concepts list.
+         */
+        SkillGraphEdgeIn: {
+            /** From Slug */
+            from_slug: string;
+            /** To Slug */
+            to_slug: string;
+        };
+        /** SkillGraphImportOut */
+        SkillGraphImportOut: {
+            /** Concept Count */
+            concept_count: number;
+            /** Edge Count */
+            edge_count: number;
+            /** Link Count */
+            link_count: number;
+        };
+        /** SkillGraphIn */
+        SkillGraphIn: {
+            /** Concepts */
+            concepts: components["schemas"]["SkillGraphConceptIn"][];
+            /** Edges */
+            edges?: components["schemas"]["SkillGraphEdgeIn"][];
+        };
+        /**
+         * SkillGraphSectionRefIn
+         * @description Where a concept is taught within the course; rank orders multiple
+         *     appearances, relevance_md is a short hand-written blurb (not a full
+         *     note).
+         */
+        SkillGraphSectionRefIn: {
+            /**
+             * Rank
+             * @default 0
+             */
+            rank: number;
+            /** Relevance Md */
+            relevance_md?: string | null;
+            /** Section Id */
+            section_id: string;
+        };
+        /** SkillMapOut */
+        SkillMapOut: {
+            /** Edges */
+            edges: components["schemas"]["SkillEdgeOut"][];
+            /** Nodes */
+            nodes: components["schemas"]["SkillNodeOut"][];
+        };
+        /** SkillMissedQuestionOut */
+        SkillMissedQuestionOut: {
+            /**
+             * Attempted At
+             * Format: date-time
+             */
+            attempted_at: string;
+            /** Correct Answer */
+            correct_answer: string;
+            /** Question */
+            question: string;
+            /** Source Test Id */
+            source_test_id: string;
+            /** Your Answer */
+            your_answer: string | null;
+        };
+        /** SkillNodeOut */
+        SkillNodeOut: {
+            /** Blocked */
+            blocked: boolean;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Level */
+            level: number;
+            /** Mastery */
+            mastery: number;
+            /** Slug */
+            slug: string;
+            /** Status */
+            status: string;
+            /** Unlock Note */
+            unlock_note?: string | null;
+        };
+        /** SkillTaughtInOut */
+        SkillTaughtInOut: {
+            /** Chapter Label */
+            chapter_label: string | null;
+            /** Rank */
+            rank: number;
+            /** Relevance Md */
+            relevance_md: string | null;
+            /** Section Id */
+            section_id: string;
+            /** Title */
+            title: string;
         };
         /** SplitOp */
         SplitOp: {
@@ -2589,6 +2783,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PracticeAssessmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_skill_map: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillMapOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_skill_graph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillGraphIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillGraphImportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_skill_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+                concept_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDetailOut"];
                 };
             };
             /** @description Validation Error */

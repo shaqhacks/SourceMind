@@ -64,6 +64,13 @@ export type HighlightUpdateIn = components["schemas"]["HighlightUpdateIn"];
 export type NoteOut = components["schemas"]["NoteOut"];
 export type NoteIn = components["schemas"]["NoteIn"];
 export type NoteUpdateIn = components["schemas"]["NoteUpdateIn"];
+export type SkillNodeOut = components["schemas"]["SkillNodeOut"];
+export type SkillEdgeOut = components["schemas"]["SkillEdgeOut"];
+export type SkillMapOut = components["schemas"]["SkillMapOut"];
+export type SkillTaughtInOut = components["schemas"]["SkillTaughtInOut"];
+export type SkillMissedQuestionOut = components["schemas"]["SkillMissedQuestionOut"];
+export type SkillFixPlanOut = components["schemas"]["SkillFixPlanOut"];
+export type SkillDetailOut = components["schemas"]["SkillDetailOut"];
 export type OutlineOp =
   | components["schemas"]["RenameOp"]
   | components["schemas"]["ReorderOp"]
@@ -663,5 +670,21 @@ export function sendChat(courseId: string, message: string, selection?: ChatSele
 export function getChatHistory(courseId: string) {
   return request(
     client.GET("/api/courses/{course_id}/chat", { params: { path: { course_id: courseId } } }),
+  );
+}
+
+export function getSkillMap(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/skills", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function getSkillDetail(courseId: string, skillId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/skills/{concept_id}", {
+      params: { path: { course_id: courseId, concept_id: skillId } },
+    }),
   );
 }

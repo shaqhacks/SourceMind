@@ -1,6 +1,14 @@
 import type { BadgeTone } from "@/components/ui/Badge";
 import type { ProgressBarTone } from "@/components/ui/ProgressBar";
-import type { SkillStatus } from "@/lib/skills/placeholder";
+
+/**
+ * The API types SkillNodeOut.status/SkillDetailOut.node.status as a plain
+ * `string` (FastAPI has no enum here) — this is the closed set
+ * `status_for` (app/services/skills_service.py) actually produces. Callers
+ * index STATUS_LABEL/STATUS_BADGE_TONE/STATUS_BAR_TONE with
+ * `node.status as SkillStatus`.
+ */
+export type SkillStatus = "solid" | "growing" | "struggling" | "locked";
 
 export const STATUS_LABEL: Record<SkillStatus, string> = {
   solid: "Solid",

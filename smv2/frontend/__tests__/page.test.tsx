@@ -8,6 +8,7 @@ import {
   findActiveIngestJob,
   findLatestIngestJob,
   getReviewSummary,
+  getSkillMap,
   getStudyNext,
   listAssets,
   listChapters,
@@ -15,6 +16,7 @@ import {
   listSections,
   type CourseOut,
   type SectionOut,
+  type SkillMapOut,
 } from "@/lib/api/client";
 
 import { err, ok } from "./support/api-result";
@@ -44,6 +46,7 @@ vi.mock("@/lib/api/client", () => ({
   getJob: vi.fn(),
   getReviewSummary: vi.fn(),
   getStudyNext: vi.fn(),
+  getSkillMap: vi.fn(),
 }));
 
 const mockedListCourses = vi.mocked(listCourses);
@@ -55,6 +58,7 @@ const mockedListSections = vi.mocked(listSections);
 const mockedListChapters = vi.mocked(listChapters);
 const mockedGetReviewSummary = vi.mocked(getReviewSummary);
 const mockedGetStudyNext = vi.mocked(getStudyNext);
+const mockedGetSkillMap = vi.mocked(getSkillMap);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
@@ -112,6 +116,7 @@ describe("Home page", () => {
       ok({ courses: [], due_total: 0, daily_throughput: 0, backlog_warning: false }),
     );
     mockedGetStudyNext.mockResolvedValue(ok([]));
+    mockedGetSkillMap.mockResolvedValue(ok({ nodes: [], edges: [] }));
   });
 
   afterEach(() => {
@@ -268,19 +273,56 @@ describe("Home page", () => {
   });
 
   describe("skill snapshot", () => {
-    it("shows sample-data mastery bars and a diagnosis callout, tagged as sample data", async () => {
+    const STRUGGLING_MAP: SkillMapOut = {
+      nodes: [
+        { id: "tokenization", slug: "tokenization", label: "Tokenization basics", level: 1, mastery: 86, status: "solid", blocked: false, unlock_note: null },
+        { id: "token-counting", slug: "token-counting", label: "Token counting", level: 1, mastery: 31, status: "struggling", blocked: false, unlock_note: null },
+        { id: "cost-estimation", slug: "cost-estimation", label: "Cost estimation", level: 2, mastery: 24, status: "struggling", blocked: true, unlock_note: null },
+      ],
+      edges: [{ from_id: "token-counting", to_id: "cost-estimation", kind: "weak" }],
+    };
+
+    it("renders the top skills and a data-driven 'why you're stuck' callout", async () => {
       mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a" })]));
+      mockedGetSkillMap.mockResolvedValue(ok(STRUGGLING_MAP));
+
       render(<Home />);
 
       expect(await screen.findByText(/skill snapshot/i)).toBeInTheDocument();
-      expect(screen.getByText("Sample data")).toBeInTheDocument();
+      expect(screen.getByText("Tokenization basics")).toBeInTheDocument();
+      // getAllByText (not getByText): "Token counting" also appears a
+      // second time, as the weak prereq's own <strong> in the callout below.
+      expect(screen.getAllByText("Token counting").length).toBeGreaterThan(0);
+      expect(screen.getByText("Cost estimation")).toBeInTheDocument();
+
       expect(screen.getByText(/why you're stuck/i)).toBeInTheDocument();
+      expect(screen.getByText(/24 mastery · requires Token counting/)).toBeInTheDocument();
 
       const link = screen.getByRole("link", { name: /full map/i });
       expect(link).toHaveAttribute("href", "/course/a/skills");
 
       await userEvent.setup().click(screen.getByRole("button", { name: /review the prerequisite/i }));
       expect(mockPush).toHaveBeenCalledWith("/course/a/skills/token-counting");
+    });
+
+    it("renders nothing when the course has no skill graph yet", async () => {
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a" })]));
+      mockedGetSkillMap.mockResolvedValue(ok({ nodes: [], edges: [] }));
+
+      render(<Home />);
+
+      await screen.findByText("Distributed Systems");
+      expect(screen.queryByText(/skill snapshot/i)).not.toBeInTheDocument();
+    });
+
+    it("renders nothing when the skill map fails to load", async () => {
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a" })]));
+      mockedGetSkillMap.mockResolvedValue(err(500));
+
+      render(<Home />);
+
+      await screen.findByText("Distributed Systems");
+      expect(screen.queryByText(/skill snapshot/i)).not.toBeInTheDocument();
     });
   });
 

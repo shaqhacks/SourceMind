@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import Badge from "@/components/ui/Badge";
+import type { SkillStatus } from "@/components/skills/format";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import ProgressBar, { type ProgressBarTone } from "@/components/ui/ProgressBar";
-import { rootCause, SAMPLE_DATA_LABEL, SKILL_NODES, type SkillStatus } from "@/lib/skills/placeholder";
+import { useSkillMap } from "@/lib/hooks/useSkillMap";
+import { describeNode, rootCause } from "@/lib/skills/derive";
 
 export interface SkillSnapshotCardProps {
   /** A course id to scope the "Full map"/"Review the prerequisite" links to. */
@@ -34,24 +35,26 @@ const SCORE_TEXT: Record<SkillStatus, string> = {
 const SNAPSHOT_COUNT = 3;
 
 /**
- * Home's "Skill snapshot" (redesign handoff §1) — reads from the
- * lib/skills/placeholder sample module until the prereq-graph backend
- * lands (see that module's own doc comment). Must stay visibly tagged as
- * sample data — the Badge below is not decorative.
+ * Home's "Skill snapshot" (redesign handoff §1) — reads the real
+ * competency graph via useSkillMap. Renders nothing while loading, on
+ * error, or when the course has no skill graph yet (matches ReviewCard's
+ * own zero-due hide), same as DiagnosisCard.
  */
 export default function SkillSnapshotCard({ courseId }: SkillSnapshotCardProps) {
   const router = useRouter();
-  const cause = rootCause();
-  const snapshot = SKILL_NODES.slice(0, SNAPSHOT_COUNT);
+  const { map, error } = useSkillMap(courseId);
+
+  if (error || map === null || map.nodes.length === 0) return null;
+
+  const { nodes, edges } = map;
+  const cause = rootCause(nodes, edges);
+  const snapshot = nodes.slice(0, SNAPSHOT_COUNT);
 
   return (
     <Card className="flex flex-col gap-3.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            Skill snapshot
-          </span>
-          <Badge tone="neutral">{SAMPLE_DATA_LABEL}</Badge>
+        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          Skill snapshot
         </span>
         <Link
           href={`/course/${courseId}/skills`}
@@ -62,26 +65,25 @@ export default function SkillSnapshotCard({ courseId }: SkillSnapshotCardProps) 
       </div>
 
       <div className="flex flex-col gap-3">
-        {snapshot.map((node) => (
-          <div key={node.id}>
-            <div className="mb-1.5 flex items-center justify-between text-[13px] font-semibold">
-              <span>{node.name}</span>
-              <span className={SCORE_TEXT[node.status]}>{node.mastery}</span>
+        {snapshot.map((node) => {
+          const status = node.status as SkillStatus;
+          return (
+            <div key={node.id}>
+              <div className="mb-1.5 flex items-center justify-between text-[13px] font-semibold">
+                <span>{node.label}</span>
+                <span className={SCORE_TEXT[status]}>{node.mastery}</span>
+              </div>
+              <ProgressBar percent={node.mastery} label={`${node.label} mastery`} tone={BAR_TONES[status]} />
             </div>
-            <ProgressBar
-              percent={node.mastery}
-              label={`${node.name} mastery`}
-              tone={BAR_TONES[node.status]}
-            />
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {cause && (
         <Card variant="tinted" className="gap-2 text-sm leading-relaxed">
           <p>
-            <strong>Why you&apos;re stuck:</strong> {cause.skill.name} builds on{" "}
-            <strong>{cause.prereq.name}</strong>. {cause.skill.note}
+            <strong>Why you&apos;re stuck:</strong> {cause.skill.label} builds on{" "}
+            <strong>{cause.prereq.label}</strong>. {describeNode(cause.skill, nodes, edges)}
           </p>
           <Button
             variant="primary"
