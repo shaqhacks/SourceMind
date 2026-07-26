@@ -30,6 +30,7 @@ from app.routers import (
     practice,
     review,
     sections,
+    skills,
     tests,
 )
 from app.services import jobs_service
@@ -93,6 +94,7 @@ def create_app() -> FastAPI:
     app.include_router(cards.router)
     app.include_router(review.router)
     app.include_router(practice.router)
+    app.include_router(skills.router)
     app.include_router(tests.router)
     app.include_router(chat.router)
 

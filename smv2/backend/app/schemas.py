@@ -547,3 +547,41 @@ class ChatTurnOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# --- Skills / competency graph ----------------------------------------
+
+
+class SkillGraphSectionRefIn(BaseModel):
+    """Where a concept is taught within the course; rank orders multiple
+    appearances, relevance_md is a short hand-written blurb (not a full
+    note)."""
+
+    section_id: str
+    rank: int = Field(default=0, ge=0)
+    relevance_md: str | None = Field(default=None, max_length=2000)
+
+
+class SkillGraphConceptIn(BaseModel):
+    slug: str = Field(min_length=1, max_length=200)
+    label: str = Field(min_length=1, max_length=500)
+    section_refs: list[SkillGraphSectionRefIn] = Field(default_factory=list)
+
+
+class SkillGraphEdgeIn(BaseModel):
+    """from_slug must be learned before to_slug — both must reference a
+    slug present in this same payload's concepts list."""
+
+    from_slug: str
+    to_slug: str
+
+
+class SkillGraphIn(BaseModel):
+    concepts: list[SkillGraphConceptIn]
+    edges: list[SkillGraphEdgeIn] = Field(default_factory=list)
+
+
+class SkillGraphImportOut(BaseModel):
+    concept_count: int
+    edge_count: int
+    link_count: int

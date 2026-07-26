@@ -1,4 +1,12 @@
-"""Pure derivation functions for skill graph levels, mastery, and status."""
+"""Pure derivation functions for skill graph levels, mastery, and status,
+plus the graph import service (top half stays pure/DB-free per the plan)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from app.db.engine import get_session
+from app.db.models import Concept, ConceptEdge, ConceptSectionLink, Section, utcnow
 
 # Constants
 QUIZ_WEIGHT = 0.5
@@ -156,3 +164,109 @@ def status_for(mastery: int, has_any_signal: bool, weak_prereq: bool) -> str:
 
     # Default to growing for those making progress
     return "growing"
+
+
+# --- Graph import (DB-backed; below the pure functions above) --------
+
+
+class GraphValidationError(ValueError):
+    """422: the incoming graph has a cycle, an edge referencing a slug not
+    in this same payload's concepts, a duplicate slug, or a section_id that
+    doesn't belong to the course."""
+
+
+def import_graph(course_id: str, payload: dict[str, Any]) -> dict[str, int]:
+    """Upserts concepts by (course_id, slug) — keeps existing ids, so
+    ConceptMastery survives a re-import — then wholesale deletes and
+    recreates every edge and section link for the course (plan decision
+    #3: "idempotent full replace of edges/links, concept upsert").
+
+    Validates the incoming edge set with derive_levels() BEFORE touching
+    the DB (cycle / unknown-slug -> GraphValidationError), then checks
+    every referenced section_id actually belongs to this course.
+    """
+    concepts_in: list[dict[str, Any]] = payload.get("concepts", [])
+    edges_in: list[dict[str, Any]] = payload.get("edges", [])
+
+    slugs = [c["slug"] for c in concepts_in]
+    if len(slugs) != len(set(slugs)):
+        raise GraphValidationError("duplicate concept slug in payload")
+
+    edge_tuples = [(e["from_slug"], e["to_slug"]) for e in edges_in]
+    try:
+        derive_levels(slugs, edge_tuples)
+    except ValueError as exc:
+        raise GraphValidationError(str(exc)) from exc
+
+    section_ids = {
+        ref["section_id"] for c in concepts_in for ref in c.get("section_refs", [])
+    }
+
+    session = get_session()
+    try:
+        if section_ids:
+            valid_section_ids = {
+                row[0]
+                for row in session.query(Section.id)
+                .filter(Section.course_id == course_id, Section.id.in_(section_ids))
+                .all()
+            }
+            missing = section_ids - valid_section_ids
+            if missing:
+                raise GraphValidationError(
+                    f"section {sorted(missing)[0]} does not belong to course {course_id}"
+                )
+
+        existing = {
+            c.slug: c
+            for c in session.query(Concept).filter(Concept.course_id == course_id).all()
+        }
+        slug_to_id: dict[str, str] = {}
+        for c in concepts_in:
+            slug = c["slug"]
+            concept = existing.get(slug)
+            if concept is not None:
+                concept.label = c["label"]
+                concept.updated_at = utcnow()
+            else:
+                concept = Concept(course_id=course_id, slug=slug, label=c["label"])
+                session.add(concept)
+                session.flush()  # assign concept.id for slug_to_id below
+            slug_to_id[slug] = concept.id
+
+        session.query(ConceptEdge).filter(ConceptEdge.course_id == course_id).delete()
+        for e in edges_in:
+            session.add(
+                ConceptEdge(
+                    course_id=course_id,
+                    from_concept_id=slug_to_id[e["from_slug"]],
+                    to_concept_id=slug_to_id[e["to_slug"]],
+                )
+            )
+
+        session.query(ConceptSectionLink).filter(
+            ConceptSectionLink.course_id == course_id
+        ).delete()
+        link_count = 0
+        for c in concepts_in:
+            concept_id = slug_to_id[c["slug"]]
+            for ref in c.get("section_refs", []):
+                session.add(
+                    ConceptSectionLink(
+                        course_id=course_id,
+                        concept_id=concept_id,
+                        section_id=ref["section_id"],
+                        rank=ref.get("rank", 0),
+                        relevance_md=ref.get("relevance_md"),
+                    )
+                )
+                link_count += 1
+
+        session.commit()
+        return {
+            "concept_count": len(concepts_in),
+            "edge_count": len(edges_in),
+            "link_count": link_count,
+        }
+    finally:
+        session.close()
