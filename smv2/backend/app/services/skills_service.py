@@ -359,8 +359,17 @@ def build_map(session, course_id: str) -> dict[str, Any]:
     links_by_concept: dict[str, list[ConceptSectionLink]] = defaultdict(list)
     for link in links:
         links_by_concept[link.concept_id].append(link)
-    link_section_ids_by_concept = {
-        cid: {link.section_id for link in links_by_concept.get(cid, [])} for cid in concept_ids
+    # Section pool used for BOTH the SRS signal/cards_count and quiz-scope
+    # attribution: links ∪ Concept.section_id — a concept created by the
+    # (separate) inline-practice feature carries only its primary
+    # section_id pointer, no ConceptSectionLink rows, and must still earn
+    # signal from cards/quizzes touching that section. taught_in stays
+    # links-only elsewhere (it's the curated "where taught" list, not a
+    # signal-attribution pool).
+    signal_section_ids_by_concept = {
+        cid: {link.section_id for link in links_by_concept.get(cid, [])}
+        | ({by_id[cid].section_id} if by_id[cid].section_id else set())
+        for cid in concept_ids
     }
 
     practice_totals: dict[str, list[int]] = defaultdict(lambda: [0, 0])
@@ -408,7 +417,7 @@ def build_map(session, course_id: str) -> dict[str, Any]:
     quiz_correct: dict[str, int] = defaultdict(int)
     quiz_wrong: dict[str, int] = defaultdict(int)
     quiz_tests_by_concept: dict[str, list[tuple[Test, TestAttempt]]] = defaultdict(list)
-    for concept_id, section_ids in link_section_ids_by_concept.items():
+    for concept_id, section_ids in signal_section_ids_by_concept.items():
         for test, latest, scope_ids in latest_by_test.values():
             if not (section_ids & scope_ids):
                 continue
@@ -423,10 +432,11 @@ def build_map(session, course_id: str) -> dict[str, Any]:
     has_signal: dict[str, bool] = {}
     cards_count: dict[str, int] = {}
     for concept in concepts:
-        srs_section_ids = set(link_section_ids_by_concept[concept.id])
-        if concept.section_id:
-            srs_section_ids.add(concept.section_id)
-        concept_cards = [c for sid in srs_section_ids for c in cards_by_section.get(sid, [])]
+        concept_cards = [
+            c
+            for sid in signal_section_ids_by_concept[concept.id]
+            for c in cards_by_section.get(sid, [])
+        ]
         cards_count[concept.id] = len(concept_cards)
 
         grades = [
@@ -459,17 +469,28 @@ def build_map(session, course_id: str) -> dict[str, Any]:
     weakest_prereq_by_concept: dict[str, Concept | None] = {}
     for concept in concepts:
         weak_prereq_ids = incoming_weak.get(concept.id, [])
-        status = status_for(mastery[concept.id], has_signal[concept.id], bool(weak_prereq_ids))
-        blocked = status == "locked"
+        weak_prereq = bool(weak_prereq_ids)
+        status = status_for(mastery[concept.id], has_signal[concept.id], weak_prereq)
+        # blocked is independent of status: a concept the learner is
+        # actively working (status "struggling"/"growing"/"solid") can
+        # still have a weak prerequisite behind it — the mock's canonical
+        # case is "Cost estimation" (struggling, signals present) blocked
+        # by weak "Token counting". Only status_for's own locked gate
+        # additionally requires zero signal.
+        blocked = weak_prereq
 
         weakest = None
         if weak_prereq_ids:
             weakest = min((by_id[pid] for pid in weak_prereq_ids), key=lambda p: (mastery[p.id], p.id))
         weakest_prereq_by_concept[concept.id] = weakest
 
+        # unlock_note is narrower than blocked: it's the "how to unlock
+        # this from zero" note, shown only once the concept is actually
+        # locked (no signal at all) — a struggling-but-blocked concept
+        # already has signal, so it's not "locked" and gets no unlock note.
         unlock_note = (
             f"Unlocks at {WEAK_PREREQ_BELOW} mastery of {weakest.label}"
-            if blocked and weakest is not None
+            if status == "locked" and weakest is not None
             else None
         )
 

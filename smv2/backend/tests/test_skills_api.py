@@ -432,3 +432,155 @@ def test_skill_detail_404_for_foreign_concept_id(client, ingest_course):
 
     resp = client.get(f"/api/courses/{course_id}/skills/does-not-exist")
     assert resp.status_code == 404
+
+
+def test_blocked_is_independent_of_status(client, ingest_course):
+    """A concept can already have its own signal (mastery in the
+    struggling/growing/solid range) and STILL be `blocked` if one of its
+    prerequisites is weak — `blocked` is not just a synonym for status
+    "locked". A prereq that's solid must NOT mark its dependent blocked.
+    """
+    from app.db.engine import get_session
+    from app.db.models import Concept, ConceptEdge, ConceptMastery
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    session = get_session()
+    try:
+        weak_prereq = Concept(course_id=course_id, slug="weak-prereq", label="Weak Prereq")
+        solid_prereq = Concept(course_id=course_id, slug="solid-prereq", label="Solid Prereq")
+        struggling = Concept(course_id=course_id, slug="struggling", label="Struggling Skill")
+        solid_dependent = Concept(
+            course_id=course_id, slug="solid-dependent", label="Solid Dependent"
+        )
+        session.add_all([weak_prereq, solid_prereq, struggling, solid_dependent])
+        session.flush()
+
+        session.add(
+            ConceptEdge(
+                course_id=course_id,
+                from_concept_id=weak_prereq.id,
+                to_concept_id=struggling.id,
+            )
+        )
+        session.add(
+            ConceptEdge(
+                course_id=course_id,
+                from_concept_id=solid_prereq.id,
+                to_concept_id=solid_dependent.id,
+            )
+        )
+
+        # weak_prereq: mastery 10 (well below WEAK_PREREQ_BELOW=60).
+        session.add(
+            ConceptMastery(
+                course_id=course_id,
+                concept_id=weak_prereq.id,
+                learner_key="default",
+                correct_count=1,
+                wrong_count=9,
+            )
+        )
+        # solid_prereq: mastery 90 (above WEAK_PREREQ_BELOW).
+        session.add(
+            ConceptMastery(
+                course_id=course_id,
+                concept_id=solid_prereq.id,
+                learner_key="default",
+                correct_count=9,
+                wrong_count=1,
+            )
+        )
+        # struggling: HAS its own signal (mastery 30, struggling range)
+        # despite the weak prereq — must not be "locked".
+        session.add(
+            ConceptMastery(
+                course_id=course_id,
+                concept_id=struggling.id,
+                learner_key="default",
+                correct_count=3,
+                wrong_count=7,
+            )
+        )
+        # solid_dependent: signal present, solid mastery, prereq solid.
+        session.add(
+            ConceptMastery(
+                course_id=course_id,
+                concept_id=solid_dependent.id,
+                learner_key="default",
+                correct_count=9,
+                wrong_count=1,
+            )
+        )
+        session.commit()
+        struggling_id, solid_dependent_id = struggling.id, solid_dependent.id
+    finally:
+        session.close()
+
+    resp = client.get(f"/api/courses/{course_id}/skills")
+    assert resp.status_code == 200
+    nodes_by_id = {n["id"]: n for n in resp.json()["nodes"]}
+
+    node = nodes_by_id[struggling_id]
+    assert node["mastery"] == 30
+    assert node["status"] == "struggling"
+    assert node["blocked"] is True
+    # Already has signal -> not "locked" -> no unlock note, even though blocked.
+    assert node["unlock_note"] is None
+
+    solid_node = nodes_by_id[solid_dependent_id]
+    assert solid_node["status"] == "solid"
+    assert solid_node["blocked"] is False
+
+
+def test_quiz_signal_reaches_concept_via_section_id_pointer_without_links(client, ingest_course):
+    """A concept created by the (separate) inline-practice feature carries
+    only Concept.section_id, no ConceptSectionLink rows. Quiz-scope
+    attribution must still reach it (harmonized with the SRS/cards_count
+    section pool: links ∪ Concept.section_id) — taught_in, which is
+    links-only, correctly stays empty for it.
+    """
+    from app.db.engine import get_session
+    from app.db.models import Concept, Test, TestAttempt
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    sections = client.get(f"/api/courses/{course_id}/sections").json()
+    s0 = sections[0]["id"]
+
+    session = get_session()
+    try:
+        concept = Concept(
+            course_id=course_id, slug="practice-only", label="Practice Only", section_id=s0
+        )
+        session.add(concept)
+        session.flush()
+
+        test = Test(
+            course_id=course_id,
+            section_id=s0,
+            questions=[
+                {"question": "Q1?", "choices": ["A", "B"], "correct_index": 0, "explanation": ""}
+            ],
+        )
+        session.add(test)
+        session.flush()
+        session.add(
+            TestAttempt(
+                test_id=test.id,
+                course_id=course_id,
+                answers=[0],
+                results=[
+                    {"correct": True, "correct_index": 0, "explanation": "", "your_answer": 0}
+                ],
+                score=1.0,
+            )
+        )
+        session.commit()
+        concept_id = concept.id
+    finally:
+        session.close()
+
+    detail = client.get(f"/api/courses/{course_id}/skills/{concept_id}").json()
+    assert detail["quiz_correct"] == 1
+    assert detail["quiz_wrong"] == 0
+    assert detail["taught_in"] == []
