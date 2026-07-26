@@ -44,6 +44,8 @@ function makeProps(overrides: Partial<TopBarProps> = {}): TopBarProps {
   return {
     courseId: "course-1",
     courseTitle: "Test Course",
+    chapterLabel: "Chapter 1",
+    sectionTitle: "Introduction",
     sidebarCollapsed: false,
     onToggleSidebar: vi.fn(),
     onLessonSectionSettled: vi.fn(),

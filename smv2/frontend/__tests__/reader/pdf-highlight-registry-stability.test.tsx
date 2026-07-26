@@ -29,6 +29,7 @@ import { FakeIntersectionObserver, makeFakeDocument, makeFakePage } from "../sup
 // (disabled, in pages mode) useHighlightPainter — that two-painter seam is
 // exactly where the bug lived.
 vi.mock("@/lib/api/client", () => ({
+  listNotes: vi.fn(() => Promise.resolve({ data: [], ok: true, status: 200 })),
   listHighlights: vi.fn(),
   createHighlight: vi.fn(),
   updateHighlight: vi.fn(),

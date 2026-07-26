@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #fdfcfb; color: #1a1a1a; font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { color: #1d4ed8; }
+  </style>
+</helmet>
+<div style="display: flex; min-height: 100vh; flex-direction: column;">
+  <header style="display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #7d7d78; padding: 16px 24px;">
+    <h1 style="margin: 0; font-size: 18px; font-weight: 600;"><a href="#" style="color: #1a1a1a;">SourceMind</a></h1>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <a href="#" style="border-radius: 9999px; background: #2563eb; padding: 4px 10px; font-size: 12px; font-weight: 500; color: #ffffff;">12 due</a>
+      <div role="group" style="display: inline-flex; overflow: hidden; border-radius: 6px; border: 1px solid #7d7d78; font-size: 14px;">
+        <button style="padding: 6px 12px; background: #2563eb; color: #ffffff; border: none; font-family: inherit; font-size: 14px; cursor: pointer;">System</button>
+        <button style="padding: 6px 12px; background: transparent; color: #1a1a1a; border: none; font-family: inherit; font-size: 14px; cursor: pointer;">Light</button>
+        <button style="padding: 6px 12px; background: transparent; color: #1a1a1a; border: none; font-family: inherit; font-size: 14px; cursor: pointer;">Dark</button>
+      </div>
+    </div>
+  </header>
+  <div style="border-bottom: 1px solid #7d7d78; padding: 16px 32px;">
+    <h1 style="margin: 0; font-size: 18px; font-weight: 600;">Review</h1>
+  </div>
+  <div style="margin: 0 auto; display: flex; width: 100%; max-width: 672px; flex: 1; flex-direction: column; gap: 24px; padding: 32px; box-sizing: border-box;">
+    <p role="status" style="margin: 0; font-size: 14px; color: #52525b;">3 of 12</p>
+    <div style="border-radius: 8px; border: 1px solid #7d7d78; background: #f5f3ef; padding: 24px;">
+      <p style="margin: 0; font-size: 16px;">What happens to a flashcard's review history when you regenerate a chapter's cards and a card comes out identical?</p>
+      <div style="margin-top: 24px; border-top: 1px solid #7d7d78; padding-top: 24px;">
+        <p style="margin: 0; font-size: 16px;">It keeps its review history — only cards whose question or answer actually changed start over.</p>
+      </div>
+    </div>
+    <div style="display: flex; justify-content: center; gap: 12px;">
+      <button style="border-radius: 6px; border: 1px solid rgba(185,28,28,0.4); background: #fee2e2; color: #b91c1c; padding: 8px 16px; font-size: 14px; font-weight: 500; font-family: inherit; cursor: pointer;" style-hover="opacity: 0.8;">Again (1)</button>
+      <button style="border-radius: 6px; border: 1px solid rgba(161,98,7,0.4); background: #fef3c7; color: #a16207; padding: 8px 16px; font-size: 14px; font-weight: 500; font-family: inherit; cursor: pointer;" style-hover="opacity: 0.8;">Hard (2)</button>
+      <button style="border-radius: 6px; border: 1px solid rgba(21,128,61,0.4); background: #dcfce7; color: #15803d; padding: 8px 16px; font-size: 14px; font-weight: 500; font-family: inherit; cursor: pointer;" style-hover="opacity: 0.8;">Good (3)</button>
+      <button style="border-radius: 6px; border: 1px solid rgba(37,99,235,0.4); background: #dbeafe; color: #2563eb; padding: 8px 16px; font-size: 14px; font-weight: 500; font-family: inherit; cursor: pointer;" style-hover="opacity: 0.8;">Easy (4)</button>
+    </div>
+    <div role="note" style="display: flex; align-items: center; gap: 16px; border-top: 1px solid #7d7d78; background: #fdfcfb; padding: 8px 16px; font-size: 12px; color: #52525b;">
+      <span style="display: flex; align-items: center; gap: 6px;"><kbd style="border-radius: 4px; border: 1px solid #7d7d78; background: rgba(82,82,91,0.1); padding: 2px 6px; font-family: 'Geist Mono', monospace;">space</kbd>Reveal answer</span>
+      <span style="display: flex; align-items: center; gap: 6px;"><kbd style="border-radius: 4px; border: 1px solid #7d7d78; background: rgba(82,82,91,0.1); padding: 2px 6px; font-family: 'Geist Mono', monospace;">1 2 3 4</kbd>Grade: Again / Hard / Good / Easy</span>
+      <span style="margin-left: auto; display: flex; align-items: center; gap: 6px;"><kbd style="border-radius: 4px; border: 1px solid #7d7d78; background: rgba(82,82,91,0.1); padding: 2px 6px; font-family: 'Geist Mono', monospace;">?</kbd>all shortcuts</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

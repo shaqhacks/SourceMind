@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/api/client", () => ({
+  listNotes: vi.fn(() => Promise.resolve({ data: [], ok: true, status: 200 })),
   getChatHistory: vi.fn(),
   sendChat: vi.fn(),
 }));

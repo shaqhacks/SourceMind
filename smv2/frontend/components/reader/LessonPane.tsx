@@ -220,7 +220,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
           message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
           onRetry={() => handleGenerate(true)}
         />
-        {actionError && <p className="text-xs text-red-600 dark:text-red-400">{actionError}</p>}
+        {actionError && <p className="text-xs text-status-serious">{actionError}</p>}
       </div>
     );
   }
@@ -232,7 +232,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>{detail ? formatGeneratedLabel(detail) : "Generated"}</span>
             {effectiveStatus === "stale" && (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+              <span className="rounded-[6px] bg-status-warning-soft px-2 py-0.5 font-medium text-status-warning">
                 Prompt updated since generation
               </span>
             )}
@@ -247,7 +247,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
         </div>
 
         {confirmingRegenerate && (
-          <div className="flex flex-col gap-2 rounded-md border border-border p-3 text-sm">
+          <div className="flex flex-col gap-2 rounded-lg border border-divider bg-surface-raised p-3 text-sm">
             <p>
               Regenerating replaces the current lesson
               {estimate ? ` (${formatEstimate(estimate)})` : ""}.
@@ -274,7 +274,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
           </div>
         )}
 
-        {actionError && <p className="text-xs text-red-600 dark:text-red-400">{actionError}</p>}
+        {actionError && <p className="text-xs text-status-serious">{actionError}</p>}
 
         <Markdown>{detail?.lesson_md ?? ""}</Markdown>
       </div>
@@ -290,7 +290,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
       <Button variant="primary" size="md" onClick={() => void handleGenerate(false)} className="self-start">
         Generate lesson
       </Button>
-      {actionError && <p className="text-xs text-red-600 dark:text-red-400">{actionError}</p>}
+      {actionError && <p className="text-xs text-status-serious">{actionError}</p>}
     </div>
   );
 }

@@ -21,6 +21,7 @@ import { ok } from "../support/api-result";
 // CardsCTA/SectionCards (listCards, findActiveCardsJob) below the article
 // body regardless of view mode.
 vi.mock("@/lib/api/client", () => ({
+  listNotes: vi.fn(() => Promise.resolve({ data: [], ok: true, status: 200 })),
   listHighlights: vi.fn(),
   createHighlight: vi.fn(),
   updateHighlight: vi.fn(),

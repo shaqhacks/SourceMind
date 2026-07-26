@@ -6,8 +6,8 @@ const TONES: Record<BadgeTone, { classes: string; glyph: string }> = {
   good: { classes: "bg-status-good-soft text-status-good", glyph: "✓" },
   warning: { classes: "bg-status-warning-soft text-status-warning", glyph: "⚠" },
   serious: { classes: "bg-status-serious-soft text-status-serious", glyph: "✕" },
-  neutral: { classes: "bg-muted-foreground/10 text-muted-foreground", glyph: "•" },
-  accent: { classes: "bg-accent-soft text-accent", glyph: "●" },
+  neutral: { classes: "bg-neutral-100 text-neutral-800", glyph: "•" },
+  accent: { classes: "bg-accent-soft text-accent-800", glyph: "●" },
 };
 
 export interface BadgeProps {
@@ -20,7 +20,7 @@ export interface BadgeProps {
 export default function Badge({ tone, children, icon }: BadgeProps) {
   const { classes, glyph } = TONES[tone];
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${classes}`}>
+    <span className={`inline-flex items-center gap-1 rounded-[6px] px-2 py-0.5 text-xs font-medium ${classes}`}>
       <span aria-hidden="true">{icon ?? glyph}</span>
       {children}
     </span>

@@ -52,7 +52,7 @@ describe("DueBadge", () => {
 
     render(<DueBadge />);
 
-    const link = await screen.findByRole("link", { name: /7 due/i });
+    const link = await screen.findByRole("link", { name: /7 cards due/i });
     expect(link).toHaveAttribute("href", "/review");
   });
 
@@ -62,12 +62,12 @@ describe("DueBadge", () => {
       .mockResolvedValueOnce(ok(makeSummary({ due_total: 5 })));
 
     const { rerender } = render(<DueBadge />);
-    expect(await screen.findByText("3 due")).toBeInTheDocument();
+    expect(await screen.findByText("3 cards due")).toBeInTheDocument();
 
     mockPathname = "/review";
     rerender(<DueBadge />);
 
-    expect(await screen.findByText("5 due")).toBeInTheDocument();
+    expect(await screen.findByText("5 cards due")).toBeInTheDocument();
     expect(mockedGetReviewSummary).toHaveBeenCalledTimes(2);
   });
 
@@ -77,18 +77,18 @@ describe("DueBadge", () => {
       .mockResolvedValueOnce(ok(makeSummary({ due_total: 1 })));
 
     render(<DueBadge />);
-    expect(await screen.findByText("2 due")).toBeInTheDocument();
+    expect(await screen.findByText("2 cards due")).toBeInTheDocument();
 
     notifyReviewSettled();
 
-    expect(await screen.findByText("1 due")).toBeInTheDocument();
+    expect(await screen.findByText("1 card due")).toBeInTheDocument();
   });
 
   it("is a stable aria-live region so a screen reader announces the count changing", async () => {
     mockedGetReviewSummary.mockResolvedValue(ok(makeSummary({ due_total: 4 })));
 
     const { container } = render(<DueBadge />);
-    await screen.findByText("4 due");
+    await screen.findByText("4 cards due");
 
     const liveRegion = container.querySelector('[aria-live="polite"]');
     expect(liveRegion).not.toBeNull();

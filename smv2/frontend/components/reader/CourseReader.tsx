@@ -429,6 +429,8 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
       <TopBar
         courseId={course.id}
         courseTitle={course.title}
+        chapterLabel={activeSection.chapter_label}
+        sectionTitle={activeSection.title}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={toggleSidebar}
         onLessonSectionSettled={patchLessonStatus}

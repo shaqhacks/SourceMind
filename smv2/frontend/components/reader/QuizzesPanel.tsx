@@ -106,7 +106,7 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-controls="quizzes-panel"
-        className="rounded-md border border-border px-2 py-1 text-sm"
+        className="rounded-md border border-border bg-surface-raised px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14]"
       >
         Quizzes
       </button>
@@ -117,7 +117,7 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
           role="dialog"
           aria-label="Quizzes"
           tabIndex={-1}
-          className="absolute right-0 z-10 mt-2 w-72 rounded-md border border-border bg-background p-4 text-sm shadow-lg"
+          className="absolute right-0 z-10 mt-2 w-72 rounded-lg border border-divider bg-surface-raised p-4 text-sm shadow-md"
         >
           <Button
             variant="primary"
@@ -138,7 +138,7 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
             </div>
           )}
           {startError && (
-            <p className="mb-2 text-xs text-red-600 dark:text-red-400">{startError}</p>
+            <p className="mb-2 text-xs text-status-serious">{startError}</p>
           )}
 
           {listState.kind === "loading" && (

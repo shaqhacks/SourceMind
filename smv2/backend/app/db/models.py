@@ -308,6 +308,34 @@ class Highlight(Base):
     )
 
 
+class Note(Base):
+    """A free-standing margin note anchored to a vertical position on a PDF
+    page (surface="pdf"), not to selected text — the coordinate equivalent of
+    Highlight, for annotating a spot with no highlightable passage. anchor_y
+    is a 0..1 top-origin fraction of the page height, so it survives the page
+    re-rendering at any width. page is 0-based in the DB / 1-based at the API,
+    the same single-conversion rule as Highlight. Wiped on re-ingest (ADR-024).
+    """
+
+    __tablename__ = "notes"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    section_id: Mapped[str] = mapped_column(
+        String, ForeignKey("sections.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    surface: Mapped[str] = mapped_column(String, nullable=False, default="pdf")
+    page: Mapped[int] = mapped_column(Integer, nullable=False)
+    anchor_y: Mapped[float] = mapped_column(Float, nullable=False)
+    note_md: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
 class Test(Base):
     """A generated quiz deck — the persisted questions, generated once.
     Retaking a test (ADR-022) creates a new TestAttempt against this SAME

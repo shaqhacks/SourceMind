@@ -163,6 +163,13 @@ def get_review_queue(course_id: str, limit: int = 20) -> dict[str, Any]:
                 "back_md": card.back_md,
                 "due_at": review_state.due_at if review_state else None,
                 "is_new": review_state is None,
+                # Same bootstrap values grade_card() uses for a card with no
+                # ReviewState yet (see below) — lets a caller run
+                # schedule_next-equivalent math for a preview without a
+                # second lookup.
+                "interval_days": review_state.interval_days if review_state else 0.0,
+                "ease": review_state.ease if review_state else DEFAULT_EASE,
+                "reps": review_state.reps if review_state else 0,
             }
             for card, review_state in rows
         ]

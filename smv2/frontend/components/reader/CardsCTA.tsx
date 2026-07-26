@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import { describeError, type FetchError } from "@/lib/api/errors";
@@ -131,7 +132,7 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
   }
 
   if (state.kind === "error") {
-    return <p className="text-xs text-red-600 dark:text-red-400">{state.error.message}</p>;
+    return <p className="text-xs text-status-serious">{state.error.message}</p>;
   }
 
   if (isGenerating) {
@@ -151,21 +152,50 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
     );
   }
 
+  const hasCards = state.cards.length > 0;
+
   return (
-    <div className="flex items-center gap-2 text-xs">
-      {state.cards.length > 0 && (
-        <span className="text-muted-foreground">
-          {state.cards.length} flashcard{state.cards.length === 1 ? "" : "s"}
-        </span>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-lg border border-divider bg-surface-raised px-5 py-4">
+      <div className="min-w-0 flex-1">
+        {/* The count stays its own <span> holding exactly "N flashcard(s)"
+            — cards-cta.test.tsx matches that string exactly and, in the
+            empty state, asserts no <span> mentions flashcards at all. */}
+        <p className="text-sm font-semibold">
+          {hasCards ? (
+            <span>
+              {state.cards.length} flashcard{state.cards.length === 1 ? "" : "s"}
+            </span>
+          ) : (
+            "No flashcards from this section yet"
+          )}
+        </p>
+        <p className="mt-0.5 text-[13px] text-muted-foreground">
+          {hasCards
+            ? "Generated from this section — they are scheduled in your review queue."
+            : "Generate a deck from this section's source text."}
+        </p>
+      </div>
+      {/* No due count: listCards returns no scheduling fields (CardOut has
+          no due/interval), so the mock's "Review N due" ships without the
+          number rather than with a guessed one. */}
+      {hasCards && (
+        <Link
+          href="/review"
+          className="rounded-md bg-accent px-4 py-2 text-[13px] font-medium text-background transition-colors hover:bg-accent-600 active:bg-accent-700"
+        >
+          Review
+        </Link>
       )}
       <button
         type="button"
         onClick={() => void handleGenerate()}
-        className="rounded-md border border-border px-2 py-1 font-medium"
+        className="rounded-md border border-border bg-surface-raised px-4 py-2 text-[13px] font-medium transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14]"
       >
-        {state.cards.length > 0 ? "Generate more flashcards" : "Generate flashcards"}
+        {hasCards ? "Generate more flashcards" : "Generate flashcards"}
       </button>
-      {actionError && <span className="text-red-600 dark:text-red-400">{actionError}</span>}
+      {actionError && (
+        <span className="w-full text-xs text-status-serious">{actionError}</span>
+      )}
     </div>
   );
 }

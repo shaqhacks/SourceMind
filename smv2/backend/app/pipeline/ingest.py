@@ -46,6 +46,7 @@ from app.db.models import (
     Course,
     Highlight,
     Job,
+    Note,
     PracticeAnswer,
     PracticeExtractionRun,
     PracticeQuestion,
@@ -405,6 +406,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     # needed beyond doing the section diff correctly.
     session.query(ChatTurn).filter(ChatTurn.course_id == course_id).delete()
     session.query(Highlight).filter(Highlight.course_id == course_id).delete()
+    session.query(Note).filter(Note.course_id == course_id).delete()
     # TestAttempt before Test: TestAttempt.test_id -> Test.id is ON DELETE
     # CASCADE, so deleting Test first would already remove these via the
     # DB itself, but every REPLACED table gets its own explicit delete here

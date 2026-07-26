@@ -3,10 +3,14 @@ import type { ButtonHTMLAttributes } from "react";
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md";
 
+// Organic system: primary = solid accent, text in ground color (the dark
+// theme's ground is dark, matching theme.css's dark .btn-primary rule);
+// secondary = surface fill + 24% ink border; ghost = accent text only.
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-foreground text-background hover:opacity-90",
-  secondary: "border border-border hover:bg-muted-foreground/10",
-  ghost: "hover:bg-muted-foreground/10",
+  primary: "bg-accent text-background hover:bg-accent-600 active:bg-accent-700",
+  secondary:
+    "border border-border bg-surface-raised hover:bg-foreground/[0.07] active:bg-foreground/[0.14]",
+  ghost: "text-accent hover:bg-accent/10 active:bg-accent/[0.18]",
   danger: "border border-status-serious/40 text-status-serious hover:bg-status-serious-soft",
 };
 
@@ -30,7 +34,7 @@ export default function Button({
   return (
     <button
       type={type}
-      className={`rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
+      className={`rounded-md font-heading transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
       {...rest}
     />
   );

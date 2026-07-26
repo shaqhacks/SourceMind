@@ -14,12 +14,15 @@ import {
   listCourses,
   listSections,
   type CourseOut,
+  type SectionOut,
 } from "@/lib/api/client";
 
 import { err, ok } from "./support/api-result";
 
+const mockPush = vi.fn();
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: mockPush }),
   usePathname: () => "/",
 }));
 
@@ -67,9 +70,35 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   };
 }
 
+function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
+  return {
+    id: "sec-0",
+    asset_id: null,
+    chapter_label: null,
+    has_content: true,
+    kind: "content",
+    lesson_status: "none",
+    order_index: 0,
+    page_end: null,
+    page_start: null,
+    title: "Section",
+    word_count: 100,
+    ...overrides,
+  };
+}
+
 function pdfFile(name: string): File {
   return new File(["%PDF-1.4 fake"], name, { type: "application/pdf" });
 }
+
+// Four content sections, saved progress sitting on the second one — gives
+// useContinueChapter a real {title, percent} to derive (50%).
+const CONTENT_SECTIONS: SectionOut[] = [
+  makeSection({ id: "sec-0", order_index: 0, title: "Introduction" }),
+  makeSection({ id: "sec-1", order_index: 1, title: "Loops and recursion" }),
+  makeSection({ id: "sec-2", order_index: 2, title: "Trees" }),
+  makeSection({ id: "sec-3", order_index: 3, title: "Graphs" }),
+];
 
 describe("Home page", () => {
   beforeEach(() => {
@@ -110,7 +139,7 @@ describe("Home page", () => {
     expect(await screen.findByText(/drop a pdf anywhere to start/i)).toBeInTheDocument();
   });
 
-  it("renders a course card for each course", async () => {
+  it("shows the heading and renders a course card for each course", async () => {
     mockedListCourses.mockResolvedValue(
       ok([
         makeCourse({ id: "a", title: "Distributed Systems" }),
@@ -119,12 +148,13 @@ describe("Home page", () => {
     );
     render(<Home />);
 
+    expect(await screen.findByRole("heading", { name: /today's study plan/i })).toBeInTheDocument();
     expect(await screen.findByText("Distributed Systems")).toBeInTheDocument();
     expect(screen.getByText("Compilers")).toBeInTheDocument();
     expect(screen.getByText("Draft")).toBeInTheDocument();
   });
 
-  it("a ready course's title is a real link into its reader (every card must be reachable, not just the Continue one)", async () => {
+  it("a ready course's title is a real link into its reader (every card must be reachable, not just a task card)", async () => {
     mockedListCourses.mockResolvedValue(
       ok([
         makeCourse({ id: "a", title: "Distributed Systems" }),
@@ -139,38 +169,131 @@ describe("Home page", () => {
     expect(screen.queryByRole("link", { name: "Not Ready Yet" })).not.toBeInTheDocument();
   });
 
-  it("shows the Continue card for the course with the most recent progress, ahead of the course grid", async () => {
-    mockedListCourses.mockResolvedValue(
-      ok([
-        makeCourse({
-          id: "a",
-          title: "Older Progress",
-          progress: { section_id: "sec-1", scroll_pos: 0.1, updated_at: "2026-01-01T00:00:00Z" },
-        }),
-        makeCourse({
-          id: "b",
-          title: "Newer Progress",
-          progress: { section_id: "sec-1", scroll_pos: 0.9, updated_at: "2026-01-10T00:00:00Z" },
-        }),
-      ]),
-    );
-    render(<Home />);
+  describe("today's task cards", () => {
+    it("shows a continue-reading task card with a progress bar for the most-recently-read course", async () => {
+      mockedListCourses.mockResolvedValue(
+        ok([
+          makeCourse({
+            id: "a",
+            title: "Older Progress",
+            progress: { section_id: "sec-1", scroll_pos: 0.1, updated_at: "2026-01-01T00:00:00Z" },
+          }),
+          makeCourse({
+            id: "b",
+            title: "Newer Progress",
+            progress: { section_id: "sec-1", scroll_pos: 0.9, updated_at: "2026-01-10T00:00:00Z" },
+          }),
+        ]),
+      );
+      mockedListSections.mockResolvedValue(ok(CONTENT_SECTIONS));
+      render(<Home />);
 
-    expect(await screen.findByText(/continue reading/i)).toBeInTheDocument();
-    // The Continue card's course title appears twice (once in the card,
-    // once in the grid below) — assert at least one is the right course.
-    expect(screen.getAllByText("Newer Progress").length).toBeGreaterThan(0);
+      expect(await screen.findByText(/keep reading — loops and recursion/i)).toBeInTheDocument();
+      expect(screen.getByText(/newer progress · 50% through/i)).toBeInTheDocument();
+      // SkillSnapshotCard renders its own progressbars (mastery bars) —
+      // target the task card's specifically by its aria-label (= card title).
+      expect(
+        screen.getByRole("progressbar", { name: /keep reading — loops and recursion/i }),
+      ).toHaveAttribute("aria-valuenow", "50");
+
+      await userEvent.setup().click(screen.getByRole("button", { name: /resume/i }));
+      expect(mockPush).toHaveBeenCalledWith("/course/b");
+    });
+
+    it("shows no continue-reading card when no course has saved progress", async () => {
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", progress: null })]));
+      render(<Home />);
+
+      await screen.findByText("Distributed Systems");
+      expect(screen.queryByText(/keep reading/i)).not.toBeInTheDocument();
+    });
+
+    it("shows a review task card linking straight into a due-now session when the primary course has cards due", async () => {
+      mockedListCourses.mockResolvedValue(
+        ok([
+          makeCourse({
+            id: "a",
+            progress: { section_id: "sec-1", scroll_pos: 0.5, updated_at: "2026-01-01T00:00:00Z" },
+          }),
+        ]),
+      );
+      mockedGetReviewSummary.mockResolvedValue(
+        ok({
+          courses: [{ course_id: "a", title: "Distributed Systems", due_count: 7, new_count: 2 }],
+          due_total: 7,
+          daily_throughput: 3,
+          backlog_warning: false,
+        }),
+      );
+      render(<Home />);
+
+      expect(await screen.findByText(/review 7 due flashcards/i)).toBeInTheDocument();
+      await userEvent.setup().click(screen.getByRole("button", { name: /start review/i }));
+      expect(mockPush).toHaveBeenCalledWith("/review?course=a&start=due");
+    });
+
+    it("hides the review task card when nothing is due anywhere", async () => {
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", progress: null })]));
+      render(<Home />);
+
+      await screen.findByText("Distributed Systems");
+      expect(screen.queryByText(/review .* due flashcard/i)).not.toBeInTheDocument();
+    });
+
+    it("shows a retake-test task card for the primary course's weakest chapter", async () => {
+      mockedListCourses.mockResolvedValue(
+        ok([
+          makeCourse({
+            id: "a",
+            progress: { section_id: "sec-1", scroll_pos: 0.5, updated_at: "2026-01-01T00:00:00Z" },
+          }),
+        ]),
+      );
+      mockedGetStudyNext.mockResolvedValue(
+        ok([{ chapter_label: "Chapter 1", reason: "low_test_score", detail: { best_score: 0.4 } }]),
+      );
+      render(<Home />);
+
+      expect(await screen.findByText(/beat your 40% on chapter 1/i)).toBeInTheDocument();
+      await userEvent.setup().click(screen.getByRole("button", { name: /retake test/i }));
+      expect(mockPush).toHaveBeenCalledWith("/course/a/chapter/Chapter%201/test");
+    });
+
+    it("shows an empty task-list message when nothing applies", async () => {
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", progress: null })]));
+      render(<Home />);
+
+      expect(await screen.findByText(/nothing on today's plan/i)).toBeInTheDocument();
+    });
   });
 
-  it("shows no Continue card when no course has saved progress", async () => {
-    mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", progress: null })]));
-    render(<Home />);
+  describe("skill snapshot", () => {
+    it("shows sample-data mastery bars and a diagnosis callout, tagged as sample data", async () => {
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a" })]));
+      render(<Home />);
 
-    await screen.findByText("Distributed Systems");
-    expect(screen.queryByText(/continue reading/i)).not.toBeInTheDocument();
+      expect(await screen.findByText(/skill snapshot/i)).toBeInTheDocument();
+      expect(screen.getByText("Sample data")).toBeInTheDocument();
+      expect(screen.getByText(/why you're stuck/i)).toBeInTheDocument();
+
+      const link = screen.getByRole("link", { name: /full map/i });
+      expect(link).toHaveAttribute("href", "/course/a/skills");
+
+      await userEvent.setup().click(screen.getByRole("button", { name: /review the prerequisite/i }));
+      expect(mockPush).toHaveBeenCalledWith("/course/a/skills/token-counting");
+    });
   });
 
-  it("shows a Review card linking straight into a due-now session when the primary course has cards due", async () => {
+  it("shows the This week day tiles", async () => {
+    mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a" })]));
+    render(<Home />);
+
+    await screen.findByText(/this week/i);
+    expect(screen.getAllByText("M").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("S").length).toBe(2);
+  });
+
+  it("shows the stat trio derived from real course/review data", async () => {
     mockedListCourses.mockResolvedValue(
       ok([
         makeCourse({
@@ -179,71 +302,23 @@ describe("Home page", () => {
         }),
       ]),
     );
+    mockedListSections.mockResolvedValue(ok(CONTENT_SECTIONS));
     mockedGetReviewSummary.mockResolvedValue(
       ok({
-        courses: [{ course_id: "a", title: "Distributed Systems", due_count: 7, new_count: 2 }],
-        due_total: 7,
-        daily_throughput: 3,
+        courses: [{ course_id: "a", title: "Distributed Systems", due_count: 5, new_count: 1 }],
+        due_total: 5,
+        daily_throughput: 2.6,
         backlog_warning: false,
       }),
     );
     render(<Home />);
 
-    // Target the Review card specifically — StatsRow now also renders a
-    // "7 cards due" stat tile that links to the generic /review hub.
-    const link = await screen.findByRole("link", { name: /start your review/i });
-    expect(link).toHaveAttribute("href", "/review?course=a&start=due");
-    expect(link).toHaveTextContent(/7 cards due/i);
-  });
-
-  it("hides the Review card when nothing is due anywhere", async () => {
-    mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", progress: null })]));
-    render(<Home />);
-
-    await screen.findByText("Distributed Systems");
-    // The Review card is gone; StatsRow's always-present "cards due" tile
-    // (showing 0) is not the Review card, so assert the card's own copy.
-    expect(screen.queryByText(/start your review/i)).not.toBeInTheDocument();
-  });
-
-  it("shows up to 3 Study next suggestions for the primary course, each linking out with its reason", async () => {
-    mockedListCourses.mockResolvedValue(
-      ok([
-        makeCourse({
-          id: "a",
-          progress: { section_id: "sec-1", scroll_pos: 0.5, updated_at: "2026-01-01T00:00:00Z" },
-        }),
-      ]),
-    );
-    mockedGetStudyNext.mockResolvedValue(
-      ok([
-        { chapter_label: "Ch 1", reason: "low_test_score", detail: { best_score: 0.4 } },
-        { chapter_label: "Ch 2", reason: "due_cards", detail: { due_count: 12 } },
-        { chapter_label: "Ch 3", reason: "unread", detail: {} },
-        { chapter_label: "Ch 4", reason: "stale", detail: { days_since: 9 } },
-      ]),
-    );
-    render(<Home />);
-
-    await screen.findByText(/study next/i);
-    expect(screen.getByText("Ch 1")).toBeInTheDocument();
-    expect(screen.getByText("Ch 2")).toBeInTheDocument();
-    expect(screen.getByText("Ch 3")).toBeInTheDocument();
-    expect(screen.queryByText("Ch 4")).not.toBeInTheDocument();
-    expect(screen.getByText("low test score (40%)")).toBeInTheDocument();
-
-    expect(screen.getByRole("link", { name: /ch 1.*low test score/i })).toHaveAttribute(
-      "href",
-      "/course/a/chapter/Ch%201/test",
-    );
-    expect(screen.getByRole("link", { name: /ch 2.*12 cards piling up/i })).toHaveAttribute(
-      "href",
-      "/review?course=a&start=due",
-    );
-    expect(screen.getByRole("link", { name: /ch 3.*unread/i })).toHaveAttribute(
-      "href",
-      "/course/a",
-    );
+    expect(await screen.findByText("50%")).toBeInTheDocument();
+    expect(screen.getByText("course progress")).toBeInTheDocument();
+    expect(screen.getByText("5")).toBeInTheDocument();
+    expect(screen.getByText("cards due")).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument(); // Math.round(2.6)
+    expect(screen.getByText(/cards\/day/i)).toBeInTheDocument();
   });
 
   it("deleting a course via its card removes it from the grid", async () => {
@@ -259,15 +334,15 @@ describe("Home page", () => {
     await waitFor(() => expect(screen.queryByText("Distributed Systems")).not.toBeInTheDocument());
   });
 
-  it("opens the upload flow after choosing files via the Upload PDF button", async () => {
+  it("opens the upload flow after choosing files via the Start a new course button", async () => {
     mockedListCourses.mockResolvedValue(ok([]));
     render(<Home />);
     await screen.findByText(/drop a pdf anywhere to start/i);
 
-    const input = screen.getByLabelText(/upload pdf/i) as HTMLInputElement;
+    const input = screen.getByLabelText(/start a new course/i) as HTMLInputElement;
     await userEvent.setup().upload(input, pdfFile("book.pdf"));
 
-    expect(screen.getByRole("dialog", { name: /upload course/i })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: /start a new course/i })).toBeInTheDocument();
   });
 
   it("opens the upload flow when PDFs are dropped anywhere on the dashboard", async () => {
@@ -279,7 +354,7 @@ describe("Home page", () => {
     const file = pdfFile("dropped.pdf");
     fireEvent.drop(dropTarget, { dataTransfer: { files: [file], types: ["Files"] } });
 
-    expect(await screen.findByRole("dialog", { name: /upload course/i })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: /start a new course/i })).toBeInTheDocument();
   });
 
   it("ignores non-PDF files dropped on the dashboard", async () => {

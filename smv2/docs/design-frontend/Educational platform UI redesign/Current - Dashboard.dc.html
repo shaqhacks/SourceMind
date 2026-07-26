@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #fdfcfb; color: #1a1a1a; font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { color: #1d4ed8; }
+  </style>
+</helmet>
+<div style="display: flex; flex-direction: column; min-height: 100vh;">
+  <header style="display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #7d7d78; padding: 16px 24px;">
+    <h1 style="margin: 0; font-size: 18px; font-weight: 600;"><a href="#" style="color: #1a1a1a;">SourceMind</a></h1>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <a href="#" style="border-radius: 9999px; background: #2563eb; padding: 4px 10px; font-size: 12px; font-weight: 500; color: #ffffff;">12 due</a>
+      <div role="group" style="display: inline-flex; overflow: hidden; border-radius: 6px; border: 1px solid #7d7d78; font-size: 14px;">
+        <button style="padding: 6px 12px; background: #2563eb; color: #ffffff; border: none; font-family: inherit; font-size: 14px; cursor: pointer;">System</button>
+        <button style="padding: 6px 12px; background: transparent; color: #1a1a1a; border: none; font-family: inherit; font-size: 14px; cursor: pointer;" style-hover="background: rgba(82,82,91,0.1);">Light</button>
+        <button style="padding: 6px 12px; background: transparent; color: #1a1a1a; border: none; font-family: inherit; font-size: 14px; cursor: pointer;" style-hover="background: rgba(82,82,91,0.1);">Dark</button>
+      </div>
+    </div>
+  </header>
+  <main style="margin: 0 auto; display: flex; width: 100%; max-width: 1024px; flex: 1; flex-direction: column; gap: 24px; padding: 32px 24px; box-sizing: border-box;">
+    <div style="display: flex; align-items: center; justify-content: space-between;">
+      <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.025em;">Your courses</h1>
+      <button style="border-radius: 6px; background: #1a1a1a; color: #fdfcfb; border: none; padding: 8px 16px; font-size: 14px; font-weight: 500; font-family: inherit; cursor: pointer;" style-hover="opacity: 0.9;">Upload PDF</button>
+    </div>
+    <div role="note" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 6px; border: 1px solid #7d7d78; background: rgba(37,99,235,0.05); padding: 12px 16px; font-size: 14px;">
+      <span>This is a sample course — drop any PDF to create your own.</span>
+      <button style="flex-shrink: 0; border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 4px 8px; font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer; color: #1a1a1a;">Dismiss</button>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+      <a href="#" style="display: block; border-radius: 8px; border: 1px solid #7d7d78; background: #f5f3ef; padding: 16px; color: #1a1a1a;" style-hover="border-color: #52525b;">
+        <p style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -0.025em;">12</p>
+        <p style="margin: 4px 0 0; font-size: 14px; color: #52525b;">cards due</p>
+      </a>
+      <a href="#" style="display: block; border-radius: 8px; border: 1px solid #7d7d78; background: #f5f3ef; padding: 16px; color: #1a1a1a;" style-hover="border-color: #52525b;">
+        <p style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -0.025em;">2</p>
+        <p style="margin: 4px 0 0; font-size: 14px; color: #52525b;">quizzes to take</p>
+      </a>
+      <div style="border-radius: 8px; border: 1px solid #7d7d78; background: #f5f3ef; padding: 16px;">
+        <p style="margin: 0; font-size: 30px; font-weight: 600; letter-spacing: -0.025em;">38%</p>
+        <p style="margin: 4px 0 0; font-size: 14px; color: #52525b;">through Welcome to SourceMind</p>
+      </div>
+    </div>
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px;">
+      <a href="#" style="display: block; border-radius: 8px; border: 1px solid #7d7d78; background: rgba(219,234,254,0.6); padding: 16px; color: #1a1a1a;" style-hover="border-color: #52525b;">
+        <p style="margin: 0; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b;">Continue reading</p>
+        <h2 style="margin: 4px 0 0; font-size: 18px; font-weight: 600;">Welcome to SourceMind</h2>
+        <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
+          <p style="margin: 0; font-size: 14px; color: #52525b;">Lessons, Flashcards and Quizzes — 38% complete</p>
+          <div style="height: 6px; width: 100%; overflow: hidden; border-radius: 9999px; background: rgba(82,82,91,0.15);">
+            <div style="height: 100%; width: 38%; border-radius: 9999px; background: #2563eb;"></div>
+          </div>
+        </div>
+      </a>
+      <a href="#" style="display: block; border-radius: 8px; border: 1px solid #7d7d78; background: rgba(219,234,254,0.6); padding: 16px; color: #1a1a1a;" style-hover="border-color: #52525b;">
+        <p style="margin: 0; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b;">Review</p>
+        <h2 style="margin: 4px 0 0; font-size: 18px; font-weight: 600;">12 cards due — start your review</h2>
+      </a>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <h2 style="margin: 0; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b;">Study next</h2>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px;">
+        <li>
+          <a href="#" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 6px; border: 1px solid #7d7d78; padding: 8px 12px; font-size: 14px; color: #1a1a1a;" style-hover="background: rgba(82,82,91,0.05);">
+            <span style="font-weight: 500;">How SourceMind Works</span>
+            <span style="display: inline-flex; align-items: center; gap: 4px; border-radius: 9999px; background: #fef3c7; color: #a16207; padding: 2px 8px; font-size: 12px; font-weight: 500;"><span>⚠</span>low test score (60%)</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 6px; border: 1px solid #7d7d78; padding: 8px 12px; font-size: 14px; color: #1a1a1a;" style-hover="background: rgba(82,82,91,0.05);">
+            <span style="font-weight: 500;">Lessons, Flashcards and Quizzes</span>
+            <span style="display: inline-flex; align-items: center; gap: 4px; border-radius: 9999px; background: #dbeafe; color: #2563eb; padding: 2px 8px; font-size: 12px; font-weight: 500;"><span>●</span>8 cards piling up</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 6px; border: 1px solid #7d7d78; padding: 8px 12px; font-size: 14px; color: #1a1a1a;" style-hover="background: rgba(82,82,91,0.05);">
+            <span style="font-weight: 500;">Reading Efficiently</span>
+            <span style="display: inline-flex; align-items: center; gap: 4px; border-radius: 9999px; background: rgba(82,82,91,0.1); color: #52525b; padding: 2px 8px; font-size: 12px; font-weight: 500;"><span>•</span>unread</span>
+          </a>
+        </li>
+      </ul>
+    </div>
+    <section style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="margin: 0; font-size: 14px; font-weight: 600;">Quizzes to take</h2>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px;">
+        <li>
+          <a href="#" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 8px; border: 1px solid #7d7d78; background: #f5f3ef; padding: 12px 16px; color: #1a1a1a;" style-hover="border-color: #52525b;">
+            <span style="min-width: 0;">
+              <span style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500;">Reading Efficiently</span>
+              <span style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #52525b;">Welcome to SourceMind</span>
+            </span>
+            <span style="display: inline-flex; align-items: center; gap: 4px; border-radius: 9999px; background: #dbeafe; color: #2563eb; padding: 2px 8px; font-size: 12px; font-weight: 500; flex-shrink: 0;"><span>●</span>Not attempted</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 8px; border: 1px solid #7d7d78; background: #f5f3ef; padding: 12px 16px; color: #1a1a1a;" style-hover="border-color: #52525b;">
+            <span style="min-width: 0;">
+              <span style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500;">How SourceMind Works</span>
+              <span style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #52525b;">Welcome to SourceMind</span>
+            </span>
+            <span style="display: inline-flex; align-items: center; gap: 4px; border-radius: 9999px; background: #fef3c7; color: #a16207; padding: 2px 8px; font-size: 12px; font-weight: 500; flex-shrink: 0;"><span>⚠</span>Retake · best 60%</span>
+          </a>
+        </li>
+      </ul>
+    </section>
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 8px; border-radius: 8px; border: 1px solid #7d7d78; background: #f5f3ef; padding: 16px;">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+          <h3 style="margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600;"><a href="#" style="color: #1a1a1a;" style-hover="text-decoration: underline; text-underline-offset: 2px;">Welcome to SourceMind</a></h3>
+          <span style="display: inline-flex; align-items: center; gap: 4px; border-radius: 9999px; background: #dcfce7; color: #15803d; padding: 2px 8px; font-size: 12px; font-weight: 500;"><span>✓</span>Ready</span>
+        </div>
+        <div style="height: 6px; width: 100%; overflow: hidden; border-radius: 9999px; background: rgba(82,82,91,0.15);">
+          <div style="height: 100%; width: 38%; border-radius: 9999px; background: #2563eb;"></div>
+        </div>
+        <div style="margin-top: auto; display: flex; align-items: center; justify-content: space-between; padding-top: 8px;">
+          <a href="#" style="font-size: 12px; font-weight: 500; color: #2563eb;">Export</a>
+          <button style="border-radius: 6px; border: 1px solid rgba(185,28,28,0.4); color: #b91c1c; background: transparent; padding: 4px 8px; font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer;" style-hover="background: #fee2e2;">Delete</button>
+        </div>
+      </div>
+    </div>
+    <section style="display: flex; flex-direction: column; gap: 12px;">
+      <button style="display: flex; align-items: center; gap: 8px; align-self: flex-start; background: transparent; border: none; padding: 0; font-size: 14px; font-weight: 600; font-family: inherit; color: #1a1a1a; cursor: pointer;">
+        <span>▸</span>
+        <span>Learning science — why this app works this way</span>
+      </button>
+    </section>
+  </main>
+</div>
+</x-dc>
+</body>
+</html>

@@ -172,10 +172,10 @@ export default function Chat({
             {turns.map((turn) => (
               <li key={turn.id} className={turn.role === "user" ? "text-right" : "text-left"}>
                 <div
-                  className={`inline-block max-w-full rounded-lg px-3 py-2 text-left text-sm ${
+                  className={`inline-block max-w-full rounded-md px-3.5 py-2.5 text-left text-sm ${
                     turn.role === "user"
-                      ? "bg-accent/10"
-                      : "border border-border bg-background"
+                      ? "bg-accent-soft"
+                      : "border border-divider bg-surface-raised"
                   }`}
                 >
                   <Markdown>{turn.content}</Markdown>
@@ -186,7 +186,7 @@ export default function Chat({
                           <button
                             type="button"
                             onClick={() => onCitationClick?.(citation)}
-                            className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted-foreground/10"
+                            className="rounded-[6px] border border-accent/40 px-2 py-0.5 text-xs font-medium text-accent-700 transition-colors hover:bg-accent/10"
                           >
                             [{citation.n}] {citation.sourceRef}
                           </button>
@@ -216,9 +216,9 @@ export default function Chat({
         )}
       </div>
 
-      <div className="border-t border-border">
-        {composerAccessory && <div className="px-3 pt-2">{composerAccessory}</div>}
-        <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3">
+      <div className="border-t border-divider">
+        {composerAccessory && <div className="px-3.5 pt-2.5">{composerAccessory}</div>}
+        <form onSubmit={handleSubmit} className="flex items-center gap-2 p-3.5">
           <input
             type="text"
             value={input}
@@ -226,7 +226,7 @@ export default function Chat({
             disabled={sending}
             placeholder="Ask about this course…"
             aria-label="Message"
-            className="flex-1 rounded-md border border-border bg-transparent px-3 py-2 text-sm disabled:opacity-50"
+            className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm disabled:opacity-50"
           />
           <Button type="submit" variant="primary" disabled={sending || !input.trim()}>
             Send

@@ -144,7 +144,7 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
         const isConfirmingDelete = confirmDeleteId === card.id;
 
         return (
-          <div key={card.id} className="rounded-lg border border-border p-3 text-sm">
+          <div key={card.id} className="rounded-lg border border-divider bg-surface-raised p-3 text-sm">
             {isEditing ? (
               <div className="flex flex-col gap-2">
                 <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
@@ -153,7 +153,7 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
                     value={editFront}
                     onChange={(event) => setEditFront(event.target.value)}
                     rows={3}
-                    className="rounded-md border border-border p-2 font-mono text-xs"
+                    className="rounded-md border border-border bg-background p-2 font-mono text-xs"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
@@ -162,10 +162,10 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
                     value={editBack}
                     onChange={(event) => setEditBack(event.target.value)}
                     rows={3}
-                    className="rounded-md border border-border p-2 font-mono text-xs"
+                    className="rounded-md border border-border bg-background p-2 font-mono text-xs"
                   />
                 </label>
-                {editError && <p className="text-xs text-red-600 dark:text-red-400">{editError}</p>}
+                {editError && <p className="text-xs text-status-serious">{editError}</p>}
                 <div className="flex gap-2">
                   <Button variant="primary" size="sm" onClick={() => void saveEdit(card.id)} disabled={saving}>
                     {saving ? "Saving…" : "Save"}
@@ -174,7 +174,7 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
                     type="button"
                     onClick={cancelEdit}
                     disabled={saving}
-                    className="rounded-md border border-border px-3 py-1 text-xs font-medium disabled:opacity-50"
+                    className="rounded-md border border-border bg-surface-raised px-3 py-1 text-xs font-medium transition-colors hover:bg-foreground/[0.07] disabled:opacity-50"
                   >
                     Cancel
                   </button>
@@ -187,7 +187,7 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
                     <Markdown>{card.front_md}</Markdown>
                   </div>
                   {card.origin === "user" && (
-                    <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    <span className="shrink-0 rounded-[6px] bg-neutral-100 px-2 py-0.5 text-[10px] font-medium text-neutral-800">
                       edited
                     </span>
                   )}
@@ -201,13 +201,13 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
                   {isRevealed ? "Hide answer" : "Show answer"}
                 </button>
                 {isRevealed && (
-                  <div className="border-t border-border pt-2">
+                  <div className="border-t border-divider pt-2">
                     <Markdown>{card.back_md}</Markdown>
                   </div>
                 )}
 
                 {deleteError && confirmDeleteId === null && (
-                  <p className="text-xs text-red-600 dark:text-red-400">{deleteError}</p>
+                  <p className="text-xs text-status-serious">{deleteError}</p>
                 )}
 
                 <div className="mt-1 flex items-center justify-end gap-2 text-xs">
@@ -220,7 +220,7 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
                         type="button"
                         onClick={() => void confirmDelete(card.id)}
                         disabled={deletingId === card.id}
-                        className="font-medium text-red-600 disabled:opacity-50 dark:text-red-400"
+                        className="font-medium text-status-serious disabled:opacity-50"
                       >
                         {deletingId === card.id ? "Deleting…" : "Confirm"}
                       </button>
@@ -244,7 +244,7 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
                       <button
                         type="button"
                         onClick={() => requestDelete(card.id)}
-                        className="font-medium text-red-600 dark:text-red-400"
+                        className="font-medium text-status-serious"
                       >
                         Delete
                       </button>

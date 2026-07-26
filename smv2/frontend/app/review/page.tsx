@@ -3,15 +3,16 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 
 import ErrorBanner from "@/components/ErrorBanner";
-import HintRow from "@/components/HintRow";
 import Markdown from "@/components/Markdown";
 import ShortcutsOverlay, { type ShortcutHint } from "@/components/ShortcutsOverlay";
 import Badge, { type BadgeTone } from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
+import ProgressBar from "@/components/ui/ProgressBar";
 import Skeleton from "@/components/ui/Skeleton";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
@@ -23,6 +24,7 @@ import {
 } from "@/lib/api/client";
 import { useKeyboardShortcuts, type ShortcutMap } from "@/lib/hooks/useKeyboardShortcuts";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
+import { formatIntervalPreview, previewIntervalDays, type ReviewGrade } from "@/lib/review/intervalPreview";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 const SHORTCUT_HINTS: ShortcutHint[] = [
@@ -33,6 +35,14 @@ const SHORTCUT_HINTS: ShortcutHint[] = [
 
 const GRADE_LABELS: Record<number, string> = { 1: "Again", 2: "Hard", 3: "Good", 4: "Easy" };
 const GRADE_TONES: Record<number, BadgeTone> = { 1: "serious", 2: "warning", 3: "good", 4: "accent" };
+// Organic system: attention ramp for the two "didn't stick" grades, sage
+// ramp for the two "stuck" grades — see the redesign handoff §4.
+const GRADE_BUTTON_BG: Record<number, string> = {
+  1: "bg-accent-200",
+  2: "bg-accent-100",
+  3: "bg-sage-200",
+  4: "bg-sage-300",
+};
 // review_queue's `limit` caps at 200 — a session's "all" is "all up to
 // that cap", not literally unbounded. Fine at this app's scale.
 const MAX_QUEUE_FETCH = 200;
@@ -131,6 +141,11 @@ function ReviewPageInner() {
     return readStoredSession() ? "resuming" : courseParam ? "chooser" : "hub";
   });
   const [courseId, setCourseId] = useState<string | null>(courseParam);
+  // Only ever populated from the hub's already-loaded ReviewSummaryOut (see
+  // goToChooser) — a direct ?course= deep link, a resumed session, or a
+  // ?start=due bootstrap has no course title in hand and none is fetched
+  // for it, so the header falls back to the untitled "Review session".
+  const [courseTitle, setCourseTitle] = useState<string | null>(null);
   const [hubState, setHubState] = useState<HubState>({ kind: "loading" });
   const [chooserState, setChooserState] = useState<ChooserState>({ kind: "loading" });
   const [sessionState, setSessionState] = useState<SessionState>({ kind: "loading" });
@@ -249,8 +264,9 @@ function ReviewPageInner() {
     };
   }, [phase, courseId]);
 
-  function goToChooser(id: string) {
+  function goToChooser(id: string, title: string) {
     setCourseId(id);
+    setCourseTitle(title);
     setPhase("chooser");
     router.push(`/review?course=${id}`);
   }
@@ -434,7 +450,7 @@ function ReviewPageInner() {
           {summary.backlog_warning && (
             <div
               role="alert"
-              className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+              className="rounded-md border border-accent/40 bg-accent-soft px-4 py-3 text-sm text-accent-800"
             >
               {summary.due_total} due — more than 2 days at your pace.
             </div>
@@ -445,7 +461,7 @@ function ReviewPageInner() {
                 <Card interactive>
                   <button
                     type="button"
-                    onClick={() => goToChooser(course.course_id)}
+                    onClick={() => goToChooser(course.course_id, course.title)}
                     className="flex w-full items-center justify-between text-left text-sm"
                   >
                     <span className="font-medium">{course.title}</span>
@@ -559,11 +575,11 @@ function ReviewPageInner() {
   } else {
     const card = cards[cardIndex];
     mainContent = (
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-8">
+      <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-6 px-9 py-10">
         {isResumedSession && (
           <div
             role="status"
-            className="flex items-center justify-between gap-3 rounded-md border border-border bg-accent/5 px-4 py-2 text-sm"
+            className="flex items-center justify-between gap-3 rounded-md border border-divider bg-accent-soft px-4 py-2 text-sm"
           >
             <span>
               Resumed session — {cards.length - cardIndex} left
@@ -571,63 +587,122 @@ function ReviewPageInner() {
             <button
               type="button"
               onClick={discardResumedSession}
-              className="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium"
+              className="shrink-0 rounded-md border border-divider px-2 py-1 text-xs font-medium"
             >
               Discard
             </button>
           </div>
         )}
-        <p role="status" className="text-sm text-muted-foreground">
-          {cardIndex + 1} of {cards.length}
-        </p>
-        <div className="rounded-lg border border-border bg-surface-raised p-6">
-          <Markdown>{card.front_md}</Markdown>
+
+        <div className="flex items-center gap-3.5">
+          <div className="flex-1">
+            <ProgressBar
+              percent={((cardIndex + 1) / cards.length) * 100}
+              label={`${cardIndex + 1} of ${cards.length}`}
+              tone="accent"
+            />
+          </div>
+          <p role="status" className="shrink-0 text-sm font-semibold text-muted-foreground">
+            {cardIndex + 1} of {cards.length}
+          </p>
+        </div>
+
+        <Card className="flex min-h-[320px] flex-col p-10 shadow-md">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-accent">
+            Spaced repetition
+          </span>
+          <div className="mt-3.5 font-heading text-2xl leading-snug">
+            <Markdown>{card.front_md}</Markdown>
+          </div>
           {revealed && (
-            <div className="mt-6 border-t border-border pt-6">
+            <div className="mt-7 border-t border-divider pt-6 text-[17px] leading-relaxed">
               <Markdown>{card.back_md}</Markdown>
             </div>
           )}
-        </div>
+          <div className="mt-auto flex flex-wrap items-center gap-2 pt-6">
+            {card.is_new && <Badge tone="neutral">New card</Badge>}
+            <Link
+              href={`/course/${courseId}?section=${card.section_id}`}
+              className="ml-auto text-xs font-medium text-accent hover:underline"
+            >
+              Open in chapter →
+            </Link>
+          </div>
+        </Card>
 
         {!revealed ? (
           <Button variant="primary" size="md" onClick={reveal} className="self-center px-6">
             Reveal (space)
           </Button>
         ) : (
-          <div className="flex justify-center gap-3">
-            {(
-              [
-                { value: 1, classes: "border-status-serious/40 bg-status-serious-soft text-status-serious" },
-                { value: 2, classes: "border-status-warning/40 bg-status-warning-soft text-status-warning" },
-                { value: 3, classes: "border-status-good/40 bg-status-good-soft text-status-good" },
-                { value: 4, classes: "border-accent/40 bg-accent-soft text-accent" },
-              ] as const
-            ).map(({ value, classes }) => (
+          <div className="grid grid-cols-4 gap-3">
+            {([1, 2, 3, 4] as ReviewGrade[]).map((value) => (
               <button
                 key={value}
                 type="button"
                 onClick={() => grade(value)}
-                className={`rounded-md border px-4 py-2 text-sm font-medium transition-colors hover:opacity-80 ${classes}`}
+                aria-label={`${GRADE_LABELS[value]} (${value})`}
+                className={`flex flex-col items-center gap-1 rounded-md py-3 text-foreground transition-opacity hover:opacity-80 ${GRADE_BUTTON_BG[value]}`}
               >
-                {GRADE_LABELS[value]} ({value})
+                <span aria-hidden="true" className="text-[15px] font-semibold">
+                  {GRADE_LABELS[value]}
+                </span>
+                <span aria-hidden="true" className="font-mono text-[11px] opacity-70">
+                  {value} ·{" "}
+                  {formatIntervalPreview(
+                    previewIntervalDays(value, {
+                      intervalDays: card.interval_days,
+                      ease: card.ease,
+                      reps: card.reps,
+                    }),
+                  )}
+                </span>
               </button>
             ))}
           </div>
         )}
 
-        <HintRow
-          hints={SHORTCUT_HINTS.map((hint) => ({ keys: hint.keys, label: hint.description }))}
-        />
+        <p className="text-center text-xs text-muted-foreground">
+          {SHORTCUT_HINTS.map((hint, i) => (
+            <span key={hint.keys}>
+              {i > 0 ? " · " : null}
+              <kbd className="rounded border border-divider bg-surface-raised px-1.5 text-xs">
+                {hint.keys}
+              </kbd>{" "}
+              {hint.description}
+            </span>
+          ))}
+        </p>
       </div>
     );
   }
 
+  const sessionActive = phase === "session" || phase === "resuming" || phase === "bootstrapping-due";
+  const headerLabel = courseId ? (courseTitle ? `Review session · ${courseTitle}` : "Review session") : "Review";
+
+  const endSession = () => {
+    clearStoredSession();
+    router.push("/");
+  };
+
   return (
     <>
-      <div className="border-b border-border px-8 py-4">
-        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-semibold outline-none">
-          Review
+      <div className="flex items-center gap-3 border-b border-divider px-5 py-3">
+        <Link
+          href="/"
+          aria-label="Back home"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-surface-raised transition-colors hover:bg-foreground/[0.07]"
+        >
+          <ArrowLeft aria-hidden="true" className="h-4 w-4" strokeWidth={2.75} />
+        </Link>
+        <h1 ref={headingRef} tabIndex={-1} className="truncate text-sm font-medium outline-none">
+          {headerLabel}
         </h1>
+        {sessionActive && (
+          <Button variant="secondary" size="sm" onClick={endSession} className="ml-auto shrink-0">
+            End session
+          </Button>
+        )}
       </div>
       {mainContent}
       <ShortcutsOverlay open={shortcutsOpen} onClose={closeShortcuts} shortcuts={SHORTCUT_HINTS} />

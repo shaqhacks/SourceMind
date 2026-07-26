@@ -61,6 +61,9 @@ export type ChatSelectionIn = components["schemas"]["ChatSelectionIn"];
 export type HighlightOut = components["schemas"]["HighlightOut"];
 export type HighlightIn = components["schemas"]["HighlightIn"];
 export type HighlightUpdateIn = components["schemas"]["HighlightUpdateIn"];
+export type NoteOut = components["schemas"]["NoteOut"];
+export type NoteIn = components["schemas"]["NoteIn"];
+export type NoteUpdateIn = components["schemas"]["NoteUpdateIn"];
 export type OutlineOp =
   | components["schemas"]["RenameOp"]
   | components["schemas"]["ReorderOp"]
@@ -610,6 +613,40 @@ export function deleteHighlight(highlightId: string) {
   return request(
     client.DELETE("/api/highlights/{highlight_id}", {
       params: { path: { highlight_id: highlightId } },
+    }),
+  );
+}
+
+export function listNotes(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/notes", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function createNote(courseId: string, body: NoteIn) {
+  return request(
+    client.POST("/api/courses/{course_id}/notes", {
+      params: { path: { course_id: courseId } },
+      body,
+    }),
+  );
+}
+
+export function updateNote(noteId: string, body: NoteUpdateIn) {
+  return request(
+    client.PATCH("/api/notes/{note_id}", {
+      params: { path: { note_id: noteId } },
+      body,
+    }),
+  );
+}
+
+export function deleteNote(noteId: string) {
+  return request(
+    client.DELETE("/api/notes/{note_id}", {
+      params: { path: { note_id: noteId } },
     }),
   );
 }

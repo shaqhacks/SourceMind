@@ -40,6 +40,11 @@ def test_review_queue_includes_new_cards_with_no_review_state(client, ingest_cou
     assert body["total"] == 2
     assert {c["id"] for c in body["cards"]} == {card1, card2}
     assert all(c["is_new"] for c in body["cards"])
+    # New cards (no ReviewState yet) expose the same bootstrap values
+    # grade_card() would use — see srs_service.DEFAULT_EASE.
+    assert all(c["interval_days"] == 0.0 for c in body["cards"])
+    assert all(c["ease"] == 2.5 for c in body["cards"])
+    assert all(c["reps"] == 0 for c in body["cards"])
 
 
 def test_review_queue_includes_past_due_and_excludes_future_due(client, ingest_course, stub_provider):
@@ -70,6 +75,12 @@ def test_review_queue_includes_past_due_and_excludes_future_due(client, ingest_c
     ids_in_queue = {c["id"] for c in body["cards"]}
     assert card1 in ids_in_queue
     assert card2 not in ids_in_queue
+    # A reviewed card's own scheduler state passes through unchanged (not
+    # the new-card bootstrap) — mirrors the ReviewState seeded above.
+    card1_out = next(c for c in body["cards"] if c["id"] == card1)
+    assert card1_out["interval_days"] == 1.0
+    assert card1_out["ease"] == 2.5
+    assert card1_out["reps"] == 1
 
 
 def test_review_queue_respects_limit(client, ingest_course, stub_provider):

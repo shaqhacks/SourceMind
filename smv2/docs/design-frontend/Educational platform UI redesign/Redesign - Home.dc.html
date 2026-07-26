@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="ds/organic.css">
+  <link rel="stylesheet" href="ds/theme.css">
+  <style>
+    body { margin: 0; }
+  </style>
+</helmet>
+<div style="height: 100vh; display: flex; flex-direction: column; overflow: hidden;">
+  <header style="display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--color-divider); flex: none;">
+    <button class="btn btn-secondary btn-icon" aria-label="Toggle sidebar" onClick="{{ toggleSidebar }}">☰</button>
+    <span class="nav-brand" style="font-size: 20px; color: var(--color-accent);">SourceMind</span>
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
+      <span class="tag tag-accent" style="font-weight: 700;">12 cards due</span>
+      <span class="tag tag-accent-2" style="font-weight: 700;">3-day streak</span>
+      <button class="btn btn-secondary btn-icon" aria-label="Toggle dark mode" onClick="{{ toggleTheme }}">{{ themeIcon }}</button>
+      <span style="width: 34px; height: 34px; border-radius: 999px; background: var(--color-accent-2-300); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px;">J</span>
+    </div>
+  </header>
+  <div style="display: flex; flex: 1; min-height: 0;">
+    <sc-if value="{{ open }}" hint-placeholder-val="{{ true }}">
+      <aside style="width: 260px; flex: none; border-right: 1px solid var(--color-divider); display: flex; flex-direction: column; gap: 20px; padding: 20px 16px; overflow-y: auto; box-sizing: border-box;">
+        <a class="btn btn-primary btn-block" href="Redesign – New Course.dc.html" style="margin: 0; text-decoration: none;">+ Start new course</a>
+        <nav style="display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600;">
+          <a href="#" aria-current="page" style="display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 8px; background: var(--color-surface); color: var(--color-accent-700); text-decoration: none; box-shadow: var(--shadow-sm);">Home</a>
+          <a href="Redesign – Flashcards.dc.html" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 14px; border-radius: 8px; color: var(--color-text); text-decoration: none; opacity: 0.75;">Flashcards <span class="tag tag-accent">12</span></a>
+          <a href="Redesign – Tests.dc.html" style="display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 8px; color: var(--color-text); text-decoration: none; opacity: 0.75;">Tests</a>
+        </nav>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <p style="margin: 0 0 2px; padding: 0 14px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-600); font-weight: 700;">Your courses</p>
+          <div style="display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--color-surface); box-shadow: var(--shadow-sm);">
+            <a href="Redesign – Reader.dc.html" style="font-size: 14px; font-weight: 700; color: var(--color-text); text-decoration: none;">Welcome to SourceMind</a>
+            <span class="text-muted" style="font-size: 12px;">3 chapters · 12 due</span>
+            <span style="height: 5px; border-radius: 999px; background: var(--color-neutral-200); display: block;"><span style="display: block; height: 100%; width: 38%; border-radius: 999px; background: var(--color-accent);"></span></span>
+            <div style="display: flex; align-items: center; gap: 12px; margin-top: 4px; font-size: 12px; font-weight: 600;">
+              <a href="Redesign – Reader.dc.html" style="color: var(--color-accent-700); text-decoration: none;">Open</a>
+              <a href="Redesign – Skill Map.dc.html" style="color: var(--color-accent-700); text-decoration: none;">Skill map</a>
+            </div>
+          </div>
+          <a href="#" style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius-md); border: 1.5px dashed var(--color-neutral-400); color: var(--color-neutral-600); text-decoration: none; font-size: 13px;">Drop a PDF here to add one</a>
+        </div>
+        <div style="margin-top: auto; padding: 0 14px;">
+          <p class="text-muted" style="margin: 0; font-size: 12px;">LLM usage: 6 calls · $0.14</p>
+        </div>
+      </aside>
+    </sc-if>
+    <main style="flex: 1; min-width: 0; overflow-y: auto;">
+      <div style="width: 100%; max-width: 1060px; margin: 0 auto; padding: 32px 36px; box-sizing: border-box; display: flex; flex-direction: column; gap: 26px;">
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;">
+          <div>
+            <p class="text-muted" style="margin: 0 0 4px; font-size: 14px;">Tuesday, July 26 · ~12 min planned</p>
+            <h1 style="font-size: 34px; margin: 0;">Today's study plan</h1>
+          </div>
+          <div style="display: flex; gap: 22px; text-align: right;">
+            <div><p style="margin: 0; font-family: var(--font-heading); font-size: 24px;">38%</p><p class="text-muted" style="margin: 0; font-size: 12px;">course progress</p></div>
+            <div><p style="margin: 0; font-family: var(--font-heading); font-size: 24px;">41</p><p class="text-muted" style="margin: 0; font-size: 12px;">cards this week</p></div>
+            <div><p style="margin: 0; font-family: var(--font-heading); font-size: 24px;">72%</p><p class="text-muted" style="margin: 0; font-size: 12px;">avg quiz score</p></div>
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 340px; gap: 24px; align-items: start;">
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div class="card elev-sm" style="flex-direction: row; align-items: center; gap: 18px; padding: 20px 24px;">
+              <span style="width: 44px; height: 44px; flex: none; border-radius: 999px; background: var(--color-accent-200); color: var(--color-accent-700); display: inline-flex; align-items: center; justify-content: center; font-family: var(--font-heading); font-size: 17px;">1</span>
+              <div style="flex: 1; min-width: 0;">
+                <p style="margin: 0; font-weight: 700; font-size: 16px;">Keep reading — Lessons, Flashcards and Quizzes</p>
+                <p class="text-muted" style="margin: 2px 0 0; font-size: 13px;">Welcome to SourceMind · Chapter 2 · 38% through</p>
+                <div style="margin-top: 8px; height: 6px; border-radius: 999px; background: var(--color-neutral-200);"><div style="height: 100%; width: 38%; border-radius: 999px; background: var(--color-accent);"></div></div>
+              </div>
+              <a class="btn btn-primary" href="Redesign – Reader.dc.html">Resume</a>
+            </div>
+            <div class="card elev-sm" style="flex-direction: row; align-items: center; gap: 18px; padding: 20px 24px;">
+              <span style="width: 44px; height: 44px; flex: none; border-radius: 999px; background: var(--color-accent-2-200); color: var(--color-accent-2-700); display: inline-flex; align-items: center; justify-content: center; font-family: var(--font-heading); font-size: 17px;">2</span>
+              <div style="flex: 1; min-width: 0;">
+                <p style="margin: 0; font-weight: 700; font-size: 16px;">Review 12 due flashcards</p>
+                <p class="text-muted" style="margin: 2px 0 0; font-size: 13px;">~6 minutes · 8 from Chapter 2, 4 from Chapter 1</p>
+              </div>
+              <a class="btn btn-secondary" href="Redesign – Review.dc.html">Start review</a>
+            </div>
+            <div class="card elev-sm" style="flex-direction: row; align-items: center; gap: 18px; padding: 20px 24px;">
+              <span style="width: 44px; height: 44px; flex: none; border-radius: 999px; background: var(--color-neutral-200); color: var(--color-neutral-700); display: inline-flex; align-items: center; justify-content: center; font-family: var(--font-heading); font-size: 17px;">3</span>
+              <div style="flex: 1; min-width: 0;">
+                <p style="margin: 0; font-weight: 700; font-size: 16px;">Beat your 60% on the Chapter 1 test</p>
+                <p class="text-muted" style="margin: 2px 0 0; font-size: 13px;">Same questions, free retake · your weakest chapter</p>
+              </div>
+              <a class="btn btn-secondary" href="Redesign – Quiz.dc.html">Retake test</a>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="card elev-sm" style="padding: 20px 22px; gap: 14px;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span class="card-kicker">Skill snapshot</span>
+                <a class="btn btn-ghost" href="Redesign – Skill Map.dc.html" style="font-size: 13px;">Full map →</a>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 12px; font-size: 13px; font-weight: 600;">
+                <div>
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>Deterministic ingest</span><span style="color: var(--color-accent-2-700);">86</span></div>
+                  <div style="height: 6px; border-radius: 999px; background: var(--color-neutral-200);"><div style="height: 100%; width: 86%; border-radius: 999px; background: var(--color-accent-2-500);"></div></div>
+                </div>
+                <div>
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>Spaced repetition</span><span style="color: var(--color-accent-700);">55</span></div>
+                  <div style="height: 6px; border-radius: 999px; background: var(--color-neutral-200);"><div style="height: 100%; width: 55%; border-radius: 999px; background: var(--color-accent-400);"></div></div>
+                </div>
+                <div>
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 5px;"><span>Cost estimation</span><span style="color: var(--color-accent-800);">24</span></div>
+                  <div style="height: 6px; border-radius: 999px; background: var(--color-neutral-200);"><div style="height: 100%; width: 24%; border-radius: 999px; background: var(--color-accent-600);"></div></div>
+                </div>
+              </div>
+              <div style="border-radius: var(--radius-md); background: var(--color-accent-100); padding: 12px 14px; font-size: 13px; line-height: 1.5;">
+                <strong>Why you're stuck:</strong> Cost estimation builds on <strong>token counting</strong> — 3 of your last 5 misses trace back to it.
+                <div style="margin-top: 8px;"><button class="btn btn-primary" style="font-size: 13px; padding: 6px 14px;">Review the prerequisite</button></div>
+              </div>
+            </div>
+            <div class="card" style="padding: 20px 22px; gap: 10px;">
+              <span class="card-kicker" style="color: var(--color-accent-2-700);">This week</span>
+              <div style="display: flex; gap: 6px;">
+                <div style="flex: 1; text-align: center;"><div style="height: 32px; border-radius: 8px; background: var(--color-accent-2-400);"></div><span class="text-muted" style="font-size: 11px;">M</span></div>
+                <div style="flex: 1; text-align: center;"><div style="height: 32px; border-radius: 8px; background: var(--color-accent-2-300);"></div><span class="text-muted" style="font-size: 11px;">T</span></div>
+                <div style="flex: 1; text-align: center;"><div style="height: 32px; border-radius: 8px; background: var(--color-neutral-200);"></div><span class="text-muted" style="font-size: 11px;">W</span></div>
+                <div style="flex: 1; text-align: center;"><div style="height: 32px; border-radius: 8px; background: var(--color-accent-2-500);"></div><span class="text-muted" style="font-size: 11px;">T</span></div>
+                <div style="flex: 1; text-align: center;"><div style="height: 32px; border-radius: 8px; border: 1.5px dashed var(--color-accent-400); box-sizing: border-box;"></div><span class="text-muted" style="font-size: 11px;">F</span></div>
+                <div style="flex: 1; text-align: center;"><div style="height: 32px; border-radius: 8px; background: var(--color-neutral-200);"></div><span class="text-muted" style="font-size: 11px;">S</span></div>
+                <div style="flex: 1; text-align: center;"><div style="height: 32px; border-radius: 8px; background: var(--color-neutral-200);"></div><span class="text-muted" style="font-size: 11px;">S</span></div>
+              </div>
+              <p class="text-muted" style="margin: 0; font-size: 13px;">Review today to make your streak 4 days.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280}}">
+class Component extends DCLogic {
+  state = { open: true, theme: "light" };
+  componentDidMount() {
+    let theme = "light", open = true;
+    try {
+      theme = localStorage.getItem("sm.theme") || "light";
+      open = localStorage.getItem("sm.sidebar") !== "closed";
+    } catch (e) {}
+    this.setState({ theme, open });
+    document.documentElement.setAttribute("data-theme", theme);
+  }
+  renderVals() {
+    const persist = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+    return {
+      open: this.state.open,
+      themeIcon: this.state.theme === "dark" ? "☀" : "☾",
+      toggleSidebar: () => this.setState((s) => { persist("sm.sidebar", s.open ? "closed" : "open"); return { open: !s.open }; }),
+      toggleTheme: () => this.setState((s) => {
+        const theme = s.theme === "dark" ? "light" : "dark";
+        persist("sm.theme", theme);
+        document.documentElement.setAttribute("data-theme", theme);
+        return { theme };
+      }),
+    };
+  }
+}
+</script>
+</body>
+</html>

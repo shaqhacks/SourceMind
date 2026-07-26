@@ -21,6 +21,7 @@ from app.routers import (
     export,
     health,
     highlights,
+    notes,
     images,
     ingest,
     jobs,
@@ -82,6 +83,8 @@ def create_app() -> FastAPI:
     app.include_router(sections.section_router)
     app.include_router(highlights.router)
     app.include_router(highlights.highlight_router)
+    app.include_router(notes.router)
+    app.include_router(notes.note_router)
     app.include_router(chapters.router)
     app.include_router(images.router)
     app.include_router(export.router)

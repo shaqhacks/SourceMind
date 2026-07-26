@@ -1,0 +1,146 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import ErrorBanner from "@/components/ErrorBanner";
+import Button from "@/components/ui/Button";
+import { describeError } from "@/lib/api/errors";
+import {
+  generateTest,
+  getJob,
+  listJobs,
+  listTests,
+  TERMINAL_JOB_STATUSES,
+  type TestSummaryOut,
+} from "@/lib/api/client";
+import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { formatJobProgress } from "@/lib/jobs/format";
+
+import { findActiveChapterTestJob } from "./testsFormat";
+
+export interface GenerateTestCardProps {
+  courseId: string;
+  chapterLabel: string;
+  /** This chapter's tests as of the last parent fetch — snapshot of known
+   * attempt ids, so a successful generation can tell which fresh attempt
+   * to navigate into (generate_test's own response is just a job_id). */
+  existingTests: TestSummaryOut[];
+  onSettled: () => void;
+}
+
+const QUESTION_COUNT = 8;
+
+/** Dashed "not attempted" card: starts a chapter-scoped generate_test job
+ * (mirrors ChapterTestClient's own generate flow) and, on success, jumps
+ * straight into the freshly-created attempt — generating a chapter test
+ * implies "I want to take it now", same precedent as the chapter test page. */
+export default function GenerateTestCard({
+  courseId,
+  chapterLabel,
+  existingTests,
+  onSettled,
+}: GenerateTestCardProps) {
+  const router = useRouter();
+  const [localJobId, setLocalJobId] = useState<string | null>(null);
+  const [discoveredJobId, setDiscoveredJobId] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
+    null,
+  );
+  const knownAttemptIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (localJobId) return undefined;
+    let active = true;
+    listJobs().then(({ data }) => {
+      if (!active || !data) return;
+      const found = findActiveChapterTestJob(data, courseId, chapterLabel, TERMINAL_JOB_STATUSES);
+      setDiscoveredJobId(found?.id ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [courseId, chapterLabel, localJobId]);
+
+  const watchedJobId = localJobId ?? discoveredJobId;
+  const { job, done, stalled } = useJobEvents(watchedJobId);
+  const isGenerating = watchedJobId !== null && !done;
+  const jobFailed = done && job?.status === "failed";
+  const failureMessage = failureInfo?.jobId === watchedJobId ? failureInfo.message : null;
+
+  useEffect(() => {
+    if (!done || job?.status !== "succeeded") return;
+    listTests(courseId).then(({ data }) => {
+      if (!data) return;
+      const forChapter = data.filter((test) => test.chapter_label === chapterLabel);
+      const freshAttempt = forChapter
+        .flatMap((test) => test.attempts)
+        .find((attempt) => !knownAttemptIdsRef.current.has(attempt.id));
+      onSettled();
+      if (freshAttempt) router.push(`/course/${courseId}/test/${freshAttempt.id}`);
+    });
+  }, [done, job?.status, courseId, chapterLabel, router, onSettled]);
+
+  useEffect(() => {
+    if (!jobFailed || !watchedJobId) return;
+    let active = true;
+    getJob(watchedJobId).then(({ data }) => {
+      if (active) setFailureInfo({ jobId: watchedJobId, message: data?.error ?? null });
+    });
+    return () => {
+      active = false;
+    };
+  }, [jobFailed, watchedJobId]);
+
+  async function handleGenerate() {
+    setStarting(true);
+    setStartError(null);
+    knownAttemptIdsRef.current = new Set(
+      existingTests.flatMap((test) => test.attempts.map((attempt) => attempt.id)),
+    );
+    const { data, status } = await generateTest(courseId, { chapterLabel });
+    setStarting(false);
+    if (data) {
+      setLocalJobId(data.job_id);
+      return;
+    }
+    setStartError(describeError(status, "Starting test generation").message);
+  }
+
+  return (
+    <div className="flex flex-col gap-2.5 rounded-lg border-[1.5px] border-dashed border-neutral-400 bg-transparent p-5">
+      <span className="text-xs font-semibold uppercase tracking-wide text-neutral-600">
+        {chapterLabel}
+      </span>
+      <p className="text-sm text-muted-foreground">
+        Not attempted yet — generate a {QUESTION_COUNT}-question test from this chapter.
+      </p>
+      {jobFailed && (
+        <ErrorBanner
+          message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
+          onRetry={() => void handleGenerate()}
+        />
+      )}
+      {isGenerating ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          {formatJobProgress(job, stalled)}
+        </p>
+      ) : (
+        !jobFailed && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void handleGenerate()}
+            disabled={starting}
+            className="self-start"
+          >
+            Generate test
+          </Button>
+        )
+      )}
+      {startError && <p className="text-xs text-red-600 dark:text-red-400">{startError}</p>}
+    </div>
+  );
+}

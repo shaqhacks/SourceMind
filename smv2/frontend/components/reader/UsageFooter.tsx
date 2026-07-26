@@ -29,7 +29,7 @@ export default function UsageFooter({ courseId }: UsageFooterProps) {
   if (!usage) return null;
 
   return (
-    <p className="px-4 py-1 text-xs text-muted-foreground">
+    <p className="border-t border-divider px-5 py-1.5 text-xs text-muted-foreground">
       LLM usage: {usage.calls} call{usage.calls === 1 ? "" : "s"} · ${usage.est_cost_usd.toFixed(2)}
     </p>
   );

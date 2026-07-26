@@ -14,6 +14,7 @@ import { ok } from "../support/api-result";
 // mock or their mount-time fetches throw on an unmocked vi.fn(). Mirrors
 // the minimal-mock convention in reading-column-highlights.test.tsx.
 vi.mock("@/lib/api/client", () => ({
+  listNotes: vi.fn(() => Promise.resolve({ data: [], ok: true, status: 200 })),
   listHighlights: vi.fn(),
   createHighlight: vi.fn(),
   updateHighlight: vi.fn(),

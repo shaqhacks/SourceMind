@@ -93,10 +93,16 @@ describe("HtmlPagesView", () => {
     expect(screen.getByTestId("html-page-2")).toHaveTextContent("Page 2");
 
     const page1Container = screen.getByTestId("html-page-1");
-    const observerForPage1 = FakeIntersectionObserver.instances.find((observer) =>
-      observer.observed.includes(page1Container),
-    );
-    observerForPage1!.triggerIntersect(page1Container);
+    // Awaited: the observer registers in a mount effect (same race class as
+    // pdf-note.test.tsx's helper — never grab instances synchronously).
+    const observerForPage1 = await waitFor(() => {
+      const found = FakeIntersectionObserver.instances.find((observer) =>
+        observer.observed.includes(page1Container),
+      );
+      if (!found) throw new Error("page observer not registered yet");
+      return found;
+    });
+    observerForPage1.triggerIntersect(page1Container);
 
     expect(await screen.findByTitle("Page 1")).toBeInTheDocument();
     // Page 2's own observer never fired — still just its placeholder.

@@ -5,11 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import UploadFlow from "@/components/upload/UploadFlow";
 import {
   createCourse,
+  editOutline,
   getJob,
+  listSections,
   startIngest,
   uploadAsset,
   type CourseOut,
   type JobOut,
+  type SectionOut,
 } from "@/lib/api/client";
 
 import { err, ok } from "./support/api-result";
@@ -28,12 +31,16 @@ vi.mock("@/lib/api/client", () => ({
   uploadAsset: vi.fn(),
   startIngest: vi.fn(),
   getJob: vi.fn(),
+  listSections: vi.fn(),
+  editOutline: vi.fn(),
 }));
 
 const mockedCreateCourse = vi.mocked(createCourse);
 const mockedUploadAsset = vi.mocked(uploadAsset);
 const mockedStartIngest = vi.mocked(startIngest);
 const mockedGetJob = vi.mocked(getJob);
+const mockedListSections = vi.mocked(listSections);
+const mockedEditOutline = vi.mocked(editOutline);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
@@ -64,6 +71,23 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
   };
 }
 
+function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
+  return {
+    id: "sec-1",
+    title: "Chapter One",
+    order_index: 0,
+    page_start: 1,
+    page_end: 10,
+    lesson_status: "none",
+    has_content: true,
+    word_count: 100,
+    kind: "content",
+    chapter_label: null,
+    asset_id: null,
+    ...overrides,
+  };
+}
+
 function pdfFile(name: string): File {
   return new File(["%PDF-1.4 fake"], name, { type: "application/pdf" });
 }
@@ -85,6 +109,27 @@ function makeAsset(filename: string) {
   };
 }
 
+/** Drives a fresh render through course creation, upload, and a succeeded
+ * ingest job, landing on the "confirming-outline" step. */
+async function renderThroughIngestSuccess(files: File[] = [pdfFile("book.pdf")]) {
+  const user = userEvent.setup();
+  render(<UploadFlow files={files} onClose={vi.fn()} />);
+
+  await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+  act(() => {
+    FakeEventSource.instances[0].emit("update", {
+      id: "job-1",
+      status: "succeeded",
+      progress: { stage: "done", pct: 100, message: "ingest complete" },
+    });
+  });
+
+  await screen.findByText(/detected outline/i);
+  return user;
+}
+
 describe("UploadFlow", () => {
   let originalEventSource: typeof EventSource;
 
@@ -98,6 +143,7 @@ describe("UploadFlow", () => {
       Promise.resolve(ok(makeAsset(file.name), 201)),
     );
     mockedStartIngest.mockResolvedValue(ok({ job_id: "job-1" }, 202));
+    mockedListSections.mockResolvedValue(ok([makeSection()]));
   });
 
   afterEach(() => {
@@ -133,6 +179,16 @@ describe("UploadFlow", () => {
 
     // Ingest still starts even though one file failed.
     await waitFor(() => expect(mockedStartIngest).toHaveBeenCalledWith("course-1"));
+  });
+
+  it("shows the uploaded page count once known", async () => {
+    const user = userEvent.setup();
+    mockedUploadAsset.mockResolvedValue(ok(makeAsset("book.pdf"), 201));
+
+    render(<UploadFlow files={[pdfFile("book.pdf")]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+
+    await waitFor(() => expect(screen.getByText(/uploaded.*10 pages/i)).toBeInTheDocument());
   });
 
   it("shows live SSE stage/pct/message once the ingest job starts, never a bare spinner", async () => {
@@ -216,28 +272,7 @@ describe("UploadFlow", () => {
     await waitFor(() => expect(mockedStartIngest).toHaveBeenCalledWith("course-1"));
   });
 
-  it("navigates straight to the reader once ingest succeeds, with no outline confirmation step", async () => {
-    const user = userEvent.setup();
-    render(<UploadFlow files={[pdfFile("book.pdf")]} onClose={vi.fn()} />);
-
-    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
-    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-
-    act(() => {
-      FakeEventSource.instances[0].emit("update", {
-        id: "job-1",
-        status: "succeeded",
-        progress: { stage: "done", pct: 100, message: "ingest complete" },
-      });
-    });
-
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/course/course-1"));
-    expect(screen.queryByRole("button", { name: /accept outline/i })).not.toBeInTheDocument();
-    expect(screen.queryByText(/confirm chapter outline/i)).not.toBeInTheDocument();
-  });
-
-  it("advances the step indicator Name → Upload → Ingest, marking completed steps with ✓", async () => {
-    const user = userEvent.setup();
+  it("advances the step indicator Upload -> Confirm outline, marking completed steps with a checkmark", async () => {
     // Hold the upload open so the "uploading" phase is observable instead of
     // resolving synchronously through to ingest.
     let resolveUpload!: (result: Awaited<ReturnType<typeof uploadAsset>>) => void;
@@ -250,41 +285,138 @@ describe("UploadFlow", () => {
 
     render(<UploadFlow files={[pdfFile("book.pdf")]} onClose={vi.fn()} />);
 
-    // The numbered circle sits immediately before its label inside each <li>.
-    function stepCircle(label: "Name" | "Upload" | "Ingest"): HTMLElement {
+    function stepCircle(label: "Upload" | "Confirm outline" | "Start reading"): HTMLElement {
       const indicator = screen.getByRole("list", { name: /upload progress/i });
       const circle = within(indicator).getByText(label).previousElementSibling;
       if (!(circle instanceof HTMLElement)) throw new Error(`no step circle for "${label}"`);
       return circle;
     }
 
-    // Title phase: Name is the current step, nothing completed yet.
-    expect(stepCircle("Name")).toHaveAttribute("aria-current", "step");
-    expect(stepCircle("Name")).toHaveTextContent("1");
-    expect(stepCircle("Upload")).not.toHaveAttribute("aria-current");
-    expect(stepCircle("Upload")).toHaveTextContent("2");
-    expect(stepCircle("Ingest")).not.toHaveAttribute("aria-current");
-    expect(stepCircle("Ingest")).toHaveTextContent("3");
+    // Naming/uploading phase: Upload is the current step.
+    expect(stepCircle("Upload")).toHaveAttribute("aria-current", "step");
+    expect(stepCircle("Upload")).toHaveTextContent("1");
+    expect(stepCircle("Confirm outline")).not.toHaveAttribute("aria-current");
+    expect(stepCircle("Confirm outline")).toHaveTextContent("2");
 
-    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create.*upload/i }));
+    await waitFor(() => expect(mockedCreateCourse).toHaveBeenCalled());
 
-    // Uploading phase (uploadAsset still pending): Upload is current, Name done.
-    await waitFor(() => expect(stepCircle("Upload")).toHaveAttribute("aria-current", "step"));
-    expect(stepCircle("Name")).not.toHaveAttribute("aria-current");
-    expect(stepCircle("Name")).toHaveTextContent("✓");
-    expect(stepCircle("Ingest")).not.toHaveAttribute("aria-current");
-    expect(stepCircle("Ingest")).toHaveTextContent("3");
-
-    // Finish the upload: startIngest fires and the SSE stream opens.
+    // Finish the upload, ingest, and let the job succeed.
     await act(async () => {
       resolveUpload(ok(makeAsset("book.pdf"), 201));
     });
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-1",
+        status: "succeeded",
+        progress: { stage: "done", pct: 100, message: "ingest complete" },
+      });
+    });
 
-    // Ingesting phase: Ingest is current, Name and Upload both done.
-    await waitFor(() => expect(stepCircle("Ingest")).toHaveAttribute("aria-current", "step"));
-    expect(FakeEventSource.instances).toHaveLength(1);
-    expect(stepCircle("Name")).toHaveTextContent("✓");
+    await waitFor(() => expect(stepCircle("Confirm outline")).toHaveAttribute("aria-current", "step"));
     expect(stepCircle("Upload")).not.toHaveAttribute("aria-current");
     expect(stepCircle("Upload")).toHaveTextContent("✓");
+  });
+
+  it("fetches and shows the detected outline for confirmation once ingest succeeds, without navigating yet", async () => {
+    mockedListSections.mockResolvedValue(ok([makeSection({ title: "Chapter One" })]));
+
+    await renderThroughIngestSuccess();
+
+    expect(mockedListSections).toHaveBeenCalledWith("course-1");
+    expect(screen.getByText("Chapter One")).toBeInTheDocument();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("shows a retryable error if fetching the detected outline fails", async () => {
+    mockedListSections.mockResolvedValueOnce(err(500));
+    const user = userEvent.setup();
+    render(<UploadFlow files={[pdfFile("book.pdf")]} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-1",
+        status: "succeeded",
+        progress: { stage: "done", pct: 100, message: "ingest complete" },
+      });
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/loading the detected outline/i);
+
+    mockedListSections.mockResolvedValueOnce(ok([makeSection({ title: "Chapter One" })]));
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+
+    await screen.findByText("Chapter One");
+  });
+
+  it("accepting the outline with no edits navigates straight to the reader, with no PATCH", async () => {
+    const user = await renderThroughIngestSuccess();
+
+    await user.click(screen.getByRole("button", { name: /accept outline.*start reading/i }));
+
+    expect(mockedEditOutline).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/course/course-1"));
+  });
+
+  it("accepting the outline with staged edits issues one edit_outline PATCH before navigating", async () => {
+    mockedListSections.mockResolvedValue(ok([makeSection({ id: "sec-1", title: "Chapter One" })]));
+    mockedEditOutline.mockResolvedValue(ok([makeSection({ id: "sec-1", title: "Renamed" })]));
+    const user = await renderThroughIngestSuccess();
+
+    await user.click(screen.getByRole("button", { name: "Chapter One" }));
+    const input = screen.getByRole("textbox", { name: /rename chapter one/i });
+    await user.clear(input);
+    await user.type(input, "Renamed{Enter}");
+
+    await user.click(screen.getByRole("button", { name: /accept outline.*start reading/i }));
+
+    await waitFor(() =>
+      expect(mockedEditOutline).toHaveBeenCalledWith("course-1", [
+        { type: "rename", section_id: "sec-1", title: "Renamed" },
+      ]),
+    );
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/course/course-1"));
+  });
+
+  it("shows a retryable error and keeps the staged draft if applying the outline fails", async () => {
+    mockedListSections.mockResolvedValue(ok([makeSection({ id: "sec-1", title: "Chapter One" })]));
+    mockedEditOutline.mockResolvedValue(err(500));
+    const user = await renderThroughIngestSuccess();
+
+    await user.click(screen.getByRole("button", { name: "Chapter One" }));
+    const input = screen.getByRole("textbox", { name: /rename chapter one/i });
+    await user.clear(input);
+    await user.type(input, "Renamed{Enter}");
+    await user.click(screen.getByRole("button", { name: /accept outline.*start reading/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/applying your outline edits failed/i);
+    expect(mockPush).not.toHaveBeenCalled();
+    // The staged draft survived the failed attempt.
+    expect(screen.getByRole("button", { name: "Renamed" })).toBeInTheDocument();
+  });
+
+  it("Cancel on the outline step closes the dialog via onClose, without navigating", async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<UploadFlow files={[pdfFile("book.pdf")]} onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-1",
+        status: "succeeded",
+        progress: { stage: "done", pct: 100, message: "ingest complete" },
+      });
+    });
+
+    await user.click(await screen.findByRole("button", { name: /^cancel$/i }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
   });
 });

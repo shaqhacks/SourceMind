@@ -29,7 +29,7 @@ export default function TypographyControls() {
         aria-controls={PANEL_ID}
         aria-label="Typography settings"
         onClick={() => setOpen((value) => !value)}
-        className="rounded-md border border-border px-3 py-1.5 text-sm font-serif"
+        className="rounded-md border border-border bg-surface-raised px-3 py-1.5 font-serif text-[13px] transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14]"
       >
         Aa
       </button>
@@ -40,7 +40,7 @@ export default function TypographyControls() {
           role="group"
           aria-label="Typography settings"
           tabIndex={-1}
-          className="absolute right-0 z-10 mt-2 w-64 space-y-4 rounded-md border border-border bg-background p-4 text-sm shadow-lg"
+          className="absolute right-0 z-10 mt-2 w-64 space-y-4 rounded-lg border border-divider bg-surface-raised p-4 text-sm shadow-md"
         >
           <label className="block">
             <span className="mb-1 flex justify-between text-muted-foreground">

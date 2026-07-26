@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; background: #fdfcfb; color: #1a1a1a; font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { color: #1d4ed8; }
+  </style>
+</helmet>
+<div style="display: flex; height: 100vh; flex-direction: column; overflow: hidden;">
+  <header style="display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #7d7d78; padding: 16px 24px;">
+    <h1 style="margin: 0; font-size: 18px; font-weight: 600;"><a href="#" style="color: #1a1a1a;">SourceMind</a></h1>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <a href="#" style="border-radius: 9999px; background: #2563eb; padding: 4px 10px; font-size: 12px; font-weight: 500; color: #ffffff;">12 due</a>
+      <div role="group" style="display: inline-flex; overflow: hidden; border-radius: 6px; border: 1px solid #7d7d78; font-size: 14px;">
+        <button style="padding: 6px 12px; background: #2563eb; color: #ffffff; border: none; font-family: inherit; font-size: 14px; cursor: pointer;">System</button>
+        <button style="padding: 6px 12px; background: transparent; color: #1a1a1a; border: none; font-family: inherit; font-size: 14px; cursor: pointer;">Light</button>
+        <button style="padding: 6px 12px; background: transparent; color: #1a1a1a; border: none; font-family: inherit; font-size: 14px; cursor: pointer;">Dark</button>
+      </div>
+    </div>
+  </header>
+  <div style="display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #7d7d78; padding: 8px 16px; font-size: 14px;">
+    <button aria-label="Hide outline" style="border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 4px 8px; font-size: 14px; font-family: inherit; cursor: pointer; color: #1a1a1a;" style-hover="background: rgba(82,82,91,0.1);">☰</button>
+    <h1 style="margin: 0; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500;">Welcome to SourceMind</h1>
+    <div role="group" style="display: flex; overflow: hidden; border-radius: 6px; border: 1px solid #7d7d78; font-size: 14px;">
+      <button style="padding: 4px 8px; background: rgba(37,99,235,0.15); font-weight: 500; color: #2563eb; border: none; font-family: inherit; font-size: 14px; cursor: pointer;">Source</button>
+      <button style="padding: 4px 8px; background: transparent; border: none; font-family: inherit; font-size: 14px; cursor: pointer; color: #1a1a1a;" style-hover="background: rgba(82,82,91,0.1);">Pages</button>
+      <button style="padding: 4px 8px; background: transparent; border: none; font-family: inherit; font-size: 14px; cursor: pointer; color: #1a1a1a;" style-hover="background: rgba(82,82,91,0.1);">Lesson</button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button style="border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 4px 8px; font-size: 14px; font-family: inherit; cursor: pointer; color: #1a1a1a;">Edit outline</button>
+      <button style="border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 4px 8px; font-size: 14px; font-family: inherit; cursor: pointer; color: #1a1a1a;">Generate all lessons</button>
+      <button style="border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 4px 8px; font-size: 14px; font-family: inherit; cursor: pointer; color: #1a1a1a;">Quizzes</button>
+    </div>
+    <button style="border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 4px 8px; font-size: 14px; font-family: inherit; cursor: pointer; color: #1a1a1a;">Chat</button>
+    <button style="border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 4px 8px; font-size: 14px; font-family: inherit; cursor: pointer; color: #1a1a1a;">Notes</button>
+    <button aria-label="Typography settings" style="border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 6px 12px; font-size: 14px; font-family: Charter, Georgia, serif; cursor: pointer; color: #1a1a1a;">Aa</button>
+  </div>
+  <div style="display: flex; min-height: 0; flex: 1;">
+    <nav aria-label="Chapter outline" style="display: flex; width: 288px; flex-shrink: 0; flex-direction: column; overflow-y: auto; border-right: 1px solid #7d7d78; background: rgba(253,252,251,0.6); padding: 8px 0;">
+      <ul style="margin: 0; padding: 0; list-style: none;">
+        <li>
+          <div style="display: flex; align-items: center; gap: 4px; padding: 4px 12px;">
+            <button style="display: flex; flex: 1; align-items: center; gap: 6px; overflow: hidden; border-radius: 4px; padding: 4px; text-align: left; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b; background: transparent; border: none; font-family: inherit; cursor: pointer;" style-hover="background: rgba(82,82,91,0.1);">
+              <span style="font-size: 10px;">▾</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">How SourceMind Works</span>
+            </button>
+            <a href="#" style="flex-shrink: 0; border-radius: 4px; border: 1px solid #7d7d78; padding: 2px 6px; font-size: 10px; font-weight: 500; color: #1a1a1a;" style-hover="background: rgba(82,82,91,0.1);">Test · 60%</a>
+          </div>
+          <ul style="margin: 0; padding: 0; list-style: none;">
+            <li>
+              <button aria-current="true" style="display: block; width: 100%; border: none; border-left: 2px solid #2563eb; background: transparent; padding: 6px 12px 6px 16px; text-align: left; font-size: 14px; font-weight: 500; color: #2563eb; font-family: inherit; cursor: pointer;">
+                <span style="display: flex; align-items: center; gap: 8px;">
+                  <span style="display: inline-block; height: 8px; width: 8px; flex-shrink: 0; border-radius: 9999px; background: #15803d;" title="Lesson ready"></span>
+                  <span style="flex-shrink: 0; color: #52525b;">1.</span>
+                  <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">How SourceMind Works</span>
+                </span>
+              </button>
+            </li>
+          </ul>
+        </li>
+        <li>
+          <div style="display: flex; align-items: center; gap: 4px; padding: 4px 12px;">
+            <button style="display: flex; flex: 1; align-items: center; gap: 6px; overflow: hidden; border-radius: 4px; padding: 4px; text-align: left; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b; background: transparent; border: none; font-family: inherit; cursor: pointer;" style-hover="background: rgba(82,82,91,0.1);">
+              <span style="font-size: 10px;">▸</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Lessons, Flashcards and Quizzes</span>
+            </button>
+            <a href="#" style="flex-shrink: 0; border-radius: 4px; border: 1px solid #7d7d78; padding: 2px 6px; font-size: 10px; font-weight: 500; color: #1a1a1a;" style-hover="background: rgba(82,82,91,0.1);">Test</a>
+          </div>
+        </li>
+        <li>
+          <div style="display: flex; align-items: center; gap: 4px; padding: 4px 12px;">
+            <button style="display: flex; flex: 1; align-items: center; gap: 6px; overflow: hidden; border-radius: 4px; padding: 4px; text-align: left; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b; background: transparent; border: none; font-family: inherit; cursor: pointer;" style-hover="background: rgba(82,82,91,0.1);">
+              <span style="font-size: 10px;">▸</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Reading Efficiently</span>
+            </button>
+            <a href="#" style="flex-shrink: 0; border-radius: 4px; border: 1px solid #7d7d78; padding: 2px 6px; font-size: 10px; font-weight: 500; color: #1a1a1a;" style-hover="background: rgba(82,82,91,0.1);">Test</a>
+          </div>
+        </li>
+      </ul>
+    </nav>
+    <div style="position: relative; display: flex; min-height: 0; flex: 1;">
+      <div style="min-height: 0; flex: 1; overflow-y: auto; font-size: 18px; line-height: 1.6;">
+        <article style="max-width: 78ch; margin: 0 auto; padding: 40px 24px; font-family: Charter, Georgia, 'Times New Roman', serif;">
+          <p style="margin: 0 0 8px; font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-size: 14px; color: #52525b;">p.1–2</p>
+          <h2 style="margin: 0 0 24px; font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-size: 24px; font-weight: 600;">How SourceMind Works</h2>
+          <p style="margin: 0 0 1em;">SourceMind turns a PDF into a workbook in three steps: upload, outline, read. You upload a PDF, and within seconds you have a full table of contents and every chapter's original text ready to read - no waiting, no AI calls, no cost. This document you're reading right now was ingested exactly the same way.</p>
+          <p style="margin: 0 0 1em;">That speed is not an accident. Ingest is deterministic: SourceMind never asks an AI model to read your document just to figure out its structure. If your PDF has bookmarks (a table of contents embedded by whoever made the PDF), SourceMind uses those directly as chapter boundaries. If it doesn't, SourceMind falls back to even page windows - a fixed number of pages per chapter - so you always get a usable outline immediately, even from a raw scan with no bookmarks at all.</p>
+          <p style="margin: 0 0 1em;">Either way, the text you see in each chapter is the real, original text extracted from your PDF - never rewritten, summarized, or paraphrased by a model. SourceMind calls this body text immutable: once ingested, it never changes unless you re-upload or re-ingest the source. Anything generated later - a lesson, flashcards, a quiz - is stored separately, so your source material is always there, unedited, to check against.</p>
+          <p style="margin: 0 0 1em;">If a chapter title looks wrong, or a chapter split lands in an odd place, you can fix it. The outline supports renaming, reordering, merging adjacent chapters, and splitting one chapter into two - directly from the reader, without re-uploading anything.</p>
+          <div style="margin-top: 32px; border-top: 1px solid #7d7d78; padding-top: 16px; font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-size: 16px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+              <p style="margin: 0; font-size: 14px; color: #52525b;">4 flashcards for this section</p>
+              <button style="border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 4px 8px; font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer; color: #1a1a1a;">Generate more</button>
+            </div>
+            <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 12px;">
+              <div style="border-radius: 8px; border: 1px solid #7d7d78; padding: 12px; font-size: 14px;">
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  <p style="margin: 0;">What are the three steps SourceMind uses to turn a PDF into a workbook?</p>
+                  <button style="align-self: flex-start; background: transparent; border: none; padding: 0; font-size: 12px; font-weight: 500; color: #2563eb; text-decoration: underline; font-family: inherit; cursor: pointer;">Show answer</button>
+                  <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 4px; font-size: 12px;">
+                    <button style="background: transparent; border: none; padding: 0; font-weight: 500; color: #2563eb; font-family: inherit; cursor: pointer;">Edit</button>
+                    <button style="background: transparent; border: none; padding: 0; font-weight: 500; color: #dc2626; font-family: inherit; cursor: pointer;">Delete</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+      <button aria-label="Next chapter" style="position: absolute; top: 0; bottom: 0; right: 0; z-index: 10; display: flex; width: 48px; align-items: center; justify-content: center; color: rgba(82,82,91,0.4); background: transparent; border: none; cursor: pointer;" style-hover="background: rgba(82,82,91,0.05); color: #1a1a1a;">
+        <span style="font-size: 24px;">›</span>
+      </button>
+    </div>
+    <div role="complementary" aria-label="Course chat" style="display: flex; width: 380px; flex-shrink: 0; flex-direction: column; border-left: 1px solid #7d7d78;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #7d7d78; padding: 12px 16px;">
+        <h2 style="margin: 0; font-size: 14px; font-weight: 600;">Chat</h2>
+        <button style="border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 4px 8px; font-size: 14px; font-family: inherit; cursor: pointer; color: #1a1a1a;">Close</button>
+      </div>
+      <div style="flex: 1; overflow-y: auto; padding: 16px;">
+        <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 16px;">
+          <li style="text-align: right;">
+            <div style="display: inline-block; max-width: 100%; border-radius: 8px; background: rgba(37,99,235,0.1); padding: 8px 12px; text-align: left; font-size: 14px;">What does "immutable body text" mean here?</div>
+          </li>
+          <li style="text-align: left;">
+            <div style="display: inline-block; max-width: 100%; border-radius: 8px; border: 1px solid #7d7d78; background: #fdfcfb; padding: 8px 12px; text-align: left; font-size: 14px;">
+              <p style="margin: 0;">It means the extracted source text never changes after ingest — lessons and cards are stored separately, so the original is always available to check against.</p>
+              <ul style="margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px;">
+                <li><button style="border-radius: 9999px; border: 1px solid #7d7d78; background: transparent; padding: 2px 8px; font-size: 12px; color: #52525b; font-family: inherit; cursor: pointer;" style-hover="background: rgba(82,82,91,0.1);">[1] How SourceMind Works:p.1</button></li>
+              </ul>
+            </div>
+          </li>
+        </ul>
+      </div>
+      <div style="border-top: 1px solid #7d7d78;">
+        <form style="display: flex; align-items: center; gap: 8px; padding: 12px;">
+          <input type="text" placeholder="Ask about this course…" aria-label="Message" style="flex: 1; border-radius: 6px; border: 1px solid #7d7d78; background: transparent; padding: 8px 12px; font-size: 14px; font-family: inherit; color: #1a1a1a;">
+          <button style="border-radius: 6px; background: #1a1a1a; color: #fdfcfb; border: none; padding: 8px 16px; font-size: 14px; font-weight: 500; font-family: inherit; cursor: pointer;">Send</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <p style="margin: 0; padding: 4px 16px; font-size: 12px; color: #52525b;">LLM usage: 6 calls · $0.14</p>
+  <div role="note" style="display: flex; align-items: center; gap: 16px; border-top: 1px solid #7d7d78; background: #fdfcfb; padding: 8px 16px; font-size: 12px; color: #52525b;">
+    <span style="display: flex; align-items: center; gap: 6px;"><kbd style="border-radius: 4px; border: 1px solid #7d7d78; background: rgba(82,82,91,0.1); padding: 2px 6px; font-family: 'Geist Mono', monospace;">← / → or j / k</kbd>Next / previous chapter</span>
+    <span style="display: flex; align-items: center; gap: 6px;"><kbd style="border-radius: 4px; border: 1px solid #7d7d78; background: rgba(82,82,91,0.1); padding: 2px 6px; font-family: 'Geist Mono', monospace;">s</kbd>Cycle source / pages / lesson view</span>
+    <span style="display: flex; align-items: center; gap: 6px;"><kbd style="border-radius: 4px; border: 1px solid #7d7d78; background: rgba(82,82,91,0.1); padding: 2px 6px; font-family: 'Geist Mono', monospace;">c</kbd>Toggle chat</span>
+    <span style="margin-left: auto; display: flex; align-items: center; gap: 6px;"><kbd style="border-radius: 4px; border: 1px solid #7d7d78; background: rgba(82,82,91,0.1); padding: 2px 6px; font-family: 'Geist Mono', monospace;">?</kbd>all shortcuts</span>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

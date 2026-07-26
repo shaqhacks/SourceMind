@@ -234,6 +234,14 @@ class ReviewQueueCardOut(BaseModel):
     back_md: str
     due_at: datetime | None
     is_new: bool
+    # Scheduler state going INTO the next grade (srs_service.schedule_next's
+    # own convention) — a new card (is_new=True) gets the same bootstrap
+    # values grade_card() uses when it has no ReviewState yet. Exposed so
+    # the frontend can preview each grade's resulting interval without
+    # guessing at state it doesn't have.
+    interval_days: float
+    ease: float
+    reps: int
 
 
 class ReviewQueueOut(BaseModel):
@@ -469,6 +477,36 @@ class HighlightOut(BaseModel):
     color: HighlightColor
     surface: Literal["source", "pdf"]
     note_md: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+# --- Notes (positional margin notes, ADR margin-notes) ---------------
+
+
+class NoteIn(BaseModel):
+    """A margin note anchored to a page + a 0..1 vertical fraction. page is
+    1-based here like every page in this API surface; anchor_y is top-origin."""
+
+    section_id: str
+    page: int = Field(ge=1)
+    anchor_y: float = Field(ge=0.0, le=1.0)
+    note_md: str = Field(min_length=1, max_length=20000)
+    surface: Literal["pdf"] = "pdf"
+
+
+class NoteUpdateIn(BaseModel):
+    note_md: str | None = Field(default=None, min_length=1, max_length=20000)
+
+
+class NoteOut(BaseModel):
+    id: str
+    course_id: str
+    section_id: str
+    surface: Literal["pdf"]
+    page: int
+    anchor_y: float
+    note_md: str
     created_at: datetime
     updated_at: datetime
 

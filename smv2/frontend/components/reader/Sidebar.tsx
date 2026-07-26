@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 
+import ProgressBar from "@/components/ui/ProgressBar";
 import { chapterGroupKey, groupSectionsByChapter } from "@/lib/reader/chapterGroups";
 import type { ChapterTestStats, ReaderSection } from "@/lib/reader/types";
 
@@ -50,6 +51,36 @@ function LessonDot({ status }: { status: string }) {
     />
   );
 }
+
+/**
+ * Reading-position marker, per the redesign's contents rows: an accent ring
+ * on the section being read, a faint neutral ring on every other one.
+ *
+ * The mock also specifies a sage-filled ✓ for "read" — deliberately not
+ * implemented: this component only knows which section is CURRENT (from
+ * `activeSectionId`), and nothing in the reader's data model records which
+ * sections have been read. Inventing that from position in the list would
+ * be a fabricated state, so unread/current are the only two rendered.
+ * `aria-hidden` because `aria-current` on the row button already conveys
+ * "this is the one you're on" to assistive tech.
+ */
+function PositionDot({ current }: { current: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`h-[18px] w-[18px] shrink-0 rounded-full ${
+        current ? "border-2 border-accent" : "border-[1.5px] border-neutral-400"
+      }`}
+    />
+  );
+}
+
+// Chapter-row "Test" tag. Raw span/link classes rather than <Badge>: Badge
+// prefixes a decorative glyph, which would land inside this link's
+// accessible name and break the `/^test/`-anchored queries the sidebar
+// tests use.
+const TEST_TAG_BASE =
+  "shrink-0 rounded-[6px] px-2 py-0.5 text-[10px] font-medium transition-colors";
 
 function formatScorePercent(score: number | null): string | null {
   return score === null ? null : `${Math.round(score * 100)}%`;
@@ -116,11 +147,22 @@ export default function Sidebar({
     });
   }
 
+  // Position of the active section within its own chapter's reading rows —
+  // the only progress-shaped figure this component can derive honestly (see
+  // PositionDot's note on why "read" state isn't available). Zero when the
+  // active section isn't a content row (a deep-linked practice/answers
+  // section), which suppresses the callout entirely.
+  const activeGroup = groups.find((group) => group.key === activeGroupKey);
+  const activeGroupContent =
+    activeGroup?.sections.filter((section) => section.kind === "content") ?? [];
+  const positionInChapter =
+    activeGroupContent.findIndex((section) => section.id === activeSectionId) + 1;
+
   return (
     <nav
       id="reader-sidebar"
       aria-label="Chapter outline"
-      className="flex w-72 shrink-0 flex-col overflow-y-auto border-r border-border bg-background/60 py-2"
+      className="flex min-h-0 w-[300px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-divider p-4"
     >
       <ul>
         {groups.map((group) => {
@@ -135,15 +177,17 @@ export default function Sidebar({
 
           return (
             <li key={group.key}>
-              <div className="flex items-center gap-1 py-1 pl-3 pr-3">
+              <div className="flex items-center gap-2 px-2 py-1.5">
                 <button
                   type="button"
                   onClick={() => toggleGroup(group.key, isActiveGroup)}
                   aria-expanded={open}
                   aria-controls={listId}
-                  className="flex flex-1 items-center gap-1.5 truncate rounded px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted-foreground/10"
+                  className={`flex flex-1 items-center gap-2 truncate rounded-sm px-1 py-0.5 text-left text-[11px] font-bold uppercase tracking-[0.06em] transition-colors hover:bg-foreground/[0.05] ${
+                    isActiveGroup ? "text-foreground" : "text-neutral-600"
+                  }`}
                 >
-                  <span aria-hidden="true" className="text-[10px]">
+                  <span aria-hidden="true" className="text-[10px] leading-none">
                     {open ? "▾" : "▸"}
                   </span>
                   <span className="truncate">{group.displayLabel}</span>
@@ -152,14 +196,18 @@ export default function Sidebar({
                   <Link
                     href={`/course/${courseId}/chapter/${encodeURIComponent(group.label)}/test`}
                     title={testLabel}
-                    className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium hover:bg-muted-foreground/10"
+                    className={`${TEST_TAG_BASE} ${
+                      isActiveGroup
+                        ? "bg-accent-soft text-accent-800 hover:bg-accent-200"
+                        : "bg-neutral-100 text-neutral-800 hover:bg-neutral-200"
+                    }`}
                   >
                     {testLabel}
                   </Link>
                 )}
               </div>
               {open && (
-                <ul id={listId}>
+                <ul id={listId} className="flex flex-col gap-px pl-2.5">
                   {contentSections.map((section, sectionIndex) => {
                     const index = indexById.get(section.id);
                     if (index === undefined) return null;
@@ -172,19 +220,18 @@ export default function Sidebar({
                           type="button"
                           aria-current={active ? "true" : undefined}
                           onClick={() => onSelect(index)}
-                          className={`block w-full border-l-2 py-1.5 pl-4 pr-3 text-left text-sm transition-colors ${
+                          className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13.5px] transition-colors ${
                             active
-                              ? "border-accent font-medium text-accent"
-                              : "border-transparent hover:bg-muted-foreground/10"
+                              ? "bg-surface-raised font-semibold shadow-sm"
+                              : "opacity-70 hover:bg-foreground/[0.05] hover:opacity-100"
                           }`}
                         >
-                          <span className="flex items-center gap-2">
-                            <LessonDot status={lessonDisplayStatus} />
-                            <span className="shrink-0 text-muted-foreground">
-                              {sectionIndex + 1}.
-                            </span>
-                            <span className="truncate">{section.title}</span>
+                          <PositionDot current={active} />
+                          <span className="shrink-0 text-muted-foreground">
+                            {sectionIndex + 1}.
                           </span>
+                          <span className="min-w-0 flex-1 truncate">{section.title}</span>
+                          <LessonDot status={lessonDisplayStatus} />
                         </button>
                       </li>
                     );
@@ -195,6 +242,28 @@ export default function Sidebar({
           );
         })}
       </ul>
+      {/* Bottom-pinned chapter callout. Deliberately narrower than the
+          mock's: it shows only where you are in the chapter, because that
+          is the one figure derivable from this component's props. The
+          mock's "N sections read" and "N cards due" have no backing data
+          here (no per-section read flag, no due counts) and are omitted
+          rather than approximated. */}
+      {positionInChapter > 0 && activeGroupContent.length > 0 && (
+        <div className="mt-auto rounded-lg bg-sage-100 p-3.5 text-[13px] leading-relaxed">
+          <strong className="font-semibold">Chapter progress</strong>
+          <div className="my-2">
+            <ProgressBar
+              percent={(positionInChapter / activeGroupContent.length) * 100}
+              label={`Chapter progress: section ${positionInChapter} of ${activeGroupContent.length}`}
+              tone="sage"
+            />
+          </div>
+          <span className="text-muted-foreground">
+            Section {positionInChapter} of {activeGroupContent.length}
+            {activeGroup ? ` · ${activeGroup.displayLabel}` : ""}
+          </span>
+        </div>
+      )}
     </nav>
   );
 }

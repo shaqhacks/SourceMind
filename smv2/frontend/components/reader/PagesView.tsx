@@ -1,10 +1,10 @@
 "use client";
 
-import type { HighlightOut } from "@/lib/api/client";
+import type { HighlightOut, NoteOut } from "@/lib/api/client";
 import { useAssetHtmlStatus } from "@/lib/reader/htmlPagesStatus";
 
 import HtmlPagesView from "./HtmlPagesView";
-import PdfPagesView from "./PdfPagesView";
+import PdfPagesView, { type NoteClickHandler, type NoteGutterClick } from "./PdfPagesView";
 
 export interface PagesViewProps {
   courseId: string;
@@ -18,6 +18,12 @@ export interface PagesViewProps {
   highlights?: HighlightOut[];
   /** Forwarded to PdfPagesView's painter gate. */
   enabled?: boolean;
+  /** Positional margin notes + gutter interactions — forwarded to
+   * PdfPagesView only (HtmlPagesView has no note gutter yet, same as
+   * highlights). */
+  notes?: NoteOut[];
+  onNoteGutterClick?: NoteGutterClick;
+  onNoteClick?: NoteClickHandler;
 }
 
 /**
@@ -36,6 +42,9 @@ export default function PagesView({
   pageEnd,
   highlights,
   enabled,
+  notes,
+  onNoteGutterClick,
+  onNoteClick,
 }: PagesViewProps) {
   const status = useAssetHtmlStatus(courseId, assetId);
 
@@ -54,6 +63,9 @@ export default function PagesView({
         pageEnd={pageEnd}
         highlights={highlights}
         enabled={enabled}
+        notes={notes}
+        onNoteGutterClick={onNoteGutterClick}
+        onNoteClick={onNoteClick}
       />
     </div>
   );

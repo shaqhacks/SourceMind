@@ -85,11 +85,11 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
         onClick={() => void handleStart()}
         disabled={starting || inProgress}
         aria-live="polite"
-        className="rounded-md border border-border px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+        className="rounded-md border border-border bg-surface-raised px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14] disabled:cursor-not-allowed disabled:opacity-45"
       >
         {inProgress ? `Generating ${settledCount} of ${total}…` : "Generate all lessons"}
       </button>
-      {error && <span className="text-xs text-red-600 dark:text-red-400">{error}</span>}
+      {error && <span className="text-xs text-status-serious">{error}</span>}
       {!inProgress && watchList !== null && skipped > 0 && (
         <span className="text-xs text-muted-foreground">{skipped} already generated</span>
       )}

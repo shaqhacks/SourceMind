@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
@@ -37,6 +38,18 @@ async function fetchAttempt(attemptId: string): Promise<LoadState> {
   const { data, status } = await getTest(attemptId);
   if (!data) return { kind: "error", error: describeError(status, "Loading quiz") };
   return { kind: "loaded", attempt: data };
+}
+
+/** "Chapter 1 test · Jul 21" — the deck only carries a chapter label, not an
+ * attempt ordinal, so the date (not "attempt N") disambiguates this attempt
+ * from others on the same deck without a second network round trip. */
+function headerLabel(attempt: TestAttemptOut): string {
+  const chapter = attempt.chapter_label ?? "Test";
+  const date = new Date(attempt.created_at).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+  return `${chapter} test · ${date}`;
 }
 
 /**
@@ -128,6 +141,11 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
     }
   }, [attemptId, answers]);
 
+  const goPrev = useCallback(() => {
+    setQuestionIndex((index) => Math.max(0, index - 1));
+    setUnanswered(false);
+  }, []);
+
   const goNext = useCallback(() => {
     if (state.kind !== "loaded") return;
     if (answers[questionIndex] === null) {
@@ -180,7 +198,7 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
     const correctCount = result.results.filter((questionResult) => questionResult.correct).length;
     const totalCount = result.results.length;
     mainContent = (
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
+      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-6 p-9">
         <StatTile
           value={`${Math.round(result.score * 100)}%`}
           label={`${correctCount} of ${totalCount} correct`}
@@ -188,7 +206,7 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
         {result.added_card_ids.length > 0 && (
           <div
             role="status"
-            className="flex items-center justify-between gap-3 rounded-md border border-accent/30 bg-accent/5 px-4 py-3 text-sm"
+            className="flex items-center justify-between gap-3 rounded-md border border-accent/30 bg-accent-soft px-4 py-3 text-sm"
           >
             <span>
               {result.added_card_ids.length} missed concept
@@ -200,7 +218,7 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
           {result.due_now_count > 0 && (
             <Link
               href={`/review?course=${courseId}&start=due`}
-              className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:opacity-90"
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-600"
             >
               Start review — {result.due_now_count} card{result.due_now_count === 1 ? "" : "s"} due
               now
@@ -221,12 +239,12 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
             const question = attempt.questions[index];
             return (
               <li key={index}>
-                <Card className="flex flex-col gap-2">
+                <Card className="flex flex-col gap-2 p-6">
                   <p className="text-sm font-medium">{question.question}</p>
                   {questionResult.correct ? (
                     <Badge tone="good">Correct</Badge>
                   ) : (
-                    <Badge tone="serious">Incorrect</Badge>
+                    <Badge tone="accent">Incorrect</Badge>
                   )}
                   <p className="text-sm text-muted-foreground">
                     Your answer:{" "}
@@ -254,54 +272,98 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
     const { attempt } = state;
     const question = attempt.questions[questionIndex];
     mainContent = (
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
-        <div className="flex flex-col gap-2">
-          <p role="status" className="text-sm text-muted-foreground">
+      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-6 p-9">
+        <div className="flex items-center gap-3.5">
+          <div className="flex-1">
+            <ProgressBar
+              percent={((questionIndex + 1) / questionCount) * 100}
+              label="Quiz progress"
+            />
+          </div>
+          <p role="status" className="shrink-0 text-sm font-semibold text-muted-foreground">
             Question {questionIndex + 1} of {questionCount}
           </p>
-          <ProgressBar
-            percent={((questionIndex + 1) / questionCount) * 100}
-            label="Quiz progress"
-          />
         </div>
-        <h2 className="text-base font-semibold">{question.question}</h2>
-        <fieldset className="flex flex-col gap-2">
-          <legend className="sr-only">Choices</legend>
-          {question.choices.map((choice, index) => (
-            <label
-              key={index}
-              className="flex items-start gap-3 rounded-lg border border-border bg-surface-raised p-3 transition-colors hover:border-muted-foreground has-checked:border-accent has-checked:bg-accent-soft/40"
+        <Card className="flex flex-col gap-5 p-8 shadow-md">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {attempt.chapter_label ?? "Test"}
+          </span>
+          <h2 className="font-heading text-[22px] leading-snug">{question.question}</h2>
+          <fieldset className="flex flex-col gap-2.5">
+            <legend className="sr-only">Choices</legend>
+            {question.choices.map((choice, index) => (
+              <label
+                key={index}
+                className="flex items-start gap-3 rounded-md border border-divider bg-background px-4 py-3.5 text-[15px] leading-snug transition-colors hover:border-muted-foreground has-checked:border-[1.5px] has-checked:border-accent has-checked:bg-accent-soft"
+              >
+                <input
+                  type="radio"
+                  name={`question-${questionIndex}`}
+                  checked={answers[questionIndex] === index}
+                  onChange={() => selectAnswer(index)}
+                  style={{ accentColor: "var(--accent)" }}
+                  className="mt-0.5"
+                />
+                <span aria-hidden="true" className="font-semibold text-muted-foreground">
+                  {index + 1}
+                </span>
+                <span>{choice}</span>
+              </label>
+            ))}
+          </fieldset>
+          {unanswered && (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              Select an answer before continuing.
+            </p>
+          )}
+          {submitError && <ErrorBanner message={submitError} onRetry={handleSubmit} />}
+          <div className="flex items-center justify-between">
+            <Button
+              variant="ghost"
+              onClick={goPrev}
+              disabled={questionIndex === 0}
+              className="text-sm"
             >
-              <input
-                type="radio"
-                name={`question-${questionIndex}`}
-                checked={answers[questionIndex] === index}
-                onChange={() => selectAnswer(index)}
-                className="mt-0.5"
-              />
-              {choice}
-            </label>
-          ))}
-        </fieldset>
-        {unanswered && (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-            Select an answer before continuing.
-          </p>
-        )}
-        {submitError && <ErrorBanner message={submitError} onRetry={handleSubmit} />}
-        <Button variant="primary" onClick={goNext} disabled={submitting} className="self-start">
-          {questionIndex + 1 < questionCount ? "Next (Enter)" : "Submit (Enter)"}
-        </Button>
+              ← Previous
+            </Button>
+            <Button variant="primary" onClick={goNext} disabled={submitting}>
+              {questionIndex + 1 < questionCount ? "Next question" : "Submit quiz"}
+            </Button>
+          </div>
+        </Card>
+        <p className="text-center text-[13px] text-muted-foreground">
+          <kbd className="rounded-md border border-divider px-1.5 py-0.5 font-sans">1–4</kbd> pick an
+          answer ·{" "}
+          <kbd className="rounded-md border border-divider px-1.5 py-0.5 font-sans">Enter</kbd> next
+          / submit
+        </p>
       </div>
     );
   }
 
   return (
     <>
-      <div className="border-b border-border px-8 py-4">
-        <h1 ref={headingRef} tabIndex={-1} className="text-lg font-semibold outline-none">
-          Quiz
+      <div className="flex items-center gap-3 border-b border-border px-6 py-3">
+        <Link
+          href="/tests"
+          aria-label="Back to tests"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-raised transition-colors hover:bg-foreground/[0.07]"
+        >
+          <ArrowLeft aria-hidden="true" className="h-4 w-4" strokeWidth={2.75} />
+        </Link>
+        <h1
+          ref={headingRef}
+          tabIndex={-1}
+          className="truncate text-sm font-medium text-muted-foreground outline-none"
+        >
+          {state.kind === "loaded" ? headerLabel(state.attempt) : "Quiz"}
         </h1>
+        <Link
+          href="/tests"
+          className="ml-auto shrink-0 rounded-md border border-border bg-surface-raised px-3 py-1.5 text-sm font-medium transition-colors hover:bg-foreground/[0.07]"
+        >
+          Save &amp; exit
+        </Link>
       </div>
       {mainContent}
     </>

@@ -13,7 +13,7 @@ describe("Button", () => {
   it("renders primary variant with token classes", () => {
     render(<Button variant="primary">Save</Button>);
     const btn = screen.getByRole("button", { name: "Save" });
-    expect(btn.className).toContain("bg-foreground");
+    expect(btn.className).toContain("bg-accent");
     expect(btn.className).toContain("text-background");
   });
   it("defaults to secondary md and forwards props", () => {
@@ -25,7 +25,7 @@ describe("Button", () => {
   it("renders ghost variant with hover token classes", () => {
     render(<Button variant="ghost">More</Button>);
     const btn = screen.getByRole("button", { name: "More" });
-    expect(btn.className).toContain("hover:bg-muted-foreground/10");
+    expect(btn.className).toContain("hover:bg-accent/10");
   });
   it("renders danger variant with serious status classes", () => {
     render(<Button variant="danger">Delete</Button>);
@@ -48,11 +48,9 @@ describe("Card", () => {
     const { container } = render(<Card>x</Card>);
     expect((container.firstChild as HTMLElement).className).toContain("bg-surface-raised");
   });
-  it("interactive adds hover border affordance", () => {
+  it("interactive adds hover elevation affordance", () => {
     const { container } = render(<Card interactive>x</Card>);
-    expect((container.firstChild as HTMLElement).className).toContain(
-      "hover:border-muted-foreground",
-    );
+    expect((container.firstChild as HTMLElement).className).toContain("hover:shadow-md");
   });
 });
 
@@ -66,7 +64,7 @@ describe("Badge", () => {
   it.each([
     ["warning", "bg-status-warning-soft"],
     ["serious", "bg-status-serious-soft"],
-    ["neutral", "bg-muted-foreground/10"],
+    ["neutral", "bg-neutral-100"],
     ["accent", "bg-accent-soft"],
   ] as const)("%s tone applies its soft background class", (tone, expected) => {
     render(<Badge tone={tone}>Label</Badge>);

@@ -270,6 +270,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Notes */
+        get: operations["list_notes"];
+        put?: never;
+        /** Create Note */
+        post: operations["create_note"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/outline": {
         parameters: {
             query?: never;
@@ -494,6 +512,24 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/notes/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Note */
+        delete: operations["delete_note"];
+        options?: never;
+        head?: never;
+        /** Update Note */
+        patch: operations["update_note"];
         trace?: never;
     };
     "/api/review/summary": {
@@ -1071,6 +1107,62 @@ export interface components {
              */
             type: "merge";
         };
+        /**
+         * NoteIn
+         * @description A margin note anchored to a page + a 0..1 vertical fraction. page is
+         *     1-based here like every page in this API surface; anchor_y is top-origin.
+         */
+        NoteIn: {
+            /** Anchor Y */
+            anchor_y: number;
+            /** Note Md */
+            note_md: string;
+            /** Page */
+            page: number;
+            /** Section Id */
+            section_id: string;
+            /**
+             * Surface
+             * @default pdf
+             * @constant
+             */
+            surface: "pdf";
+        };
+        /** NoteOut */
+        NoteOut: {
+            /** Anchor Y */
+            anchor_y: number;
+            /** Course Id */
+            course_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Note Md */
+            note_md: string;
+            /** Page */
+            page: number;
+            /** Section Id */
+            section_id: string;
+            /**
+             * Surface
+             * @constant
+             */
+            surface: "pdf";
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** NoteUpdateIn */
+        NoteUpdateIn: {
+            /** Note Md */
+            note_md?: string | null;
+        };
         /** OutlineEditRequest */
         OutlineEditRequest: {
             /** Operations */
@@ -1201,12 +1293,18 @@ export interface components {
             back_md: string;
             /** Due At */
             due_at: string | null;
+            /** Ease */
+            ease: number;
             /** Front Md */
             front_md: string;
             /** Id */
             id: string;
+            /** Interval Days */
+            interval_days: number;
             /** Is New */
             is_new: boolean;
+            /** Reps */
+            reps: number;
             /** Section Id */
             section_id: string;
         };
@@ -2173,6 +2271,72 @@ export interface operations {
             };
         };
     };
+    list_notes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     edit_outline: {
         parameters: {
             query?: never;
@@ -2732,6 +2896,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmUsageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteOut"];
                 };
             };
             /** @description Validation Error */

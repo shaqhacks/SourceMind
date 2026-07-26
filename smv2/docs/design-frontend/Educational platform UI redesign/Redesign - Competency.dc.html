@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="ds/organic.css">
+  <link rel="stylesheet" href="ds/theme.css">
+  <style>
+    body { margin: 0; }
+  </style>
+</helmet>
+<div style="height: 100vh; display: flex; flex-direction: column; overflow: hidden;">
+  <header style="display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--color-divider); flex: none;">
+    <a class="btn btn-secondary btn-icon" aria-label="Back to skill map" href="Redesign – Skill Map.dc.html" style="text-decoration: none;">←</a>
+    <span class="nav-brand" style="font-size: 20px; color: var(--color-accent);">SourceMind</span>
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
+      <span class="tag tag-accent" style="font-weight: 700;">12 cards due</span>
+      <button class="btn btn-secondary btn-icon" aria-label="Toggle dark mode" onClick="{{ toggleTheme }}">{{ themeIcon }}</button>
+      <span style="width: 34px; height: 34px; border-radius: 999px; background: var(--color-accent-2-300); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px;">J</span>
+    </div>
+  </header>
+  <main style="flex: 1; min-height: 0; overflow-y: auto;">
+    <div style="width: 100%; max-width: 880px; margin: 0 auto; padding: 32px 36px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px;">
+      <div>
+        <p style="margin: 0 0 4px; font-size: 13px; font-weight: 600;"><a href="Redesign – Reader.dc.html" style="color: var(--color-accent-700); text-decoration: none;">Welcome to SourceMind</a> <span class="text-muted" style="opacity: 0.6;">/</span> <a href="Redesign – Skill Map.dc.html" style="color: var(--color-accent-700); text-decoration: none;">Skill map</a> <span class="text-muted" style="opacity: 0.6;">/</span> <span class="text-muted">Token counting</span></p>
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <h1 style="font-size: 34px; margin: 0;">Token counting</h1>
+          <span class="tag tag-accent" style="font-weight: 700;">Struggling · 31 mastery</span>
+        </div>
+        <p class="text-muted" style="margin: 6px 0 0; font-size: 14px;">Missed 3 of your last 5 questions on this skill · blocks <strong style="color: var(--color-text);">Cost estimation</strong> and <strong style="color: var(--color-text);">Spend caps &amp; budgeting</strong></p>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;">
+        <div class="card" style="padding: 16px 18px; gap: 4px;">
+          <span class="card-kicker">Mastery</span>
+          <p style="margin: 0; font-family: var(--font-heading); font-size: 26px;">31</p>
+          <div style="height: 6px; border-radius: 999px; background: var(--color-neutral-200);"><div style="height: 100%; width: 31%; border-radius: 999px; background: var(--color-accent-500);"></div></div>
+        </div>
+        <div class="card" style="padding: 16px 18px; gap: 4px;">
+          <span class="card-kicker">Cards on this skill</span>
+          <p style="margin: 0; font-family: var(--font-heading); font-size: 26px;">5</p>
+          <p class="text-muted" style="margin: 0; font-size: 12px;">3 due now · graded Hard ×3</p>
+        </div>
+        <div class="card" style="padding: 16px 18px; gap: 4px;">
+          <span class="card-kicker">Quiz record</span>
+          <p style="margin: 0; font-family: var(--font-heading); font-size: 26px;">2/5</p>
+          <p class="text-muted" style="margin: 0; font-size: 12px;">last two attempts, Ch.1–2 tests</p>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <h4 style="margin: 0;">Where this skill is taught — review these</h4>
+        <div class="card elev-sm" style="padding: 18px 22px; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div style="flex: 1; min-width: 0;">
+              <span class="card-kicker">Chapter 2 · section 2.2</span>
+              <p style="margin: 4px 0 0; font-weight: 700; font-size: 15px;">Estimating before you generate</p>
+              <p class="text-muted" style="margin: 2px 0 0; font-size: 13px;">The core explanation — token usage, cost recording, estimates · 4 min read</p>
+            </div>
+            <span class="tag tag-accent">Most relevant</span>
+            <a class="btn btn-primary" href="Redesign – Reader.dc.html" style="flex: none; font-size: 13px;">Re-read</a>
+          </div>
+          <div style="border-top: 1px solid var(--color-divider); padding-top: 10px; display: flex; align-items: center; gap: 12px; font-size: 13px;">
+            <span class="text-muted" style="flex: 1;">You highlighted this section once · 2 of your missed questions cite it</span>
+            <a class="btn btn-ghost" href="Redesign – Review.dc.html" style="font-size: 13px;">Review its 3 cards</a>
+          </div>
+        </div>
+        <div class="card elev-sm" style="padding: 18px 22px; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div style="flex: 1; min-width: 0;">
+              <span class="card-kicker">Chapter 2 · section 2.3</span>
+              <p style="margin: 4px 0 0; font-weight: 700; font-size: 15px;">Spend caps in practice</p>
+              <p class="text-muted" style="margin: 2px 0 0; font-size: 13px;">Applies token counting to budgeting — read after 2.2 · 3 min read</p>
+            </div>
+            <a class="btn btn-secondary" href="Redesign – Reader.dc.html" style="flex: none; font-size: 13px;">Re-read</a>
+          </div>
+        </div>
+        <div class="card elev-sm" style="padding: 18px 22px; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div style="flex: 1; min-width: 0;">
+              <span class="card-kicker">Chapter 1 · section 1.2</span>
+              <p style="margin: 4px 0 0; font-weight: 700; font-size: 15px;">Why ingest never counts tokens</p>
+              <p class="text-muted" style="margin: 2px 0 0; font-size: 13px;">Background — the deterministic/generative boundary · 2 min read</p>
+            </div>
+            <a class="btn btn-secondary" href="Redesign – Reader.dc.html" style="flex: none; font-size: 13px;">Re-read</a>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <h4 style="margin: 0;">Questions you missed on this skill</h4>
+        <div class="card" style="padding: 16px 20px; gap: 6px;">
+          <p style="margin: 0; font-size: 14px; font-weight: 600;">"What does SourceMind estimate before you generate a lesson?"</p>
+          <p class="text-muted" style="margin: 0; font-size: 13px;">You answered "page count" · correct: time and cost, from chapter length and model · Ch.2 test, 2 days ago</p>
+        </div>
+        <div class="card" style="padding: 16px 20px; gap: 6px;">
+          <p style="margin: 0; font-size: 14px; font-weight: 600;">"When is exact token usage recorded?"</p>
+          <p class="text-muted" style="margin: 0; font-size: 13px;">You answered "before the call" · correct: after every generation call · Ch.1 test, 4 days ago</p>
+        </div>
+      </div>
+      <div class="card elev-md" style="padding: 20px 24px; gap: 12px; flex-direction: row; align-items: center; margin-bottom: 8px;">
+        <div style="flex: 1;">
+          <span class="card-kicker" style="color: var(--color-accent-800);">Fix plan</span>
+          <p style="margin: 6px 0 0; font-size: 15px;">Re-read section 2.2 (~4 min), then drill this skill's 5 cards. That should lift you past 60 and unblock Cost estimation.</p>
+        </div>
+        <a class="btn btn-primary" href="Redesign – Reader.dc.html" style="flex: none;">Start with 2.2</a>
+        <a class="btn btn-secondary" href="Redesign – Review.dc.html" style="flex: none;">Drill 5 cards</a>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280}}">
+class Component extends DCLogic {
+  state = { theme: "light" };
+  componentDidMount() {
+    let theme = "light";
+    try { theme = localStorage.getItem("sm.theme") || "light"; } catch (e) {}
+    this.setState({ theme });
+    document.documentElement.setAttribute("data-theme", theme);
+  }
+  renderVals() {
+    return {
+      themeIcon: this.state.theme === "dark" ? "☀" : "☾",
+      toggleTheme: () => this.setState((s) => {
+        const theme = s.theme === "dark" ? "light" : "dark";
+        try { localStorage.setItem("sm.theme", theme); } catch (e) {}
+        document.documentElement.setAttribute("data-theme", theme);
+        return { theme };
+      }),
+    };
+  }
+}
+</script>
+</body>
+</html>

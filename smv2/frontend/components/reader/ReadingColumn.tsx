@@ -13,8 +13,9 @@ import {
 } from "@/lib/annotations/anchors";
 import { highlightAtPoint } from "@/lib/annotations/hitTest";
 import { isHighlightApiSupported, useHighlightPainter } from "@/lib/annotations/useHighlightPainter";
-import type { HighlightOut, HighlightUpdateIn } from "@/lib/api/client";
+import type { HighlightOut, HighlightUpdateIn, NoteOut } from "@/lib/api/client";
 import { useHighlights, type HighlightColor } from "@/lib/hooks/useHighlights";
+import { useNotes } from "@/lib/hooks/useNotes";
 import { prefsToCssVars, type TypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import type { ReaderSection, SectionBodyState, ViewMode } from "@/lib/reader/types";
 
@@ -22,7 +23,9 @@ import AddToChatPopover from "./AddToChatPopover";
 import CardsCTA from "./CardsCTA";
 import HighlightEditPopover from "./HighlightEditPopover";
 import LessonPane, { type LessonDisplayStatus } from "./LessonPane";
+import NotePopover from "./NotePopover";
 import PagesView from "./PagesView";
+import type { NoteClickHandler, NoteGutterClick } from "./PdfPagesView";
 import SectionCards from "./SectionCards";
 import SelectionPopover from "./SelectionPopover";
 
@@ -69,8 +72,13 @@ const NON_CONTENT_BANNER_TEXT: Record<"practice" | "answers", string> = {
   answers: "This is an answer key, not regular reading — it belongs on the chapter test page.",
 };
 
-const CHEVRON_ZONE_CLASSES =
-  "group absolute inset-y-0 z-10 flex w-12 items-center justify-center text-muted-foreground/40 transition-colors hover:bg-muted-foreground/5 hover:text-foreground focus-visible:bg-muted-foreground/5 focus-visible:text-foreground";
+// Prev/next moved out of the old full-height edge hit-zones into a footer
+// row under the body, per the redesign (ghost links split left/right over a
+// top hairline). The aria-labels are unchanged — they are the reader's
+// navigation contract, and the visible chapter title is now the label's
+// tail rather than a bare chevron.
+const NAV_LINK_CLASSES =
+  "max-w-[48%] truncate rounded-md px-2 py-1 text-sm font-medium text-accent transition-colors hover:bg-accent/10 active:bg-accent/[0.18]";
 
 // A single stable (never-reallocated) empty array, shared by every non-source
 // render of `paintable` below. `useHighlightPainter`'s effect is keyed on
@@ -86,6 +94,20 @@ const CHEVRON_ZONE_CLASSES =
 // entering pages mode, correctly discarding a stale source paint) and then
 // leaves the PDF painter's own registry entries alone.
 const NO_HIGHLIGHTS: HighlightOut[] = [];
+
+// A zero-size viewport-relative rect at a click point, for anchoring the
+// note popovers the same way the highlight popovers anchor to a range's
+// getBoundingClientRect (same fallback shape handleArticleClick already uses).
+function pointRect(clientX: number, clientY: number): DOMRect {
+  return {
+    top: clientY,
+    bottom: clientY,
+    left: clientX,
+    right: clientX,
+    width: 0,
+    height: 0,
+  } as DOMRect;
+}
 
 export default function ReadingColumn({
   courseId,
@@ -108,6 +130,16 @@ export default function ReadingColumn({
   // view shows correct highlights immediately, without waiting on a fresh
   // fetch that a mode switch alone wouldn't trigger.
   const { highlights, error, createFromSelector, updateOne, deleteOne } = useHighlights(courseId, section.id);
+  // Positional margin notes for this section (surface:"pdf"), independent of
+  // highlights — see useNotes. Mounted unconditionally for the same reason as
+  // useHighlights: switching INTO pages view shows notes immediately.
+  const {
+    notes,
+    error: notesError,
+    createNote,
+    updateNote,
+    deleteNote,
+  } = useNotes(courseId, section.id);
   // useHighlights re-syncs its `highlights` array ASYNCHRONOUSLY (only once
   // its course-wide fetch for the new section resolves), but `body.kind`
   // can flip to "ready" for the new section before that fetch lands. In
@@ -493,27 +525,76 @@ export default function ReadingColumn({
     setPagesEditPopover(null);
   }, [pagesEditPopover, onExplainSelection]);
 
+  // Positional margin notes (Pages view). `noteComposer` = create at a gutter
+  // click; `noteEditPopover` = click an existing pin to edit/delete. Kept as
+  // separate state and rendered as plain sibling popovers, same convention as
+  // the highlight popovers above. Opening one closes the other so two note
+  // popovers are never open at once.
+  const [noteComposer, setNoteComposer] = useState<{
+    page: number;
+    anchorY: number;
+    anchorRect: DOMRect;
+  } | null>(null);
+  const [noteEditPopover, setNoteEditPopover] = useState<{
+    note: NoteOut;
+    anchorRect: DOMRect;
+  } | null>(null);
+
+  const closeNoteComposer = useCallback(() => setNoteComposer(null), []);
+  const closeNoteEditPopover = useCallback(() => setNoteEditPopover(null), []);
+
+  const handleNoteGutterClick = useCallback<NoteGutterClick>((page, anchorY, clientX, clientY) => {
+    // Also dismiss any open highlight popover: a gutter click's mouseup can
+    // bubble to handlePagesMouseUp and (re)open pagesPopover off a stale
+    // selection, which would otherwise sit alongside this composer.
+    setPagesPopover(null);
+    setPagesEditPopover(null);
+    setNoteEditPopover(null);
+    setNoteComposer({ page, anchorY, anchorRect: pointRect(clientX, clientY) });
+  }, []);
+
+  const handleNoteClick = useCallback<NoteClickHandler>((note, clientX, clientY) => {
+    setPagesPopover(null);
+    setPagesEditPopover(null);
+    setNoteComposer(null);
+    setNoteEditPopover({ note, anchorRect: pointRect(clientX, clientY) });
+  }, []);
+
+  const handleNoteComposerSave = useCallback(
+    (noteMd: string) => {
+      if (!noteComposer) return;
+      // Fire-and-forget, same convention as handleSelectionColor: useNotes
+      // sets its own `error` (rendered below) on failure.
+      void createNote(noteComposer.page, noteComposer.anchorY, noteMd);
+      setNoteComposer(null);
+    },
+    [noteComposer, createNote],
+  );
+
+  const handleNoteEditSave = useCallback(
+    (noteMd: string) => {
+      if (!noteEditPopover) return;
+      void updateNote(noteEditPopover.note.id, noteMd);
+      setNoteEditPopover(null);
+    },
+    [noteEditPopover, updateNote],
+  );
+
+  const handleNoteEditDelete = useCallback(() => {
+    if (!noteEditPopover) return;
+    void deleteNote(noteEditPopover.note.id);
+    setNoteEditPopover(null);
+  }, [noteEditPopover, deleteNote]);
+
   return (
     <div className="relative flex min-h-0 flex-1">
-      {previousTitle !== null && (
-        <button
-          type="button"
-          onClick={onPrevious}
-          aria-label={`Previous chapter: ${previousTitle}`}
-          className={`${CHEVRON_ZONE_CLASSES} left-0`}
-        >
-          <span aria-hidden="true" className="text-2xl">
-            ‹
-          </span>
-        </button>
-      )}
       <div
         ref={columnRef}
         data-testid="reading-column"
         className="reading-column min-h-0 flex-1 overflow-y-auto"
         style={prefsToCssVars(typography)}
       >
-        <article className="reading-measure mx-auto px-6 py-10 font-serif">
+        <article className="reading-measure mx-auto px-8 py-11">
           {/* Surfaces a failed highlight create/update/delete — useHighlights
               sets `error` to a human string (via describeError) on any of
               those, and clears it again once a later mutation succeeds. This
@@ -525,6 +606,12 @@ export default function ReadingColumn({
               <ErrorBanner message={error} />
             </div>
           )}
+          {/* Notes have their own hook/error, surfaced the same way. */}
+          {notesError && (
+            <div className="mb-6">
+              <ErrorBanner message={notesError} />
+            </div>
+          )}
           {/* Reached only via an explicit deep link (Sidebar/keyboard nav
               never select these, see chapterGroups.ts and CourseReader's
               goToOffset) — surfaced so it isn't a silent, unexplained
@@ -533,28 +620,24 @@ export default function ReadingColumn({
             <div
               role="note"
               aria-label="Reading flow notice"
-              className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 text-sm"
+              className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-divider bg-accent-soft px-4 py-3 text-sm"
             >
               <span>{NON_CONTENT_BANNER_TEXT[section.kind]}</span>
               {section.chapter_label !== null && (
                 <Link
                   href={`/course/${courseId}/chapter/${encodeURIComponent(section.chapter_label)}/test`}
-                  className="shrink-0 font-medium text-accent underline"
+                  className="shrink-0 font-medium text-accent-700 underline"
                 >
                   Go to chapter test
                 </Link>
               )}
             </div>
           )}
-          {pages ? <p className="mb-2 font-sans text-sm text-muted-foreground">{pages}</p> : null}
+          {pages ? <p className="mb-1.5 text-[13px] text-muted-foreground">{pages}</p> : null}
           {/* Explicit heading (not part of the markdown body) so chapter-change
               focus management has a stable, deterministic target regardless of
               what heading levels the section's own source text happens to use. */}
-          <h2
-            ref={headingRef}
-            tabIndex={-1}
-            className="mb-6 font-sans text-2xl font-semibold outline-none"
-          >
+          <h2 ref={headingRef} tabIndex={-1} className="mb-5 text-[30px] outline-none">
             {section.title}
           </h2>
           {mode === "source" ? (
@@ -601,6 +684,9 @@ export default function ReadingColumn({
                   pageEnd={section.page_end}
                   highlights={pdfHighlights}
                   enabled={mode === "pages"}
+                  notes={notes}
+                  onNoteGutterClick={handleNoteGutterClick}
+                  onNoteClick={handleNoteClick}
                 />
               </div>
             ) : (
@@ -618,24 +704,41 @@ export default function ReadingColumn({
               onStatusChange={(status) => onLessonStatusChange(section.id, status)}
             />
           )}
-          <div className="mt-8 border-t border-border pt-4">
+          <div className="mt-8">
             <CardsCTA key={`cta-${section.id}`} sectionId={section.id} />
             <SectionCards key={`cards-${section.id}`} sectionId={section.id} />
           </div>
+          {(previousTitle !== null || nextTitle !== null) && (
+            <nav
+              aria-label="Chapter navigation"
+              className="mt-7 flex items-center justify-between gap-3 border-t border-divider pt-4"
+            >
+              {previousTitle !== null && (
+                <button
+                  type="button"
+                  onClick={onPrevious}
+                  aria-label={`Previous chapter: ${previousTitle}`}
+                  className={NAV_LINK_CLASSES}
+                >
+                  <span aria-hidden="true">← </span>
+                  {previousTitle}
+                </button>
+              )}
+              {nextTitle !== null && (
+                <button
+                  type="button"
+                  onClick={onNext}
+                  aria-label={`Next chapter: ${nextTitle}`}
+                  className={`${NAV_LINK_CLASSES} ml-auto`}
+                >
+                  {nextTitle}
+                  <span aria-hidden="true"> →</span>
+                </button>
+              )}
+            </nav>
+          )}
         </article>
       </div>
-      {nextTitle !== null && (
-        <button
-          type="button"
-          onClick={onNext}
-          aria-label={`Next chapter: ${nextTitle}`}
-          className={`${CHEVRON_ZONE_CLASSES} right-0`}
-        >
-          <span aria-hidden="true" className="text-2xl">
-            ›
-          </span>
-        </button>
-      )}
       {selectionPopover && (
         // Rendered outside the scrollable column deliberately: it's
         // `position: fixed` (viewport-relative, matching
@@ -699,6 +802,25 @@ export default function ReadingColumn({
           onDelete={handlePagesEditDelete}
           onExplain={handlePagesEditExplain}
           onClose={closePagesEditPopover}
+        />
+      )}
+      {noteComposer && (
+        // Composer for a new margin note (no onDelete). Same "plain sibling,
+        // not nested in the scrolling column" placement rationale as the
+        // highlight popovers above.
+        <NotePopover
+          anchorRect={noteComposer.anchorRect}
+          onSave={handleNoteComposerSave}
+          onClose={closeNoteComposer}
+        />
+      )}
+      {noteEditPopover && (
+        <NotePopover
+          initialNote={noteEditPopover.note.note_md}
+          anchorRect={noteEditPopover.anchorRect}
+          onSave={handleNoteEditSave}
+          onDelete={handleNoteEditDelete}
+          onClose={closeNoteEditPopover}
         />
       )}
     </div>

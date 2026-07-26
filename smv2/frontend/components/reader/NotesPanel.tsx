@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
-import { listHighlights, type HighlightOut } from "@/lib/api/client";
+import { listHighlights, listNotes, type HighlightOut, type NoteOut } from "@/lib/api/client";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
@@ -37,13 +37,14 @@ export interface NotesPanelProps {
 type LoadState =
   | { kind: "loading" }
   | { kind: "error"; error: FetchError }
-  | { kind: "ready"; highlights: HighlightOut[] };
+  | { kind: "ready"; highlights: HighlightOut[]; notes: NoteOut[] };
 
-interface HighlightGroup {
+interface SectionGroup {
   sectionId: string;
   title: string;
   orderIndex: number;
   highlights: HighlightOut[];
+  notes: NoteOut[];
 }
 
 // Long selections still need to fit on one line-ish quote — this isn't a
@@ -56,35 +57,43 @@ function truncateExact(text: string): string {
 }
 
 /**
- * Groups a COURSE-WIDE highlight list by section, ordered by the section's
- * own order_index (reading order), with each group's highlights ordered by
- * created_at (oldest first — the order they were added while reading
- * through that section). A highlight whose section_id isn't found in
- * `sections` (e.g. a since-deleted/merged section from an outline edit)
- * still gets its own group, sorted last — never dropped, per the "never
- * hidden, never auto-deleted" rule this panel exists to uphold.
+ * Groups a COURSE-WIDE highlight AND note list by section, ordered by the
+ * section's own order_index (reading order), each group's items ordered by
+ * created_at (oldest first — the order they were added). A highlight or note
+ * whose section_id isn't found in `sections` (e.g. a since-deleted/merged
+ * section from an outline edit) still gets its own group, sorted last — never
+ * dropped, per the "never hidden, never auto-deleted" rule this panel upholds.
  */
-function groupBySection(highlights: HighlightOut[], sections: NotesPanelSection[]): HighlightGroup[] {
+function groupBySection(
+  highlights: HighlightOut[],
+  notes: NoteOut[],
+  sections: NotesPanelSection[],
+): SectionGroup[] {
   const sectionById = new Map(sections.map((section) => [section.id, section]));
-  const groups = new Map<string, HighlightGroup>();
+  const groups = new Map<string, SectionGroup>();
 
-  for (const item of highlights) {
-    let group = groups.get(item.section_id);
+  const ensureGroup = (sectionId: string): SectionGroup => {
+    let group = groups.get(sectionId);
     if (!group) {
-      const section = sectionById.get(item.section_id);
+      const section = sectionById.get(sectionId);
       group = {
-        sectionId: item.section_id,
+        sectionId,
         title: section?.title ?? "Unknown section",
         orderIndex: section?.order_index ?? Number.MAX_SAFE_INTEGER,
         highlights: [],
+        notes: [],
       };
-      groups.set(item.section_id, group);
+      groups.set(sectionId, group);
     }
-    group.highlights.push(item);
-  }
+    return group;
+  };
+
+  for (const item of highlights) ensureGroup(item.section_id).highlights.push(item);
+  for (const item of notes) ensureGroup(item.section_id).notes.push(item);
 
   for (const group of groups.values()) {
     group.highlights.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    group.notes.sort((a, b) => a.created_at.localeCompare(b.created_at));
   }
 
   return Array.from(groups.values()).sort((a, b) => a.orderIndex - b.orderIndex);
@@ -98,11 +107,11 @@ function HighlightRow({
   onNavigate: (sectionId: string, surface: HighlightOut["surface"]) => void;
 }) {
   return (
-    <li className="overflow-hidden rounded-md border border-border">
+    <li className="overflow-hidden rounded-md border border-divider bg-surface-raised">
       <button
         type="button"
         onClick={() => onNavigate(highlight.section_id, highlight.surface)}
-        className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-muted-foreground/10"
+        className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-foreground/[0.05]"
       >
         <span
           aria-hidden="true"
@@ -115,7 +124,7 @@ function HighlightRow({
          * so it folds the page number in rather than repeating it via the
          * source-only "· p.N" suffix below. */}
         {highlight.surface === "pdf" && (
-          <span className="mt-0.5 shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="mt-0.5 shrink-0 rounded-[6px] bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-neutral-800">
             PDF{highlight.page !== null ? ` p.${highlight.page}` : ""}
           </span>
         )}
@@ -128,12 +137,42 @@ function HighlightRow({
       </button>
       {/* Outside the button — Markdown can render block elements (e.g. a
        * paragraph, a link), which can't legally nest inside a <button>. */}
-      <div className="border-t border-border px-3 py-2 pl-8 text-sm">
+      <div className="border-t border-divider px-3 py-2 pl-8 text-sm">
         {highlight.note_md ? (
           <Markdown>{highlight.note_md}</Markdown>
         ) : (
           <span className="text-xs text-muted-foreground">No note</span>
         )}
+      </div>
+    </li>
+  );
+}
+
+/** A standalone positional margin note (no quoted passage — just the note
+ * text and which PDF page it sits beside). Clicking navigates to that section
+ * in Pages view, same as a pdf highlight. */
+function NoteRow({
+  note,
+  onNavigate,
+}: {
+  note: NoteOut;
+  onNavigate: (sectionId: string, surface: HighlightOut["surface"]) => void;
+}) {
+  return (
+    <li className="overflow-hidden rounded-md border border-divider bg-surface-raised">
+      <button
+        type="button"
+        onClick={() => onNavigate(note.section_id, "pdf")}
+        className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-foreground/[0.05]"
+      >
+        <span className="mt-0.5 shrink-0 rounded-[6px] bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-neutral-800">
+          PDF p.{note.page}
+        </span>
+        <span className="min-w-0 flex-1 text-muted-foreground">Page note</span>
+      </button>
+      {/* Outside the button — Markdown can render block elements. */}
+      <div className="border-t border-divider px-3 py-2 pl-8 text-sm">
+        <Markdown>{note.note_md}</Markdown>
       </div>
     </li>
   );
@@ -173,12 +212,13 @@ export default function NotesPanel({ courseId, open, sections, onClose, onNaviga
     // reopen briefly shows the PREVIOUS fetch's list while the new one is
     // in flight, then swaps once it resolves, rather than flashing back to
     // a loading state the user just watched resolve moments ago.
-    listHighlights(courseId).then(({ data, status }) => {
+    Promise.all([listHighlights(courseId), listNotes(courseId)]).then(([hl, nt]) => {
       if (!active) return;
-      if (data) {
-        setState({ kind: "ready", highlights: data });
+      if (hl.data && nt.data) {
+        setState({ kind: "ready", highlights: hl.data, notes: nt.data });
       } else {
-        setState({ kind: "error", error: describeError(status, "Loading notes") });
+        const failedStatus = hl.data ? nt.status : hl.status;
+        setState({ kind: "error", error: describeError(failedStatus, "Loading notes") });
       }
     });
     return () => {
@@ -187,7 +227,7 @@ export default function NotesPanel({ courseId, open, sections, onClose, onNaviga
   }, [open, courseId, reloadToken]);
 
   const groups = useMemo(
-    () => (state.kind === "ready" ? groupBySection(state.highlights, sections) : []),
+    () => (state.kind === "ready" ? groupBySection(state.highlights, state.notes, sections) : []),
     [state, sections],
   );
 
@@ -199,20 +239,22 @@ export default function NotesPanel({ courseId, open, sections, onClose, onNaviga
       role="complementary"
       aria-label="Course notes"
       tabIndex={-1}
-      className="fixed inset-y-0 right-0 z-40 flex w-96 max-w-[90vw] flex-col border-l border-border bg-background shadow-xl"
+      className="fixed inset-y-0 right-0 z-40 flex w-[340px] max-w-[90vw] flex-col border-l border-divider bg-background shadow-lg"
     >
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold">Notes</h2>
+      <div className="flex items-center justify-between gap-2 border-b border-divider px-4 py-3">
+        <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+          Notes
+        </h2>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close notes"
-          className="rounded-md border border-border px-2 py-1 text-sm"
+          className="rounded-md border border-border bg-surface-raised px-2.5 py-1 text-xs font-medium transition-colors hover:bg-foreground/[0.07]"
         >
           Close
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {state.kind === "loading" && (
           <p className="p-4 text-sm text-muted-foreground">Loading notes…</p>
         )}
@@ -227,18 +269,22 @@ export default function NotesPanel({ courseId, open, sections, onClose, onNaviga
         )}
         {state.kind === "ready" && groups.length === 0 && (
           <p className="p-4 text-sm text-muted-foreground">
-            No highlights yet — select text in a chapter to add one.
+            No highlights or notes yet — select text in a chapter, or add a page note in the
+            original pages.
           </p>
         )}
         {state.kind === "ready" &&
           groups.map((group) => (
-            <section key={group.sectionId} className="border-b border-border px-3 py-3 last:border-b-0">
-              <h3 className="mb-2 truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <section key={group.sectionId} className="border-b border-divider px-3 py-3 last:border-b-0">
+              <h3 className="mb-2 truncate text-[11px] font-bold uppercase tracking-[0.06em] text-neutral-600">
                 {group.title}
               </h3>
               <ul className="flex flex-col gap-2">
                 {group.highlights.map((item) => (
                   <HighlightRow key={item.id} highlight={item} onNavigate={onNavigate} />
+                ))}
+                {group.notes.map((item) => (
+                  <NoteRow key={item.id} note={item} onNavigate={onNavigate} />
                 ))}
               </ul>
             </section>

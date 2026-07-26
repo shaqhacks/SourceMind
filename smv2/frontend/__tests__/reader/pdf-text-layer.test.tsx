@@ -98,7 +98,9 @@ describe("PdfPage text layer overlay", () => {
     expect(textLayerEl).not.toBeNull();
     expect(textLayerEl!.parentElement).toBe(wrapper);
     expect(canvas.parentElement).toBe(wrapper);
-    expect(wrapper!.children).toHaveLength(2);
+    // canvas + .textLayer + the note gutter (a third sibling added with margin
+    // notes); no note pins here since this render passes no notes.
+    expect(wrapper!.children).toHaveLength(3);
 
     // TextLayer was built from the CSS-px viewport (page.getViewport({
     // scale }) — jsdom reports clientWidth 0, so the component's own

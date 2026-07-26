@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Caprasimo, Figtree, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 import AppShell from "@/components/AppShell";
@@ -7,8 +7,17 @@ import SiteHeader from "@/components/SiteHeader";
 import SkipToMainLink from "@/components/SkipToMainLink";
 import { THEME_STORAGE_KEY } from "@/lib/hooks/useTheme";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Organic design system faces (self-hosted via next/font, replacing the
+// handoff CSS's Google Fonts @import): Caprasimo ships a single 400
+// weight; Figtree is a variable font, so no weight list is needed.
+const caprasimo = Caprasimo({
+  weight: "400",
+  variable: "--font-caprasimo",
+  subsets: ["latin"],
+});
+
+const figtree = Figtree({
+  variable: "--font-figtree",
   subsets: ["latin"],
 });
 
@@ -39,7 +48,7 @@ export default function RootLayout({
       lang="en"
       data-theme="light"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${caprasimo.variable} ${figtree.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: noFlashThemeScript }} />

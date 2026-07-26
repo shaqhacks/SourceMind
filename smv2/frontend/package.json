@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "katex": "^0.17.0",
+    "lucide-react": "^1.27.0",
     "next": "16.2.10",
     "openapi-fetch": "^0.17.0",
     "pdfjs-dist": "^6.1.200",

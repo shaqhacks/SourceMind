@@ -103,7 +103,7 @@ export default function HighlightEditPopover({
       aria-label="Highlight actions"
       tabIndex={-1}
       style={style}
-      className="z-50 flex w-64 flex-col gap-2 rounded-lg border border-border bg-background p-3 shadow-xl"
+      className="z-50 flex w-64 flex-col gap-2 rounded-lg border border-divider bg-surface-raised p-3 shadow-md"
     >
       <textarea
         value={note}
@@ -111,7 +111,7 @@ export default function HighlightEditPopover({
         placeholder="Add a note…"
         aria-label="Highlight note"
         rows={3}
-        className="w-full resize-none rounded-md border border-border bg-transparent p-2 text-sm outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        className="w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none"
       />
       <div className="flex items-center gap-1">
         {COLORS.map((color) => (
@@ -122,16 +122,20 @@ export default function HighlightEditPopover({
             aria-label={`Highlight ${color}`}
             aria-pressed={highlight.color === color}
             title={`Highlight ${color}`}
-            className="h-6 w-6 rounded-full border border-border"
+            className={`h-6 w-6 rounded-full transition-transform hover:scale-110 ${
+              highlight.color === color
+                ? "border-2 border-accent"
+                : "border border-border"
+            }`}
             style={{ backgroundColor: `var(--highlight-${color})` }}
           />
         ))}
       </div>
-      <div className="flex items-center justify-between gap-1 border-t border-border pt-2">
+      <div className="flex items-center justify-between gap-1 border-t border-divider pt-2">
         <button
           type="button"
           onClick={onDelete}
-          className="rounded-md px-2 py-1 text-sm font-medium text-status-serious hover:bg-status-serious-soft"
+          className="rounded-md px-2 py-1 text-sm font-medium text-status-serious transition-colors hover:bg-status-serious-soft"
         >
           Delete
         </button>
@@ -139,14 +143,14 @@ export default function HighlightEditPopover({
           <button
             type="button"
             onClick={onExplain}
-            className="whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium hover:bg-muted-foreground/10"
+            className="whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium text-accent-700 transition-colors hover:bg-accent/10"
           >
             Add to chat
           </button>
           <button
             type="button"
             onClick={handleSaveNote}
-            className="whitespace-nowrap rounded-md bg-accent px-2 py-1 text-sm font-medium text-white hover:opacity-90"
+            className="whitespace-nowrap rounded-md bg-accent px-2 py-1 text-sm font-medium text-background transition-colors hover:bg-accent-600"
           >
             Save
           </button>

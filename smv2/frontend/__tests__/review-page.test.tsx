@@ -55,6 +55,12 @@ function makeQueueCard(overrides: Partial<ReviewQueueCardOut> = {}): ReviewQueue
     back_md: "4",
     due_at: "2026-01-01T00:00:00Z",
     is_new: false,
+    // Default fixture represents a once-reviewed card ("first Good" state,
+    // per srs_service's bootstrap table) — is_new:false above wouldn't be
+    // internally consistent with the all-new bootstrap values.
+    interval_days: 1.0,
+    ease: 2.5,
+    reps: 1,
     ...overrides,
   };
 }

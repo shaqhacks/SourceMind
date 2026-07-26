@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="ds/organic.css">
+  <link rel="stylesheet" href="ds/theme.css">
+  <style>
+    body { margin: 0; }
+  </style>
+</helmet>
+<div style="height: 100vh; display: flex; flex-direction: column; overflow: hidden;">
+  <header style="display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--color-divider); flex: none;">
+    <button class="btn btn-secondary btn-icon" aria-label="Toggle sidebar" onClick="{{ toggleSidebar }}">☰</button>
+    <span class="nav-brand" style="font-size: 20px; color: var(--color-accent);">SourceMind</span>
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
+      <span class="tag tag-accent" style="font-weight: 700;">12 cards due</span>
+      <button class="btn btn-secondary btn-icon" aria-label="Toggle dark mode" onClick="{{ toggleTheme }}">{{ themeIcon }}</button>
+      <span style="width: 34px; height: 34px; border-radius: 999px; background: var(--color-accent-2-300); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px;">J</span>
+    </div>
+  </header>
+  <div style="display: flex; flex: 1; min-height: 0;">
+    <sc-if value="{{ open }}" hint-placeholder-val="{{ true }}">
+      <aside style="width: 260px; flex: none; border-right: 1px solid var(--color-divider); display: flex; flex-direction: column; gap: 20px; padding: 20px 16px; overflow-y: auto; box-sizing: border-box;">
+        <a class="btn btn-primary btn-block" href="Redesign – New Course.dc.html" style="margin: 0; text-decoration: none;">+ Start new course</a>
+        <nav style="display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600;">
+          <a href="Redesign – Home.dc.html" style="display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 8px; color: var(--color-text); text-decoration: none; opacity: 0.75;">Home</a>
+          <a href="Redesign – Flashcards.dc.html" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 14px; border-radius: 8px; color: var(--color-text); text-decoration: none; opacity: 0.75;">Flashcards <span class="tag tag-accent">12</span></a>
+          <a href="Redesign – Tests.dc.html" style="display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 8px; color: var(--color-text); text-decoration: none; opacity: 0.75;">Tests</a>
+        </nav>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <p style="margin: 0 0 2px; padding: 0 14px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-600); font-weight: 700;">Your courses</p>
+          <div style="display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--color-surface); box-shadow: var(--shadow-sm); border: 1.5px solid var(--color-accent-400);">
+            <a href="Redesign – Reader.dc.html" style="font-size: 14px; font-weight: 700; color: var(--color-text); text-decoration: none;">Welcome to SourceMind</a>
+            <span class="text-muted" style="font-size: 12px;">3 chapters · 12 due</span>
+            <span style="height: 5px; border-radius: 999px; background: var(--color-neutral-200); display: block;"><span style="display: block; height: 100%; width: 38%; border-radius: 999px; background: var(--color-accent);"></span></span>
+            <div style="display: flex; align-items: center; gap: 12px; margin-top: 4px; font-size: 12px; font-weight: 600;">
+              <a href="Redesign – Reader.dc.html" style="color: var(--color-accent-700); text-decoration: none;">Open</a>
+              <span aria-current="page" style="color: var(--color-text); border-bottom: 2px solid var(--color-accent);">Skill map</span>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top: auto; padding: 0 14px;">
+          <p class="text-muted" style="margin: 0; font-size: 12px;">LLM usage: 6 calls · $0.14</p>
+        </div>
+      </aside>
+    </sc-if>
+    <main style="flex: 1; min-width: 0; overflow-y: auto;">
+      <div style="width: 100%; max-width: 1100px; margin: 0 auto; padding: 32px 36px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px;">
+        <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;">
+          <div>
+            <p style="margin: 0 0 4px; font-size: 13px; font-weight: 600;"><a href="Redesign – Reader.dc.html" style="color: var(--color-accent-700); text-decoration: none;">Welcome to SourceMind</a> <span class="text-muted" style="opacity: 0.6;">/</span> <span class="text-muted">Skill map</span></p>
+            <h1 style="font-size: 34px; margin: 0 0 4px;">Skill map — Welcome to SourceMind</h1>
+            <p class="text-muted" style="margin: 0; font-size: 14px;">Built from this course's chapters, tests and reviews · click a skill to see what to review · skills build left to right</p>
+          </div>
+          <div class="seg">
+            <label class="seg-opt"><input type="radio" name="mapview" checked>By prerequisite</label>
+            <label class="seg-opt"><input type="radio" name="mapview">By chapter</label>
+          </div>
+        </div>
+        <div style="overflow-x: auto; padding-bottom: 8px;">
+          <div style="position: relative; width: {{ canvasWpx }}; height: {{ canvasHpx }};">
+            <svg width="{{ canvasW }}" height="{{ canvasH }}" style="position: absolute; inset: 0; pointer-events: none;" aria-hidden="true">
+              <sc-for list="{{ dividers }}" as="d" hint-placeholder-count="2">
+                <line x1="{{ d.x }}" y1="18" x2="{{ d.x }}" y2="{{ d.y2 }}" style="stroke: var(--color-divider);" stroke-width="1"></line>
+              </sc-for>
+              <sc-for list="{{ solidEdges }}" as="e" hint-placeholder-count="3">
+                <path d="{{ e.d }}" fill="none" style="stroke: var(--color-accent-2-500);" stroke-width="2.5"></path>
+              </sc-for>
+              <sc-for list="{{ weakEdges }}" as="e" hint-placeholder-count="2">
+                <path d="{{ e.d }}" fill="none" style="stroke: var(--color-accent-500);" stroke-width="2.5" stroke-dasharray="6 5"></path>
+              </sc-for>
+              <sc-for list="{{ solidEdges }}" as="e" hint-placeholder-count="3">
+                <circle cx="{{ e.tx }}" cy="{{ e.ty }}" r="4" style="fill: var(--color-accent-2-500);"></circle>
+              </sc-for>
+              <sc-for list="{{ weakEdges }}" as="e" hint-placeholder-count="2">
+                <circle cx="{{ e.tx }}" cy="{{ e.ty }}" r="4" style="fill: var(--color-accent-500);"></circle>
+              </sc-for>
+            </svg>
+            <sc-for list="{{ lanes }}" as="lane" hint-placeholder-count="3">
+              <p style="position: absolute; top: 0; width: 260px; margin: 0; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-neutral-600); font-weight: 700; left: {{ lane.leftPx }};">{{ lane.name }}</p>
+            </sc-for>
+            <sc-for list="{{ nodes }}" as="s" hint-placeholder-count="8">
+              <a href="Redesign – Competency.dc.html" class="card elev-sm" style="position: absolute; width: 260px; height: 118px; padding: 14px 16px; gap: 7px; box-sizing: border-box; display: flex; flex-direction: column; text-decoration: none; color: var(--color-text); cursor: pointer; left: {{ s.leftPx }}; top: {{ s.topPx }}; border: {{ s.borderCss }};" style-hover="box-shadow: var(--shadow-md); transform: translateY(-1px);">
+                <span style="display: flex; align-items: center; justify-content: space-between; gap: 8px;"><span style="font-weight: 700; font-size: 14px;">{{ s.name }}</span><span class="tag {{ s.tagClass }}" style="flex: none;">{{ s.statusLabel }}</span></span>
+                <span style="height: 6px; border-radius: 999px; background: var(--color-neutral-200); display: block;"><span style="display: block; height: 100%; border-radius: 999px; width: {{ s.masteryPct }}; background: {{ s.barCss }};"></span></span>
+                <span class="text-muted" style="font-size: 12px;">{{ s.note }}</span>
+              </a>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: row; gap: 24px; font-size: 12px;">
+          <span style="display: flex; align-items: center; gap: 8px;"><span style="width: 26px; height: 0; border-top: 2.5px solid var(--color-accent-2-500);"></span><span class="text-muted">prerequisite met</span></span>
+          <span style="display: flex; align-items: center; gap: 8px;"><span style="width: 26px; height: 0; border-top: 2.5px dashed var(--color-accent-500);"></span><span class="text-muted">weak prerequisite — fix first</span></span>
+        </div>
+        <div class="card elev-md" style="padding: 22px 26px; gap: 12px; flex-direction: row; align-items: center;">
+          <div style="flex: 1;">
+            <span class="card-kicker" style="color: var(--color-accent-800);">Recommended fix</span>
+            <p style="margin: 6px 0 0; font-size: 15px; line-height: 1.5;"><strong>Token counting</strong> is the root of your two struggling skills. A focused 5-card drill plus re-reading one section (~4 min) should unblock <strong>Cost estimation</strong> and <strong>Spend caps</strong>.</p>
+          </div>
+          <a class="btn btn-primary" href="Redesign – Review.dc.html" style="flex: none;">Start 4-min fix</a>
+          <a class="btn btn-secondary" href="Redesign – Competency.dc.html" style="flex: none;">See what to review</a>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280}}">
+class Component extends DCLogic {
+  state = { open: true, theme: "light" };
+  componentDidMount() {
+    let theme = "light", open = true;
+    try {
+      theme = localStorage.getItem("sm.theme") || "light";
+      open = localStorage.getItem("sm.sidebar") !== "closed";
+    } catch (e) {}
+    this.setState({ theme, open });
+    document.documentElement.setAttribute("data-theme", theme);
+  }
+  renderVals() {
+    const persist = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+    // ── Map data: any number of lanes, any number of skills per lane ──
+    const LANES = [
+      { name: "Level 1 · Foundations", skills: [
+        { id: "pdf", name: "PDF structure & bookmarks", status: "solid", mastery: 92, note: "92 mastery · quiz 100%" },
+        { id: "outline", name: "Outline detection", status: "growing", mastery: 58, note: "58 mastery · retake Ch.1 test" },
+        { id: "token", name: "Token counting", status: "struggling", mastery: 31, note: "31 mastery · blocks 2 skills →" },
+      ]},
+      { name: "Level 2 · Core skills", skills: [
+        { id: "ingest", name: "Deterministic ingest", status: "solid", mastery: 86, note: "86 mastery · requires 2 foundations" },
+        { id: "spaced", name: "Spaced repetition", status: "growing", mastery: 55, note: "55 mastery · 8 cards due today" },
+        { id: "cost", name: "Cost estimation", status: "struggling", mastery: 24, note: "24 mastery · requires Token counting ⚠" },
+      ]},
+      { name: "Level 3 · Applied", skills: [
+        { id: "review", name: "Efficient review workflow", status: "growing", mastery: 47, note: "47 mastery · requires Spaced repetition" },
+        { id: "caps", name: "Spend caps & budgeting", status: "locked", mastery: 0, note: "Unlocks at Cost estimation 60" },
+      ]},
+      { name: "Level 4 · Mastery", skills: [
+        { id: "mastery", name: "Course mastery", status: "locked", mastery: 0, note: "Unlocks when Level 3 is solid" },
+      ]},
+    ];
+    const EDGES = [
+      { from: "pdf", to: "ingest", weak: false },
+      { from: "outline", to: "ingest", weak: false },
+      { from: "token", to: "cost", weak: true },
+      { from: "spaced", to: "review", weak: false },
+      { from: "cost", to: "caps", weak: true },
+      { from: "review", to: "mastery", weak: false },
+      { from: "caps", to: "mastery", weak: true },
+    ];
+    // ── Geometry: uniform boxes on aligned rows, lanes left→right ──
+    const W = 260, H = 118, PX = 370, PY = 170, TOP = 30;
+    const pos = {}; const nodes = []; const lanes = [];
+    let maxRows = 0;
+    LANES.forEach((lane, li) => {
+      lanes.push({ name: lane.name, leftPx: (li * PX) + "px" });
+      maxRows = Math.max(maxRows, lane.skills.length);
+      lane.skills.forEach((s, ri) => {
+        const left = li * PX, top = TOP + ri * PY;
+        pos[s.id] = { left, top };
+        const struggling = s.status === "struggling";
+        nodes.push({
+          name: s.name,
+          leftPx: left + "px",
+          topPx: top + "px",
+          masteryPct: s.mastery + "%",
+          note: s.note,
+          statusLabel: s.status === "solid" ? "Solid" : s.status === "growing" ? "Growing" : s.status === "locked" ? "Locked" : "Struggling",
+          tagClass: s.status === "solid" ? "tag-accent-2" : struggling ? "tag-accent" : "tag-neutral",
+          barCss: s.status === "solid" ? "var(--color-accent-2-500)" : struggling ? "var(--color-accent-500)" : "var(--color-accent-2-400)",
+          borderCss: struggling ? "1.5px solid var(--color-accent-400)" : "1px solid var(--color-divider)",
+        });
+      });
+    });
+    // Spread multiple edges landing on one node so arrowheads don't overlap.
+    const incoming = {};
+    EDGES.forEach((e) => { (incoming[e.to] = incoming[e.to] || []).push(e); });
+    const solidEdges = [], weakEdges = [];
+    EDGES.forEach((e) => {
+      const a = pos[e.from], b = pos[e.to];
+      const sibs = incoming[e.to]; const idx = sibs.indexOf(e);
+      const spread = sibs.length > 1 ? (idx - (sibs.length - 1) / 2) * 14 : 0;
+      const x1 = a.left + W, y1 = a.top + H / 2;
+      const x2 = b.left, y2 = b.top + H / 2 + spread;
+      const d = Math.abs(y1 - y2) < 1
+        ? "M " + x1 + " " + y1 + " L " + x2 + " " + y2
+        : "M " + x1 + " " + y1 + " C " + (x1 + 55) + " " + y1 + ", " + (x2 - 55) + " " + y2 + ", " + x2 + " " + y2;
+      (e.weak ? weakEdges : solidEdges).push({ d, tx: x2, ty: y2 });
+    });
+    const canvasW = LANES.length * PX - (PX - W);
+    const canvasH = TOP + maxRows * PY - (PY - H);
+    const dividers = [];
+    for (let i = 1; i < LANES.length; i++) dividers.push({ x: i * PX - (PX - W) / 2, y2: canvasH });
+    return {
+      open: this.state.open,
+      themeIcon: this.state.theme === "dark" ? "☀" : "☾",
+      toggleSidebar: () => this.setState((s) => { persist("sm.sidebar", s.open ? "closed" : "open"); return { open: !s.open }; }),
+      toggleTheme: () => this.setState((s) => {
+        const theme = s.theme === "dark" ? "light" : "dark";
+        persist("sm.theme", theme);
+        document.documentElement.setAttribute("data-theme", theme);
+        return { theme };
+      }),
+      lanes, nodes, solidEdges, weakEdges, dividers,
+      canvasW, canvasH,
+      canvasWpx: canvasW + "px", canvasHpx: canvasH + "px",
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -71,12 +71,12 @@ export default function AddToChatPopover({ anchorRect, onAdd, onClose }: AddToCh
       aria-label="Add to chat"
       tabIndex={-1}
       style={style}
-      className="z-50 flex items-center gap-1 rounded-lg border border-border bg-background p-1.5 shadow-xl"
+      className="z-50 flex items-center gap-1 rounded-lg border border-divider bg-surface-raised p-1.5 shadow-md"
     >
       <button
         type="button"
         onClick={onAdd}
-        className="whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium hover:bg-muted-foreground/10"
+        className="whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium text-accent-700 transition-colors hover:bg-accent/10"
       >
         Add to chat
       </button>

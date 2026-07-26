@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
-import { buildAssetFileUrl, type HighlightOut } from "@/lib/api/client";
+import { buildAssetFileUrl, type HighlightOut, type NoteOut } from "@/lib/api/client";
 import { usePdfHighlightPainter, type PdfHighlightPage } from "@/lib/annotations/usePdfHighlightPainter";
 import { useNearViewport } from "@/lib/hooks/useNearViewport";
 import { GlobalWorkerOptions, TextLayer, getDocument, type PDFDocumentProxy } from "pdfjs-dist";
@@ -76,7 +76,24 @@ export interface PdfPagesViewProps {
    * `enabled`: false (the default) means "don't paint, and clear whatever
    * this painter's names currently hold in the registry." */
   enabled?: boolean;
+  /** The section's positional margin notes (surface:"pdf"), sliced per-page
+   * (`n.page === pageNumber`) and rendered as gutter pins by each PdfPage.
+   * Defaults to empty so callers that don't care don't have to pass it. */
+  notes?: NoteOut[];
+  /** Fired when the note gutter beside a page is clicked — `anchorY` is the
+   * clamped 0..1 fraction of the page height at the click point. */
+  onNoteGutterClick?: NoteGutterClick;
+  /** Fired when an existing note's pin is clicked. */
+  onNoteClick?: NoteClickHandler;
 }
+
+export type NoteGutterClick = (
+  page: number,
+  anchorY: number,
+  clientX: number,
+  clientY: number,
+) => void;
+export type NoteClickHandler = (note: NoteOut, clientX: number, clientY: number) => void;
 
 export default function PdfPagesView({
   assetId,
@@ -84,6 +101,9 @@ export default function PdfPagesView({
   pageEnd,
   highlights = [],
   enabled = false,
+  notes = [],
+  onNoteGutterClick,
+  onNoteClick,
 }: PdfPagesViewProps) {
   const [state, setState] = useState<DocState>({ kind: "loading" });
 
@@ -192,6 +212,9 @@ export default function PdfPagesView({
           pageNumber={pageNumber}
           onTextLayerReady={handleTextLayerReady}
           onTextLayerGone={handleTextLayerGone}
+          notes={notes.filter((n) => n.page === pageNumber)}
+          onNoteGutterClick={onNoteGutterClick}
+          onNoteClick={onNoteClick}
         />
       ))}
     </div>
@@ -213,9 +236,21 @@ interface PdfPageProps {
    * from the ready set before a stale, now-empty container gets handed to
    * the painter again. */
   onTextLayerGone?: (pageNumber: number) => void;
+  /** This page's notes (already sliced to `n.page === pageNumber` by the parent). */
+  notes?: NoteOut[];
+  onNoteGutterClick?: NoteGutterClick;
+  onNoteClick?: NoteClickHandler;
 }
 
-function PdfPage({ doc, pageNumber, onTextLayerReady, onTextLayerGone }: PdfPageProps) {
+function PdfPage({
+  doc,
+  pageNumber,
+  onTextLayerReady,
+  onTextLayerGone,
+  notes = [],
+  onNoteGutterClick,
+  onNoteClick,
+}: PdfPageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -369,6 +404,71 @@ function PdfPage({ doc, pageNumber, onTextLayerReady, onTextLayerGone }: PdfPage
             data-pdf-page={pageNumber}
             data-text-layer-ready={textLayerReady}
           />
+          {/* Margin-note gutter — anchored to this position:relative wrapper so
+              a pin's `top: {anchor_y*100}%` tracks the page height at any
+              width (no JS geometry). The click strip sits in the right gutter;
+              a click computes anchor_y from the live rect. Keyboard fallback
+              (Enter/Space) drops a note at the page middle, since placing at a
+              precise y is inherently pointer-driven. */}
+          <div
+            data-testid={`note-gutter-${pageNumber}`}
+            role="button"
+            tabIndex={0}
+            aria-label={`Add a note beside page ${pageNumber}`}
+            className="absolute inset-y-0 left-full ml-2 w-6 cursor-copy rounded bg-muted-foreground/5 hover:bg-muted-foreground/10"
+            onClick={(event) => {
+              event.stopPropagation();
+              const rect = event.currentTarget.getBoundingClientRect();
+              // Bail if the page hasn't laid out yet (0-height rect during the
+              // pending window before doc.getPage resolves) — else anchor_y is
+              // NaN and the create is rejected 422 with only a generic banner.
+              if (rect.height <= 0) return;
+              const anchorY = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+              onNoteGutterClick?.(pageNumber, anchorY, event.clientX, event.clientY);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                const rect = event.currentTarget.getBoundingClientRect();
+                onNoteGutterClick?.(pageNumber, 0.5, rect.left, rect.top + rect.height / 2);
+              }
+            }}
+          />
+          {(() => {
+            // Simple collision nudge (spec MVP, not a full solver): pins are
+            // ordered by anchor_y and any within a small y-fraction of the
+            // previous one get a stacked downward pixel offset, so two
+            // near-coincident notes don't render as one indistinguishable pin.
+            // The -50% keeps the pin centered on its anchor; the offset stacks
+            // from there.
+            const ordered = [...notes].sort((a, b) => a.anchor_y - b.anchor_y);
+            let prevAnchorY = -Infinity;
+            let stack = 0;
+            return ordered.map((note) => {
+              stack = note.anchor_y - prevAnchorY <= 0.02 ? stack + 1 : 0;
+              prevAnchorY = note.anchor_y;
+              const offsetPx = stack * 16;
+              return (
+                <button
+                  key={note.id}
+                  type="button"
+                  data-testid={`note-pin-${note.id}`}
+                  style={{
+                    top: `${note.anchor_y * 100}%`,
+                    transform: `translateY(calc(-50% + ${offsetPx}px))`,
+                  }}
+                  aria-label={`Note on page ${pageNumber}`}
+                  className="absolute left-full ml-2 flex h-5 w-6 items-center justify-center rounded bg-accent text-[10px] text-white shadow hover:opacity-90"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onNoteClick?.(note, event.clientX, event.clientY);
+                  }}
+                >
+                  ●
+                </button>
+              );
+            });
+          })()}
         </div>
       )}
     </div>

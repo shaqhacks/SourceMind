@@ -1,17 +1,34 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import NotesPanel from "@/components/reader/NotesPanel";
-import { listHighlights, type HighlightOut } from "@/lib/api/client";
+import { listHighlights, listNotes, type HighlightOut, type NoteOut } from "@/lib/api/client";
 
 import { err, ok } from "../support/api-result";
 
 vi.mock("@/lib/api/client", () => ({
   listHighlights: vi.fn(),
+  listNotes: vi.fn(),
 }));
 
 const mockedListHighlights = vi.mocked(listHighlights);
+const mockedListNotes = vi.mocked(listNotes);
+
+function makeNote(overrides: Partial<NoteOut>): NoteOut {
+  return {
+    id: "n-default",
+    course_id: "course-1",
+    section_id: "sec-1",
+    surface: "pdf",
+    page: 7,
+    anchor_y: 0.4,
+    note_md: "a standalone page note",
+    created_at: "2026-01-01T00:00:03Z",
+    updated_at: "2026-01-01T00:00:03Z",
+    ...overrides,
+  };
+}
 
 const SECTIONS = [
   { id: "sec-1", title: "Chapter 1: Origins", order_index: 0 },
@@ -67,6 +84,12 @@ const PDF_NOTE = highlight({
 });
 
 describe("NotesPanel", () => {
+  beforeEach(() => {
+    // Default: no standalone notes, so the existing highlight-only tests are
+    // unaffected by the added Promise.all([listHighlights, listNotes]) fetch.
+    mockedListNotes.mockResolvedValue(ok([]));
+  });
+
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -175,11 +198,58 @@ describe("NotesPanel", () => {
       />,
     );
 
-    expect(await screen.findByText(/no highlights yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no highlights or notes yet/i)).toBeInTheDocument();
+  });
+
+  it("lists standalone margin notes alongside highlights, grouped by section", async () => {
+    mockedListHighlights.mockResolvedValue(ok([WITH_NOTE]));
+    mockedListNotes.mockResolvedValue(
+      ok([makeNote({ id: "n1", section_id: "sec-1", note_md: "margin thought", page: 7 })]),
+    );
+    const onNavigate = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <NotesPanel
+        courseId="course-1"
+        open
+        sections={SECTIONS}
+        onClose={vi.fn()}
+        onNavigate={onNavigate}
+      />,
+    );
+
+    // The highlight and the standalone note both render under Chapter 1.
+    expect(await screen.findByText(/remember this metaphor/i)).toBeInTheDocument();
+    expect(screen.getByText(/margin thought/i)).toBeInTheDocument();
+
+    const noteRow = screen.getByRole("button", { name: /page note/i });
+    expect(within(noteRow).getByText(/pdf p\.7/i)).toBeInTheDocument();
+
+    await user.click(noteRow);
+    expect(onNavigate).toHaveBeenCalledWith("sec-1", "pdf");
   });
 
   it("a failed listHighlights shows an error affordance", async () => {
     mockedListHighlights.mockResolvedValue(err(500));
+
+    render(
+      <NotesPanel
+        courseId="course-1"
+        open
+        sections={SECTIONS}
+        onClose={vi.fn()}
+        onNavigate={vi.fn()}
+      />,
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText(/loading notes failed \(http 500\)/i)).toBeInTheDocument();
+  });
+
+  it("a failed listNotes (with highlights ok) also shows an error affordance", async () => {
+    mockedListHighlights.mockResolvedValue(ok([]));
+    mockedListNotes.mockResolvedValue(err(500));
 
     render(
       <NotesPanel

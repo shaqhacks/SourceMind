@@ -1067,6 +1067,121 @@
         "title": "MergeOp",
         "type": "object"
       },
+      "NoteIn": {
+        "description": "A margin note anchored to a page + a 0..1 vertical fraction. page is\n1-based here like every page in this API surface; anchor_y is top-origin.",
+        "properties": {
+          "anchor_y": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Anchor Y",
+            "type": "number"
+          },
+          "note_md": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Note Md",
+            "type": "string"
+          },
+          "page": {
+            "minimum": 1.0,
+            "title": "Page",
+            "type": "integer"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "surface": {
+            "const": "pdf",
+            "default": "pdf",
+            "title": "Surface",
+            "type": "string"
+          }
+        },
+        "required": [
+          "section_id",
+          "page",
+          "anchor_y",
+          "note_md"
+        ],
+        "title": "NoteIn",
+        "type": "object"
+      },
+      "NoteOut": {
+        "properties": {
+          "anchor_y": {
+            "title": "Anchor Y",
+            "type": "number"
+          },
+          "course_id": {
+            "title": "Course Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "note_md": {
+            "title": "Note Md",
+            "type": "string"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "section_id": {
+            "title": "Section Id",
+            "type": "string"
+          },
+          "surface": {
+            "const": "pdf",
+            "title": "Surface",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "course_id",
+          "section_id",
+          "surface",
+          "page",
+          "anchor_y",
+          "note_md",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "NoteOut",
+        "type": "object"
+      },
+      "NoteUpdateIn": {
+        "properties": {
+          "note_md": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Md"
+          }
+        },
+        "title": "NoteUpdateIn",
+        "type": "object"
+      },
       "OutlineEditRequest": {
         "properties": {
           "operations": {
@@ -1471,6 +1586,10 @@
             ],
             "title": "Due At"
           },
+          "ease": {
+            "title": "Ease",
+            "type": "number"
+          },
           "front_md": {
             "title": "Front Md",
             "type": "string"
@@ -1479,9 +1598,17 @@
             "title": "Id",
             "type": "string"
           },
+          "interval_days": {
+            "title": "Interval Days",
+            "type": "number"
+          },
           "is_new": {
             "title": "Is New",
             "type": "boolean"
+          },
+          "reps": {
+            "title": "Reps",
+            "type": "integer"
           },
           "section_id": {
             "title": "Section Id",
@@ -1494,7 +1621,10 @@
           "front_md",
           "back_md",
           "due_at",
-          "is_new"
+          "is_new",
+          "interval_days",
+          "ease",
+          "reps"
         ],
         "title": "ReviewQueueCardOut",
         "type": "object"
@@ -3232,6 +3362,102 @@
         ]
       }
     },
+    "/api/courses/{course_id}/notes": {
+      "get": {
+        "operationId": "list_notes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NoteOut"
+                  },
+                  "title": "Response List Notes",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Notes",
+        "tags": [
+          "notes"
+        ]
+      },
+      "post": {
+        "operationId": "create_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Note",
+        "tags": [
+          "notes"
+        ]
+      }
+    },
     "/api/courses/{course_id}/outline": {
       "patch": {
         "operationId": "edit_outline",
@@ -4060,6 +4286,91 @@
         "summary": "Llm Usage",
         "tags": [
           "llm"
+        ]
+      }
+    },
+    "/api/notes/{note_id}": {
+      "delete": {
+        "operationId": "delete_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "title": "Note Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Note",
+        "tags": [
+          "notes"
+        ]
+      },
+      "patch": {
+        "operationId": "update_note",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "note_id",
+            "required": true,
+            "schema": {
+              "title": "Note Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Note",
+        "tags": [
+          "notes"
         ]
       }
     },

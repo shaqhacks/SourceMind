@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="ds/organic.css">
+  <link rel="stylesheet" href="ds/theme.css">
+  <style>
+    body { margin: 0; }
+  </style>
+</helmet>
+<div style="height: 100vh; display: flex; flex-direction: column; overflow: hidden; position: relative;">
+  <header style="display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--color-divider); flex: none; opacity: 0.5;">
+    <button class="btn btn-secondary btn-icon" aria-label="Toggle sidebar">☰</button>
+    <span class="nav-brand" style="font-size: 20px; color: var(--color-accent);">SourceMind</span>
+    <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
+      <span class="tag tag-accent" style="font-weight: 700;">12 cards due</span>
+      <span style="width: 34px; height: 34px; border-radius: 999px; background: var(--color-accent-2-300); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px;">J</span>
+    </div>
+  </header>
+  <div style="flex: 1; opacity: 0.5;"></div>
+  <div class="dialog-backdrop" style="z-index: 50;">
+    <div class="dialog elev-lg" role="dialog" aria-label="Start new course" style="width: min(620px, 100%); gap: 18px; padding: 28px 30px;">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <h3 class="dialog-title" style="margin: 0; font-size: 24px;">Start a new course</h3>
+        <a class="btn btn-secondary btn-icon" aria-label="Close" href="Redesign – Home.dc.html" style="text-decoration: none;">✕</a>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600;">
+        <span style="display: inline-flex; align-items: center; gap: 8px; color: var(--color-accent-2-700);"><span style="width: 22px; height: 22px; border-radius: 999px; background: var(--color-accent-2-500); color: var(--color-bg); display: inline-flex; align-items: center; justify-content: center; font-size: 12px;">✓</span>Upload</span>
+        <span style="flex: 1; height: 2px; background: var(--color-accent-2-400);"></span>
+        <span style="display: inline-flex; align-items: center; gap: 8px; color: var(--color-accent-700);"><span style="width: 22px; height: 22px; border-radius: 999px; background: var(--color-accent); color: var(--color-bg); display: inline-flex; align-items: center; justify-content: center; font-size: 12px;">2</span>Confirm outline</span>
+        <span style="flex: 1; height: 2px; background: var(--color-neutral-300);"></span>
+        <span style="display: inline-flex; align-items: center; gap: 8px; color: var(--color-neutral-600);"><span style="width: 22px; height: 22px; border-radius: 999px; background: var(--color-neutral-200); display: inline-flex; align-items: center; justify-content: center; font-size: 12px;">3</span>Start reading</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; border: 1px solid var(--color-divider); border-radius: 10px; padding: 12px 16px; background: var(--color-bg);">
+        <span style="font-size: 13px; font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">statistics-101-textbook.pdf</span>
+        <span class="tag tag-accent-2">Uploaded · 214 pages</span>
+      </div>
+      <div class="field" style="margin: 0;">
+        <label>Course title</label>
+        <input class="input" type="text" value="Statistics 101">
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <p style="margin: 0; font-size: 13px; font-weight: 700;">Detected outline — 12 chapters from your PDF's bookmarks</p>
+          <p class="text-muted" style="margin: 0; font-size: 12px;">No AI used · instant &amp; free</p>
+        </div>
+        <div style="border: 1px solid var(--color-divider); border-radius: 10px; overflow: hidden; max-height: 240px; overflow-y: auto;">
+          <div style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--color-divider); font-size: 14px;">
+            <span style="flex: 1; font-weight: 600;">1 · Describing Data</span>
+            <span class="text-muted" style="font-size: 12px;">p.1–18</span>
+            <button class="btn btn-ghost" style="font-size: 12px;">Rename</button>
+            <button class="btn btn-ghost" style="font-size: 12px;">Split</button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--color-divider); font-size: 14px;">
+            <span style="flex: 1; font-weight: 600;">2 · Probability Basics</span>
+            <span class="text-muted" style="font-size: 12px;">p.19–44</span>
+            <button class="btn btn-ghost" style="font-size: 12px;">Rename</button>
+            <button class="btn btn-ghost" style="font-size: 12px;">Split</button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--color-divider); font-size: 14px; background: var(--color-accent-100);">
+            <span style="flex: 1; font-weight: 600;">3 · Random Variables <span class="tag tag-accent" style="margin-left: 6px;">merging with 4</span></span>
+            <span class="text-muted" style="font-size: 12px;">p.45–61</span>
+            <button class="btn btn-ghost" style="font-size: 12px;">Undo</button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; font-size: 14px;">
+            <span style="flex: 1; font-weight: 600;">5 · Sampling Distributions</span>
+            <span class="text-muted" style="font-size: 12px;">p.62–80</span>
+            <button class="btn btn-ghost" style="font-size: 12px;">Rename</button>
+            <button class="btn btn-ghost" style="font-size: 12px;">Split</button>
+          </div>
+        </div>
+        <p class="text-muted" style="margin: 0; font-size: 12px;">You can fix the outline any time from the reader — merging or splitting resets review state for affected chapters only.</p>
+      </div>
+      <div class="dialog-actions" style="margin: 0;">
+        <a class="btn btn-secondary" href="Redesign – Home.dc.html" style="text-decoration: none;">Cancel</a>
+        <a class="btn btn-primary" href="Redesign – Reader.dc.html" style="text-decoration: none;">Accept outline &amp; start reading</a>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280}}">
+class Component extends DCLogic {
+  componentDidMount() {
+    let theme = "light";
+    try { theme = localStorage.getItem("sm.theme") || "light"; } catch (e) {}
+    document.documentElement.setAttribute("data-theme", theme);
+  }
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

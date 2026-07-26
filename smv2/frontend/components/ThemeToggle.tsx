@@ -27,8 +27,8 @@ export default function ThemeToggle() {
             onClick={() => setPreference(option.value)}
             className={`px-3 py-1.5 transition-colors ${
               active
-                ? "bg-accent text-white"
-                : "bg-transparent text-foreground hover:bg-muted-foreground/10"
+                ? "bg-accent text-background"
+                : "bg-transparent text-foreground hover:bg-foreground/[0.07]"
             }`}
           >
             {option.label}

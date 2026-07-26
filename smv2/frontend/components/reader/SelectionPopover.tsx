@@ -77,7 +77,7 @@ export default function SelectionPopover({
       aria-label="Selection actions"
       tabIndex={-1}
       style={style}
-      className="z-50 flex items-center gap-1 rounded-lg border border-border bg-background p-1.5 shadow-xl"
+      className="z-50 flex items-center gap-1 rounded-lg border border-divider bg-surface-raised p-1.5 shadow-md"
     >
       {COLORS.map((color) => (
         <button
@@ -86,15 +86,15 @@ export default function SelectionPopover({
           onClick={() => onColor(color)}
           aria-label={`Highlight ${color}`}
           title={`Highlight ${color}`}
-          className="h-6 w-6 rounded-full border border-border"
+          className="h-6 w-6 rounded-full border border-border transition-transform hover:scale-110"
           style={{ backgroundColor: `var(--highlight-${color})` }}
         />
       ))}
-      <div aria-hidden="true" className="mx-1 h-5 w-px bg-border" />
+      <div aria-hidden="true" className="mx-1 h-5 w-px bg-divider" />
       <button
         type="button"
         onClick={onExplain}
-        className="whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium hover:bg-muted-foreground/10"
+        className="whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium text-accent-700 transition-colors hover:bg-accent/10"
       >
         Add to chat
       </button>

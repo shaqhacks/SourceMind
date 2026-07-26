@@ -1,0 +1,78 @@
+/* SourceMind theme layer — loaded AFTER ds/organic.css.
+   Retunes the Organic ground to a cooler, less-brown neutral and adds a
+   dark theme via [data-theme="dark"]. Accent ramps (terracotta + sage)
+   stay from the design system. */
+:root {
+  --color-bg: #fafaf7;
+  --color-surface: #efeeea;
+  --color-text: #1e1e1c;
+  --color-divider: color-mix(in srgb, #1e1e1c 14%, transparent);
+
+  --color-neutral-100: #f5f5f2;
+  --color-neutral-200: #e9e9e4;
+  --color-neutral-300: #d9d9d2;
+  --color-neutral-400: #bcbcb3;
+  --color-neutral-500: #9d9d94;
+  --color-neutral-600: #7e7e76;
+  --color-neutral-700: #60605a;
+  --color-neutral-800: #444440;
+  --color-neutral-900: #2c2c29;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #2c2c29 10%, transparent);
+  --shadow-md: 0 3px 10px color-mix(in srgb, #2c2c29 12%, transparent);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, #2c2c29 18%, transparent);
+}
+
+[data-theme="dark"] {
+  --color-bg: #16181d;
+  --color-surface: #21242b;
+  --color-text: #ecedee;
+  --color-divider: color-mix(in srgb, #ecedee 16%, transparent);
+
+  --color-accent: #e08a52;
+  --color-accent-100: #38231331;
+  --color-accent-100: #382313;
+  --color-accent-200: #4b2e18;
+  --color-accent-300: #6b421f;
+  --color-accent-400: #b2622d;
+  --color-accent-500: #d67f48;
+  --color-accent-600: #f6a06b;
+  --color-accent-700: #ffb98a;
+  --color-accent-800: #ffd4b3;
+  --color-accent-900: #ffe9d8;
+
+  --color-accent-2: #97a878;
+  --color-accent-2-100: #232b15;
+  --color-accent-2-200: #313d20;
+  --color-accent-2-300: #46552f;
+  --color-accent-2-400: #5f7042;
+  --color-accent-2-500: #8fa073;
+  --color-accent-2-600: #aebf92;
+  --color-accent-2-700: #ccdbb2;
+  --color-accent-2-800: #e1eecc;
+  --color-accent-2-900: #f0fae1;
+
+  --color-neutral-100: #1d2026;
+  --color-neutral-200: #282c33;
+  --color-neutral-300: #363b44;
+  --color-neutral-400: #4d545e;
+  --color-neutral-500: #6b727d;
+  --color-neutral-600: #8d949e;
+  --color-neutral-700: #aeb4bc;
+  --color-neutral-800: #cfd3d9;
+  --color-neutral-900: #eceef0;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.5);
+  --shadow-md: 0 3px 10px rgba(0,0,0,0.5);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.6);
+}
+/* Solidity pass: tighter radii, visible card borders, filled secondaries —
+   overrides Organic's pill/over-rounded layer. */
+:root { --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px; }
+.btn, .seg, .input { border-radius: 8px !important; }
+.tag { border-radius: 6px !important; }
+.card, .dialog { border-radius: 12px !important; border: 1px solid var(--color-divider); }
+.btn-secondary { background: var(--color-surface); border-color: color-mix(in srgb, var(--color-text) 24%, transparent); }
+
+[data-theme="dark"] .btn-primary { color: #16181d; }
+[data-theme="dark"] .seg-opt:has(input:checked) { color: #16181d; }

@@ -49,9 +49,9 @@ export default function DueBadge() {
       {dueTotal ? (
         <Link
           href="/review"
-          className="rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-white"
+          className="rounded-[6px] bg-accent-soft px-2.5 py-1 text-xs font-semibold text-accent-800"
         >
-          {dueTotal} due
+          {dueTotal} card{dueTotal === 1 ? "" : "s"} due
         </Link>
       ) : null}
     </div>

@@ -14,6 +14,7 @@ from app.db.models import (
     ConceptMasteryEvent,
     Course,
     LlmCall,
+    Note,
     PracticeAnswer,
     PracticeExtractionRun,
     PracticeQuestion,
@@ -96,6 +97,14 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
             id=str(uuid.uuid4()), course_id=course.id, section_id=section.id, questions=[{"q": 1}]
         )
         test_attempt = TestAttempt(id=str(uuid.uuid4()), test_id=test.id, course_id=course.id)
+        note = Note(
+            course_id=course.id,
+            section_id=section.id,
+            surface="pdf",
+            page=0,
+            anchor_y=0.5,
+            note_md="cascade note",
+        )
         concept = Concept(
             course_id=course.id,
             slug="cascade.concept",
@@ -171,6 +180,7 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
                 chat_turn,
                 test,
                 test_attempt,
+                note,
                 mastery_event,
                 llm_call,
             ]
@@ -198,6 +208,7 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         assert session.query(ChatTurn).filter_by(course_id=course_id).count() == 0
         assert session.query(Test).filter_by(course_id=course_id).count() == 0
         assert session.query(TestAttempt).filter_by(course_id=course_id).count() == 0
+        assert session.query(Note).filter_by(course_id=course_id).count() == 0
         assert session.query(Concept).filter_by(course_id=course_id).count() == 0
         assert session.query(PracticeQuestion).filter_by(course_id=course_id).count() == 0
         assert session.query(PracticeExtractionRun).filter_by(course_id=course_id).count() == 0

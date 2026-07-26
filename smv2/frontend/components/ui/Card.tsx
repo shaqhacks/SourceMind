@@ -12,11 +12,13 @@ export default function Card({
   className = "",
   ...rest
 }: CardProps) {
-  const bg = variant === "tinted" ? "bg-accent-soft/60" : "bg-surface-raised";
-  const hover = interactive ? "transition-colors hover:border-muted-foreground" : "";
+  const bg = variant === "tinted" ? "bg-accent-soft" : "bg-surface-raised";
+  const hover = interactive
+    ? "transition-[box-shadow,translate] hover:-translate-y-px hover:shadow-md"
+    : "";
   return (
     <div
-      className={`rounded-lg border border-border p-4 ${bg} ${hover} ${className}`}
+      className={`rounded-lg border border-divider p-4 ${bg} ${hover} ${className}`}
       {...rest}
     />
   );

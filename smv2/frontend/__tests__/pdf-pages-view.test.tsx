@@ -96,10 +96,16 @@ describe("PdfPagesView", () => {
     expect(doc.getPage).not.toHaveBeenCalled();
 
     const page1Container = screen.getByTestId("pdf-page-1");
-    const observerForPage1 = FakeIntersectionObserver.instances.find((observer) =>
-      observer.observed.includes(page1Container),
-    );
-    observerForPage1!.triggerIntersect(page1Container);
+    // Awaited: the observer registers in a mount effect (same race class as
+    // pdf-note.test.tsx's helper — never grab instances synchronously).
+    const observerForPage1 = await waitFor(() => {
+      const found = FakeIntersectionObserver.instances.find((observer) =>
+        observer.observed.includes(page1Container),
+      );
+      if (!found) throw new Error("page observer not registered yet");
+      return found;
+    });
+    observerForPage1.triggerIntersect(page1Container);
 
     await waitFor(() => expect(doc.getPage).toHaveBeenCalledWith(1));
     expect(doc.getPage).not.toHaveBeenCalledWith(2);

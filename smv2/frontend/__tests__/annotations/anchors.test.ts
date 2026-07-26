@@ -65,7 +65,7 @@ describe("selectorFromRange", () => {
     const el = container("<p>alpha <strong>beta</strong> gamma</p>");
     // Select "beta gamma" across the <strong> boundary.
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    const beta = walker.nextNode() && walker.currentNode; // "alpha "
+    const _beta = walker.nextNode() && walker.currentNode; // "alpha "
     // simpler: build range from "beta" start to end of " gamma"
     const strongText = el.querySelector("strong")!.firstChild!;
     const tailText = el.querySelector("p")!.childNodes[2]; // " gamma"

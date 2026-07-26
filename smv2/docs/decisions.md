@@ -888,3 +888,40 @@ CFI/DOM-position or char-offset based, because the same source text
 renders in multiple DOMs (react-markdown, pdf.js text layer). The feature
 is readest-inspired but uses zero readest code — readest's UI is AGPL-3.0
 and must never be copied into this repo.
+
+## ADR-025 — Positional margin notes: normalized-y anchor, separate Note table (2026-07-21)
+
+The new `notes` table (student margin notes: `page` + `anchor_y` +
+`note_md`, surface="pdf") lets a student annotate a spot on a PDF page
+without selecting text. The anchor is `anchor_y`, a 0..1 top-origin
+**fraction of the page height**, NOT pixels/CFI/text-quote: each PDF page
+renders fit-to-width with a fixed aspect ratio, so a fraction tracks the
+same spot when the page re-lays-out at any zoom/width, rendered as a plain
+CSS `top: {anchor_y*100}%` inside the page's position:relative wrapper (no
+JS geometry). A **separate** entity rather than overloading the text-quote
+`Highlight` (whose `exact` is required and central); the NotesPanel is the
+union of both. MVP scope: PDF surface only (a markdown source view reflows,
+so a y-fraction is meaningless there), no colors/drag/cross-page notes.
+Wiped on re-ingest like highlights (ADR-024) — classified
+REPLACED_ON_REINGEST AND explicitly deleted in `_run_ingest`'s wipe block
+(registry membership alone does not wipe; FK cascade doesn't fire for
+sections kept unchanged across re-ingest). Spec:
+docs/superpowers/specs/2026-07-21-margin-notes-design.md.
+
+## ADR-026 — Outline confirmation reinstated in the new-course dialog; supersedes ADR-014 (2026-07-26)
+
+The 2026-07-26 UI redesign (design handoff:
+docs/design-frontend/Educational platform UI redesign/design_handoff_sourcemind_redesign/,
+plan: docs/superpowers/plans/2026-07-26-ui-redesign.md) reintroduces the
+outline-confirmation step that ADR-014 removed: the "Start a new course"
+dialog now runs Upload → Confirm outline → Start reading, with the
+detected outline shown as an explicit reviewable step (rename/split/merge,
+staged with Undo) before the reader opens. This is an informed reversal,
+not an oversight — the handoff README calls it out ("outline confirmation
+returns as an explicit step... it currently lives only in the reader").
+ADR-014's underlying observation ("verifying page numbers is not a user
+job") is respected in the new UI: the step defaults to a one-click
+"Accept outline & start reading" and never requires page-number editing;
+Cancel simply dismisses (the course is already created and ingested, and
+the outline stays editable from the reader's Edit outline modal, which
+remains unchanged). ADR-014 is superseded on the upload-flow point only.

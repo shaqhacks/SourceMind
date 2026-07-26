@@ -158,17 +158,19 @@ export default function CourseChatDrawer({
       tabIndex={-1}
       className={
         isNarrow
-          ? "fixed inset-y-0 right-0 z-40 flex w-96 max-w-[90vw] flex-col border-l border-border bg-background shadow-xl"
-          : "flex w-[380px] shrink-0 flex-col border-l border-border"
+          ? "fixed inset-y-0 right-0 z-40 flex w-96 max-w-[90vw] flex-col border-l border-divider bg-background shadow-lg"
+          : "flex w-[340px] shrink-0 flex-col border-l border-divider"
       }
     >
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold">Chat</h2>
+      <div className="flex items-center justify-between gap-2 border-b border-divider px-4 py-3">
+        <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+          Chat
+        </h2>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close chat"
-          className="rounded-md border border-border px-2 py-1 text-sm"
+          className="rounded-md border border-border bg-surface-raised px-2.5 py-1 text-xs font-medium transition-colors hover:bg-foreground/[0.07]"
         >
           Close
         </button>
