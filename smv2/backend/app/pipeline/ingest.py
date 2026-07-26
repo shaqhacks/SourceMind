@@ -41,8 +41,10 @@ from app.db.models import (
     ChatTurn,
     Chunk,
     Concept,
+    ConceptEdge,
     ConceptMastery,
     ConceptMasteryEvent,
+    ConceptSectionLink,
     Course,
     Highlight,
     Job,
@@ -421,6 +423,13 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     session.query(PracticeExtractionRun).filter(
         PracticeExtractionRun.course_id == course_id
     ).delete()
+    # ConceptEdge/ConceptSectionLink before Concept: both FK to concepts.id
+    # ON DELETE CASCADE, so deleting Concept first would already remove
+    # these via the DB itself, but every REPLACED table gets its own
+    # explicit delete here regardless (ADR-022), same rationale as
+    # TestAttempt before Test above.
+    session.query(ConceptEdge).filter(ConceptEdge.course_id == course_id).delete()
+    session.query(ConceptSectionLink).filter(ConceptSectionLink.course_id == course_id).delete()
     session.query(Concept).filter(Concept.course_id == course_id).delete()
 
     for existing_id, existing in list(existing_sections.items()):

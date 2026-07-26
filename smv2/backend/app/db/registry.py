@@ -16,8 +16,10 @@ from app.db.models import (
     ChatTurn,
     Chunk,
     Concept,
+    ConceptEdge,
     ConceptMastery,
     ConceptMasteryEvent,
+    ConceptSectionLink,
     Highlight,
     LlmCall,
     Note,
@@ -49,6 +51,8 @@ REPLACED_ON_REINGEST = [
     PracticeQuestion,
     PracticeExtractionRun,
     Concept,
+    ConceptEdge,
+    ConceptSectionLink,
 ]
 
 # Survive re-ingest by remapping onto the new content-addressed ids (spaced

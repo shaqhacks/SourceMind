@@ -411,6 +411,60 @@ class Concept(Base):
     )
 
 
+class ConceptEdge(Base):
+    """A prerequisite edge between two concepts: from must be learned before
+    to. Directed, course-scoped. Wiped on re-ingest — concepts themselves
+    are wiped and regenerated, so any edge referencing them would otherwise
+    dangle.
+    """
+
+    __tablename__ = "concept_edges"
+    __table_args__ = (
+        UniqueConstraint(
+            "course_id", "from_concept_id", "to_concept_id", name="uq_concept_edges"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    from_concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    to_concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class ConceptSectionLink(Base):
+    """Where a concept is taught. Concept.section_id stays the "introduced
+    here" pointer; this table holds every section a concept is covered in
+    (including re-appearances later in the course), ordered by rank within
+    a concept. Wiped on re-ingest along with the concepts it references.
+    """
+
+    __tablename__ = "concept_section_links"
+    __table_args__ = (
+        UniqueConstraint("concept_id", "section_id", name="uq_concept_section_links"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    section_id: Mapped[str] = mapped_column(
+        String, ForeignKey("sections.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    relevance_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
 class PracticeQuestion(Base):
     __tablename__ = "practice_questions"
     __table_args__ = (
