@@ -24,13 +24,18 @@ def derive_levels(node_ids: list[str], edges: list[tuple[str, str]]) -> dict[str
         Dictionary mapping node_id to its level (1-based)
 
     Raises:
-        ValueError: If the graph contains a cycle
+        ValueError: If the graph contains a cycle or an edge references an unknown node
     """
     # Build adjacency list and track in-degrees
     graph = {node: [] for node in node_ids}
     in_degree = {node: 0 for node in node_ids}
 
+    # Validate that all edge endpoints are in node_ids
     for from_node, to_node in edges:
+        if from_node not in graph:
+            raise ValueError(f"edge references unknown node: {from_node}")
+        if to_node not in graph:
+            raise ValueError(f"edge references unknown node: {to_node}")
         graph[from_node].append(to_node)
         in_degree[to_node] += 1
 
@@ -62,7 +67,7 @@ def derive_levels(node_ids: list[str], edges: list[tuple[str, str]]) -> dict[str
                 queue.append(child)
 
     # Check for cycle: if not all nodes were processed, there's a cycle
-    if processed_count != len(node_ids):
+    if processed_count != len(graph):
         raise ValueError("cycle")
 
     return levels

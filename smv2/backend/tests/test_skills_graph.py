@@ -61,3 +61,16 @@ def test_status_thresholds_and_locked_gate():
     assert status_for(39, True, False) == "struggling"
     assert status_for(70, True, False) == "growing"
     assert status_for(71, True, False) == "solid"
+
+
+def test_derive_levels_handles_duplicate_node_ids():
+    """Regression: duplicate node_ids should not cause false-positive cycle detection."""
+    levels = derive_levels(["a", "b", "b"], [("a", "b")])
+    assert levels == {"a": 1, "b": 2}
+
+
+def test_derive_levels_rejects_edge_with_unknown_endpoint():
+    """Regression: edge referencing unknown node should raise ValueError, not KeyError."""
+    with pytest.raises(ValueError) as exc_info:
+        derive_levels(["a", "b"], [("a", "x")])
+    assert "x" in str(exc_info.value)
