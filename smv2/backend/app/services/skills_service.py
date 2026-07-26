@@ -26,6 +26,9 @@ def derive_levels(node_ids: list[str], edges: list[tuple[str, str]]) -> dict[str
     Raises:
         ValueError: If the graph contains a cycle or an edge references an unknown node
     """
+    # Dedupe node_ids while preserving order
+    node_ids = list(dict.fromkeys(node_ids))
+
     # Build adjacency list and track in-degrees
     graph = {node: [] for node in node_ids}
     in_degree = {node: 0 for node in node_ids}

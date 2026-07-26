@@ -74,3 +74,15 @@ def test_derive_levels_rejects_edge_with_unknown_endpoint():
     with pytest.raises(ValueError) as exc_info:
         derive_levels(["a", "b"], [("a", "x")])
     assert "x" in str(exc_info.value)
+
+
+def test_derive_levels_handles_duplicate_roots():
+    """Regression: duplicate root nodes should not inflate processed_count."""
+    levels = derive_levels(["a", "a", "b"], [])
+    assert levels == {"a": 1, "b": 1}
+
+
+def test_derive_levels_handles_duplicate_nodes_in_diamond():
+    """Regression: duplicate nodes in a DAG should be deduplicated, not cause cycle detection."""
+    levels = derive_levels(["a", "a", "b", "c"], [("a", "b"), ("a", "c"), ("b", "c")])
+    assert levels == {"a": 1, "b": 2, "c": 3}
