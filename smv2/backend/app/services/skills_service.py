@@ -579,6 +579,7 @@ def get_skill_detail(course_id: str, concept_id: str) -> dict[str, Any] | None:
                         "your_answer": (
                             question["choices"][your_answer_idx]
                             if your_answer_idx is not None
+                            and 0 <= your_answer_idx < len(question["choices"])
                             else None
                         ),
                         "correct_answer": question["choices"][question["correct_index"]],

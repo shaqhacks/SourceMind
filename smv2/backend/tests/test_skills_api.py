@@ -584,3 +584,65 @@ def test_quiz_signal_reaches_concept_via_section_id_pointer_without_links(client
     assert detail["quiz_correct"] == 1
     assert detail["quiz_wrong"] == 0
     assert detail["taught_in"] == []
+
+
+def test_skill_detail_survives_out_of_range_your_answer_index(client, ingest_course):
+    """submit_test never validates a submitted answer index against
+    len(choices) (tests_service.py accepts answers like [99] unchecked), so
+    a stored TestAttempt.results row can carry an out-of-range your_answer.
+    The detail endpoint must degrade that to your_answer=None, not crash
+    with an uncaught IndexError on every request whose quiz scope includes
+    the bad row.
+    """
+    from app.db.engine import get_session
+    from app.db.models import Concept, ConceptSectionLink, Test, TestAttempt
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    sections = client.get(f"/api/courses/{course_id}/sections").json()
+    s0 = sections[0]["id"]
+
+    session = get_session()
+    try:
+        concept = Concept(course_id=course_id, slug="oob-answer", label="Out Of Range")
+        session.add(concept)
+        session.flush()
+        session.add(
+            ConceptSectionLink(course_id=course_id, concept_id=concept.id, section_id=s0, rank=0)
+        )
+
+        test = Test(
+            course_id=course_id,
+            section_id=s0,
+            questions=[
+                {
+                    "question": "Which is correct?",
+                    "choices": ["A", "B"],
+                    "correct_index": 0,
+                    "explanation": "",
+                }
+            ],
+        )
+        session.add(test)
+        session.flush()
+        session.add(
+            TestAttempt(
+                test_id=test.id,
+                course_id=course_id,
+                answers=[99],
+                results=[
+                    {"correct": False, "correct_index": 0, "explanation": "", "your_answer": 99}
+                ],
+                score=0.0,
+            )
+        )
+        session.commit()
+        concept_id = concept.id
+    finally:
+        session.close()
+
+    resp = client.get(f"/api/courses/{course_id}/skills/{concept_id}")
+    assert resp.status_code == 200
+    missed = resp.json()["missed_questions"]
+    assert len(missed) == 1
+    assert missed[0]["your_answer"] is None
+    assert missed[0]["correct_answer"] == "A"
