@@ -318,7 +318,11 @@ describe("TestsPage", () => {
       screen.getByText(/missed questions are added to your flashcards automatically/i),
     ).toBeInTheDocument();
 
-    expect(screen.getByText("Diagnosis")).toBeInTheDocument();
+    // findByText, not getByText: ScoreHistoryCard and DiagnosisCard render
+    // off separate fetches (listChapters/listTests vs. DiagnosisCard's own
+    // useSkillMap), so "Score history" appearing above gives no ordering
+    // guarantee that the skill map fetch has resolved yet.
+    expect(await screen.findByText("Diagnosis")).toBeInTheDocument();
     // Two assertions, not one regex spanning both: the message's prereq
     // name sits inside its own <strong>, and RTL's getByText only matches
     // an element's own direct text nodes, not text a nested element covers.
