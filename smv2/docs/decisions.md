@@ -925,3 +925,101 @@ job") is respected in the new UI: the step defaults to a one-click
 Cancel simply dismisses (the course is already created and ingested, and
 the outline stays editable from the reader's Edit outline modal, which
 remains unchanged). ADR-014 is superseded on the upload-flow point only.
+
+## ADR-027 — Competency graph: Concept-based nodes, read-time mastery, hand-run import (2026-07-26)
+
+The competency graph reuses the existing `Concept` table as its node type
+rather than the office-hours spec's `PrereqConcept` naming — a parallel
+concept vocabulary would fragment the existing `ConceptMastery` table (from
+the inline-practice-assessments feature) across two id spaces for what is
+conceptually one thing. Two new tables carry the graph itself:
+`ConceptEdge` (`from_concept_id` -> `to_concept_id` prerequisite edges,
+unique per course+pair) and `ConceptSectionLink` (concept -> section
+attribution beyond `Concept.section_id`, unique per concept+section,
+carrying an ordering `rank` and optional `relevance_md`), added in
+migration `0013_concept_graph.py`. Both are classified
+`REPLACED_ON_REINGEST` in `app/db/registry.py` and explicitly deleted in
+`ingest.py`'s `_run_ingest` wipe block ahead of `Concept` itself
+(child-before-parent, the same ordering `ConceptEdge`/`ConceptSectionLink`
+foreign keys require and the same discipline ADR-022/024/025 already
+established) — registry membership alone does not wipe rows referencing an
+unchanged `course_id`, so the explicit delete call is load-bearing.
+
+Mastery is computed at read time on every skills request; nothing is
+stored, cached, or job-produced, so there is no staleness to reconcile.
+`skills_service.mastery_score` blends up to three per-concept signals, each
+already normalized to 0-1 and renormalized over whichever are actually
+present: quiz (weight 0.5, correct/(correct+wrong) over each concept's
+latest graded attempts), practice (weight 0.3, `ConceptMastery`'s own
+correct_count/wrong_count), and SRS (weight 0.2, each linked `Card`'s
+`ReviewState.last_grade` rescaled from SM-2's 1-4 grade scale to 0-1 via
+`(last_grade-1)/3`, averaged). `status_for` resolves to one of four states
+in priority order: `locked` when a concept has zero recorded signals AND at
+least one prerequisite's mastery is below `WEAK_PREREQ_BELOW` (60);
+`growing` when it has zero signals but no weak prerequisite (unblocked,
+not-yet-started); `struggling` below `STRUGGLING_BELOW` (40); `solid` above
+`SOLID_ABOVE` (70); `growing` again for the 40-70 band in between. The
+read-side `blocked` field is independent of `status` — `any(incoming
+prerequisite's mastery < 60)` — after an implementation pass conflated the
+two (the original code only set `blocked` when `status == "locked"`,
+silently hiding the case where a concept is `struggling` on its own signals
+while separately gated by an unrelated weak prerequisite). Graph levels
+(topological depth, used for map layout) come from `derive_levels`, a
+Kahn's-algorithm longest-path over deduplicated node ids that raises before
+any state changes if the edge set contains a cycle or references a node id
+outside the set given to it — the same function backs both `import_graph`'s
+422 validation and `build_map`'s read-time layout, so cycle detection can't
+drift between the two call sites.
+
+Quiz signal attribution is section-pool based, not per-question tagging:
+each concept's signal-eligible sections are `ConceptSectionLink` rows
+unioned with the concept's own `Concept.section_id` (not links alone — an
+earlier pass scoped quiz attribution to links only, which disagreed with
+the union already used for the SRS/cards-count pool and was harmonized to
+match, since a concept created by the separate inline-practice feature
+carries only a bare `section_id` pointer and no link rows). A test's own
+scope resolves to section ids the same way `tests_service` already resolves
+it elsewhere (explicit `section_id`, else every non-answer-key section of
+its `chapter_label`, else the whole course); only the latest graded attempt
+per test contributes, and a test with no graded attempt contributes
+nothing. `taught_in` deliberately stays link-only (a curated "where this is
+taught" list, not a signal-attribution pool) even though signal attribution
+itself is unioned.
+
+The graph is authored offline by a hand-run extraction prompt
+(`backend/prompts/v1/prereq_extraction.md`) that no application code loads
+(verified: zero `load_prompt("prereq_extraction")` call sites) — a human
+runs it against a course's outline, reviews the output, and PUTs the
+result in, keeping this feature at zero in-app LLM calls per this
+codebase's deterministic-before-generative default. Import
+(`PUT /api/courses/{course_id}/skills/graph`, `app/routers/skills.py`) is
+idempotent: concepts are upserted by `(course_id, slug)` so a concept's id
+— and therefore its `ConceptSectionLink` rows and any mastery history keyed
+through it — survives a later re-import with edited edges, while edges and
+section links are deleted and rewritten wholesale for the course on every
+import rather than diffed incrementally. `GraphValidationError` (422)
+covers a cycle, an edge or section_ref referencing a slug/section_id absent
+from the same payload, and a duplicate concept slug within one payload;
+exact-duplicate edges and exact-duplicate section-refs within one concept
+are silently deduplicated (first occurrence wins, reflected in the response
+counts) rather than rejected, since a duplicate produced by re-running the
+extraction prompt is a nuisance to tolerate, not a caller error to reject.
+Concepts dropped from a later import are left untouched by design — import
+only ever upserts concepts, never deletes one — so a course's concept list
+can only grow via re-import, though its edges/links fully reset each time.
+
+Both read endpoints (`GET /api/courses/{course_id}/skills` for the full map,
+`GET /api/courses/{course_id}/skills/{concept_id}` for one concept's detail,
+404 if absent from the course) delegate to one shared `build_map` assembly
+that loads a course's concepts/edges/links/cards/attempts in a fixed number
+of queries rather than per-concept, so requesting the whole map costs the
+same as requesting one detail's worth of underlying data.
+
+Deliberately deferred: generation-time per-question concept tagging.
+Attribution is scope-based (test scope -> sections -> concepts, resolved at
+read time) rather than tagging each generated quiz question with its
+concept at generation time, keeping quiz generation itself unchanged and
+avoiding a fourth LLM-call site or a second deterministic tagging pass for
+a feature whose section-level granularity already suffices for the mastery
+signal it feeds. No `_EXTRACTOR_ALGO_VERSION` bump — nothing in
+extraction/outline changed this round.
