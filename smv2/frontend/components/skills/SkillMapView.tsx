@@ -231,7 +231,7 @@ function MapViewToggle() {
       <button
         type="button"
         disabled
-        title="Coming with the competency backend"
+        title="By-chapter view isn't built yet"
         className="rounded-[6px] px-3 py-1.5 text-muted-foreground disabled:cursor-not-allowed disabled:opacity-45"
       >
         By chapter

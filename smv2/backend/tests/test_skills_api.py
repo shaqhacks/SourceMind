@@ -98,6 +98,37 @@ def test_import_rejects_cycle_with_422(client, ingest_course):
     assert resp.status_code == 422
 
 
+def test_import_rejects_duplicate_slug_with_422(client, ingest_course):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    payload = {
+        "concepts": [
+            {"slug": "a", "label": "A", "section_refs": []},
+            {"slug": "a", "label": "A again", "section_refs": []},
+        ],
+        "edges": [],
+    }
+    resp = client.put(f"/api/courses/{course_id}/skills/graph", json=payload)
+    assert resp.status_code == 422
+
+
+def test_import_rejects_edge_referencing_unknown_slug_with_422(client, ingest_course):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    payload = {
+        "concepts": [{"slug": "a", "label": "A", "section_refs": []}],
+        "edges": [{"from_slug": "a", "to_slug": "does-not-exist"}],
+    }
+    resp = client.put(f"/api/courses/{course_id}/skills/graph", json=payload)
+    assert resp.status_code == 422
+
+
+def test_import_graph_404_for_missing_course(client):
+    payload = {"concepts": [{"slug": "a", "label": "A", "section_refs": []}], "edges": []}
+    resp = client.put("/api/courses/does-not-exist/skills/graph", json=payload)
+    assert resp.status_code == 404
+
+
 def test_import_rejects_foreign_section_with_422(client, ingest_course):
     from conftest import _first_section_id
 
@@ -171,6 +202,45 @@ def test_import_dedupes_duplicate_section_ref(client, ingest_course):
         assert links[0].relevance_md == "First."
     finally:
         session.close()
+
+
+def test_import_then_read_roundtrip(client, ingest_course):
+    """PUT .../skills/graph followed by the two GET read endpoints — the map
+    must reflect exactly the imported concepts/edges (by slug, since ids are
+    server-generated) and the detail endpoint must surface the imported
+    section link with its relevance_md."""
+    from conftest import _first_section_id
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    put_resp = client.put(f"/api/courses/{course_id}/skills/graph", json=_graph(section_id))
+    assert put_resp.status_code == 200
+
+    map_resp = client.get(f"/api/courses/{course_id}/skills")
+    assert map_resp.status_code == 200
+    body = map_resp.json()
+
+    nodes_by_slug = {n["slug"]: n for n in body["nodes"]}
+    assert set(nodes_by_slug) == {"tokenization", "counting"}
+    assert nodes_by_slug["tokenization"]["level"] == 1
+    assert nodes_by_slug["counting"]["level"] == 2
+
+    tokenization_id = nodes_by_slug["tokenization"]["id"]
+    counting_id = nodes_by_slug["counting"]["id"]
+
+    assert len(body["edges"]) == 1
+    edge = body["edges"][0]
+    assert edge["from_id"] == tokenization_id
+    assert edge["to_id"] == counting_id
+
+    detail_resp = client.get(f"/api/courses/{course_id}/skills/{tokenization_id}")
+    assert detail_resp.status_code == 200
+    taught_in = detail_resp.json()["taught_in"]
+    assert any(
+        t["section_id"] == section_id and t["relevance_md"] == "Defines tokens."
+        for t in taught_in
+    )
 
 
 # --- Read endpoints: map + detail ---------------------------------------

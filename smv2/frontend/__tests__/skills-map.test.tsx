@@ -128,7 +128,7 @@ describe("SkillMapView", () => {
 
     const byChapter = screen.getByRole("button", { name: "By chapter" });
     expect(byChapter).toBeDisabled();
-    expect(byChapter).toHaveAttribute("title", "Coming with the competency backend");
+    expect(byChapter).toHaveAttribute("title", "By-chapter view isn't built yet");
   });
 
   it("shows an EmptyState with no CTA when the course has no skill graph yet", async () => {
