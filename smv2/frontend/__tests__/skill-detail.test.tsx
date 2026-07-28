@@ -108,9 +108,13 @@ describe("CompetencyDetailView", () => {
     expect(screen.getByText("Counting and budgeting tokens")).toBeInTheDocument();
     expect(screen.getByText("How text becomes tokens")).toBeInTheDocument();
     expect(screen.getByText("Most relevant")).toBeInTheDocument();
+    // Each Re-read link deep-links into the reader at the section it's
+    // taught in (?section=<id>), not just the bare course — taughtIn order
+    // above is sec-2 then sec-1.
     const reReadLinks = screen.getAllByRole("link", { name: "Re-read" });
     expect(reReadLinks.length).toBe(2);
-    reReadLinks.forEach((link) => expect(link).toHaveAttribute("href", "/course/course-1"));
+    expect(reReadLinks[0]).toHaveAttribute("href", "/course/course-1?section=sec-2");
+    expect(reReadLinks[1]).toHaveAttribute("href", "/course/course-1?section=sec-1");
 
     // Two missed questions, one with a null your_answer rendered as "Skipped"
     expect(screen.getByText(/3,000-word document/)).toBeInTheDocument();
@@ -121,7 +125,7 @@ describe("CompetencyDetailView", () => {
     // fix_plan is null for this skill (its own prereq, tokenization, isn't
     // weak) — the fallback plan re-reads the top taught-in section.
     const startWith = screen.getByRole("link", { name: "Start with Counting and budgeting tokens" });
-    expect(startWith).toHaveAttribute("href", "/course/course-1");
+    expect(startWith).toHaveAttribute("href", "/course/course-1?section=sec-2");
     const drillCards = screen.getByRole("link", { name: "Drill cards" });
     expect(drillCards).toHaveAttribute("href", "/review");
   });

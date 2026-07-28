@@ -368,7 +368,15 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     },
     [setChatOpen],
   );
-  const consumeSelection = useCallback(() => setPendingSelection(null), []);
+  // Clears only if `sent` (the selection CourseChatDrawer actually attached
+  // to the just-settled send/removal) is still the current pendingSelection.
+  // Without the identity check, a selection attached while an earlier send
+  // was in flight would get nulled out the moment that earlier send's
+  // onConsumeSelection callback fires, even though it was never sent yet.
+  const consumeSelection = useCallback(
+    (sent: ChatSelectionIn) => setPendingSelection((current) => (current === sent ? null : current)),
+    [],
+  );
   const handleOutlineApplied = useCallback((updated: SectionOut[]) => {
     setSectionsOverride(updated);
   }, []);

@@ -19,6 +19,7 @@ import {
   getReviewQueue,
   getReviewSummary,
   gradeCard,
+  MAX_QUEUE_FETCH,
   type ReviewQueueCardOut,
   type ReviewSummaryOut,
 } from "@/lib/api/client";
@@ -43,10 +44,6 @@ const GRADE_BUTTON_BG: Record<number, string> = {
   3: "bg-sage-200",
   4: "bg-sage-300",
 };
-// review_queue's `limit` caps at 200 — a session's "all" is "all up to
-// that cap", not literally unbounded. Fine at this app's scale.
-const MAX_QUEUE_FETCH = 200;
-
 const REVIEW_SESSION_STORAGE_KEY = "smv2.review.session";
 
 interface StoredReviewSession {

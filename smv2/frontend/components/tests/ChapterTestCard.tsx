@@ -115,7 +115,7 @@ export default function ChapterTestCard({
           </span>
           <p className="mt-1 text-base font-semibold">
             {isWeak
-              ? `Best score ${percent}% — below your 80% target`
+              ? `Best score ${percent}% — below your ${toPercent(SOLID_THRESHOLD)}% target`
               : `Best score ${percent}% — solid`}
           </p>
           <p className="mt-0.5 text-[13px] text-muted-foreground">

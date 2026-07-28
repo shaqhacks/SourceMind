@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
 import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
@@ -302,14 +302,7 @@ export default function ReadingColumn({
       });
       const anchorRect: DOMRect = range
         ? range.getBoundingClientRect()
-        : ({
-            top: event.clientY,
-            bottom: event.clientY,
-            left: event.clientX,
-            right: event.clientX,
-            width: 0,
-            height: 0,
-          } as DOMRect);
+        : pointRect(event.clientX, event.clientY);
       setEditPopover({ highlight: hit, anchorRect });
     },
     [paintable],
@@ -394,6 +387,12 @@ export default function ReadingColumn({
     const pdfAnchor = isHighlightApiSupported()
       ? resolvePdfPageSelection(selection.anchorNode, selection.focusNode, range)
       : null;
+    // Also dismiss any open note popover — mirrors handleNoteGutterClick/
+    // handleNoteClick dismissing the pages popovers on the reverse path, so
+    // opening a highlight-selection popover can't leave a note composer/
+    // editor open alongside it.
+    setNoteComposer(null);
+    setNoteEditPopover(null);
     setPagesPopover({
       anchorRect: range.getBoundingClientRect(),
       exact,
@@ -487,14 +486,11 @@ export default function ReadingColumn({
       });
       const anchorRect: DOMRect = range
         ? range.getBoundingClientRect()
-        : ({
-            top: event.clientY,
-            bottom: event.clientY,
-            left: event.clientX,
-            right: event.clientX,
-            width: 0,
-            height: 0,
-          } as DOMRect);
+        : pointRect(event.clientX, event.clientY);
+      // Also dismiss any open note popover, same rationale as
+      // handlePagesMouseUp above.
+      setNoteComposer(null);
+      setNoteEditPopover(null);
       setPagesEditPopover({ highlight: hit, anchorRect });
     },
     [pdfHighlights],
@@ -542,6 +538,22 @@ export default function ReadingColumn({
 
   const closeNoteComposer = useCallback(() => setNoteComposer(null), []);
   const closeNoteEditPopover = useCallback(() => setNoteEditPopover(null), []);
+
+  // A section switch (chapter nav, keyboard j/k, a "Re-read" deep link)
+  // remounts both the source article wrapper and the pages wrapper (both
+  // keyed on section.id above), which would otherwise leave any of these
+  // six popovers anchored to a DOMRect/highlight/note from a subtree that
+  // no longer exists. Closes all of them across both view modes whenever
+  // the section changes, rather than relying on each view's own dismiss
+  // handlers (which only fire on user interaction within that view).
+  useEffect(() => {
+    setSelectionPopover(null);
+    setEditPopover(null);
+    setPagesPopover(null);
+    setPagesEditPopover(null);
+    setNoteComposer(null);
+    setNoteEditPopover(null);
+  }, [section.id]);
 
   const handleNoteGutterClick = useCallback<NoteGutterClick>((page, anchorY, clientX, clientY) => {
     // Also dismiss any open highlight popover: a gutter click's mouseup can

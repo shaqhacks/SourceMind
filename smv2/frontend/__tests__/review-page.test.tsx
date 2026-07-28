@@ -24,6 +24,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/api/client", () => ({
+  MAX_QUEUE_FETCH: 200,
   getReviewSummary: vi.fn(),
   getReviewQueue: vi.fn(),
   gradeCard: vi.fn(),

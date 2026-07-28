@@ -168,7 +168,11 @@ export default function CompetencyDetailView({ courseId, skillId }: CompetencyDe
                 {t.relevance_md && <p className="mt-0.5 text-sm text-muted-foreground">{t.relevance_md}</p>}
               </div>
               {i === 0 && <Badge tone="accent">Most relevant</Badge>}
-              <LinkButton href={`/course/${courseId}`} variant={i === 0 ? "primary" : "secondary"} className="text-xs">
+              <LinkButton
+                href={`/course/${courseId}?section=${t.section_id}`}
+                variant={i === 0 ? "primary" : "secondary"}
+                className="text-xs"
+              >
                 Re-read
               </LinkButton>
             </Card>
@@ -214,7 +218,10 @@ export default function CompetencyDetailView({ courseId, skillId }: CompetencyDe
             Fix {detail.fix_plan.prereq_label}
           </LinkButton>
         ) : (
-          <LinkButton href={`/course/${courseId}`} variant="primary">
+          <LinkButton
+            href={primaryTaught ? `/course/${courseId}?section=${primaryTaught.section_id}` : `/course/${courseId}`}
+            variant="primary"
+          >
             {primaryTaught ? `Start with ${primaryTaught.title}` : "Open the reader"}
           </LinkButton>
         )}

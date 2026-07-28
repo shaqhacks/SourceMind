@@ -23,7 +23,12 @@ export interface CourseChatDrawerProps {
    * passage. Carried into the *next* sendChat call, then cleared via
    * onConsumeSelection so it attaches to exactly one turn. */
   pendingSelection?: ChatSelectionIn | null;
-  onConsumeSelection?: () => void;
+  /** Receives back the exact selection object that was actually sent (or
+   * removed), so the parent can clear `pendingSelection` only if it's
+   * still that same one. Without this, a selection attached *while* an
+   * earlier send is in flight would get wiped out from under the user the
+   * moment that earlier send's onConsumeSelection fires. */
+  onConsumeSelection?: (sent: ChatSelectionIn) => void;
 }
 
 /** ChatTurnOut.citations is `{[key:string]: unknown}[] | null` (untyped —
@@ -110,14 +115,17 @@ export default function CourseChatDrawer({
   // behavior stays byte-identical.
   const sendFn = useCallback(
     async (message: string): Promise<ChatSendResult> => {
-      const { data, status } = pendingSelection
-        ? await sendChat(courseId, message, pendingSelection)
+      const sentSelection = pendingSelection;
+      const { data, status } = sentSelection
+        ? await sendChat(courseId, message, sentSelection)
         : await sendChat(courseId, message);
       if (data) {
         // Attach the selection to exactly one turn: only consumed once the
         // send actually succeeds, so a failed/retryable send doesn't lose
-        // it out from under a later retry.
-        onConsumeSelection?.();
+        // it out from under a later retry. Passes the exact selection that
+        // was sent (not just "clear whatever's pending now") so a *newer*
+        // selection attached while this send was in flight survives.
+        if (sentSelection) onConsumeSelection?.(sentSelection);
         return {
           ok: true,
           content: data.reply_md,
@@ -183,7 +191,7 @@ export default function CourseChatDrawer({
           pendingSelection ? (
             <SelectionContextPill
               exact={pendingSelection.exact}
-              onRemove={() => onConsumeSelection?.()}
+              onRemove={() => onConsumeSelection?.(pendingSelection)}
             />
           ) : null
         }

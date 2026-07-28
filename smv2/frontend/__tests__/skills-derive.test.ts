@@ -96,6 +96,20 @@ describe("rootCause", () => {
     const allSolid = NODES.map((n) => ({ ...n, status: "solid", blocked: false }));
     expect(rootCause(allSolid, EDGES)).toBeNull();
   });
+
+  it("skips a first struggling+blocked node with no incoming weak edge and returns the second's pair", () => {
+    const first = node({ id: "first", label: "First", status: "struggling", blocked: true });
+    const second = node({ id: "second", label: "Second", status: "struggling", blocked: true });
+    const prereq = node({ id: "prereq", label: "Prereq", mastery: 10 });
+    // "first" has NO incoming weak edge at all (weakestPrereq would return
+    // null for it), so rootCause's `if (prereq) return` guard must fall
+    // through to "second" rather than stopping at the first match.
+    const edges: SkillEdgeOut[] = [{ from_id: "prereq", to_id: "second", kind: "weak" }];
+
+    const cause = rootCause([first, second, prereq], edges);
+    expect(cause?.skill.id).toBe("second");
+    expect(cause?.prereq.id).toBe("prereq");
+  });
 });
 
 describe("describeNode", () => {

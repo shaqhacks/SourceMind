@@ -9,17 +9,26 @@ import Card from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import ProgressBar from "@/components/ui/ProgressBar";
 import Skeleton from "@/components/ui/Skeleton";
+import type { SkillEdgeOut } from "@/lib/api/client";
 import { useSkillMap } from "@/lib/hooks/useSkillMap";
-import { blockedBy, describeNode, rootCause } from "@/lib/skills/derive";
+import { blockedBy, buildSkillDeriveIndex, describeNodeFromIndex, rootCause } from "@/lib/skills/derive";
 
 import { STATUS_BADGE_TONE, STATUS_BAR_TONE, STATUS_LABEL, joinNames, type SkillStatus } from "./format";
-import { computeSkillMapLayout } from "./layout";
+import { computeSkillMapLayout, SKILL_CARD_HEIGHT, SKILL_CARD_WIDTH } from "./layout";
 import LinkButton from "./LinkButton";
 import { useCourseTitle } from "./useCourseTitle";
 
 export interface SkillMapViewProps {
   courseId: string;
 }
+
+// "met" edges are already-solid prerequisites (sage); "weak" edges are the
+// ones a fix should target (accent) — used for both the edge's own stroke
+// and its target-end dot, which previously duplicated this same ternary.
+const EDGE_COLOR: Record<SkillEdgeOut["kind"], string> = {
+  met: "var(--sage-500)",
+  weak: "var(--accent)",
+};
 
 /**
  * Per-course skill map (design handoff §7) — reads the real competency
@@ -72,6 +81,10 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
   const layout = computeSkillMapLayout(nodes, edges);
   const fix = rootCause(nodes, edges);
   const fixBlocked = fix ? blockedBy(nodes, edges, fix.prereq.id) : [];
+  // Built once here rather than calling describeNode (which rebuilds a byId
+  // Map and re-filters `edges`) per node in the render loop below — turns an
+  // O(nodes * edges) render into a single O(nodes + edges) pass.
+  const skillIndex = buildSkillDeriveIndex(nodes, edges);
 
   return (
     <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 px-9 py-8">
@@ -117,7 +130,7 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
                 key={`edge-${e.from}-${e.to}`}
                 d={e.d}
                 fill="none"
-                stroke={e.kind === "met" ? "var(--sage-500)" : "var(--accent)"}
+                stroke={EDGE_COLOR[e.kind]}
                 strokeWidth={2.5}
                 strokeDasharray={e.kind === "weak" ? "6 5" : undefined}
               />
@@ -128,7 +141,7 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
                 cx={e.tx}
                 cy={e.ty}
                 r={4}
-                fill={e.kind === "met" ? "var(--sage-500)" : "var(--accent)"}
+                fill={EDGE_COLOR[e.kind]}
               />
             ))}
           </svg>
@@ -136,8 +149,8 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
           {layout.lanes.map((lane) => (
             <p
               key={lane.level}
-              className="absolute top-0 w-[260px] text-[11px] font-bold uppercase tracking-[0.1em] text-neutral-600"
-              style={{ left: lane.leftPx }}
+              className="absolute top-0 text-[11px] font-bold uppercase tracking-[0.1em] text-neutral-600"
+              style={{ left: lane.leftPx, width: SKILL_CARD_WIDTH }}
             >
               {lane.name}
             </p>
@@ -151,8 +164,8 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
               <Link
                 key={node.id}
                 href={`/course/${courseId}/skills/${node.id}`}
-                style={{ left: pos.leftPx, top: pos.topPx }}
-                className={`absolute flex h-[118px] w-[260px] flex-col gap-[7px] rounded-lg bg-surface-raised p-[14px_16px] text-foreground shadow-sm transition-[box-shadow,translate] hover:-translate-y-px hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
+                style={{ left: pos.leftPx, top: pos.topPx, width: SKILL_CARD_WIDTH, height: SKILL_CARD_HEIGHT }}
+                className={`absolute flex flex-col gap-[7px] rounded-lg bg-surface-raised p-[14px_16px] text-foreground shadow-sm transition-[box-shadow,translate] hover:-translate-y-px hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
                   status === "struggling" ? "border-[1.5px] border-accent" : "border border-divider"
                 }`}
               >
@@ -165,7 +178,7 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
                   label={`${node.label} mastery`}
                   tone={STATUS_BAR_TONE[status]}
                 />
-                <span className="text-xs text-muted-foreground">{describeNode(node, nodes, edges)}</span>
+                <span className="text-xs text-muted-foreground">{describeNodeFromIndex(node, skillIndex)}</span>
               </Link>
             );
           })}
