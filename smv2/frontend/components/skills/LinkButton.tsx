@@ -5,9 +5,10 @@ export type LinkButtonVariant = "primary" | "secondary";
 
 // Mirrors Button.tsx's variant classes (that component only renders a
 // <button>, not a navigable <a>) so these CTAs look identical while
-// actually routing via next/link.
+// actually routing via next/link. See Button.tsx's primary variant comment
+// for why the fill is accent-700 rather than the base --accent.
 const VARIANTS: Record<LinkButtonVariant, string> = {
-  primary: "bg-accent text-background hover:bg-accent-600 active:bg-accent-700",
+  primary: "bg-accent-700 text-background hover:bg-accent-800 active:bg-accent-900",
   secondary:
     "border border-border bg-surface-raised hover:bg-foreground/[0.07] active:bg-foreground/[0.14]",
 };

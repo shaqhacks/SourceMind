@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 
+import Button from "@/components/ui/Button";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import {
@@ -23,16 +24,17 @@ export default function TypographyControls() {
 
   return (
     <div ref={containerRef} className="relative">
-      <button
-        type="button"
+      <Button
+        variant="toolbar"
+        size="toolbar"
         aria-expanded={open}
         aria-controls={PANEL_ID}
         aria-label="Typography settings"
         onClick={() => setOpen((value) => !value)}
-        className="rounded-md border border-border bg-surface-raised px-3 py-1.5 font-serif text-[13px] transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14]"
+        className="font-serif"
       >
         Aa
-      </button>
+      </Button>
       {open && (
         <div
           ref={panelRef}

@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState } from "react";
 
+import { popoverStyle } from "@/lib/annotations/popoverPlacement";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
@@ -16,22 +17,9 @@ export interface NotePopoverProps {
   onClose: () => void;
 }
 
-const GAP_PX = 8;
 // Rough height used only to decide above-vs-below placement before layout —
 // same fixed-position idiom as HighlightEditPopover.popoverStyle.
 const ESTIMATED_HEIGHT_PX = 150;
-
-function popoverStyle(anchorRect: DOMRect): CSSProperties {
-  const openAbove = anchorRect.top >= ESTIMATED_HEIGHT_PX + GAP_PX;
-  return {
-    position: "fixed",
-    left: anchorRect.left + anchorRect.width / 2,
-    transform: "translateX(-50%)",
-    ...(openAbove
-      ? { bottom: window.innerHeight - anchorRect.top + GAP_PX }
-      : { top: anchorRect.bottom + GAP_PX }),
-  };
-}
 
 /**
  * Floating editor for a positional margin note — one component for both
@@ -53,7 +41,7 @@ export default function NotePopover({
   useKeyboardShortcuts({}, true);
 
   const [note, setNote] = useState(initialNote);
-  const style = useMemo(() => popoverStyle(anchorRect), [anchorRect]);
+  const style = useMemo(() => popoverStyle(anchorRect, ESTIMATED_HEIGHT_PX), [anchorRect]);
   const canSave = note.trim().length > 0;
 
   return (
@@ -97,7 +85,7 @@ export default function NotePopover({
             if (canSave) onSave(note);
           }}
           disabled={!canSave}
-          className="whitespace-nowrap rounded-md bg-accent px-2 py-1 text-sm font-medium text-background transition-colors hover:bg-accent-600 disabled:cursor-not-allowed disabled:opacity-45"
+          className="whitespace-nowrap rounded-md bg-accent-700 px-2 py-1 text-sm font-medium text-background transition-colors hover:bg-accent-800 disabled:cursor-not-allowed disabled:opacity-45"
         >
           Save
         </button>

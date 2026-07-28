@@ -309,7 +309,7 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
                   i < currentStep
                     ? "bg-sage-500 text-background"
                     : i === currentStep
-                      ? "bg-accent text-background"
+                      ? "bg-accent-700 text-background"
                       : "bg-neutral-200"
                 }`}
               >

@@ -218,7 +218,7 @@ export default function TestAttemptClient({ courseId, attemptId }: TestAttemptCl
           {result.due_now_count > 0 && (
             <Link
               href={`/review?course=${courseId}&start=due`}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-600"
+              className="rounded-md bg-accent-700 px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-800"
             >
               Start review — {result.due_now_count} card{result.due_now_count === 1 ? "" : "s"} due
               now

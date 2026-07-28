@@ -8,12 +8,12 @@ import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   findActiveCardsJob,
   generateCards,
-  getJob,
   listCards,
   type CardOut,
 } from "@/lib/api/client";
 import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { useJobFailureMessage } from "@/lib/hooks/useJobFailureMessage";
 import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
@@ -44,13 +44,6 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
   const [localJobId, setLocalJobId] = useState<string | null>(null);
   const [discoveredJobId, setDiscoveredJobId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  // Tagged with the jobId it was fetched for (same idiom as useJobEvents'
-  // own internal state) so staleness is a render-time comparison rather
-  // than something an effect has to reset — a plain top-of-effect
-  // setState would fire on every dependency change, not just the fetch.
-  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
-    null,
-  );
 
   useEffect(() => {
     let active = true;
@@ -79,7 +72,7 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
   const { job, done, stalled } = useJobEvents(watchedJobId);
   const isGenerating = watchedJobId !== null && !done;
   const jobFailed = done && job?.status === "failed";
-  const failureMessage = failureInfo?.jobId === watchedJobId ? failureInfo.message : null;
+  const failureMessage = useJobFailureMessage(jobFailed, watchedJobId);
 
   useEffect(() => {
     if (!done) return;
@@ -92,20 +85,6 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
     // just means the refetch reconfirms the same list).
     notifyCardsSettled(sectionId);
   }, [done, sectionId]);
-
-  // JobEvent (the SSE snapshot) carries no error text — only {id, status,
-  // progress} — so surfacing the actual failure message needs a follow-up
-  // plain REST fetch, same as UploadFlow does for a failed ingest job.
-  useEffect(() => {
-    if (!jobFailed || !watchedJobId) return;
-    let active = true;
-    getJob(watchedJobId).then(({ data }) => {
-      if (active) setFailureInfo({ jobId: watchedJobId, message: data?.error ?? null });
-    });
-    return () => {
-      active = false;
-    };
-  }, [jobFailed, watchedJobId]);
 
   async function handleGenerate() {
     setActionError(null);
@@ -181,7 +160,7 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
       {hasCards && (
         <Link
           href="/review"
-          className="rounded-md bg-accent px-4 py-2 text-[13px] font-medium text-background transition-colors hover:bg-accent-600 active:bg-accent-700"
+          className="rounded-md bg-accent-700 px-4 py-2 text-[13px] font-medium text-background transition-colors hover:bg-accent-800 active:bg-accent-900"
         >
           Review
         </Link>

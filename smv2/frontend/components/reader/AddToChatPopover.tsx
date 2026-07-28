@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, type CSSProperties } from "react";
+import { useMemo } from "react";
 
+import { popoverStyle } from "@/lib/annotations/popoverPlacement";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
@@ -19,27 +20,10 @@ export interface AddToChatPopoverProps {
   onClose: () => void;
 }
 
-const GAP_PX = 8;
 // Rough popover height used only to decide above-vs-below placement before
 // the real element has laid out — see SelectionPopover's identical
 // constant for why an estimate (not a measurement) is fine here.
 const ESTIMATED_HEIGHT_PX = 40;
-
-/** Fixed-position placement near the selection — identical placement logic
- * to SelectionPopover's `popoverStyle`, kept as its own copy rather than a
- * shared import since the two components' estimated heights differ and
- * there is nothing else to factor out. */
-function popoverStyle(anchorRect: DOMRect): CSSProperties {
-  const openAbove = anchorRect.top >= ESTIMATED_HEIGHT_PX + GAP_PX;
-  return {
-    position: "fixed",
-    left: anchorRect.left + anchorRect.width / 2,
-    transform: "translateX(-50%)",
-    ...(openAbove
-      ? { bottom: window.innerHeight - anchorRect.top + GAP_PX }
-      : { top: anchorRect.bottom + GAP_PX }),
-  };
-}
 
 /**
  * Floating "Add to chat" toolbar for a live text selection in Pages-mode
@@ -62,7 +46,7 @@ export default function AddToChatPopover({ anchorRect, onAdd, onClose }: AddToCh
   // single-key shortcuts don't fire while this popover is open.
   useKeyboardShortcuts({}, true);
 
-  const style = useMemo(() => popoverStyle(anchorRect), [anchorRect]);
+  const style = useMemo(() => popoverStyle(anchorRect, ESTIMATED_HEIGHT_PX), [anchorRect]);
 
   return (
     <div

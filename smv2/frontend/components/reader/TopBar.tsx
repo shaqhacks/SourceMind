@@ -164,7 +164,7 @@ export default function TopBar({
               onClick={() => onChangeViewMode(mode)}
               className={`rounded-[6px] px-3 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 viewMode === mode
-                  ? "bg-accent font-semibold text-background"
+                  ? "bg-accent-700 font-semibold text-background"
                   : "hover:bg-foreground/[0.07]"
               }`}
             >
@@ -214,7 +214,7 @@ export default function TopBar({
           aria-label={chatOpen ? "Close chat" : "Open chat"}
           className={
             chatOpen
-              ? `${ICON_CONTROL} border-accent bg-accent text-background hover:bg-accent-600`
+              ? `${ICON_CONTROL} border-accent-700 bg-accent-700 text-background hover:bg-accent-800`
               : ICON_CONTROL
           }
         >
@@ -228,7 +228,7 @@ export default function TopBar({
             aria-label={notesOpen ? "Close notes" : "Open notes"}
             className={
               notesOpen
-                ? `${ICON_CONTROL} border-accent bg-accent text-background hover:bg-accent-600`
+                ? `${ICON_CONTROL} border-accent-700 bg-accent-700 text-background hover:bg-accent-800`
                 : ICON_CONTROL
             }
           >

@@ -11,11 +11,11 @@ import { describeError } from "@/lib/api/errors";
 import {
   findActiveCardsJob,
   generateCards,
-  getJob,
   type CardOut,
 } from "@/lib/api/client";
 import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { useJobFailureMessage } from "@/lib/hooks/useJobFailureMessage";
 import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
@@ -64,9 +64,6 @@ export default function ChapterDeckCard({
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [discoveredJobId, setDiscoveredJobId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
-    null,
-  );
 
   const hasCards = cards.length > 0;
   const firstSectionId = sectionIds[0] ?? null;
@@ -96,7 +93,7 @@ export default function ChapterDeckCard({
   // brief "finishing up" status instead of flashing back to the "Generate
   // cards" button in that gap.
   const justFinished = done && watchedJobId !== null && job?.status === "succeeded" && !hasCards;
-  const failureMessage = failureInfo?.jobId === watchedJobId ? failureInfo.message : null;
+  const failureMessage = useJobFailureMessage(jobFailed, watchedJobId);
 
   // Advances the generation queue. Every setState call here happens inside
   // an async continuation (after an await, or in a .then()) rather than
@@ -126,17 +123,6 @@ export default function ChapterDeckCard({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [done, job?.status]);
-
-  useEffect(() => {
-    if (!jobFailed || !watchedJobId) return;
-    let active = true;
-    getJob(watchedJobId).then(({ data }) => {
-      if (active) setFailureInfo({ jobId: watchedJobId, message: data?.error ?? null });
-    });
-    return () => {
-      active = false;
-    };
-  }, [jobFailed, watchedJobId]);
 
   async function handleGenerate() {
     setActionError(null);
@@ -180,7 +166,7 @@ export default function ChapterDeckCard({
            * inside <button>) — classes mirror Button's primary/sm variant. */}
           <Link
             href={`/review?course=${courseId}&start=due`}
-            className="rounded-md bg-accent px-2 py-1 font-heading text-xs text-background transition-colors hover:bg-accent-600 active:bg-accent-700"
+            className="rounded-md bg-accent-700 px-2 py-1 font-heading text-xs text-background transition-colors hover:bg-accent-800 active:bg-accent-900"
           >
             Review
           </Link>

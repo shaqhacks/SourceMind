@@ -6,10 +6,11 @@ import { useRouter } from "next/navigation";
 import ErrorBanner from "@/components/ErrorBanner";
 import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
-import { generateTest, getJob, listTests, type TestSummaryOut } from "@/lib/api/client";
+import { generateTest, listTests, type TestSummaryOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { useJobFailureMessage } from "@/lib/hooks/useJobFailureMessage";
 import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
@@ -34,12 +35,6 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  // Tagged with the jobId it was fetched for (same idiom as useJobEvents'
-  // own internal state) so staleness is a render-time comparison rather
-  // than something an effect has to reset.
-  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
-    null,
-  );
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useDialogFocus<HTMLDivElement>(open, { trap: false });
   const close = useCallback(() => setOpen(false), []);
@@ -48,7 +43,7 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
   const { job, done, stalled } = useJobEvents(jobId);
   const isGenerating = jobId !== null && !done;
   const jobFailed = done && job?.status === "failed";
-  const failureMessage = failureInfo?.jobId === jobId ? failureInfo.message : null;
+  const failureMessage = useJobFailureMessage(jobFailed, jobId);
 
   // Deliberately doesn't reset to "loading" before refetching — the panel
   // just quietly replaces the list once the fresh fetch resolves, so
@@ -73,20 +68,6 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
     notifyReviewSettled();
   }, [done, loadTests]);
 
-  // JobEvent (the SSE snapshot) carries no error text — only {id, status,
-  // progress} — so surfacing the actual failure message needs a follow-up
-  // plain REST fetch.
-  useEffect(() => {
-    if (!jobFailed || !jobId) return;
-    let active = true;
-    getJob(jobId).then(({ data }) => {
-      if (active) setFailureInfo({ jobId, message: data?.error ?? null });
-    });
-    return () => {
-      active = false;
-    };
-  }, [jobFailed, jobId]);
-
   async function handleGenerate() {
     setStarting(true);
     setStartError(null);
@@ -101,15 +82,16 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
 
   return (
     <div ref={containerRef} className="relative">
-      <button
-        type="button"
+      <Button
+        variant="toolbar"
+        size="toolbar"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-controls="quizzes-panel"
-        className="rounded-md border border-border bg-surface-raised px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14]"
+        className="font-medium"
       >
         Quizzes
-      </button>
+      </Button>
       {open && (
         <div
           ref={panelRef}

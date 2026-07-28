@@ -31,6 +31,13 @@
   --surface-raised: #efeeea;
   --accent-soft: #fff2eb;
 
+  /* --accent itself is ~3.45:1 against this theme's --background, under
+     WCAG AA's 4.5:1 text-contrast floor — fine for focus rings/borders/tints
+     (non-text uses only need 3:1) but NOT for a solid button fill carrying
+     `text-background`. Those fills use --accent-700 instead (the lightest
+     rung on the ramp below that clears 4.5:1 in both themes — accent-600
+     only reaches ~4.29:1 here); --accent stays reserved for focus rings and
+     non-text fills. See components/ui/Button.tsx's primary variant. */
   --accent-100: #fff2eb;
   --accent-200: #ffe1d0;
   --accent-300: #ffc6a5;

@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useMemo, useState } from "react";
 
+import { HIGHLIGHT_COLORS } from "@/lib/annotations/highlightRegistry";
+import { popoverStyle } from "@/lib/annotations/popoverPlacement";
 import type { HighlightOut, HighlightUpdateIn } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
-import type { HighlightColor } from "@/lib/hooks/useHighlights";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 
 export interface HighlightEditPopoverProps {
@@ -21,28 +22,10 @@ export interface HighlightEditPopoverProps {
   onClose: () => void;
 }
 
-const COLORS: readonly HighlightColor[] = ["yellow", "green", "blue", "pink"];
-const GAP_PX = 8;
 // Rough popover height used only to decide above-vs-below placement before
 // the real element has laid out — taller than SelectionPopover's estimate
 // since this popover also has a textarea and a button row.
 const ESTIMATED_HEIGHT_PX = 170;
-
-/** Same fixed-position placement logic as SelectionPopover.popoverStyle —
- * duplicated rather than shared because the two components' estimated
- * heights differ and there's no third caller yet to justify extracting a
- * shared helper. */
-function popoverStyle(anchorRect: DOMRect): CSSProperties {
-  const openAbove = anchorRect.top >= ESTIMATED_HEIGHT_PX + GAP_PX;
-  return {
-    position: "fixed",
-    left: anchorRect.left + anchorRect.width / 2,
-    transform: "translateX(-50%)",
-    ...(openAbove
-      ? { bottom: window.innerHeight - anchorRect.top + GAP_PX }
-      : { top: anchorRect.bottom + GAP_PX }),
-  };
-}
 
 /**
  * Floating editor for an EXISTING highlight, opened by clicking painted
@@ -83,7 +66,7 @@ export default function HighlightEditPopover({
 
   const [note, setNote] = useState(highlight.note_md ?? "");
 
-  const style = useMemo(() => popoverStyle(anchorRect), [anchorRect]);
+  const style = useMemo(() => popoverStyle(anchorRect, ESTIMATED_HEIGHT_PX), [anchorRect]);
 
   // An empty/whitespace-only note is sent as `null`, not `""`: per
   // HighlightUpdateIn's own docstring ("an explicit null note_md clears
@@ -114,7 +97,7 @@ export default function HighlightEditPopover({
         className="w-full resize-none rounded-md border border-border bg-background p-2 text-sm outline-none"
       />
       <div className="flex items-center gap-1">
-        {COLORS.map((color) => (
+        {HIGHLIGHT_COLORS.map((color) => (
           <button
             key={color}
             type="button"
@@ -150,7 +133,7 @@ export default function HighlightEditPopover({
           <button
             type="button"
             onClick={handleSaveNote}
-            className="whitespace-nowrap rounded-md bg-accent px-2 py-1 text-sm font-medium text-background transition-colors hover:bg-accent-600"
+            className="whitespace-nowrap rounded-md bg-accent-700 px-2 py-1 text-sm font-medium text-background transition-colors hover:bg-accent-800"
           >
             Save
           </button>

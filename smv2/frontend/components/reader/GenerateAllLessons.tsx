@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 
+import Button from "@/components/ui/Button";
 import { generateAllLessons, getJob } from "@/lib/api/client";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
@@ -80,15 +81,16 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
 
   return (
     <div className="flex items-center gap-2">
-      <button
-        type="button"
+      <Button
+        variant="toolbar"
+        size="toolbar"
         onClick={() => void handleStart()}
         disabled={starting || inProgress}
         aria-live="polite"
-        className="rounded-md border border-border bg-surface-raised px-3 py-1.5 text-[13px] font-medium transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14] disabled:cursor-not-allowed disabled:opacity-45"
+        className="font-medium"
       >
         {inProgress ? `Generating ${settledCount} of ${total}…` : "Generate all lessons"}
-      </button>
+      </Button>
       {error && <span className="text-xs text-status-serious">{error}</span>}
       {!inProgress && watchList !== null && skipped > 0 && (
         <span className="text-xs text-muted-foreground">{skipped} already generated</span>

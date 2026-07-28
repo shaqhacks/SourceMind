@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, type CSSProperties } from "react";
+import { useMemo } from "react";
 
+import { HIGHLIGHT_COLORS } from "@/lib/annotations/highlightRegistry";
+import { popoverStyle } from "@/lib/annotations/popoverPlacement";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import type { HighlightColor } from "@/lib/hooks/useHighlights";
@@ -19,30 +21,11 @@ export interface SelectionPopoverProps {
   onClose: () => void;
 }
 
-const COLORS: readonly HighlightColor[] = ["yellow", "green", "blue", "pink"];
-const GAP_PX = 8;
 // Rough popover height used only to decide above-vs-below placement before
 // the real element has laid out (this runs on first paint, no measured
 // height yet) — doesn't need to be exact, just enough margin that "above"
 // isn't picked when it would clip off the top of the viewport.
 const ESTIMATED_HEIGHT_PX = 56;
-
-/** Fixed-position placement near the selection: above by default (the
- * conventional floating-toolbar spot), below when there isn't enough room
- * above. `anchorRect` is already viewport-relative (from
- * `getBoundingClientRect()`), which is exactly what `position: fixed`
- * expects — no scroll-offset math needed. */
-function popoverStyle(anchorRect: DOMRect): CSSProperties {
-  const openAbove = anchorRect.top >= ESTIMATED_HEIGHT_PX + GAP_PX;
-  return {
-    position: "fixed",
-    left: anchorRect.left + anchorRect.width / 2,
-    transform: "translateX(-50%)",
-    ...(openAbove
-      ? { bottom: window.innerHeight - anchorRect.top + GAP_PX }
-      : { top: anchorRect.bottom + GAP_PX }),
-  };
-}
 
 /**
  * Floating toolbar for a live text selection in source-mode reading:
@@ -68,7 +51,7 @@ export default function SelectionPopover({
   // OutlineEditorModal/ShortcutsOverlay.
   useKeyboardShortcuts({}, true);
 
-  const style = useMemo(() => popoverStyle(anchorRect), [anchorRect]);
+  const style = useMemo(() => popoverStyle(anchorRect, ESTIMATED_HEIGHT_PX), [anchorRect]);
 
   return (
     <div
@@ -79,7 +62,7 @@ export default function SelectionPopover({
       style={style}
       className="z-50 flex items-center gap-1 rounded-lg border border-divider bg-surface-raised p-1.5 shadow-md"
     >
-      {COLORS.map((color) => (
+      {HIGHLIGHT_COLORS.map((color) => (
         <button
           key={color}
           type="button"

@@ -32,7 +32,7 @@ export default function SelectionContextPill({ exact, onRemove }: SelectionConte
   return (
     <div
       title={exact}
-      className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground"
+      className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-xs text-muted-foreground"
     >
       <span className="truncate">
         <span aria-hidden="true">📄</span> {words} {words === 1 ? "word" : "words"} — &ldquo;{snippet(exact)}&rdquo;

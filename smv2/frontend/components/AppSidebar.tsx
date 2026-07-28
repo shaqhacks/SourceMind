@@ -136,7 +136,7 @@ export default function AppSidebar() {
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
-        className="block w-full rounded-md bg-accent px-4 py-2 text-center font-heading text-sm text-background transition-colors hover:bg-accent-600"
+        className="block w-full rounded-md bg-accent-700 px-4 py-2 text-center font-heading text-sm text-background transition-colors hover:bg-accent-800"
       >
         + Start new course
       </button>
