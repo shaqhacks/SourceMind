@@ -220,6 +220,36 @@ describe("useHighlights", () => {
     expect(result.current.error).not.toBeNull();
   });
 
+  it("updateOne with an id absent from the cache makes no API call and sets no error", async () => {
+    mockedListHighlights.mockResolvedValue(ok([makeHighlight({ id: "hl-1" })]));
+
+    const { result } = renderHook(() => useHighlights("course-1", "sec-1"));
+    await waitFor(() => expect(result.current.highlights).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.updateOne("does-not-exist", { color: "pink" });
+    });
+
+    expect(mockedUpdateHighlight).not.toHaveBeenCalled();
+    expect(result.current.error).toBeNull();
+    expect(result.current.highlights).toHaveLength(1);
+  });
+
+  it("deleteOne with an id absent from the cache makes no API call and sets no error", async () => {
+    mockedListHighlights.mockResolvedValue(ok([makeHighlight({ id: "hl-1" })]));
+
+    const { result } = renderHook(() => useHighlights("course-1", "sec-1"));
+    await waitFor(() => expect(result.current.highlights).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.deleteOne("does-not-exist");
+    });
+
+    expect(mockedDeleteHighlight).not.toHaveBeenCalled();
+    expect(result.current.error).toBeNull();
+    expect(result.current.highlights).toHaveLength(1);
+  });
+
   it("reload() re-fetches the course list and refreshes the active section's slice", async () => {
     mockedListHighlights
       .mockResolvedValueOnce(ok([makeHighlight({ id: "hl-1" })]))

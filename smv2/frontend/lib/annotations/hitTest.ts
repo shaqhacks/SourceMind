@@ -11,7 +11,7 @@
  * `getClientRects()` is real.
  */
 
-import { rangeForSelector } from "@/lib/annotations/anchors";
+import { flatten, resolveAgainst, toQuoteSelector } from "@/lib/annotations/anchors";
 import type { HighlightOut } from "@/lib/api/client";
 
 /**
@@ -34,15 +34,15 @@ export function highlightAtPoint(
   clientX: number,
   clientY: number,
 ): HighlightOut | null {
+  if (highlights.length === 0) return null;
+
   let best: HighlightOut | null = null;
+  // Flattened once for this click, not once per candidate highlight — every
+  // highlight below resolves against this same container's same text.
+  const flat = flatten(container);
 
   for (const highlight of highlights) {
-    const range = rangeForSelector(container, {
-      exact: highlight.exact,
-      prefix: highlight.prefix,
-      suffix: highlight.suffix,
-      occurrence: highlight.occurrence,
-    });
+    const range = resolveAgainst(flat, toQuoteSelector(highlight));
     if (!range) continue;
 
     const rects = range.getClientRects();

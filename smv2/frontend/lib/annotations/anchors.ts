@@ -16,9 +16,18 @@ export type QuoteSelector = {
   occurrence: number;
 };
 
+/** Narrows a persisted HighlightOut (or anything sharing its
+ * exact/prefix/suffix/occurrence anchor fields) down to the plain
+ * QuoteSelector `resolveAgainst` expects — shared by hitTest.ts,
+ * useHighlightPainter, and usePdfHighlightPainter, which each used to
+ * build this same object literal from a highlight themselves. */
+export function toQuoteSelector(h: QuoteSelector): QuoteSelector {
+  return { exact: h.exact, prefix: h.prefix, suffix: h.suffix, occurrence: h.occurrence };
+}
+
 export const CONTEXT_LEN = 32;
 
-type FlatText = {
+export type FlatText = {
   text: string;
   // For each character index i in `text`, nodeAt[i]/offsetAt[i] give the DOM
   // position of that character (its text node and offset within it).
@@ -26,7 +35,16 @@ type FlatText = {
   offsetAt: number[];
 };
 
-function flatten(container: HTMLElement): FlatText {
+/**
+ * Walks `container`'s Text nodes into one flat string plus a per-character
+ * DOM back-reference. Exported (alongside `resolveAgainst` below) so a
+ * caller resolving MANY selectors against the SAME container in one pass
+ * (painting every highlight in a section, hit-testing a click against every
+ * highlight on a page) can flatten once and reuse it, instead of
+ * `rangeForSelector` silently re-walking the whole container's DOM per
+ * selector — same text, same result, wasted work each time.
+ */
+export function flatten(container: HTMLElement): FlatText {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   let text = "";
   const nodeAt: Text[] = [];
@@ -143,10 +161,15 @@ export function resolvePdfPageSelection(
   return { selector, page };
 }
 
-export function rangeForSelector(container: HTMLElement, selector: QuoteSelector): Range | null {
+/** Resolves a selector against an already-`flatten`ed container — the part
+ * of `rangeForSelector` that doesn't need the container itself once its
+ * text has been walked. Callers resolving multiple selectors against one
+ * container in the same pass should flatten once and call this per
+ * selector instead of calling `rangeForSelector` (which re-flattens every
+ * time) in a loop. */
+export function resolveAgainst(flat: FlatText, selector: QuoteSelector): Range | null {
   const { exact, occurrence } = selector;
   if (!exact) return null;
-  const flat = flatten(container);
 
   let seen = 0;
   let from = flat.text.indexOf(exact);
@@ -156,4 +179,13 @@ export function rangeForSelector(container: HTMLElement, selector: QuoteSelector
     from = flat.text.indexOf(exact, from + 1);
   }
   return null;
+}
+
+/** Thin wrapper — flattens `container` then resolves `selector` against it.
+ * Kept for callers that only need to resolve ONE selector against a
+ * container; a caller resolving many should call `flatten` once and
+ * `resolveAgainst` per selector instead (see usePdfHighlightPainter,
+ * useHighlightPainter, hitTest.ts). */
+export function rangeForSelector(container: HTMLElement, selector: QuoteSelector): Range | null {
+  return resolveAgainst(flatten(container), selector);
 }

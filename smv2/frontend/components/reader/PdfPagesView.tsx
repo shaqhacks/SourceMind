@@ -35,6 +35,13 @@ if (typeof window !== "undefined" && typeof Worker !== "undefined" && !GlobalWor
 // file every time.
 const documentCache = new Map<string, Promise<PDFDocumentProxy>>();
 
+// Note-pin collision nudge (see the stacking pass in PdfPage below): two
+// notes whose anchor_y falls within this fraction of each other are treated
+// as visually coincident and get stacked pixel offsets, one PIN_STACK_OFFSET_PX
+// apart, so they don't render as one indistinguishable pin.
+const PIN_COLLISION_THRESHOLD = 0.02;
+const PIN_STACK_OFFSET_PX = 16;
+
 function loadDocument(assetId: string): Promise<PDFDocumentProxy> {
   let cached = documentCache.get(assetId);
   if (!cached) {
@@ -445,9 +452,9 @@ function PdfPage({
             let prevAnchorY = -Infinity;
             let stack = 0;
             return ordered.map((note) => {
-              stack = note.anchor_y - prevAnchorY <= 0.02 ? stack + 1 : 0;
+              stack = note.anchor_y - prevAnchorY <= PIN_COLLISION_THRESHOLD ? stack + 1 : 0;
               prevAnchorY = note.anchor_y;
-              const offsetPx = stack * 16;
+              const offsetPx = stack * PIN_STACK_OFFSET_PX;
               return (
                 <button
                   key={note.id}

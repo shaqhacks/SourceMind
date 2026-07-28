@@ -55,3 +55,23 @@ export function clearHighlightRegistry(): void {
     CSS.highlights.delete(highlightRegistryName(color));
   }
 }
+
+/**
+ * Commits one resolved-ranges-per-color map to the CSS Custom Highlight API
+ * registry: `.set()` a `Highlight(...ranges)` for every color that has at
+ * least one range, `.delete()` every other color's name so a color that
+ * used to have highlights but no longer does doesn't keep painting stale
+ * ranges. Shared by `useHighlightPainter` and `usePdfHighlightPainter`,
+ * which each used to loop over `HIGHLIGHT_COLORS` and do this same
+ * set-or-delete themselves once their own resolve pass finished.
+ */
+export function commitRangesByColor(rangesByColor: Map<HighlightColor, Range[]>): void {
+  for (const color of HIGHLIGHT_COLORS) {
+    const ranges = rangesByColor.get(color);
+    if (ranges && ranges.length > 0) {
+      CSS.highlights.set(highlightRegistryName(color), new Highlight(...ranges));
+    } else {
+      CSS.highlights.delete(highlightRegistryName(color));
+    }
+  }
+}

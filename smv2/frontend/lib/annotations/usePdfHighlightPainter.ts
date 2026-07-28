@@ -2,12 +2,11 @@
 
 import { useLayoutEffect } from "react";
 
-import { rangeForSelector } from "@/lib/annotations/anchors";
+import { flatten, resolveAgainst, toQuoteSelector } from "@/lib/annotations/anchors";
 import {
   clearHighlightRegistry,
+  commitRangesByColor,
   HIGHLIGHT_API_SUPPORTED,
-  HIGHLIGHT_COLORS,
-  highlightRegistryName,
 } from "@/lib/annotations/highlightRegistry";
 import { ensureHighlightStyles } from "@/lib/annotations/highlightStyles";
 import type { HighlightOut } from "@/lib/api/client";
@@ -77,13 +76,12 @@ export function usePdfHighlightPainter(pages: PdfHighlightPage[], enabled: boole
 
     const rangesByColor = new Map<HighlightColor, Range[]>();
     for (const page of pages) {
+      // Flattened once per page, not once per highlight on that page — every
+      // highlight in `page.highlights` resolves against this same container.
+      if (page.highlights.length === 0) continue;
+      const flat = flatten(page.container);
       for (const highlight of page.highlights) {
-        const range = rangeForSelector(page.container, {
-          exact: highlight.exact,
-          prefix: highlight.prefix,
-          suffix: highlight.suffix,
-          occurrence: highlight.occurrence,
-        });
+        const range = resolveAgainst(flat, toQuoteSelector(highlight));
         if (!range) continue;
         const existing = rangesByColor.get(highlight.color);
         if (existing) {
@@ -94,14 +92,7 @@ export function usePdfHighlightPainter(pages: PdfHighlightPage[], enabled: boole
       }
     }
 
-    for (const color of HIGHLIGHT_COLORS) {
-      const ranges = rangesByColor.get(color);
-      if (ranges && ranges.length > 0) {
-        CSS.highlights.set(highlightRegistryName(color), new Highlight(...ranges));
-      } else {
-        CSS.highlights.delete(highlightRegistryName(color));
-      }
-    }
+    commitRangesByColor(rangesByColor);
 
     return () => {
       clearHighlightRegistry();

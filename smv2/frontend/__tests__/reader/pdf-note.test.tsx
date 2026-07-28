@@ -137,4 +137,39 @@ describe("PdfPage margin-note gutter and pins", () => {
     expect(page).toBe(1);
     expect(anchorY).toBeCloseTo(0.5); // 400 / 800
   });
+
+  it.each(["Enter", " "])(
+    "pressing %s on the gutter fires onNoteGutterClick with anchorY 0.5",
+    async (key) => {
+      const onNoteGutterClick = vi.fn();
+      await renderPageWithGutter({ onNoteGutterClick });
+
+      const gutter = screen.getByTestId("note-gutter-1");
+      fireEvent.keyDown(gutter, { key });
+
+      expect(onNoteGutterClick).toHaveBeenCalledTimes(1);
+      const [page, anchorY] = onNoteGutterClick.mock.calls[0];
+      expect(page).toBe(1);
+      expect(anchorY).toBe(0.5);
+    },
+  );
+
+  it("stacks pixel offsets for two notes whose anchor_y falls within the collision threshold", async () => {
+    await renderPageWithGutter({
+      notes: [
+        note({ id: "n-first", anchor_y: 0.5 }),
+        note({ id: "n-second", anchor_y: 0.51 }),
+      ],
+    });
+
+    const first = screen.getByTestId("note-pin-n-first");
+    const second = screen.getByTestId("note-pin-n-second");
+    // `top` still tracks each note's own anchor_y (nearly identical: 50%
+    // vs 51%) — the collision nudge instead gives the second pin a nonzero
+    // stacked translateY offset on top of that, so the two pins don't end
+    // up rendered at visually-identical positions.
+    expect(first.style.transform).not.toBe(second.style.transform);
+    expect(first.style.transform).toContain("calc(-50% + 0px)");
+    expect(second.style.transform).toContain("calc(-50% + 16px)");
+  });
 });

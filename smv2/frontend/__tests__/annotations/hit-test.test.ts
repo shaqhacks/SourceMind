@@ -116,6 +116,26 @@ describe("highlightAtPoint", () => {
     expect(highlightAtPoint(el, [inner, outer], 60, 10)?.id).toBe("hl-inner");
   });
 
+  it("when two overlapping highlights have equal exact length, the first in the list wins (documented tie-break)", () => {
+    const el = container("<p>The quick brown fox jumps over the lazy dog</p>");
+    // "quick" and "brown" are both 5 chars, and both rects cover x=40.
+    stubRectsByText({
+      quick: [rect(0, 0, 50, 20)],
+      brown: [rect(30, 0, 80, 20)],
+    });
+
+    const first = makeHighlight({ id: "hl-first", exact: "quick" });
+    const second = makeHighlight({ id: "hl-second", exact: "brown" });
+
+    // highlightAtPoint only replaces `best` on a STRICTLY shorter exact
+    // (`highlight.exact.length < best.exact.length`) — an equal-length
+    // candidate never displaces the current `best`, so among same-length
+    // overlapping matches the FIRST one encountered in array order wins.
+    // This is a deliberate, deterministic tie-break, not arbitrary order.
+    expect(highlightAtPoint(el, [first, second], 40, 10)?.id).toBe("hl-first");
+    expect(highlightAtPoint(el, [second, first], 40, 10)?.id).toBe("hl-second");
+  });
+
   it("skips a highlight whose selector doesn't resolve against the current DOM", () => {
     const el = container("<p>The quick brown fox jumps over the lazy dog</p>");
     stubRectsByText({ brown: [rect(0, 0, 50, 20)] });

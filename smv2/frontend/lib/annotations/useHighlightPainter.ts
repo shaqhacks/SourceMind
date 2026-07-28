@@ -2,12 +2,11 @@
 
 import { useLayoutEffect, type RefObject } from "react";
 
-import { rangeForSelector } from "@/lib/annotations/anchors";
+import { flatten, resolveAgainst, toQuoteSelector } from "@/lib/annotations/anchors";
 import {
   clearHighlightRegistry,
+  commitRangesByColor,
   HIGHLIGHT_API_SUPPORTED,
-  HIGHLIGHT_COLORS,
-  highlightRegistryName,
   isHighlightApiSupported,
 } from "@/lib/annotations/highlightRegistry";
 import { ensureHighlightStyles } from "@/lib/annotations/highlightStyles";
@@ -55,31 +54,25 @@ export function useHighlightPainter(
     // every effect run is fine.
     ensureHighlightStyles();
 
+    // Flattened once for this whole repaint pass — not once per highlight —
+    // since every highlight below resolves against the same container's
+    // same (already-committed) text.
     const rangesByColor = new Map<HighlightColor, Range[]>();
-    for (const highlight of highlights) {
-      const range = rangeForSelector(container, {
-        exact: highlight.exact,
-        prefix: highlight.prefix,
-        suffix: highlight.suffix,
-        occurrence: highlight.occurrence,
-      });
-      if (!range) continue;
-      const existing = rangesByColor.get(highlight.color);
-      if (existing) {
-        existing.push(range);
-      } else {
-        rangesByColor.set(highlight.color, [range]);
+    if (highlights.length > 0) {
+      const flat = flatten(container);
+      for (const highlight of highlights) {
+        const range = resolveAgainst(flat, toQuoteSelector(highlight));
+        if (!range) continue;
+        const existing = rangesByColor.get(highlight.color);
+        if (existing) {
+          existing.push(range);
+        } else {
+          rangesByColor.set(highlight.color, [range]);
+        }
       }
     }
 
-    for (const color of HIGHLIGHT_COLORS) {
-      const ranges = rangesByColor.get(color);
-      if (ranges && ranges.length > 0) {
-        CSS.highlights.set(highlightRegistryName(color), new Highlight(...ranges));
-      } else {
-        CSS.highlights.delete(highlightRegistryName(color));
-      }
-    }
+    commitRangesByColor(rangesByColor);
 
     return () => {
       clearHighlightRegistry();

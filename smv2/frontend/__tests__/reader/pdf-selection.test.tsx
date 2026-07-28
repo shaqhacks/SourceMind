@@ -157,6 +157,45 @@ describe("Pages-view selection -> Add to chat popover", () => {
     expect(screen.queryByRole("button", { name: "Add to chat" })).not.toBeInTheDocument();
   });
 
+  it("collapses multi-space/newline whitespace in a pages-mode selection before sending it to chat", async () => {
+    const onExplainSelection = vi.fn();
+    renderColumn(onExplainSelection);
+
+    const stub = await screen.findByTestId("pdf-stub-text");
+    stub.textContent = "line one\n\n   line   two  ";
+    selectAllTextIn(stub);
+    fireEvent.mouseUp(stub);
+
+    const button = await screen.findByRole("button", { name: "Add to chat" });
+    const user = userEvent.setup();
+    await user.click(button);
+
+    expect(onExplainSelection).toHaveBeenCalledWith({
+      sectionId: "sec-pdf",
+      exact: "line one line two",
+    });
+  });
+
+  it("truncates a selection longer than 2000 chars without erroring", async () => {
+    const onExplainSelection = vi.fn();
+    renderColumn(onExplainSelection);
+
+    const stub = await screen.findByTestId("pdf-stub-text");
+    stub.textContent = "a".repeat(2500);
+    selectAllTextIn(stub);
+    fireEvent.mouseUp(stub);
+
+    const button = await screen.findByRole("button", { name: "Add to chat" });
+    const user = userEvent.setup();
+    await user.click(button);
+
+    expect(onExplainSelection).toHaveBeenCalledTimes(1);
+    const [arg] = onExplainSelection.mock.calls[0];
+    expect(arg.exact).toHaveLength(2000);
+    expect(arg.exact).toBe("a".repeat(2000));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("does not render the source-view selection-color popover from a pages-mode selection", async () => {
     renderColumn();
 
