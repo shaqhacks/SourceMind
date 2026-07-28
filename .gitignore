@@ -37,3 +37,7 @@ data/
 # Tool caches
 .ruff_cache/
 .superpowers/
+
+# API keys — never commit, wherever one lands
+secrets.toml
+.gstack/

@@ -242,6 +242,41 @@ describe("TestAttemptClient", () => {
     expect(await screen.findByText(/1 missed concept added to your reviews/i)).toBeInTheDocument();
   });
 
+  it("disables Previous on question 1, and Previous navigates back once advanced", async () => {
+    mockedGetTest.mockResolvedValue(ok(makeAttempt()));
+
+    render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
+    await screen.findByText("2+2=?");
+    expect(screen.getByRole("button", { name: /previous/i })).toBeDisabled();
+
+    fireEvent.keyDown(window, { key: "2" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await screen.findByText("Capital of France?");
+    expect(screen.getByRole("button", { name: /previous/i })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /previous/i }));
+    expect(await screen.findByText("2+2=?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /previous/i })).toBeDisabled();
+  });
+
+  it("renders the chapter/date header label and a Save & exit link back to /tests", async () => {
+    const attempt = makeAttempt({ chapter_label: "Chapter 1", created_at: "2026-01-01T00:00:00Z" });
+    mockedGetTest.mockResolvedValue(ok(attempt));
+
+    render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
+
+    const expectedDate = new Date(attempt.created_at).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+    expect(
+      await screen.findByRole("heading", { name: `Chapter 1 test · ${expectedDate}` }),
+    ).toBeInTheDocument();
+
+    const exitLink = screen.getByRole("link", { name: /save & exit/i });
+    expect(exitLink).toHaveAttribute("href", "/tests");
+  });
+
   it("shows no banner when added_card_ids is absent or empty", async () => {
     mockedGetTest.mockResolvedValue(ok(makeAttempt()));
     mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult({ added_card_ids: [] })));
