@@ -78,6 +78,13 @@ def create_note(
 
 
 def update_note(note_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+    """fields comes from NoteUpdateIn.model_dump(exclude_unset=True): absent
+    key = leave alone; an explicit null note_md is a no-op, NOT a clear —
+    unlike Highlight.note_md (nullable, so an explicit null there really does
+    clear it), Note.note_md is NOT NULL at the DB level, so there is no
+    'cleared' state to set it to. A note with nothing left to say should be
+    deleted (see delete_note), not patched to a null body.
+    """
     session = get_session()
     try:
         n = session.get(Note, note_id)

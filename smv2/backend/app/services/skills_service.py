@@ -3,7 +3,7 @@ plus the graph import service (top half stays pure/DB-free per the plan)."""
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Any
 
 from app.db.engine import get_session
@@ -19,6 +19,7 @@ from app.db.models import (
     TestAttempt,
     utcnow,
 )
+from app.services.srs_service import AGAIN, EASY
 
 # Constants
 QUIZ_WEIGHT = 0.5
@@ -65,12 +66,14 @@ def derive_levels(node_ids: list[str], edges: list[tuple[str, str]]) -> dict[str
     # Initialize levels (will update with longest paths)
     levels = {node: 0 for node in node_ids}
 
-    # Kahn's algorithm: start with nodes that have no incoming edges (roots)
-    queue = [node for node in node_ids if in_degree[node] == 0]
+    # Kahn's algorithm: start with nodes that have no incoming edges (roots).
+    # deque so dequeuing is O(1) (popleft) instead of list.pop(0)'s O(n)
+    # shift of every remaining element.
+    queue = deque(node for node in node_ids if in_degree[node] == 0)
     processed_count = 0
 
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         processed_count += 1
 
         # Set level for current node if not yet set or if this is a longer path
@@ -440,7 +443,7 @@ def build_map(session, course_id: str) -> dict[str, Any]:
         cards_count[concept.id] = len(concept_cards)
 
         grades = [
-            min(1.0, max(0.0, (review_by_card[c.id].last_grade - 1) / 3))
+            min(1.0, max(0.0, (review_by_card[c.id].last_grade - AGAIN) / (EASY - AGAIN)))
             for c in concept_cards
             if c.id in review_by_card and review_by_card[c.id].last_grade is not None
         ]

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 
 def _graph(section_id):
     return {
@@ -716,3 +718,363 @@ def test_skill_detail_survives_out_of_range_your_answer_index(client, ingest_cou
     assert len(missed) == 1
     assert missed[0]["your_answer"] is None
     assert missed[0]["correct_answer"] == "A"
+
+
+def test_skill_detail_404_for_missing_course(client):
+    """The detail endpoint's OWN course-404 branch (distinct from its
+    concept-404 branch below it) — existing tests only vary concept_id
+    against a real course_id."""
+    resp = client.get("/api/courses/does-not-exist/skills/some-concept")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "course not found"
+
+
+def test_weakest_prereq_picks_lowest_mastery_among_multiple_weak_edges(client, ingest_course):
+    """A concept with TWO incoming weak-prereq edges (both < WEAK_PREREQ_BELOW)
+    must select the LOWER-mastery one for fix_plan/unlock_note, not just
+    whichever edge happens to be iterated first."""
+    from app.db.engine import get_session
+    from app.db.models import Concept, ConceptEdge, ConceptMastery
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    session = get_session()
+    try:
+        weaker = Concept(course_id=course_id, slug="weaker", label="Weaker Prereq")
+        stronger_weak = Concept(
+            course_id=course_id, slug="stronger-weak", label="Stronger Weak Prereq"
+        )
+        dependent = Concept(course_id=course_id, slug="multi-dependent", label="Multi Dependent")
+        session.add_all([weaker, stronger_weak, dependent])
+        session.flush()
+
+        session.add(
+            ConceptEdge(
+                course_id=course_id, from_concept_id=weaker.id, to_concept_id=dependent.id
+            )
+        )
+        session.add(
+            ConceptEdge(
+                course_id=course_id, from_concept_id=stronger_weak.id, to_concept_id=dependent.id
+            )
+        )
+
+        # weaker: mastery 10 (well below WEAK_PREREQ_BELOW=60).
+        session.add(
+            ConceptMastery(
+                course_id=course_id,
+                concept_id=weaker.id,
+                learner_key="default",
+                correct_count=1,
+                wrong_count=9,
+            )
+        )
+        # stronger_weak: mastery 50 -- still weak (< 60) but higher than weaker's 10.
+        session.add(
+            ConceptMastery(
+                course_id=course_id,
+                concept_id=stronger_weak.id,
+                learner_key="default",
+                correct_count=5,
+                wrong_count=5,
+            )
+        )
+        session.commit()
+        weaker_id, dependent_id = weaker.id, dependent.id
+    finally:
+        session.close()
+
+    detail = client.get(f"/api/courses/{course_id}/skills/{dependent_id}").json()
+    assert detail["node"]["blocked"] is True
+    assert detail["node"]["unlock_note"] == "Unlocks at 60 mastery of Weaker Prereq"
+    assert detail["fix_plan"]["prereq_id"] == weaker_id
+    assert detail["fix_plan"]["prereq_label"] == "Weaker Prereq"
+
+
+def test_weakest_prereq_tie_break_uses_lower_concept_id(client, ingest_course):
+    """When two weak prereqs have IDENTICAL mastery, the min(key=(mastery,
+    id)) tie-break must pick the lexicographically lower concept id --
+    resolved against the actual server-generated ids, not an assumption
+    about insertion order (ids are random uuid4, not sortable-by-creation)."""
+    from app.db.engine import get_session
+    from app.db.models import Concept, ConceptEdge, ConceptMastery
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    session = get_session()
+    try:
+        prereq_x = Concept(course_id=course_id, slug="prereq-x", label="Prereq X")
+        prereq_y = Concept(course_id=course_id, slug="prereq-y", label="Prereq Y")
+        dependent = Concept(course_id=course_id, slug="tie-dependent", label="Tie Dependent")
+        session.add_all([prereq_x, prereq_y, dependent])
+        session.flush()
+
+        session.add(
+            ConceptEdge(
+                course_id=course_id, from_concept_id=prereq_x.id, to_concept_id=dependent.id
+            )
+        )
+        session.add(
+            ConceptEdge(
+                course_id=course_id, from_concept_id=prereq_y.id, to_concept_id=dependent.id
+            )
+        )
+
+        # Identical mastery for both prereqs -- forces the id tie-break.
+        session.add(
+            ConceptMastery(
+                course_id=course_id,
+                concept_id=prereq_x.id,
+                learner_key="default",
+                correct_count=1,
+                wrong_count=9,
+            )
+        )
+        session.add(
+            ConceptMastery(
+                course_id=course_id,
+                concept_id=prereq_y.id,
+                learner_key="default",
+                correct_count=1,
+                wrong_count=9,
+            )
+        )
+        session.commit()
+        prereq_x_id, prereq_y_id, dependent_id = prereq_x.id, prereq_y.id, dependent.id
+    finally:
+        session.close()
+
+    label_by_id = {prereq_x_id: "Prereq X", prereq_y_id: "Prereq Y"}
+    expected_winner_id = min(prereq_x_id, prereq_y_id)
+    expected_winner_label = label_by_id[expected_winner_id]
+
+    detail = client.get(f"/api/courses/{course_id}/skills/{dependent_id}").json()
+    assert detail["fix_plan"]["prereq_id"] == expected_winner_id
+    assert detail["fix_plan"]["prereq_label"] == expected_winner_label
+    assert detail["node"]["unlock_note"] == f"Unlocks at 60 mastery of {expected_winner_label}"
+
+
+def test_quiz_signal_attributes_to_concepts_in_chapter_scope_only(client, ingest_course):
+    """A chapter-scoped test (Test.section_id=None, chapter_label set) must
+    attribute its results to concepts linked to THAT chapter's sections
+    only -- a concept linked to a different chapter's section must see no
+    signal at all."""
+    from app.db.engine import get_session
+    from app.db.models import Concept, ConceptSectionLink, Test, TestAttempt
+
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    sections = client.get(f"/api/courses/{course_id}/sections").json()
+    by_title = {s["title"]: s for s in sections}
+    ch1_section_id = by_title["Chapter 1: Foundations"]["id"]
+    ch2_section_id = by_title["Chapter 2: Structures"]["id"]
+
+    session = get_session()
+    try:
+        in_scope = Concept(course_id=course_id, slug="in-scope", label="In Scope")
+        out_of_scope = Concept(course_id=course_id, slug="out-of-scope", label="Out Of Scope")
+        session.add_all([in_scope, out_of_scope])
+        session.flush()
+        session.add(
+            ConceptSectionLink(
+                course_id=course_id, concept_id=in_scope.id, section_id=ch1_section_id, rank=0
+            )
+        )
+        session.add(
+            ConceptSectionLink(
+                course_id=course_id, concept_id=out_of_scope.id, section_id=ch2_section_id, rank=0
+            )
+        )
+
+        test = Test(
+            course_id=course_id,
+            chapter_label="Chapter 1: Foundations",
+            section_id=None,
+            questions=[
+                {"question": "Q1?", "choices": ["A", "B"], "correct_index": 0, "explanation": ""},
+                {"question": "Q2?", "choices": ["A", "B"], "correct_index": 0, "explanation": ""},
+            ],
+        )
+        session.add(test)
+        session.flush()
+        session.add(
+            TestAttempt(
+                test_id=test.id,
+                course_id=course_id,
+                answers=[0, 1],
+                results=[
+                    {"correct": True, "correct_index": 0, "explanation": "", "your_answer": 0},
+                    {"correct": False, "correct_index": 0, "explanation": "", "your_answer": 1},
+                ],
+                score=0.5,
+            )
+        )
+        session.commit()
+        in_scope_id, out_of_scope_id = in_scope.id, out_of_scope.id
+    finally:
+        session.close()
+
+    in_detail = client.get(f"/api/courses/{course_id}/skills/{in_scope_id}").json()
+    assert in_detail["quiz_correct"] == 1
+    assert in_detail["quiz_wrong"] == 1
+
+    out_detail = client.get(f"/api/courses/{course_id}/skills/{out_of_scope_id}").json()
+    assert out_detail["quiz_correct"] == 0
+    assert out_detail["quiz_wrong"] == 0
+
+
+def test_test_scope_section_ids_whole_course_fallback_returns_all_sections():
+    """Unit test of _test_scope_section_ids' own contract for a whole-course
+    test (section_id AND chapter_label both None): it returns the literal
+    all_section_ids list verbatim. Unlike the chapter-scoped branch (which
+    filters out kind=='answers' sections), this fallback branch does NOT
+    filter anything -- read the function, don't assume symmetry."""
+    from app.db.models import Test
+    from app.services.skills_service import _test_scope_section_ids
+
+    whole_course_test = Test(course_id="irrelevant", chapter_label=None, section_id=None, questions=[])
+    all_section_ids = ["s-answers", "s-content", "s-practice"]
+
+    result = _test_scope_section_ids(
+        whole_course_test, sections_by_chapter={}, all_section_ids=all_section_ids
+    )
+    assert result == all_section_ids
+
+
+def test_fix_plan_section_falls_back_to_weakest_concept_section_id_pointer(client, ingest_course):
+    """The weakest prereq may have ZERO ConceptSectionLink rows (e.g. an
+    inline-practice-only concept) but still carry a Concept.section_id
+    pointer -- fix_plan.section_id must fall back to that pointer instead
+    of staying None."""
+    from app.db.engine import get_session
+    from app.db.models import Concept, ConceptEdge, ConceptMastery
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    sections = client.get(f"/api/courses/{course_id}/sections").json()
+    s0 = sections[0]["id"]
+
+    session = get_session()
+    try:
+        weak_prereq = Concept(
+            course_id=course_id, slug="pointer-only-weak", label="Pointer Only Weak", section_id=s0
+        )
+        dependent = Concept(course_id=course_id, slug="pointer-dependent", label="Pointer Dependent")
+        session.add_all([weak_prereq, dependent])
+        session.flush()
+
+        session.add(
+            ConceptEdge(
+                course_id=course_id, from_concept_id=weak_prereq.id, to_concept_id=dependent.id
+            )
+        )
+        session.add(
+            ConceptMastery(
+                course_id=course_id,
+                concept_id=weak_prereq.id,
+                learner_key="default",
+                correct_count=1,
+                wrong_count=9,
+            )
+        )
+        session.commit()
+        dependent_id = dependent.id
+    finally:
+        session.close()
+
+    detail = client.get(f"/api/courses/{course_id}/skills/{dependent_id}").json()
+    assert detail["fix_plan"] is not None
+    assert detail["fix_plan"]["section_id"] == s0
+
+
+def test_srs_signal_and_cards_count_reach_concept_via_section_id_pointer_without_links(
+    client, ingest_course
+):
+    """The links ∪ Concept.section_id union (build_map's
+    signal_section_ids_by_concept) must feed BOTH cards_count and the SRS
+    signal, not just quiz attribution -- a link-less concept with only the
+    section_id pointer must see cards_count > 0 and a non-null SRS
+    contribution once a reviewed card exists in that section."""
+    from app.db.engine import get_session
+    from app.db.models import Card, Concept, ReviewState
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    sections = client.get(f"/api/courses/{course_id}/sections").json()
+    s0 = sections[0]["id"]
+
+    session = get_session()
+    try:
+        concept = Concept(
+            course_id=course_id, slug="pointer-only-srs", label="Pointer Only SRS", section_id=s0
+        )
+        session.add(concept)
+        session.flush()
+
+        card = Card(
+            id="card-pointer-only-1",
+            course_id=course_id,
+            section_id=s0,
+            front_md="Q",
+            back_md="A",
+            position=0,
+        )
+        session.add(card)
+        session.flush()
+        session.add(
+            ReviewState(
+                card_id=card.id,
+                course_id=course_id,
+                due_at=datetime.now(timezone.utc),
+                interval_days=1.0,
+                ease=2.5,
+                reps=1,
+                lapses=0,
+                last_grade=4,  # EASY -> srs signal == 1.0 (the only signal present)
+            )
+        )
+        session.commit()
+        concept_id = concept.id
+    finally:
+        session.close()
+
+    detail = client.get(f"/api/courses/{course_id}/skills/{concept_id}").json()
+    assert detail["cards_count"] == 1
+    # Only signal present is SRS at 1.0, fully renormalized to that one weight.
+    assert detail["node"]["mastery"] == 100
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(
+            {
+                "concepts": [
+                    {"slug": f"c{i}", "label": "C", "section_refs": []} for i in range(501)
+                ],
+                "edges": [],
+            },
+            id="501-concepts-over-max-length",
+        ),
+        pytest.param(
+            {
+                "concepts": [
+                    {
+                        "slug": "a",
+                        "label": "A",
+                        "section_refs": [
+                            {"section_id": f"s{i}", "rank": 0} for i in range(51)
+                        ],
+                    }
+                ],
+                "edges": [],
+            },
+            id="51-section-refs-over-max-length",
+        ),
+        pytest.param(
+            {"concepts": [{"slug": "", "label": "A", "section_refs": []}], "edges": []},
+            id="empty-slug-under-min-length",
+        ),
+    ],
+)
+def test_import_graph_bounds_rejected_with_422(client, ingest_course, payload):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    resp = client.put(f"/api/courses/{course_id}/skills/graph", json=payload)
+    assert resp.status_code == 422

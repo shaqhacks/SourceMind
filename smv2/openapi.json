@@ -2082,6 +2082,7 @@
             "items": {
               "$ref": "#/components/schemas/SkillGraphSectionRefIn"
             },
+            "maxItems": 50,
             "title": "Section Refs",
             "type": "array"
           },
@@ -2147,6 +2148,7 @@
             "items": {
               "$ref": "#/components/schemas/SkillGraphConceptIn"
             },
+            "maxItems": 500,
             "title": "Concepts",
             "type": "array"
           },
@@ -2154,6 +2156,7 @@
             "items": {
               "$ref": "#/components/schemas/SkillGraphEdgeIn"
             },
+            "maxItems": 2000,
             "title": "Edges",
             "type": "array"
           }

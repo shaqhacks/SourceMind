@@ -10,9 +10,12 @@ from app.db.models import (
     ChatTurn,
     Chunk,
     Concept,
+    ConceptEdge,
     ConceptMastery,
     ConceptMasteryEvent,
+    ConceptSectionLink,
     Course,
+    Highlight,
     LlmCall,
     Note,
     PracticeAnswer,
@@ -111,7 +114,30 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
             label="Cascade Concept",
             section_id=section.id,
         )
-        session.add(concept)
+        concept_2 = Concept(
+            course_id=course.id,
+            slug="cascade.concept-2",
+            label="Cascade Concept 2",
+            section_id=section.id,
+        )
+        session.add_all([concept, concept_2])
+        session.flush()
+        concept_edge = ConceptEdge(
+            course_id=course.id,
+            from_concept_id=concept.id,
+            to_concept_id=concept_2.id,
+        )
+        concept_section_link = ConceptSectionLink(
+            course_id=course.id,
+            concept_id=concept.id,
+            section_id=section.id,
+        )
+        highlight = Highlight(
+            course_id=course.id,
+            section_id=section.id,
+            exact="cascade highlight",
+        )
+        session.add_all([concept_edge, concept_section_link, highlight])
         session.flush()
         practice_question = PracticeQuestion(
             course_id=course.id,
@@ -209,7 +235,10 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         assert session.query(Test).filter_by(course_id=course_id).count() == 0
         assert session.query(TestAttempt).filter_by(course_id=course_id).count() == 0
         assert session.query(Note).filter_by(course_id=course_id).count() == 0
+        assert session.query(Highlight).filter_by(course_id=course_id).count() == 0
         assert session.query(Concept).filter_by(course_id=course_id).count() == 0
+        assert session.query(ConceptEdge).filter_by(course_id=course_id).count() == 0
+        assert session.query(ConceptSectionLink).filter_by(course_id=course_id).count() == 0
         assert session.query(PracticeQuestion).filter_by(course_id=course_id).count() == 0
         assert session.query(PracticeExtractionRun).filter_by(course_id=course_id).count() == 0
         assert session.query(PracticeAnswer).filter_by(course_id=course_id).count() == 0

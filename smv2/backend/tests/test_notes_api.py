@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 
 def test_create_list_update_delete_note(client, ingest_course):
     from conftest import _first_section_id
@@ -51,6 +53,82 @@ def test_create_note_bad_anchor_is_422(client, ingest_course):
         },
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"note_md": ""},
+        {"page": 0},
+        {"surface": "pages"},
+        {"anchor_y": -0.01},
+        {"anchor_y": 1.01},
+    ],
+)
+def test_create_note_validation_rejects_bad_payloads(client, ingest_course, overrides):
+    from conftest import _first_section_id
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+    payload = {
+        "section_id": section_id,
+        "page": 1,
+        "anchor_y": 0.4,
+        "note_md": "x",
+        "surface": "pdf",
+        **overrides,
+    }
+    assert client.post(f"/api/courses/{course_id}/notes", json=payload).status_code == 422
+
+
+@pytest.mark.parametrize("anchor_y", [0.0, 1.0])
+def test_create_note_accepts_anchor_y_boundaries(client, ingest_course, anchor_y):
+    from conftest import _first_section_id
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+    resp = client.post(
+        f"/api/courses/{course_id}/notes",
+        json={
+            "section_id": section_id,
+            "page": 1,
+            "anchor_y": anchor_y,
+            "note_md": "x",
+            "surface": "pdf",
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["anchor_y"] == anchor_y
+
+
+def test_create_note_section_of_other_course_is_422(client, ingest_course):
+    from conftest import _first_section_id
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    other = client.post("/api/courses", json={"title": "Other"}).json()["id"]
+    section_id = _first_section_id(client, course_id)
+
+    resp = client.post(
+        f"/api/courses/{other}/notes",
+        json={
+            "section_id": section_id,
+            "page": 1,
+            "anchor_y": 0.3,
+            "note_md": "x",
+            "surface": "pdf",
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_update_missing_note_is_404(client):
+    resp = client.patch("/api/notes/does-not-exist", json={"note_md": "bye"})
+    assert resp.status_code == 404
+
+
+def test_delete_missing_note_is_404(client):
+    resp = client.delete("/api/notes/does-not-exist")
+    assert resp.status_code == 404
 
 
 def test_create_note_missing_course_is_404(client):

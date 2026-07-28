@@ -84,9 +84,12 @@ def _quoted_md(text: str) -> str:
 def _build_selection_block(section: Section, exact: str) -> str:
     """Deterministic passage grounding: the quote plus up to
     _SELECTION_CONTEXT_CHARS of surrounding body_md on each side
-    (first-occurrence match). A verbatim miss should be impossible —
-    body_md is immutable and the client sends the text it read — so on a
-    miss (stale/forged anchor) degrade to the quote alone, never error.
+    (first-occurrence match). A miss is EXPECTED, not exceptional: the
+    client sends rendered-space text (and pages-view selections are
+    whitespace-normalized), so any selection crossing inline Markdown or
+    reflowed whitespace won't match body_md verbatim. On a miss, degrade
+    to the quote alone, never error. Matching against a normalized
+    body_md copy is tracked in TODOS.md.
     """
     body = section.body_md or ""
     idx = body.find(exact)

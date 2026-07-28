@@ -565,7 +565,7 @@ class SkillGraphSectionRefIn(BaseModel):
 class SkillGraphConceptIn(BaseModel):
     slug: str = Field(min_length=1, max_length=200)
     label: str = Field(min_length=1, max_length=500)
-    section_refs: list[SkillGraphSectionRefIn] = Field(default_factory=list)
+    section_refs: list[SkillGraphSectionRefIn] = Field(default_factory=list, max_length=50)
 
 
 class SkillGraphEdgeIn(BaseModel):
@@ -577,8 +577,8 @@ class SkillGraphEdgeIn(BaseModel):
 
 
 class SkillGraphIn(BaseModel):
-    concepts: list[SkillGraphConceptIn]
-    edges: list[SkillGraphEdgeIn] = Field(default_factory=list)
+    concepts: list[SkillGraphConceptIn] = Field(max_length=500)
+    edges: list[SkillGraphEdgeIn] = Field(default_factory=list, max_length=2000)
 
 
 class SkillGraphImportOut(BaseModel):
