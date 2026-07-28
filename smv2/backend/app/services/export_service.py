@@ -22,7 +22,7 @@ from pathlib import Path
 
 from app.db.engine import get_session
 from app.db.models import Asset, Course, Section
-from app.services import highlights_service
+from app.services import highlights_service, notes_service
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 # Exports over this size spill from memory to a temp file automatically.
@@ -109,6 +109,20 @@ def build_export_zip(course_id: str) -> tuple[tempfile.SpooledTemporaryFile, str
             zf.writestr(
                 "highlights.json",
                 json.dumps(highlights_payload, indent=2, default=str),
+            )
+
+            # Same reasoning as highlights.json above: margin notes are the
+            # user's own work and must travel with the export too. Sourced
+            # from notes_service (never a raw model re-query) so page stays
+            # 1-based like the API.
+            notes_payload = {
+                "schema_version": 1,
+                "course_id": course.id,
+                "notes": notes_service.list_notes(course_id),
+            }
+            zf.writestr(
+                "notes.json",
+                json.dumps(notes_payload, indent=2, default=str),
             )
 
             for s in sections:
