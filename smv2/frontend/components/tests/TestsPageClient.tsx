@@ -27,10 +27,18 @@ type CoursesState =
   | { kind: "error"; error: FetchError }
   | { kind: "ready"; courses: CourseOut[] };
 
+// error/ready are tagged with the courseId they were fetched for. Two
+// defenses key off this tag: loadChapters below skips WRITING a response
+// whose courseId no longer matches the current selection (a stale fetch
+// that resolved after the user switched courses), and
+// displayedChaptersState further down re-checks the tag at render time as
+// defense in depth. Same two-layer shape as FlashcardsClient's
+// selectedCourseIdRef write-guard plus its CourseDataEntry render-time
+// check.
 type ChaptersState =
   | { kind: "loading" }
-  | { kind: "error"; error: FetchError }
-  | { kind: "ready"; chapters: ChapterOut[]; tests: TestSummaryOut[] };
+  | { kind: "error"; courseId: string; error: FetchError }
+  | { kind: "ready"; courseId: string; chapters: ChapterOut[]; tests: TestSummaryOut[] };
 
 export default function TestsPageClient() {
   const router = useRouter();
@@ -58,6 +66,18 @@ export default function TestsPageClient() {
     coursesState.kind === "ready" ? coursesState.courses.filter((c) => c.status === "ready") : [];
   const selectedCourseId = courseParam ?? readyCourses[0]?.id ?? null;
 
+  // Mirrors selectedCourseId for loadChapters' resolve-time staleness check
+  // below — a ref, not the selectedCourseId variable itself, because
+  // loadChapters (and the .then() closure it creates) is called from a
+  // specific render and would otherwise only ever see that render's own
+  // selectedCourseId (which always equals the courseId argument, defeating
+  // the check). Declared — and synced — before the fetch-triggering effect
+  // further down so that effect's first run already has a ref in place.
+  const selectedCourseIdRef = useRef<string | null>(selectedCourseId);
+  useEffect(() => {
+    selectedCourseIdRef.current = selectedCourseId;
+  }, [selectedCourseId]);
+
   // Deliberately doesn't reset to "loading" before (re)fetching — same
   // idiom as QuizzesPanel's loadTests: every setState here stays inside
   // the .then(), so this is safe to call directly from an effect body
@@ -65,24 +85,46 @@ export default function TestsPageClient() {
   // render every dependency change). Switching courses or retrying after
   // an error just quietly replaces the state once the fetch resolves,
   // rather than flashing back through a loading skeleton.
+  //
+  // Every write below is guarded against staleness: rapid course switching
+  // (A -> B -> C) can let A's fetch resolve last, after C's has already
+  // landed. Without the guard that stale write would overwrite C's good
+  // entry with one tagged courseId: "A", which displayedChaptersState's
+  // render-time mask would then hide as "loading" forever — the mask has
+  // no retry of its own, and the fetch effect below only re-runs when
+  // selectedCourseId itself changes again. So the write itself checks the
+  // current selection (via selectedCourseIdRef, per the comment above) and
+  // skips silently for an abandoned course instead of clobbering a newer
+  // entry — same pattern as FlashcardsClient's reloadCourseData.
   const loadChapters = useCallback((courseId: string) => {
     Promise.all([listChapters(courseId), listTests(courseId)]).then(
       ([chaptersResult, testsResult]) => {
         if (!chaptersResult.data) {
-          setChaptersState({
-            kind: "error",
-            error: describeError(chaptersResult.status, "Loading chapters"),
-          });
+          const error = describeError(chaptersResult.status, "Loading chapters");
+          setChaptersState((current) =>
+            courseId === selectedCourseIdRef.current ? { kind: "error", courseId, error } : current,
+          );
           return;
         }
         if (!testsResult.data) {
-          setChaptersState({
-            kind: "error",
-            error: describeError(testsResult.status, "Loading tests"),
-          });
+          const error = describeError(testsResult.status, "Loading tests");
+          setChaptersState((current) =>
+            courseId === selectedCourseIdRef.current ? { kind: "error", courseId, error } : current,
+          );
           return;
         }
-        setChaptersState({ kind: "ready", chapters: chaptersResult.data, tests: testsResult.data });
+        // Destructured into their own const bindings (rather than referenced
+        // as chaptersResult.data / testsResult.data below) so the `!data`
+        // narrowing above survives into the setState updater closure — TS
+        // does not carry a property-access narrowing across a function
+        // boundary, only a local const's.
+        const chapters = chaptersResult.data;
+        const tests = testsResult.data;
+        setChaptersState((current) =>
+          courseId === selectedCourseIdRef.current
+            ? { kind: "ready", courseId, chapters, tests }
+            : current,
+        );
       },
     );
   }, []);
@@ -90,6 +132,15 @@ export default function TestsPageClient() {
   useEffect(() => {
     if (selectedCourseId) loadChapters(selectedCourseId);
   }, [selectedCourseId, loadChapters]);
+
+  // A response tagged with a courseId that no longer matches the current
+  // selection is a stale fetch that resolved after the user switched courses
+  // — render it as still-loading (the switch's own fetch is in flight)
+  // rather than flashing the abandoned course's chapters/tests.
+  const displayedChaptersState: ChaptersState =
+    chaptersState.kind !== "loading" && chaptersState.courseId !== selectedCourseId
+      ? { kind: "loading" }
+      : chaptersState;
 
   function selectCourse(id: string) {
     router.push(`/tests?course=${id}`);
@@ -129,7 +180,7 @@ export default function TestsPageClient() {
     );
   } else if (!selectedCourseId) {
     body = null;
-  } else if (chaptersState.kind === "loading") {
+  } else if (displayedChaptersState.kind === "loading") {
     body = (
       <div role="status" className="flex flex-col gap-3">
         <span className="sr-only">Loading…</span>
@@ -137,16 +188,16 @@ export default function TestsPageClient() {
         <Skeleton className="h-24 w-full" />
       </div>
     );
-  } else if (chaptersState.kind === "error") {
+  } else if (displayedChaptersState.kind === "error") {
     body = (
       <ErrorBanner
-        status={chaptersState.error.status}
-        message={chaptersState.error.message}
+        status={displayedChaptersState.error.status}
+        message={displayedChaptersState.error.message}
         onRetry={() => loadChapters(selectedCourseId)}
       />
     );
   } else {
-    const { chapters, tests } = chaptersState;
+    const { chapters, tests } = displayedChaptersState;
     // Front matter (chapter_label: null) has nothing to link or test —
     // same precedent as lib/dashboard/quizzes.ts.
     const namedChapters = chapters.filter(
@@ -167,7 +218,7 @@ export default function TestsPageClient() {
               const hasAttempts = stats !== null && stats.attempts > 0 && stats.best_score !== null;
               return hasAttempts ? (
                 <ChapterTestCard
-                  key={label}
+                  key={`${selectedCourseId}-${label}`}
                   courseId={selectedCourseId}
                   chapterLabel={label}
                   tests={tests}
@@ -176,7 +227,7 @@ export default function TestsPageClient() {
                 />
               ) : (
                 <GenerateTestCard
-                  key={label}
+                  key={`${selectedCourseId}-${label}`}
                   courseId={selectedCourseId}
                   chapterLabel={label}
                   existingTests={tests.filter((test) => test.chapter_label === label)}

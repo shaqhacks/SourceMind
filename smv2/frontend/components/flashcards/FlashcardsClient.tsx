@@ -15,6 +15,7 @@ import {
   listCards,
   listChapters,
   listCourses,
+  MAX_QUEUE_FETCH,
   type CardOut,
   type ChapterOut,
   type CourseOut,
@@ -23,13 +24,6 @@ import {
 } from "@/lib/api/client";
 import { subscribeCardsSettled } from "@/lib/cards/cardsBus";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
-
-// review_queue's `limit` caps at 200 — a course's due/new set beyond that
-// isn't visible to this page's per-chapter breakdown. Same cap and the same
-// "fine at this app's scale" reasoning as app/review/page.tsx's own
-// MAX_QUEUE_FETCH; the headline "N due now" stat below doesn't share this
-// cap since it reads CourseReviewSummaryOut.due_count directly instead.
-const MAX_QUEUE_FETCH = 200;
 
 type CoursesState =
   | { kind: "loading" }
@@ -121,6 +115,16 @@ export default function FlashcardsClient() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus(headingRef);
 
+  // Mirrors selectedCourseId for reloadCourseData's resolve-time check
+  // above — a ref, not the state variable itself, because reloadCourseData
+  // (and the .then() closure it creates) is called from a specific render
+  // and would otherwise only ever see that render's own selectedCourseId
+  // (which always equals the courseId argument, defeating the check).
+  const selectedCourseIdRef = useRef<string | null>(selectedCourseId);
+  useEffect(() => {
+    selectedCourseIdRef.current = selectedCourseId;
+  }, [selectedCourseId]);
+
   function fetchCourses() {
     listCourses().then(({ data, status }) => {
       if (data) {
@@ -145,15 +149,27 @@ export default function FlashcardsClient() {
 
   // Shared by the course-change effect, the settle-bus subscription, and
   // the error banner's retry button. Every setState here happens inside
-  // the fetch's own .then() — never synchronously in an effect body — so a
-  // slow response for a since-abandoned course can't clobber a newer one:
-  // whichever response resolves last simply becomes the entry the render
-  // below compares selectedCourseId against, and a stale courseId's result
-  // just loses that comparison instead of needing its own guard.
+  // the fetch's own .then() — never synchronously in an effect body.
+  //
+  // "Whichever response resolves last wins" is NOT enough on its own: if a
+  // slow fetch for an abandoned course resolves after a newer course's
+  // fetch already landed, writing it would overwrite the newer course's
+  // good entry with a mismatched-courseId one — the render-time comparison
+  // below then reads that as "loading" (correctly hiding the stale data),
+  // but the newer course's already-fetched data is gone, and nothing
+  // re-fetches it (the effect only re-runs when selectedCourseId itself
+  // changes again) — a permanent skeleton. So the write itself is guarded:
+  // compare this fetch's target courseId against the selection at RESOLVE
+  // time (via a ref — `selectedCourseId` closed over by this function's own
+  // call would just equal `courseId` and never catch a switch that happened
+  // after the call), and skip the write entirely for a since-abandoned
+  // course rather than let it replace a newer entry.
   function reloadCourseData(courseId: string) {
     loadCourseData(courseId).then((result) => {
-      setCourseDataEntry({ courseId, state: result });
-      if (result.kind === "ready") {
+      setCourseDataEntry((current) =>
+        courseId === selectedCourseIdRef.current ? { courseId, state: result } : current,
+      );
+      if (result.kind === "ready" && courseId === selectedCourseIdRef.current) {
         setBrowsedChapterLabel((current) => {
           if (current && result.chapters.some((c) => c.chapter_label === current)) return current;
           const firstWithCards = result.chapters.find(
@@ -274,7 +290,7 @@ export default function FlashcardsClient() {
         </div>
         <Link
           href={`/review?course=${selectedCourse.id}&start=due`}
-          className="rounded-md bg-accent px-4 py-2 font-heading text-sm text-background transition-colors hover:bg-accent-600 active:bg-accent-700"
+          className="rounded-md bg-accent-700 px-4 py-2 font-heading text-sm text-background transition-colors hover:bg-accent-800 active:bg-accent-900"
         >
           Review all due{courseDue !== null ? ` (${courseDue})` : ""}
         </Link>

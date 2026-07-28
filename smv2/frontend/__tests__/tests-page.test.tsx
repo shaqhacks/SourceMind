@@ -381,4 +381,88 @@ describe("TestsPage", () => {
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent(/loading courses/i);
   });
+
+  it("shows an error banner when chapters load but tests fail to load", async () => {
+    mockedListCourses.mockResolvedValue(ok([makeCourse()]));
+    mockedListChapters.mockResolvedValue(
+      ok([makeChapter({ chapter_label: "Chapter 1", test_stats: null })]),
+    );
+    mockedListTests.mockResolvedValue({ status: 500, ok: false });
+
+    render(<TestsPage />);
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/loading tests/i);
+  });
+
+  it("a stale fetch for an abandoned course does not clobber the newer course's loaded state", async () => {
+    // Repro for the write-side race: course A's chapters/tests fetch is left
+    // pending while the user switches to course C, C's fetch resolves and
+    // renders, and only THEN does A's stale response land. Before the
+    // write-guard fix, that stale write replaced chaptersState with a
+    // `courseId: "course-a"` entry; displayedChaptersState's render-time
+    // mask correctly hides a courseId mismatch as "loading", but nothing
+    // ever re-fetches C after that (the fetch effect only re-runs when
+    // selectedCourseId itself changes again) — a permanent skeleton. The
+    // fix skips the write entirely for a since-abandoned course.
+    const courseA = makeCourse({ id: "course-a", title: "Course A" });
+    const courseC = makeCourse({ id: "course-c", title: "Course C" });
+    mockedListCourses.mockResolvedValue(ok([courseA, courseC]));
+
+    let resolveChaptersA!: (result: Awaited<ReturnType<typeof listChapters>>) => void;
+    let resolveTestsA!: (result: Awaited<ReturnType<typeof listTests>>) => void;
+    let resolveChaptersC!: (result: Awaited<ReturnType<typeof listChapters>>) => void;
+    let resolveTestsC!: (result: Awaited<ReturnType<typeof listTests>>) => void;
+
+    mockedListChapters.mockImplementation((courseId: string) => {
+      if (courseId === "course-a") {
+        return new Promise((resolve) => {
+          resolveChaptersA = resolve;
+        });
+      }
+      return new Promise((resolve) => {
+        resolveChaptersC = resolve;
+      });
+    });
+    mockedListTests.mockImplementation((courseId: string) => {
+      if (courseId === "course-a") {
+        return new Promise((resolve) => {
+          resolveTestsA = resolve;
+        });
+      }
+      return new Promise((resolve) => {
+        resolveTestsC = resolve;
+      });
+    });
+
+    const { rerender } = render(<TestsPage />);
+
+    // Default selection (no ?course=) is the first ready course, A — its
+    // fetch is deliberately left pending so it's still in flight below.
+    await waitFor(() => expect(mockedListChapters).toHaveBeenCalledWith("course-a"));
+
+    // Switch to course C before A's fetch resolves — same as a user
+    // rapid-clicking through the course selector.
+    mockSearchParams = new URLSearchParams({ course: "course-c" });
+    rerender(<TestsPage />);
+    await waitFor(() => expect(mockedListChapters).toHaveBeenCalledWith("course-c"));
+
+    // C's fetch resolves: its chapter renders.
+    await act(async () => {
+      resolveChaptersC(ok([makeChapter({ chapter_label: "Chapter C", test_stats: null })]));
+      resolveTestsC(ok([]));
+    });
+    expect(await screen.findByText("Chapter C")).toBeInTheDocument();
+
+    // A's stale fetch resolves last.
+    await act(async () => {
+      resolveChaptersA(ok([makeChapter({ chapter_label: "Chapter A", test_stats: null })]));
+      resolveTestsA(ok([]));
+    });
+
+    // C's content must still be rendered — not a skeleton, not A's data.
+    expect(screen.getByText("Chapter C")).toBeInTheDocument();
+    expect(screen.queryByText("Chapter A")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
 });

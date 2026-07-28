@@ -8,13 +8,13 @@ import Button from "@/components/ui/Button";
 import { describeError } from "@/lib/api/errors";
 import {
   generateTest,
-  getJob,
   listJobs,
   listTests,
   TERMINAL_JOB_STATUSES,
   type TestSummaryOut,
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { useJobFailureMessage } from "@/lib/hooks/useJobFailureMessage";
 import { formatJobProgress } from "@/lib/jobs/format";
 
 import { findActiveChapterTestJob } from "./testsFormat";
@@ -46,10 +46,16 @@ export default function GenerateTestCard({
   const [discoveredJobId, setDiscoveredJobId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
-    null,
-  );
   const knownAttemptIdsRef = useRef<Set<string>>(new Set());
+  // Guards the job-succeeded effect below against re-firing for the SAME
+  // job: `onSettled` is a fresh closure every render of the parent
+  // (`onSettled={() => loadChapters(selectedCourseId)}`) and `courseId` can
+  // also change identity across a parent re-render, so this effect's own
+  // dependency array churns independently of `done`/`job?.status` actually
+  // changing — without this guard, a re-run after the job already succeeded
+  // would call listTests/onSettled/router.push again for a job that already
+  // finished being handled.
+  const handledJobIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (localJobId) return undefined;
@@ -68,10 +74,12 @@ export default function GenerateTestCard({
   const { job, done, stalled } = useJobEvents(watchedJobId);
   const isGenerating = watchedJobId !== null && !done;
   const jobFailed = done && job?.status === "failed";
-  const failureMessage = failureInfo?.jobId === watchedJobId ? failureInfo.message : null;
+  const failureMessage = useJobFailureMessage(jobFailed, watchedJobId);
 
   useEffect(() => {
-    if (!done || job?.status !== "succeeded") return;
+    if (!done || job?.status !== "succeeded" || !watchedJobId) return;
+    if (handledJobIdRef.current === watchedJobId) return;
+    handledJobIdRef.current = watchedJobId;
     listTests(courseId).then(({ data }) => {
       if (!data) return;
       const forChapter = data.filter((test) => test.chapter_label === chapterLabel);
@@ -81,18 +89,7 @@ export default function GenerateTestCard({
       onSettled();
       if (freshAttempt) router.push(`/course/${courseId}/test/${freshAttempt.id}`);
     });
-  }, [done, job?.status, courseId, chapterLabel, router, onSettled]);
-
-  useEffect(() => {
-    if (!jobFailed || !watchedJobId) return;
-    let active = true;
-    getJob(watchedJobId).then(({ data }) => {
-      if (active) setFailureInfo({ jobId: watchedJobId, message: data?.error ?? null });
-    });
-    return () => {
-      active = false;
-    };
-  }, [jobFailed, watchedJobId]);
+  }, [done, job?.status, watchedJobId, courseId, chapterLabel, router, onSettled]);
 
   async function handleGenerate() {
     setStarting(true);

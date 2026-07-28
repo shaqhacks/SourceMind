@@ -466,6 +466,12 @@ export async function findActiveCardsJob(sectionId: string): Promise<JobOut | nu
   );
 }
 
+// review_queue's `limit` caps at 200 server-side — a caller's "all" is "all
+// up to that cap", not literally unbounded. Fine at this app's scale.
+// Shared by app/review/page.tsx and FlashcardsClient, which each used to
+// define their own identical constant.
+export const MAX_QUEUE_FETCH = 200;
+
 export function getReviewQueue(courseId: string, limit?: number) {
   return request(
     client.GET("/api/courses/{course_id}/review/queue", {

@@ -26,6 +26,7 @@ import { FakeEventSource } from "./support/fake-event-source";
 vi.mock("@/lib/api/client", () => ({
   API_BASE: "http://localhost:8000",
   TERMINAL_JOB_STATUSES: new Set(["succeeded", "failed"]),
+  MAX_QUEUE_FETCH: 200,
   listCourses: vi.fn(),
   listChapters: vi.fn(),
   listCards: vi.fn(),
@@ -355,6 +356,44 @@ describe("FlashcardsClient", () => {
 
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent(/loading courses failed/i);
+
+    await user.click(within(banner).getByRole("button", { name: /retry/i }));
+
+    expect(await screen.findByText("Cell Biology Basics")).toBeInTheDocument();
+  });
+
+  it("shows an error banner with a working retry when the review queue fails to load", async () => {
+    mockedListCourses.mockResolvedValue(ok([makeCourse()]));
+    mockedListChapters.mockResolvedValue(ok([chapter1]));
+    mockedListCards.mockResolvedValue(ok([cardA]));
+    mockedGetReviewQueue
+      .mockResolvedValueOnce(err(500))
+      .mockResolvedValueOnce(ok({ cards: [], due: 0, new: 0, total: 1 }));
+    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
+
+    const user = userEvent.setup();
+    render(<FlashcardsClient />);
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/loading review queue failed/i);
+
+    await user.click(within(banner).getByRole("button", { name: /retry/i }));
+
+    expect(await screen.findByText("Cell Biology Basics")).toBeInTheDocument();
+  });
+
+  it("shows an error banner with a working retry when flashcards fail to load", async () => {
+    mockedListCourses.mockResolvedValue(ok([makeCourse()]));
+    mockedListChapters.mockResolvedValue(ok([chapter1]));
+    mockedListCards.mockResolvedValueOnce(err(500)).mockResolvedValueOnce(ok([cardA]));
+    mockedGetReviewQueue.mockResolvedValue(ok({ cards: [], due: 0, new: 0, total: 1 }));
+    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
+
+    const user = userEvent.setup();
+    render(<FlashcardsClient />);
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/loading flashcards failed/i);
 
     await user.click(within(banner).getByRole("button", { name: /retry/i }));
 
