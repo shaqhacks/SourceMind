@@ -7,7 +7,6 @@ import CourseCard from "@/components/dashboard/CourseCard";
 import SkillSnapshotCard from "@/components/dashboard/SkillSnapshotCard";
 import ThisWeekCard from "@/components/dashboard/ThisWeekCard";
 import TodayTaskList from "@/components/dashboard/TodayTaskList";
-import VideoSection from "@/components/dashboard/VideoSection";
 import ErrorBanner from "@/components/ErrorBanner";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -361,8 +360,6 @@ export default function Home() {
               ))}
             </div>
           </div>
-
-          <VideoSection />
         </div>
       )}
 

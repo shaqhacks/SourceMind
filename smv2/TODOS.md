@@ -48,12 +48,11 @@ Shared course header nav making the surfaces one click apart. Cards/quizzes are 
 **Priority:** P3
 Generic `useSectionScopedCrud<T>` hook (useHighlights/useNotes share ~70 lines of plumbing); shared `CourseSwitcher` (tests page `<select>` vs flashcards tablist); shared `Breadcrumb`; HintRow reuse in review page; `useSkillDetail` hook mirroring `useSkillMap`; move `useCourseTitle` to lib/hooks/; `findActiveChapterTestJob` into client.ts.
 
-### Home page eagerly loads YouTube embed (ISSUE-002)
-**Priority:** P3
-The learning-science section's embedded player fires requests to youtube-nocookie.com on page load with no interaction — a local-first app phoning home, plus load weight. Fix: facade pattern (static thumbnail, mount the iframe on click). Found by /qa 2026-07-28; report: `.gstack/qa-reports/qa-report-localhost-2026-07-28.md`.
-
 ### UX polish (from design review — informational)
 **Priority:** P3
 Note-gutter affordance nearly invisible at rest (5% tint, no glyph) — add a persistent low-key cue. Enhanced-HTML view silently hides existing highlights/notes (no painter there yet) — show a non-blocking notice like the `converting` state. 24px swatch/pin touch targets — add hit-slop if tablet use matters; popovers lack a horizontal viewport clamp near screen edges.
 
 ## Completed
+
+### Home page eagerly loads YouTube embed (ISSUE-002)
+Resolved by removing the learning-science video section entirely (owner decision — went further than the planned lazy-load facade). **Completed:** 2026-07-28.
