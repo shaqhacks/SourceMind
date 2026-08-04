@@ -41,3 +41,9 @@ data/
 # API keys — never commit, wherever one lands
 secrets.toml
 .gstack/
+
+# Local agent and workflow tooling
+/.claude/skills/
+/.github/workflows/
+/CLAUDE.md
+/smv2/frontend/CLAUDE.md
