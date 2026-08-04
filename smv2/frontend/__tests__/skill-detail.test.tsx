@@ -35,10 +35,18 @@ function makeDetail(overrides: Partial<SkillDetailOut> = {}): SkillDetailOut {
       slug: "token-counting",
       label: "Token counting",
       level: 1,
-      mastery: 31,
-      status: "struggling",
-      blocked: false,
-      unlock_note: null,
+      status: "likely_struggling",
+      readiness_estimate: 0.31,
+      evidence_state: "likely_struggling",
+      distinct_item_count: 5,
+      distinct_session_count: 3,
+      effective_evidence_count: 4.2,
+      uncertainty: 0.18,
+      quiz_estimate: 0.4,
+      review_estimate: 0.25,
+      trend: "declining",
+      forgetting_risk: 0.2,
+      last_evidence_at: "2026-01-02T00:00:00Z",
     },
     taught_in: [
       {
@@ -72,11 +80,9 @@ function makeDetail(overrides: Partial<SkillDetailOut> = {}): SkillDetailOut {
         attempted_at: "2026-01-02T00:00:00Z",
       },
     ],
-    blocked_skill_labels: ["Cost estimation", "Context management"],
     cards_count: 5,
     quiz_correct: 2,
     quiz_wrong: 3,
-    fix_plan: null,
     ...overrides,
   };
 }
@@ -87,20 +93,20 @@ describe("CompetencyDetailView", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the skill's status, blocked skills, taught-in sections, and missed questions", async () => {
+  it("renders readiness evidence, taught-in sections, and missed questions", async () => {
     mockedGetCourse.mockResolvedValue(ok(makeCourse()));
     mockedGetSkillDetail.mockResolvedValue(ok(makeDetail()));
 
     render(<CompetencyDetailView courseId="course-1" skillId="token-counting" />);
 
     expect(await screen.findByRole("heading", { level: 1, name: "Token counting" })).toBeInTheDocument();
-    expect(screen.getByText("Struggling · 31 mastery")).toBeInTheDocument();
-
-    expect(screen.getByText(/Blocks/)).toBeInTheDocument();
-    expect(screen.getByText("Cost estimation and Context management")).toBeInTheDocument();
+    expect(screen.getByText("Likely struggling · 31% readiness")).toBeInTheDocument();
 
     expect(screen.getByText("5")).toBeInTheDocument();
-    expect(screen.getByText("Cards on this skill")).toBeInTheDocument();
+    expect(screen.getByText("Distinct evidence items")).toBeInTheDocument();
+    expect(screen.getByText("Why this estimate")).toBeInTheDocument();
+    expect(screen.getByText("40%")).toBeInTheDocument();
+    expect(screen.getByText("25%")).toBeInTheDocument();
     expect(screen.getByText("2/5")).toBeInTheDocument();
     expect(screen.getByText("Quiz record")).toBeInTheDocument();
 
@@ -122,12 +128,11 @@ describe("CompetencyDetailView", () => {
     expect(screen.getByText("You answered: Skipped")).toBeInTheDocument();
     expect(screen.getByText("You answered: ~1,500 tokens")).toBeInTheDocument();
 
-    // fix_plan is null for this skill (its own prereq, tokenization, isn't
-    // weak) — the fallback plan re-reads the top taught-in section.
+    // The next step points to reviewed source material rather than asserting a cause.
     const startWith = screen.getByRole("link", { name: "Start with Counting and budgeting tokens" });
     expect(startWith).toHaveAttribute("href", "/course/course-1?section=sec-2");
-    const drillCards = screen.getByRole("link", { name: "Drill cards" });
-    expect(drillCards).toHaveAttribute("href", "/review");
+    const practice = screen.getByRole("link", { name: "Practice and review" });
+    expect(practice).toHaveAttribute("href", "/review?course=course-1");
   });
 
   it("shows a quiet note instead of fabricating missed questions for a skill with none", async () => {
@@ -140,13 +145,12 @@ describe("CompetencyDetailView", () => {
             slug: "tokenization",
             label: "Tokenization basics",
             level: 1,
-            mastery: 86,
-            status: "solid",
-            blocked: false,
-            unlock_note: null,
+            status: "retained",
+            readiness_estimate: 0.86,
+            evidence_state: "retained",
+            distinct_item_count: 7,
           },
           missed_questions: [],
-          blocked_skill_labels: [],
         }),
       ),
     );
@@ -159,7 +163,7 @@ describe("CompetencyDetailView", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a fix plan pointing at the weak prerequisite when fix_plan is present", async () => {
+  it("does not present a causal explanation for a low readiness estimate", async () => {
     mockedGetCourse.mockResolvedValue(ok(makeCourse()));
     mockedGetSkillDetail.mockResolvedValue(
       ok(
@@ -169,12 +173,11 @@ describe("CompetencyDetailView", () => {
             slug: "cost-estimation",
             label: "Cost estimation",
             level: 2,
-            mastery: 24,
-            status: "struggling",
-            blocked: true,
-            unlock_note: null,
+            status: "likely_struggling",
+            readiness_estimate: 0.24,
+            evidence_state: "likely_struggling",
+            distinct_item_count: 6,
           },
-          fix_plan: { prereq_id: "token-counting", prereq_label: "Token counting", section_id: "sec-2" },
         }),
       ),
     );
@@ -182,11 +185,9 @@ describe("CompetencyDetailView", () => {
     render(<CompetencyDetailView courseId="course-1" skillId="cost-estimation" />);
 
     await screen.findByRole("heading", { level: 1, name: "Cost estimation" });
-    expect(
-      screen.getByText(/blocked by weak Token counting\. Fix that first/i),
-    ).toBeInTheDocument();
-    const fixLink = screen.getByRole("link", { name: "Fix Token counting" });
-    expect(fixLink).toHaveAttribute("href", "/course/course-1/skills/token-counting");
+    expect(screen.getByText("Next study step")).toBeInTheDocument();
+    expect(screen.queryByText(/blocked by|fix that first/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /fix token counting/i })).not.toBeInTheDocument();
   });
 
   it("shows a not-linked note when a skill has no taught-in sections", async () => {

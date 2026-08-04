@@ -39,8 +39,9 @@ function makeAnswered(overrides: Partial<PracticeAnsweredOut> = {}): PracticeAns
     correct: false,
     correct_index: 1,
     explanation_md: "Use the textbook relationship $F = ma$.",
-    mastery_points: 4,
-    points_delta: -1,
+    evidence_count: 0,
+    evidence_state: "insufficient_evidence",
+    readiness_estimate: null,
     selected_index: 0,
     ...overrides,
   };
@@ -55,8 +56,9 @@ function makeSubmitAnswer(
     correct: false,
     correct_index: 1,
     explanation_md: "Use the textbook relationship $F = ma$.",
-    mastery_points: 4,
-    points_delta: -1,
+    evidence_count: 0,
+    evidence_state: "insufficient_evidence",
+    readiness_estimate: null,
     question_id: "question-1",
     selected_index: 0,
     ...overrides,
@@ -109,7 +111,8 @@ describe("InlinePracticeAssessment", () => {
 
     expect(mockedSubmitPracticeAnswer).toHaveBeenCalledWith("course-1", "question-1", 0);
     expect(await screen.findByText("Incorrect")).toBeInTheDocument();
-    expect(screen.getByText("Concept points 4")).toBeInTheDocument();
+    expect(screen.getByText("Readiness needs more evidence")).toBeInTheDocument();
+    expect(screen.getByText("0 evidence items")).toBeInTheDocument();
     expect(screen.getByText(/textbook relationship/)).toBeInTheDocument();
   });
 
@@ -308,7 +311,8 @@ describe("InlinePracticeAssessment", () => {
     render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
 
     expect(await screen.findByText("Correct")).toBeInTheDocument();
-    expect(screen.getByText("Concept points 4")).toBeInTheDocument();
+    expect(screen.getByText("Readiness needs more evidence")).toBeInTheDocument();
+    expect(screen.getByText("0 evidence items")).toBeInTheDocument();
     expect(screen.getByText(/textbook relationship/)).toBeInTheDocument();
     for (const button of screen.getAllByRole("button", { name: /^[468] N$/ })) {
       expect(button).toBeDisabled();

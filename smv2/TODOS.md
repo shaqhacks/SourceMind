@@ -2,13 +2,9 @@
 
 ## Skills / Competency Backend
 
-### Learner-key scoping for skills endpoints
-**Priority:** P1
-`skills_service.build_map` aggregates ConceptMastery across ALL learner_keys while practice writes are per-browser-cookie (`routers/practice.py`). One browser's answers move another's mastery/locks. Fix: resolve the same learner cookie in skills endpoints and filter. Blocked on: deciding whether skills should be per-learner at all in a single-user app.
-
 ### Graph re-import prune semantics
 **Priority:** P2
-`import_graph` upserts concepts but never deletes omitted ones → unbounded growth across re-imports. Deleting would drop mastery history for renamed slugs. Decide: prune, tombstone, or document keep-forever.
+`import_graph` upserts concepts but never deletes omitted ones → unbounded growth across re-imports. Deleting could orphan historical curriculum revisions and evidence mappings for renamed slugs. Decide: tombstone, merge, or document keep-forever.
 
 ### get_skill_detail recomputes the whole course map per concept click
 **Priority:** P3
@@ -37,6 +33,20 @@ Pages-mode popover offers highlight/add-to-chat but both schemas cap `exact` at 
 ### Chapter due-counts wrong past 200 queued cards
 **Priority:** P2
 `FlashcardsClient` infers per-chapter counts from the first `MAX_QUEUE_FETCH=200` queue entries; headline is right, chapter cards undercount. Fix: server-side per-chapter aggregates.
+
+## Learning Model Validation
+
+### Prospective challenger promotion
+**Priority:** P1
+BKT, PFA, and DAS3H-style estimates run in shadow mode. Do not promote one to learner-facing or scheduling authority until the prospective evaluation meets the documented calibration, delayed-prediction, stability, subgroup, and interpretability gates.
+
+### Instructor agreement sample
+**Priority:** P1
+Collect blinded instructor judgments across enough learners, concepts, and evidence patterns to report agreement beyond the insufficient-sample state. Resolve every post-reveal disagreement reason before including it in aggregate agreement.
+
+### Delayed-retention pilot
+**Priority:** P1
+Run the documented randomized pilot with unseen delayed probes. Report assignment balance, attrition, workload, and confidence intervals; do not claim a causal benefit below the configured sample floor.
 
 ## Frontend Structure
 

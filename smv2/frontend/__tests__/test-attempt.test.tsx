@@ -71,6 +71,20 @@ function makeSubmitResult(overrides: Partial<SubmitTestOut> = {}): SubmitTestOut
   };
 }
 
+async function advanceFirstQuestionByKeyboard() {
+  fireEvent.keyDown(window, { key: "2" });
+  await waitFor(() => expect(screen.getByRole("radio", { name: "4" })).toBeChecked());
+  fireEvent.keyDown(window, { key: "Enter" });
+  await screen.findByText("Capital of France?");
+}
+
+async function submitQuizByKeyboard() {
+  await advanceFirstQuestionByKeyboard();
+  fireEvent.keyDown(window, { key: "1" });
+  await waitFor(() => expect(screen.getByRole("radio", { name: "Berlin" })).toBeChecked());
+  fireEvent.keyDown(window, { key: "Enter" });
+}
+
 describe("TestAttemptClient", () => {
   afterEach(() => {
     cleanup();
@@ -111,14 +125,11 @@ describe("TestAttemptClient", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/select an answer/i);
     expect(screen.getByText("2+2=?")).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "2" });
-    expect(screen.getByRole("radio", { name: "4" })).toBeChecked();
-
-    fireEvent.keyDown(window, { key: "Enter" });
-    expect(await screen.findByText("Capital of France?")).toBeInTheDocument();
+    await advanceFirstQuestionByKeyboard();
     expect(screen.getByText("Question 2 of 2")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "1" });
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Berlin" })).toBeChecked());
     fireEvent.keyDown(window, { key: "Enter" });
 
     expect(mockedSubmitTest).toHaveBeenCalledWith("attempt-1", [1, 0]);
@@ -131,11 +142,7 @@ describe("TestAttemptClient", () => {
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
 
-    fireEvent.keyDown(window, { key: "2" });
-    fireEvent.keyDown(window, { key: "Enter" });
-    await screen.findByText("Capital of France?");
-    fireEvent.keyDown(window, { key: "1" });
-    fireEvent.keyDown(window, { key: "Enter" });
+    await submitQuizByKeyboard();
 
     expect(await screen.findByText("50%")).toBeInTheDocument();
     expect(screen.getByText("1 of 2 correct")).toBeInTheDocument();
@@ -155,11 +162,7 @@ describe("TestAttemptClient", () => {
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
 
-    fireEvent.keyDown(window, { key: "2" });
-    fireEvent.keyDown(window, { key: "Enter" });
-    await screen.findByText("Capital of France?");
-    fireEvent.keyDown(window, { key: "1" });
-    fireEvent.keyDown(window, { key: "Enter" });
+    await submitQuizByKeyboard();
 
     // Wait for a piece of text unique to the post-submit view first — the
     // in-progress "N of 2" indicator also has role="status", so querying
@@ -177,11 +180,7 @@ describe("TestAttemptClient", () => {
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
-    fireEvent.keyDown(window, { key: "2" });
-    fireEvent.keyDown(window, { key: "Enter" });
-    await screen.findByText("Capital of France?");
-    fireEvent.keyDown(window, { key: "1" });
-    fireEvent.keyDown(window, { key: "Enter" });
+    await submitQuizByKeyboard();
 
     const link = await screen.findByRole("link", { name: /start review.*5 cards due now/i });
     expect(link).toHaveAttribute("href", "/review?course=course-1&start=due");
@@ -193,11 +192,7 @@ describe("TestAttemptClient", () => {
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
-    fireEvent.keyDown(window, { key: "2" });
-    fireEvent.keyDown(window, { key: "Enter" });
-    await screen.findByText("Capital of France?");
-    fireEvent.keyDown(window, { key: "1" });
-    fireEvent.keyDown(window, { key: "Enter" });
+    await submitQuizByKeyboard();
 
     await screen.findByText("50%");
     expect(screen.queryByRole("link", { name: /start review/i })).not.toBeInTheDocument();
@@ -210,11 +205,7 @@ describe("TestAttemptClient", () => {
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
-    fireEvent.keyDown(window, { key: "2" });
-    fireEvent.keyDown(window, { key: "Enter" });
-    await screen.findByText("Capital of France?");
-    fireEvent.keyDown(window, { key: "1" });
-    fireEvent.keyDown(window, { key: "Enter" });
+    await submitQuizByKeyboard();
 
     await screen.findByText("50%");
     fireEvent.click(screen.getByRole("button", { name: /retake test/i }));
@@ -233,11 +224,7 @@ describe("TestAttemptClient", () => {
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
 
-    fireEvent.keyDown(window, { key: "2" });
-    fireEvent.keyDown(window, { key: "Enter" });
-    await screen.findByText("Capital of France?");
-    fireEvent.keyDown(window, { key: "1" });
-    fireEvent.keyDown(window, { key: "Enter" });
+    await submitQuizByKeyboard();
 
     expect(await screen.findByText(/1 missed concept added to your reviews/i)).toBeInTheDocument();
   });
@@ -249,9 +236,7 @@ describe("TestAttemptClient", () => {
     await screen.findByText("2+2=?");
     expect(screen.getByRole("button", { name: /previous/i })).toBeDisabled();
 
-    fireEvent.keyDown(window, { key: "2" });
-    fireEvent.keyDown(window, { key: "Enter" });
-    await screen.findByText("Capital of France?");
+    await advanceFirstQuestionByKeyboard();
     expect(screen.getByRole("button", { name: /previous/i })).not.toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: /previous/i }));
@@ -284,11 +269,7 @@ describe("TestAttemptClient", () => {
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
 
-    fireEvent.keyDown(window, { key: "2" });
-    fireEvent.keyDown(window, { key: "Enter" });
-    await screen.findByText("Capital of France?");
-    fireEvent.keyDown(window, { key: "1" });
-    fireEvent.keyDown(window, { key: "Enter" });
+    await submitQuizByKeyboard();
 
     await screen.findByText("50%");
     expect(screen.queryByText(/missed concept/i)).not.toBeInTheDocument();

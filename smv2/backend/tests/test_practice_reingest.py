@@ -99,6 +99,6 @@ def test_reingest_removes_practice_assessment_rows(client, ingest_course):
         assert session.query(ConceptMastery).filter_by(course_id=course_id).count() == 0
         assert session.query(PracticeQuestion).filter_by(course_id=course_id).count() == 0
         assert session.query(PracticeExtractionRun).filter_by(course_id=course_id).count() == 0
-        assert session.query(Concept).filter_by(course_id=course_id).count() == 0
+        assert session.query(Concept).filter_by(course_id=course_id).count() == 1
     finally:
         session.close()

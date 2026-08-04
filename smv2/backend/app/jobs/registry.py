@@ -17,12 +17,15 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Asset, Course, Job, Section
 from app.pipeline.cards_generation import run_card_generation
+from app.pipeline.concept_extraction import run_concept_extraction
+from app.pipeline.concept_practice_generation import run_concept_practice_generation
 from app.pipeline.embedding import run_embed_course
 from app.pipeline.generation import run_lesson_generation
 from app.pipeline.html_conversion import run_html_conversion
 from app.pipeline.ingest import run_ingest
 from app.pipeline.practice_extraction import run_practice_extraction
 from app.pipeline.quiz_generation import run_test_generation
+from app.services import learner_context
 from app.services.backup_service import run_backup
 
 JobHandler = Callable[[Session, Job], dict[str, Any]]
@@ -69,8 +72,18 @@ def _generate_test_handler(session: Session, job: Job) -> dict[str, Any]:
     course_id = payload.get("course_id")
     if not course_id:
         raise ValueError("generate_test job payload missing course_id")
+    course_learning_profile_id = payload.get("course_learning_profile_id")
+    if not course_learning_profile_id:
+        course_learning_profile_id = learner_context.ensure_course_learning_profile(
+            session, learner_context.LEGACY_LOCAL_LEARNER_ID, course_id
+        ).id
     extra = run_test_generation(
-        session, job, course_id, payload.get("section_ids"), payload.get("chapter_label")
+        session,
+        job,
+        course_id,
+        payload.get("section_ids"),
+        payload.get("chapter_label"),
+        course_learning_profile_id=course_learning_profile_id,
     )
     return {"course_id": course_id, **extra}
 
@@ -87,6 +100,35 @@ def _generate_practice_assessment_handler(session: Session, job: Job) -> dict[st
     if not run_id:
         raise ValueError("generate_practice_assessment job payload missing run_id")
     return run_practice_extraction(session, job, course_id, section_id, run_id)
+
+
+def _concept_extraction_handler(session: Session, job: Job) -> dict[str, Any]:
+    payload = job.payload or {}
+    course_id = payload.get("course_id")
+    curriculum_version_id = payload.get("curriculum_version_id")
+    if not course_id:
+        raise ValueError("concept_extraction job payload missing course_id")
+    if not curriculum_version_id:
+        raise ValueError("concept_extraction job payload missing curriculum_version_id")
+    return run_concept_extraction(session, job, course_id, curriculum_version_id)
+
+
+def _concept_practice_generation_handler(
+    session: Session, job: Job
+) -> dict[str, Any]:
+    payload = job.payload or {}
+    course_id = payload.get("course_id")
+    concept_id = payload.get("concept_id")
+    curriculum_version_id = payload.get("curriculum_version_id")
+    if not course_id or not concept_id or not curriculum_version_id:
+        raise ValueError("concept practice generation job payload is incomplete")
+    return run_concept_practice_generation(
+        session,
+        job,
+        course_id,
+        concept_id,
+        curriculum_version_id,
+    )
 
 
 def _embed_course_handler(session: Session, job: Job) -> dict[str, Any]:
@@ -113,6 +155,8 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "generate_cards": _generate_cards_handler,
     "generate_test": _generate_test_handler,
     "generate_practice_assessment": _generate_practice_assessment_handler,
+    "concept_extraction": _concept_extraction_handler,
+    "concept_practice_generation": _concept_practice_generation_handler,
     "embed_course": _embed_course_handler,
     "convert_html": _convert_html_handler,
 }
@@ -194,5 +238,7 @@ ON_ORPHAN_HOOKS: dict[str, OrphanHook] = {
     "noop": default_on_orphan,
     "ingest": _ingest_on_orphan,
     "generate_lesson": _generate_lesson_on_orphan,
+    "concept_extraction": default_on_orphan,
+    "concept_practice_generation": default_on_orphan,
     "convert_html": _convert_html_on_orphan,
 }

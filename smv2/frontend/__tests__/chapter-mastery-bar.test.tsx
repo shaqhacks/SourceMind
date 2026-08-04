@@ -24,9 +24,9 @@ describe("ChapterMasteryBar", () => {
   it("renders best_score as the headline percentage with correct progressbar aria", () => {
     render(<ChapterMasteryBar stats={{ attempts: 3, best_score: 0.8, latest_score: 0.6 }} />);
 
-    expect(screen.getByText("Chapter mastery: 80%")).toBeInTheDocument();
+    expect(screen.getByText("Best chapter test score: 80%")).toBeInTheDocument();
 
-    const bar = screen.getByRole("progressbar", { name: /chapter mastery/i });
+    const bar = screen.getByRole("progressbar", { name: /best chapter test score/i });
     expect(bar).toHaveAttribute("aria-valuenow", "80");
     expect(bar).toHaveAttribute("aria-valuemin", "0");
     expect(bar).toHaveAttribute("aria-valuemax", "100");

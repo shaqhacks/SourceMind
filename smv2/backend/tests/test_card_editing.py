@@ -35,7 +35,7 @@ def test_update_card_mints_new_id_and_migrates_review_state_and_logs(client, ing
 
     session = get_session()
     try:
-        state_before = session.get(ReviewState, card_id)
+        state_before = session.query(ReviewState).filter_by(card_id=card_id).one_or_none()
         due_before, interval_before, reps_before = (
             state_before.due_at, state_before.interval_days, state_before.reps
         )
@@ -55,10 +55,10 @@ def test_update_card_mints_new_id_and_migrates_review_state_and_logs(client, ing
     session = get_session()
     try:
         assert session.get(Card, card_id) is None  # old card gone
-        assert session.get(ReviewState, card_id) is None
+        assert session.query(ReviewState).filter_by(card_id=card_id).one_or_none() is None
         assert session.query(ReviewLog).filter(ReviewLog.card_id == card_id).count() == 0
 
-        new_state = session.get(ReviewState, new_id)
+        new_state = session.query(ReviewState).filter_by(card_id=new_id).one_or_none()
         assert new_state is not None
         assert new_state.due_at == due_before
         assert new_state.interval_days == interval_before
@@ -124,7 +124,7 @@ def test_delete_card_cascades_review_state_and_logs(client, ingest_course, stub_
     session = get_session()
     try:
         assert session.get(Card, card_id) is None
-        assert session.get(ReviewState, card_id) is None
+        assert session.query(ReviewState).filter_by(card_id=card_id).one_or_none() is None
         assert session.query(ReviewLog).filter(ReviewLog.card_id == card_id).count() == 0
     finally:
         session.close()

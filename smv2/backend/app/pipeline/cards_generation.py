@@ -23,6 +23,7 @@ from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
 from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
+from app.services import evidence_items_service
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +31,21 @@ _MAX_TOKENS = 4096
 _MAX_CARDS = 8
 
 
-def _build_messages(section: Section) -> tuple[str, list[dict]]:
+def _build_messages(
+    section: Section, claim_options: list[dict[str, Any]] | None = None
+) -> tuple[str, list[dict]]:
     system_prompt, _ = load_prompt("cards")
-    user_content = f"Chapter title: {section.title}\n\n<source_text>\n{section.body_md}\n</source_text>"
+    user_content = (
+        f"Chapter title: {section.title}\n\n"
+        f"<allowed_claims>\n{json.dumps(claim_options or [], ensure_ascii=False)}\n"
+        f"</allowed_claims>\n\n<source_text>\n{section.body_md}\n</source_text>"
+    )
     return system_prompt, [{"role": "user", "content": user_content}]
 
 
-def _parse_cards(text: str) -> list[dict[str, str]]:
+def _parse_cards(
+    text: str, allowed_claim_ids: set[str] | None = None
+) -> list[dict[str, Any]]:
     """Parses the model's JSON array defensively: a top-level parse
     failure raises (caller retries once); individual malformed items are
     dropped (logged) rather than failing the whole batch.
@@ -45,7 +54,7 @@ def _parse_cards(text: str) -> list[dict[str, str]]:
     if not isinstance(data, list):
         raise ValueError("expected a JSON array of cards")
 
-    cards: list[dict[str, str]] = []
+    cards: list[dict[str, Any]] = []
     for i, item in enumerate(data):
         if not isinstance(item, dict):
             logger.warning("dropping malformed card item %d: not an object", i)
@@ -54,7 +63,32 @@ def _parse_cards(text: str) -> list[dict[str, str]]:
         if not isinstance(front, str) or not front.strip() or not isinstance(back, str) or not back.strip():
             logger.warning("dropping malformed card item %d: missing/empty front or back", i)
             continue
-        cards.append({"front": front.strip(), "back": back.strip()})
+        card = {"front": front.strip(), "back": back.strip()}
+        if allowed_claim_ids:
+            claim_id = item.get("claim_id")
+            if not isinstance(claim_id, str) or claim_id not in allowed_claim_ids:
+                raise ValueError(f"card {i} references an unknown claim id")
+            mapping_confidence = item.get("mapping_confidence")
+            if (
+                isinstance(mapping_confidence, bool)
+                or not isinstance(mapping_confidence, (int, float))
+                or not 0 <= mapping_confidence <= 1
+            ):
+                raise ValueError(f"card {i} has invalid mapping confidence")
+            for field in ("task_type", "cognitive_demand", "difficulty_band", "source_ref"):
+                if not isinstance(item.get(field), str) or not item[field].strip():
+                    raise ValueError(f"card {i} is missing {field}")
+            card.update(
+                {
+                    "claim_id": claim_id,
+                    "task_type": item["task_type"].strip(),
+                    "cognitive_demand": item["cognitive_demand"].strip(),
+                    "difficulty_band": item["difficulty_band"].strip(),
+                    "mapping_confidence": float(mapping_confidence),
+                    "source_ref": item["source_ref"].strip(),
+                }
+            )
+        cards.append(card)
 
     return cards
 
@@ -66,7 +100,11 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
 
     _report_progress(job.id, stage="generating", pct=10, message=f"generating cards for {section.title}")
 
-    system_prompt, messages = _build_messages(section)
+    curriculum_version_id, claim_options = evidence_items_service.claim_options_for_sections(
+        session, section.course_id, [section.id]
+    )
+    allowed_claim_ids = {option["claim_id"] for option in claim_options}
+    system_prompt, messages = _build_messages(section, claim_options)
     _, prompt_version = load_prompt("cards")
     provider = get_provider()
 
@@ -88,7 +126,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
     )
 
     try:
-        cards_data = _parse_cards(result.text)
+        cards_data = _parse_cards(result.text, allowed_claim_ids)
     except (json.JSONDecodeError, ValueError):
         # Bounded: one retry on a whole-response parse failure, then give up.
         _report_progress(job.id, stage="retrying", pct=50, message="retrying malformed response")
@@ -102,7 +140,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
             wait_for_slot=True,
         )
         try:
-            cards_data = _parse_cards(result.text)
+            cards_data = _parse_cards(result.text, allowed_claim_ids)
         except (json.JSONDecodeError, ValueError) as exc:
             # The provider wrapper already recorded this same call as
             # status='ok' (the completion succeeded at the transport level);
@@ -140,6 +178,14 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
                 "front": c["front"],
                 "back": c["back"],
                 "position": len(new_cards_by_id),
+                "mapping": {key: c[key] for key in (
+                    "claim_id",
+                    "task_type",
+                    "cognitive_demand",
+                    "difficulty_band",
+                    "mapping_confidence",
+                    "source_ref",
+                ) if key in c},
             }
 
     existing_cards = {c.id: c for c in session.query(Card).filter(Card.section_id == section_id).all()}
@@ -159,6 +205,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
 
     for data in new_cards_by_id.values():
         existing = existing_cards.get(data["id"])
+        card_row = existing
         if existing is not None:
             if existing.origin == "user":
                 # A user-origin card happens to already BE this exact
@@ -170,8 +217,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
             existing.position = data["position"]
             existing.prompt_version = prompt_version
         else:
-            session.add(
-                Card(
+            card_row = Card(
                     id=data["id"],
                     course_id=section.course_id,
                     section_id=section_id,
@@ -180,7 +226,36 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
                     position=data["position"],
                     prompt_version=prompt_version,
                     origin="generated",
-                )
+            )
+            session.add(card_row)
+        assert card_row is not None
+        evidence_item = evidence_items_service.snapshot_item(
+            session,
+            course_id=section.course_id,
+            item_type="flashcard",
+            source_record_id=card_row.id,
+            source_index=-1,
+            content={"front": data["front"], "back": data["back"]},
+            source_ref=data["mapping"].get("source_ref", section.title),
+            prompt_version=prompt_version,
+            model=result.model,
+        )
+        mapping = data["mapping"]
+        if mapping and curriculum_version_id is not None:
+            evidence_items_service.map_item_to_claim(
+                session,
+                evidence_item,
+                curriculum_version_id=curriculum_version_id,
+                learning_claim_id=mapping["claim_id"],
+                role="primary",
+                task_type=mapping["task_type"],
+                cognitive_demand=mapping["cognitive_demand"],
+                authored_difficulty_band=mapping["difficulty_band"],
+                mapping_confidence=mapping["mapping_confidence"],
+                source_ref=mapping["source_ref"],
+                prompt_version=prompt_version,
+                model=result.model,
+                review_state="unverified",
             )
 
     # In-session (not report_progress): the card diff (deletes/inserts) is

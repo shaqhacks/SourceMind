@@ -6,15 +6,18 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     JSON,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     event,
+    text,
 )
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -71,6 +74,37 @@ class Course(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
     title: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="created")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class LearnerProfile(Base):
+    __tablename__ = "learner_profiles"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class CourseLearningProfile(Base):
+    __tablename__ = "course_learning_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "learner_id", "course_id", name="uq_course_learning_profiles_learner_course"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    learner_id: Mapped[str] = mapped_column(
+        String, ForeignKey("learner_profiles.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, onupdate=utcnow
@@ -203,7 +237,17 @@ class Card(Base):
 
 class ReviewState(Base):
     __tablename__ = "review_states"
+    __table_args__ = (
+        UniqueConstraint(
+            "course_learning_profile_id", "card_id", name="uq_review_states_profile_card"
+        ),
+    )
 
+    course_learning_profile_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("course_learning_profiles.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
     card_id: Mapped[str] = mapped_column(
         String, ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True
     )
@@ -225,6 +269,12 @@ class ReviewLog(Base):
     __tablename__ = "review_logs"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_learning_profile_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("course_learning_profiles.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
     card_id: Mapped[str] = mapped_column(
         String, ForeignKey("cards.id", ondelete="CASCADE"), index=True, nullable=False
     )
@@ -379,6 +429,12 @@ class TestAttempt(Base):
     __test__ = False  # not a pytest test class, despite the name
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_learning_profile_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("course_learning_profiles.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
     test_id: Mapped[str] = mapped_column(
         String, ForeignKey("tests.id", ondelete="CASCADE"), index=True, nullable=False
     )
@@ -405,10 +461,628 @@ class Concept(Base):
     section_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("sections.id", ondelete="SET NULL"), nullable=True
     )
+    merged_into_concept_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, onupdate=utcnow
     )
+
+
+class CurriculumVersion(Base):
+    __tablename__ = "curriculum_versions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'published', 'superseded')",
+            name="ck_curriculum_versions_status",
+        ),
+        CheckConstraint(
+            "is_current = 0 OR status = 'published'",
+            name="ck_curriculum_versions_current_published",
+        ),
+        Index(
+            "uq_curriculum_versions_current_course",
+            "course_id",
+            unique=True,
+            sqlite_where=text("is_current = 1"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    parent_version_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("curriculum_versions.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    label: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ConceptRevision(Base):
+    __tablename__ = "concept_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "curriculum_version_id", "concept_id", name="uq_concept_revisions_version_concept"
+        ),
+        CheckConstraint(
+            "review_state IN ('unverified', 'verified', 'rejected')",
+            name="ck_concept_revisions_review_state",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    curriculum_version_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    description_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    aliases: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    chapter_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    review_state: Mapped[str] = mapped_column(String, nullable=False, default="unverified")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class LearningClaim(Base):
+    __tablename__ = "learning_claims"
+    __table_args__ = (
+        UniqueConstraint("course_id", "stable_key", name="uq_learning_claims_course_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    stable_key: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class LearningClaimRevision(Base):
+    __tablename__ = "learning_claim_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "curriculum_version_id",
+            "learning_claim_id",
+            name="uq_learning_claim_revisions_version_claim",
+        ),
+        CheckConstraint(
+            "review_state IN ('unverified', 'verified', 'rejected')",
+            name="ck_learning_claim_revisions_review_state",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    curriculum_version_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    learning_claim_id: Mapped[str] = mapped_column(
+        String, ForeignKey("learning_claims.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    statement: Mapped[str] = mapped_column(Text, nullable=False)
+    success_criteria_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    aliases: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    cognitive_demand: Mapped[str | None] = mapped_column(String, nullable=True)
+    review_state: Mapped[str] = mapped_column(String, nullable=False, default="unverified")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class ConceptRelation(Base):
+    __tablename__ = "concept_relations"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('is_part_of', 'requires', 'recommended_before', "
+            "'develops_into', 'related_to', 'equivalent_to', 'aligns_to_standard')",
+            name="ck_concept_relations_kind",
+        ),
+        CheckConstraint(
+            "review_state IN ('unverified', 'verified', 'rejected')",
+            name="ck_concept_relations_review_state",
+        ),
+        UniqueConstraint(
+            "curriculum_version_id",
+            "from_concept_id",
+            "to_concept_id",
+            "kind",
+            name="uq_concept_relations_version_pair_kind",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    curriculum_version_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    from_concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    to_concept_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=True
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    external_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rationale_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_state: Mapped[str] = mapped_column(String, nullable=False, default="unverified")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class ConceptSourceLink(Base):
+    __tablename__ = "concept_source_links"
+    __table_args__ = (
+        CheckConstraint(
+            "review_state IN ('unverified', 'verified', 'rejected')",
+            name="ck_concept_source_links_review_state",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    curriculum_version_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    learning_claim_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("learning_claims.id", ondelete="CASCADE"), index=True, nullable=True
+    )
+    section_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("sections.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    source_ref: Mapped[str] = mapped_column(String, nullable=False)
+    excerpt_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rationale_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_state: Mapped[str] = mapped_column(String, nullable=False, default="unverified")
+    stale: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class EvidenceItem(Base):
+    __tablename__ = "evidence_items"
+    __table_args__ = (
+        CheckConstraint(
+            "item_type IN ('quiz_question', 'practice_question', 'flashcard')",
+            name="ck_evidence_items_type",
+        ),
+        CheckConstraint(
+            "mapping_status IN ('mapped', 'legacy_unmapped')",
+            name="ck_evidence_items_mapping_status",
+        ),
+        UniqueConstraint(
+            "item_type",
+            "source_record_id",
+            "source_index",
+            "content_fingerprint",
+            name="uq_evidence_items_source_snapshot",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    item_type: Mapped[str] = mapped_column(String, nullable=False)
+    source_record_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    source_index: Mapped[int] = mapped_column(Integer, nullable=False, default=-1)
+    content_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    content_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    mapping_status: Mapped[str] = mapped_column(
+        String, nullable=False, default="legacy_unmapped"
+    )
+    source_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class EvidenceItemConceptLink(Base):
+    __tablename__ = "evidence_item_concept_links"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('primary', 'supporting', 'prerequisite')",
+            name="ck_evidence_item_concept_links_role",
+        ),
+        CheckConstraint(
+            "review_state IN ('unverified', 'verified', 'rejected')",
+            name="ck_evidence_item_concept_links_review_state",
+        ),
+        UniqueConstraint(
+            "evidence_item_id",
+            "curriculum_version_id",
+            "learning_claim_id",
+            "role",
+            name="uq_evidence_item_concept_links_mapping",
+        ),
+        Index(
+            "uq_evidence_item_concept_links_primary",
+            "evidence_item_id",
+            unique=True,
+            sqlite_where=text("role = 'primary' AND review_state != 'rejected'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    evidence_item_id: Mapped[str] = mapped_column(
+        String, ForeignKey("evidence_items.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    curriculum_version_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    learning_claim_id: Mapped[str] = mapped_column(
+        String, ForeignKey("learning_claims.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    task_type: Mapped[str] = mapped_column(String, nullable=False)
+    cognitive_demand: Mapped[str | None] = mapped_column(String, nullable=True)
+    authored_difficulty_band: Mapped[str | None] = mapped_column(String, nullable=True)
+    mapping_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    review_state: Mapped[str] = mapped_column(String, nullable=False, default="unverified")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class LearnerEvidenceEvent(Base):
+    __tablename__ = "learner_evidence_events"
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('practice', 'quiz', 'review')",
+            name="ck_learner_evidence_events_channel",
+        ),
+        CheckConstraint(
+            "normalized_outcome >= 0 AND normalized_outcome <= 1",
+            name="ck_learner_evidence_events_outcome",
+        ),
+        CheckConstraint(
+            "spacing_seconds IS NULL OR spacing_seconds >= 0",
+            name="ck_learner_evidence_events_spacing",
+        ),
+        UniqueConstraint("source_event_key", name="uq_learner_evidence_events_source"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    course_learning_profile_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("course_learning_profiles.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    evidence_item_id: Mapped[str] = mapped_column(
+        String, ForeignKey("evidence_items.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    evidence_mapping_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("evidence_item_concept_links.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    learning_claim_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("learning_claims.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    curriculum_version_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("curriculum_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    channel: Mapped[str] = mapped_column(String, nullable=False)
+    normalized_outcome: Mapped[float] = mapped_column(Float, nullable=False)
+    raw_result: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    event_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attempt_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_event_key: Mapped[str] = mapped_column(String, nullable=False)
+    spacing_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    model_version: Mapped[str] = mapped_column(String, nullable=False, default="evidence-v1")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class LearnerConceptState(Base):
+    __tablename__ = "learner_concept_states"
+    __table_args__ = (
+        CheckConstraint(
+            "state_scope IN ('claim', 'concept')",
+            name="ck_learner_concept_states_scope",
+        ),
+        CheckConstraint(
+            "status IN ('insufficient_evidence', 'likely_struggling', 'building', "
+            "'watch', 'retained')",
+            name="ck_learner_concept_states_status",
+        ),
+        UniqueConstraint(
+            "course_learning_profile_id",
+            "curriculum_version_id",
+            "state_key",
+            "model_version",
+            name="uq_learner_concept_states_projection",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    course_learning_profile_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("course_learning_profiles.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    curriculum_version_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    learning_claim_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("learning_claims.id", ondelete="CASCADE"), index=True, nullable=True
+    )
+    state_scope: Mapped[str] = mapped_column(String, nullable=False)
+    state_key: Mapped[str] = mapped_column(String, nullable=False)
+    readiness_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quiz_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    review_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lower_bound: Mapped[float | None] = mapped_column(Float, nullable=True)
+    upper_bound: Mapped[float | None] = mapped_column(Float, nullable=True)
+    uncertainty: Mapped[float | None] = mapped_column(Float, nullable=True)
+    effective_evidence_count: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    distinct_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    distinct_session_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    trend: Mapped[str] = mapped_column(String, nullable=False, default="unknown")
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="insufficient_evidence"
+    )
+    forgetting_risk: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    last_evidence_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    calculated_through: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    model_version: Mapped[str] = mapped_column(String, nullable=False)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class ShadowLearnerPrediction(Base):
+    __tablename__ = "shadow_learner_predictions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('predicted', 'insufficient_data', 'disabled')",
+            name="ck_shadow_learner_predictions_status",
+        ),
+        UniqueConstraint(
+            "course_learning_profile_id",
+            "learning_claim_id",
+            "model_name",
+            "model_version",
+            "evidence_snapshot_hash",
+            name="uq_shadow_learner_predictions_snapshot",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    course_learning_profile_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("course_learning_profiles.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    curriculum_version_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    learning_claim_id: Mapped[str] = mapped_column(
+        String, ForeignKey("learning_claims.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    model_name: Mapped[str] = mapped_column(String, nullable=False)
+    model_version: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    predicted_probability: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence_snapshot_hash: Mapped[str] = mapped_column(String, nullable=False)
+    training_cutoff: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    feature_schema_version: Mapped[str] = mapped_column(String, nullable=False)
+    prediction_horizon: Mapped[str] = mapped_column(String, nullable=False)
+    target_definition: Mapped[str] = mapped_column(Text, nullable=False)
+    config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class DiagnosticJudgment(Base):
+    __tablename__ = "diagnostic_judgments"
+    __table_args__ = (
+        CheckConstraint(
+            "judgment IN ('insufficient', 'not_struggling', 'uncertain', 'likely_struggling')",
+            name="ck_diagnostic_judgments_judgment",
+        ),
+        CheckConstraint(
+            "disagreement_reason IS NULL OR disagreement_reason IN "
+            "('model_estimate', 'item_mapping', 'concept_granularity', "
+            "'insufficient_student_evidence', 'instructor_disagreement')",
+            name="ck_diagnostic_judgments_reason",
+        ),
+        UniqueConstraint(
+            "course_learning_profile_id",
+            "curriculum_version_id",
+            "concept_id",
+            "reviewer_key",
+            name="uq_diagnostic_judgments_blind_review",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    course_learning_profile_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("course_learning_profiles.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    curriculum_version_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("curriculum_versions.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    reviewer_key: Mapped[str] = mapped_column(String, nullable=False, default="local-owner")
+    judgment: Mapped[str] = mapped_column(String, nullable=False)
+    disagreement_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    notes_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_state: Mapped[str] = mapped_column(String, nullable=False)
+    readiness_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    evidence_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_version: Mapped[str] = mapped_column(String, nullable=False)
+    state_calculated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    agreement: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class RetentionStudy(Base):
+    __tablename__ = "retention_studies"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'active', 'closed')",
+            name="ck_retention_studies_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
+    assignment_seed: Mapped[str] = mapped_column(String, nullable=False)
+    protocol_version: Mapped[str] = mapped_column(String, nullable=False, default="retention-v1")
+    delay_start_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+    delay_end_days: Mapped[int] = mapped_column(Integer, nullable=False, default=14)
+    minimum_per_group: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class RetentionAssignment(Base):
+    __tablename__ = "retention_assignments"
+    __table_args__ = (
+        CheckConstraint(
+            "study_group IN ('adaptive_targeted', 'baseline_review')",
+            name="ck_retention_assignments_group",
+        ),
+        UniqueConstraint(
+            "study_id",
+            "course_learning_profile_id",
+            "concept_id",
+            name="uq_retention_assignments_pair",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    study_id: Mapped[str] = mapped_column(
+        String, ForeignKey("retention_studies.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    course_learning_profile_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("course_learning_profiles.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    concept_id: Mapped[str] = mapped_column(
+        String, ForeignKey("concepts.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    study_group: Mapped[str] = mapped_column(String, nullable=False)
+    workload_target: Mapped[int] = mapped_column(Integer, nullable=False)
+    assignment_key: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class RetentionProbe(Base):
+    __tablename__ = "retention_probes"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('scheduled', 'completed', 'missed', 'cancelled')",
+            name="ck_retention_probes_status",
+        ),
+        UniqueConstraint(
+            "assignment_id", "evidence_item_id", name="uq_retention_probes_item"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
+    course_id: Mapped[str] = mapped_column(
+        String, ForeignKey("courses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    assignment_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("retention_assignments.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    evidence_item_id: Mapped[str] = mapped_column(
+        String, ForeignKey("evidence_items.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    learning_claim_id: Mapped[str] = mapped_column(
+        String, ForeignKey("learning_claims.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="scheduled")
+    outcome_event_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("learner_evidence_events.id", ondelete="SET NULL"), nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
 class ConceptEdge(Base):

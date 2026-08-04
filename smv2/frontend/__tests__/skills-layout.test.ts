@@ -6,10 +6,9 @@ import { computeSkillMapLayout, SKILL_CARD_HEIGHT, SKILL_CARD_WIDTH } from "@/co
 function node(overrides: Partial<SkillNodeOut> & Pick<SkillNodeOut, "id" | "label" | "level">): SkillNodeOut {
   return {
     slug: overrides.id,
-    mastery: 50,
-    status: "growing",
-    blocked: false,
-    unlock_note: null,
+    status: "insufficient_evidence",
+    readiness_estimate: null,
+    evidence_state: "insufficient_evidence",
     ...overrides,
   };
 }
@@ -67,9 +66,9 @@ describe("computeSkillMapLayout", () => {
       node({ id: "target", label: "Target", level: 2 }),
     ];
     const edges: SkillEdgeOut[] = [
-      { from_id: "a", to_id: "target", kind: "weak" },
-      { from_id: "b", to_id: "target", kind: "weak" },
-      { from_id: "c", to_id: "target", kind: "met" },
+      { from_id: "a", to_id: "target", kind: "review_suggested" },
+      { from_id: "b", to_id: "target", kind: "review_suggested" },
+      { from_id: "c", to_id: "target", kind: "ready" },
     ];
     const layout = computeSkillMapLayout(nodes, edges);
 

@@ -464,6 +464,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
           />
         )}
         <ReadingColumn
+          key={activeSection.id}
           courseId={course.id}
           section={activeSection}
           mode={mode}

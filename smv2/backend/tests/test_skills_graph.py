@@ -5,7 +5,7 @@ import pytest
 from app.db.engine import get_session
 from app.db.models import Concept, ConceptEdge, ConceptSectionLink, Section
 from app.jobs.worker import run_due_jobs_once
-from app.services.skills_service import derive_levels, mastery_score, status_for
+from app.services.skills_service import derive_levels
 
 
 def test_reingest_wipes_concept_graph(client, ingest_course):
@@ -45,22 +45,6 @@ def test_derive_levels_longest_path_and_cycle_rejection():
     assert levels == {"a": 1, "b": 2, "c": 3}  # c takes the LONGEST path
     with pytest.raises(ValueError):
         derive_levels(["a", "b"], [("a", "b"), ("b", "a")])
-
-
-def test_mastery_renormalizes_over_missing_signals():
-    assert mastery_score(None, None, None) == 0
-    assert mastery_score(1.0, None, None) == 100      # only practice present
-    assert mastery_score(0.5, 0.5, 0.5) == 50
-    # quiz 0.5 weight vs practice 0.3: (0.5*0 + 0.3*1)/(0.8) = 0.375
-    assert mastery_score(1.0, None, 0.0) == 38
-
-
-def test_status_thresholds_and_locked_gate():
-    assert status_for(0, has_any_signal=False, weak_prereq=True) == "locked"
-    assert status_for(0, has_any_signal=False, weak_prereq=False) == "growing"  # new, unblocked
-    assert status_for(39, True, False) == "struggling"
-    assert status_for(70, True, False) == "growing"
-    assert status_for(71, True, False) == "solid"
 
 
 def test_derive_levels_handles_duplicate_node_ids():

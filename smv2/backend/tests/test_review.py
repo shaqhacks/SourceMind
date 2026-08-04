@@ -48,18 +48,24 @@ def test_review_queue_includes_new_cards_with_no_review_state(client, ingest_cou
 
 
 def test_review_queue_includes_past_due_and_excludes_future_due(client, ingest_course, stub_provider):
+    from conftest import _course_profile_id, _set_learner_cookie
+
     course_id, card1, card2 = _generate_two_cards(client, ingest_course, stub_provider)
+    learner_id = _set_learner_cookie(client)
 
     session = get_session()
     try:
+        profile_id = _course_profile_id(session, course_id, learner_id)
         session.add(
             ReviewState(
+                course_learning_profile_id=profile_id,
                 card_id=card1, course_id=course_id, due_at=utcnow() - timedelta(hours=1),
                 interval_days=1.0, ease=2.5, reps=1, lapses=0,
             )
         )
         session.add(
             ReviewState(
+                course_learning_profile_id=profile_id,
                 card_id=card2, course_id=course_id, due_at=utcnow() + timedelta(days=5),
                 interval_days=6.0, ease=2.5, reps=2, lapses=0,
             )
@@ -97,11 +103,16 @@ def test_review_queue_404_for_missing_course(client):
 
 
 def test_grade_card_creates_review_state_on_first_grade(client, ingest_course, stub_provider):
+    from conftest import _course_profile_id, _set_learner_cookie
+
     course_id, card1, _card2 = _generate_two_cards(client, ingest_course, stub_provider)
+    learner_id = _set_learner_cookie(client)
 
     session = get_session()
     try:
-        assert session.get(ReviewState, card1) is None
+        profile_id = _course_profile_id(session, course_id, learner_id)
+        session.commit()
+        assert session.get(ReviewState, (profile_id, card1)) is None
     finally:
         session.close()
 
@@ -113,7 +124,7 @@ def test_grade_card_creates_review_state_on_first_grade(client, ingest_course, s
 
     session = get_session()
     try:
-        state = session.get(ReviewState, card1)
+        state = session.get(ReviewState, (profile_id, card1))
         assert state is not None
         assert state.interval_days == 1.0  # first Good
         assert state.reps == 1
@@ -162,11 +173,15 @@ def test_review_summary_aggregates_across_courses(client, ingest_course, stub_pr
 
 
 def test_review_summary_backlog_warning_flags_large_backlog(client, ingest_course, stub_provider):
+    from conftest import _course_profile_id, _set_learner_cookie
+
     course_id, card1, card2 = _generate_two_cards(client, ingest_course, stub_provider)
+    learner_id = _set_learner_cookie(client)
 
     # Seed 25 due ReviewStates with zero recent throughput -> backlog warning.
     session = get_session()
     try:
+        profile_id = _course_profile_id(session, course_id, learner_id)
         for i in range(25):
             c = Card(
                 id=f"backlog-card-{i}", course_id=course_id,
@@ -177,6 +192,7 @@ def test_review_summary_backlog_warning_flags_large_backlog(client, ingest_cours
             session.flush()
             session.add(
                 ReviewState(
+                    course_learning_profile_id=profile_id,
                     card_id=c.id, course_id=course_id, due_at=utcnow() - timedelta(hours=1),
                     interval_days=1.0, ease=2.5, reps=1, lapses=0,
                 )

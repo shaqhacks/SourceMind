@@ -11,9 +11,9 @@ import ProgressBar from "@/components/ui/ProgressBar";
 import Skeleton from "@/components/ui/Skeleton";
 import type { SkillEdgeOut } from "@/lib/api/client";
 import { useSkillMap } from "@/lib/hooks/useSkillMap";
-import { blockedBy, buildSkillDeriveIndex, describeNodeFromIndex, rootCause } from "@/lib/skills/derive";
+import { describeNode, mostNeedsReview } from "@/lib/skills/derive";
 
-import { STATUS_BADGE_TONE, STATUS_BAR_TONE, STATUS_LABEL, joinNames, type SkillStatus } from "./format";
+import { STATUS_BADGE_TONE, STATUS_BAR_TONE, STATUS_LABEL, type SkillStatus } from "./format";
 import { computeSkillMapLayout, SKILL_CARD_HEIGHT, SKILL_CARD_WIDTH } from "./layout";
 import LinkButton from "./LinkButton";
 import { useCourseTitle } from "./useCourseTitle";
@@ -22,20 +22,16 @@ export interface SkillMapViewProps {
   courseId: string;
 }
 
-// "met" edges are already-solid prerequisites (sage); "weak" edges are the
-// ones a fix should target (accent) — used for both the edge's own stroke
-// and its target-end dot, which previously duplicated this same ternary.
 const EDGE_COLOR: Record<SkillEdgeOut["kind"], string> = {
-  met: "var(--sage-500)",
-  weak: "var(--accent)",
+  ready: "var(--sage-500)",
+  review_suggested: "var(--accent)",
 };
 
 /**
  * Per-course skill map (design handoff §7) — reads the real competency
  * graph via GET /api/courses/{course_id}/skills. Only the course title and
  * the skill map are separate fetches (useCourseTitle / useSkillMap); the
- * layout/root-cause/blocked-by math below is all derived client-side from
- * whichever resolves.
+ * layout and display labels are derived client-side from whichever resolves.
  */
 export default function SkillMapView({ courseId }: SkillMapViewProps) {
   const { title: courseTitle, error: titleError, reload: reloadTitle } = useCourseTitle(courseId);
@@ -79,12 +75,7 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
   }
 
   const layout = computeSkillMapLayout(nodes, edges);
-  const fix = rootCause(nodes, edges);
-  const fixBlocked = fix ? blockedBy(nodes, edges, fix.prereq.id) : [];
-  // Built once here rather than calling describeNode (which rebuilds a byId
-  // Map and re-filters `edges`) per node in the render loop below — turns an
-  // O(nodes * edges) render into a single O(nodes + edges) pass.
-  const skillIndex = buildSkillDeriveIndex(nodes, edges);
+  const reviewTarget = mostNeedsReview(nodes);
 
   return (
     <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 px-9 py-8">
@@ -132,7 +123,7 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
                 fill="none"
                 stroke={EDGE_COLOR[e.kind]}
                 strokeWidth={2.5}
-                strokeDasharray={e.kind === "weak" ? "6 5" : undefined}
+                strokeDasharray={e.kind === "review_suggested" ? "6 5" : undefined}
               />
             ))}
             {layout.edges.map((e) => (
@@ -166,19 +157,25 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
                 href={`/course/${courseId}/skills/${node.id}`}
                 style={{ left: pos.leftPx, top: pos.topPx, width: SKILL_CARD_WIDTH, height: SKILL_CARD_HEIGHT }}
                 className={`absolute flex flex-col gap-[7px] rounded-lg bg-surface-raised p-[14px_16px] text-foreground shadow-sm transition-[box-shadow,translate] hover:-translate-y-px hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
-                  status === "struggling" ? "border-[1.5px] border-accent" : "border border-divider"
+                  status === "likely_struggling"
+                    ? "border-[1.5px] border-accent"
+                    : "border border-divider"
                 }`}
               >
                 <span className="flex items-center justify-between gap-2">
                   <span className="text-sm font-bold">{node.label}</span>
                   <Badge tone={STATUS_BADGE_TONE[status]}>{STATUS_LABEL[status]}</Badge>
                 </span>
-                <ProgressBar
-                  percent={node.mastery}
-                  label={`${node.label} mastery`}
-                  tone={STATUS_BAR_TONE[status]}
-                />
-                <span className="text-xs text-muted-foreground">{describeNodeFromIndex(node, skillIndex)}</span>
+                {node.readiness_estimate == null ? (
+                  <span className="text-xs text-muted-foreground">Estimate pending more varied practice</span>
+                ) : (
+                  <ProgressBar
+                    percent={Math.round(node.readiness_estimate * 100)}
+                    label={`${node.label} readiness`}
+                    tone={STATUS_BAR_TONE[status]}
+                  />
+                )}
+                <span className="text-xs text-muted-foreground">{describeNode(node)}</span>
               </Link>
             );
           })}
@@ -195,26 +192,26 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
             aria-hidden="true"
             className="inline-block h-0 w-[26px] border-t-[2.5px] border-dashed border-accent"
           />
-          weak prerequisite — fix first
+          prerequisite review suggested
         </span>
       </div>
 
-      {fix && (
+      {reviewTarget && (
         <Card className="flex flex-row items-center gap-4 py-5 shadow-md">
           <div className="flex-1">
             <span className="text-xs font-semibold uppercase tracking-wide text-accent-800">
-              Recommended fix
+              Recommended review
             </span>
             <p className="mt-1.5 text-[15px] leading-relaxed">
-              <strong>{fix.prereq.label}</strong> is weak and is the root cause blocking{" "}
-              <strong>{joinNames(fixBlocked.map((n) => n.label))}</strong>. A focused review of{" "}
-              {fix.prereq.label} should unblock {fixBlocked.length > 1 ? "them" : "it"}.
+              Current quiz and review evidence suggests spending more time on{" "}
+              <strong>{reviewTarget.label}</strong>. This is an estimate from observed answers,
+              not a claim about the cause of difficulty.
             </p>
           </div>
-          <LinkButton href={`/course/${courseId}/skills/${fix.prereq.id}`} variant="primary">
-            Start 4-min fix
+          <LinkButton href={`/course/${courseId}/skills/${reviewTarget.id}`} variant="primary">
+            Practice this concept
           </LinkButton>
-          <LinkButton href={`/course/${courseId}/skills/${fix.prereq.id}#taught`} variant="secondary">
+          <LinkButton href={`/course/${courseId}/skills/${reviewTarget.id}#taught`} variant="secondary">
             See what to review
           </LinkButton>
         </Card>

@@ -9,26 +9,25 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.engine import get_session
 from app.db.models import (
     Concept,
-    ConceptMastery,
-    ConceptMasteryEvent,
+    CurriculumVersion,
     Job,
+    LearnerConceptState,
     PracticeAnswer,
     PracticeExtractionRun,
     PracticeQuestion,
     Section,
-    utcnow,
 )
+from app.services import evidence_items_service, evidence_service, learner_context
 from app.services.jobs_service import create_job_in_session
 
 EXTRACTION_VERSION = "v3"
-LEARNER_COOKIE = "smv2_learner"
+LEARNER_COOKIE = learner_context.LEARNER_COOKIE
 
 GENERATING_MESSAGE = "Practice questions are being extracted from the textbook."
 NOT_STARTED_MESSAGE = "Practice questions have not been extracted yet."
@@ -97,7 +96,7 @@ def _serialize_questions(
         for concept in session.query(Concept).filter(Concept.id.in_(concept_ids)).all()
     }
     answers: dict[str, PracticeAnswer] = {}
-    mastery_points: dict[str, int] = {}
+    learner_states: dict[str, LearnerConceptState] = {}
     if learner_key is not None:
         question_ids = [question.id for question in questions]
         answers = {
@@ -109,15 +108,23 @@ def _serialize_questions(
             )
             .all()
         }
-        mastery_points = {
-            mastery.concept_id: mastery.points
-            for mastery in session.query(ConceptMastery)
-            .filter(
-                ConceptMastery.learner_key == learner_key,
-                ConceptMastery.concept_id.in_(concept_ids),
-            )
-            .all()
-        }
+        profile = learner_context.ensure_course_learning_profile(
+            session, learner_key, questions[0].course_id
+        )
+        current_version_id = session.query(CurriculumVersion.id).filter_by(
+            course_id=questions[0].course_id, is_current=True
+        ).scalar()
+        if current_version_id is not None:
+            learner_states = {
+                state.concept_id: state
+                for state in session.query(LearnerConceptState).filter(
+                    LearnerConceptState.course_learning_profile_id == profile.id,
+                    LearnerConceptState.curriculum_version_id == current_version_id,
+                    LearnerConceptState.state_scope == "concept",
+                    LearnerConceptState.concept_id.in_(concept_ids),
+                    LearnerConceptState.model_version == "transparent-beta-v1",
+                )
+            }
     serialized: list[dict[str, Any]] = []
     for question in questions:
         concept = concepts[question.concept_id]
@@ -129,8 +136,7 @@ def _serialize_questions(
                 "correct": answer.correct,
                 "correct_index": question.correct_index,
                 "explanation_md": question.explanation_md,
-                "points_delta": answer.points_delta,
-                "mastery_points": mastery_points.get(question.concept_id, 0),
+                **_state_payload(learner_states.get(question.concept_id)),
                 "answered_at": answer.answered_at,
             }
         serialized.append(
@@ -151,59 +157,36 @@ def _serialize_questions(
     return serialized
 
 
-def _get_mastery(
-    session: Session, course_id: str, concept_id: str, learner_key: str
-) -> ConceptMastery:
-    mastery = session.get(ConceptMastery, (course_id, concept_id, learner_key))
-    if mastery is not None:
-        return mastery
+def _state_payload(state: LearnerConceptState | None) -> dict[str, Any]:
+    return {
+        "readiness_estimate": state.readiness_estimate if state is not None else None,
+        "evidence_state": state.status if state is not None else "insufficient_evidence",
+        "evidence_count": state.distinct_item_count if state is not None else 0,
+    }
 
-    mastery = ConceptMastery(
-        course_id=course_id,
+
+def _concept_state(
+    session: Session, course_profile_id: str, course_id: str, concept_id: str
+) -> LearnerConceptState | None:
+    version_id = session.query(CurriculumVersion.id).filter_by(
+        course_id=course_id, is_current=True
+    ).scalar()
+    if version_id is None:
+        return None
+    return session.query(LearnerConceptState).filter_by(
+        course_learning_profile_id=course_profile_id,
+        curriculum_version_id=version_id,
         concept_id=concept_id,
-        learner_key=learner_key,
-        points=0,
-        correct_count=0,
-        wrong_count=0,
-    )
-    session.add(mastery)
-    session.flush()
-    return mastery
-
-
-def _apply_mastery_delta(
-    session: Session,
-    course_id: str,
-    concept_id: str,
-    learner_key: str,
-    delta: int,
-    correct: bool,
-) -> ConceptMastery:
-    mastery = _get_mastery(session, course_id, concept_id, learner_key)
-    session.execute(
-        update(ConceptMastery)
-        .where(
-            ConceptMastery.course_id == course_id,
-            ConceptMastery.concept_id == concept_id,
-            ConceptMastery.learner_key == learner_key,
-        )
-        .values(
-            points=ConceptMastery.points + delta,
-            correct_count=ConceptMastery.correct_count + (1 if correct else 0),
-            wrong_count=ConceptMastery.wrong_count + (0 if correct else 1),
-            updated_at=utcnow(),
-        )
-        .execution_options(synchronize_session=False)
-    )
-    session.refresh(mastery)
-    return mastery
+        state_scope="concept",
+        model_version="transparent-beta-v1",
+    ).one_or_none()
 
 
 def _answer_payload(
     session: Session,
     question: PracticeQuestion,
     answer: PracticeAnswer,
-    mastery_points: int,
+    course_profile_id: str,
     already_answered: bool,
 ) -> dict[str, Any]:
     concept = session.get(Concept, question.concept_id)
@@ -220,8 +203,14 @@ def _answer_payload(
             "slug": concept.slug,
             "label": concept.label,
         },
-        "points_delta": answer.points_delta,
-        "mastery_points": mastery_points,
+        **_state_payload(
+            _concept_state(
+                session,
+                course_profile_id,
+                question.course_id,
+                question.concept_id,
+            )
+        ),
         "already_answered": already_answered,
     }
 
@@ -240,12 +229,14 @@ def _load_existing_answer_payload(
     if answer is None:
         return None
 
-    mastery = session.get(ConceptMastery, (question.course_id, question.concept_id, learner_key))
+    profile = learner_context.ensure_course_learning_profile(
+        session, learner_key, question.course_id
+    )
     return _answer_payload(
         session,
         question,
         answer,
-        mastery.points if mastery is not None else 0,
+        profile.id,
         already_answered=True,
     )
 
@@ -268,6 +259,10 @@ def submit_answer(
                 if question is None:
                     raise PracticeQuestionNotFoundError("practice question not found")
 
+                course_profile = learner_context.ensure_course_learning_profile(
+                    session, learner_key, course_id
+                )
+
                 if type(selected_index) is not int or not 0 <= selected_index < len(
                     question.choices
                 ):
@@ -278,40 +273,61 @@ def submit_answer(
                     return existing
 
                 correct = selected_index == question.correct_index
-                delta = 1 if correct else -1
                 answer = PracticeAnswer(
                     course_id=course_id,
                     question_id=question.id,
                     learner_key=learner_key,
                     selected_index=selected_index,
                     correct=correct,
-                    points_delta=delta,
+                    points_delta=0,
                 )
                 session.add(answer)
                 session.flush()
 
-                mastery = _apply_mastery_delta(
+                evidence_item = evidence_service.find_item(
                     session,
-                    course_id,
-                    question.concept_id,
-                    learner_key,
-                    delta,
-                    correct,
+                    item_type="practice_question",
+                    source_record_id=question.id,
                 )
-
-                session.add(
-                    ConceptMasteryEvent(
+                if evidence_item is None:
+                    evidence_item = evidence_items_service.snapshot_item(
+                        session,
                         course_id=course_id,
-                        concept_id=question.concept_id,
-                        question_id=question.id,
-                        practice_answer_id=answer.id,
-                        learner_key=learner_key,
-                        delta=delta,
+                        item_type="practice_question",
+                        source_record_id=question.id,
+                        source_index=-1,
+                        content={
+                            "stem_md": question.stem_md,
+                            "choices": question.choices,
+                            "correct_index": question.correct_index,
+                            "explanation_md": question.explanation_md,
+                        },
+                        source_ref=question.source_ref,
+                        prompt_version=question.extraction_version,
+                        model=None,
                     )
+                evidence_service.record_event(
+                    session,
+                    course_learning_profile_id=course_profile.id,
+                    evidence_item=evidence_item,
+                    channel="practice",
+                    normalized_outcome=1.0 if correct else 0.0,
+                    raw_result={
+                        "correct": correct,
+                        "selected_index": selected_index,
+                        "correct_index": question.correct_index,
+                    },
+                    source_event_key=f"practice_answer:{answer.id}",
+                    event_at=answer.answered_at,
+                    attempt_id=answer.id,
                 )
                 session.commit()
                 return _answer_payload(
-                    session, question, answer, mastery.points, already_answered=False
+                    session,
+                    question,
+                    answer,
+                    course_profile.id,
+                    already_answered=False,
                 )
             except IntegrityError:
                 session.rollback()

@@ -10,6 +10,8 @@ from __future__ import annotations
 import uuid
 from datetime import timedelta
 
+from conftest import _course_profile_id
+
 from app.db.engine import get_session
 from app.db.models import Card, Course, ProgressState, ReviewState, Section, Test, TestAttempt, utcnow
 from app.services.study_service import study_next
@@ -40,7 +42,14 @@ def _add_graded_test(session, course_id: str, chapter_label: str, score: float) 
     test = Test(course_id=course_id, chapter_label=chapter_label, questions=[{"q": 1}])
     session.add(test)
     session.flush()
-    session.add(TestAttempt(test_id=test.id, course_id=course_id, score=score))
+    session.add(
+        TestAttempt(
+            test_id=test.id,
+            course_id=course_id,
+            course_learning_profile_id=_course_profile_id(session, course_id),
+            score=score,
+        )
+    )
     session.commit()
 
 

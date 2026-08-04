@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Field, StrictInt
+from pydantic import BaseModel, computed_field, Field, StrictInt
 
 
 class JobCreate(BaseModel):
@@ -56,6 +56,149 @@ class CourseOut(BaseModel):
     progress: ProgressSummary | None = None
 
     model_config = {"from_attributes": True}
+
+
+# --- Versioned curriculum -------------------------------------------------
+
+
+class CurriculumExtractionOut(BaseModel):
+    job_id: str
+    curriculum_version_id: str
+
+
+class CurriculumDraftIn(BaseModel):
+    label: str | None = None
+
+
+class CurriculumDraftOut(BaseModel):
+    curriculum_version_id: str
+
+
+class CurriculumConceptOut(BaseModel):
+    id: str
+    stable_key: str
+    label: str
+    description_md: str
+    aliases: list[str]
+    chapter_label: str | None
+    review_state: str
+    is_active: bool
+
+
+class CurriculumClaimOut(BaseModel):
+    id: str
+    stable_key: str
+    concept_id: str
+    statement: str
+    success_criteria_md: str
+    aliases: list[str]
+    cognitive_demand: str | None
+    review_state: str
+    is_active: bool
+
+
+class CurriculumRelationOut(BaseModel):
+    id: str
+    from_concept_id: str
+    to_concept_id: str | None
+    kind: str
+    external_ref: str | None
+    confidence: float | None
+    rationale_md: str | None
+    review_state: str
+
+
+class CurriculumSourceOut(BaseModel):
+    id: str
+    concept_id: str
+    learning_claim_id: str | None
+    section_id: str | None
+    source_ref: str
+    excerpt_md: str | None
+    source_content_hash: str | None
+    confidence: float | None
+    rationale_md: str | None
+    review_state: str
+    stale: bool
+
+
+class CurriculumVersionOut(BaseModel):
+    id: str
+    course_id: str
+    parent_version_id: str | None
+    status: str
+    is_current: bool
+    label: str | None
+    created_at: datetime
+    published_at: datetime | None
+    concepts: list[CurriculumConceptOut]
+    claims: list[CurriculumClaimOut]
+    relations: list[CurriculumRelationOut]
+    sources: list[CurriculumSourceOut]
+
+
+class EvidenceMappingReviewOut(BaseModel):
+    id: str
+    evidence_item_id: str
+    item_type: str
+    item_preview: str
+    concept_id: str
+    concept_label: str
+    learning_claim_id: str
+    claim_statement: str
+    role: str
+    task_type: str
+    cognitive_demand: str | None
+    mapping_confidence: float | None
+    review_state: str
+    source_ref: str | None
+
+
+class EvidenceMappingReviewIn(BaseModel):
+    review_state: Literal["verified", "rejected"]
+
+
+class CurriculumConceptEditIn(BaseModel):
+    label: str = Field(min_length=1, max_length=500)
+    description_md: str = Field(max_length=20000)
+    aliases: list[str] = Field(default_factory=list, max_length=100)
+    chapter_label: str | None = Field(default=None, max_length=500)
+
+
+class CurriculumClaimEditIn(BaseModel):
+    concept_id: str | None = None
+    statement: str | None = Field(default=None, min_length=1, max_length=5000)
+    success_criteria_md: str | None = Field(default=None, max_length=10000)
+    aliases: list[str] | None = Field(default=None, max_length=100)
+    cognitive_demand: str | None = Field(default=None, max_length=100)
+    review_state: Literal["unverified", "verified", "rejected"] | None = None
+    is_active: bool | None = None
+
+
+class CurriculumMergeIn(BaseModel):
+    source_concept_ids: list[str] = Field(min_length=1, max_length=100)
+    target_concept_id: str
+
+
+class CurriculumSplitChildIn(BaseModel):
+    stable_key: str = Field(min_length=1, max_length=200)
+    label: str = Field(min_length=1, max_length=500)
+    description_md: str = Field(default="", max_length=20000)
+
+
+class CurriculumSplitIn(BaseModel):
+    children: list[CurriculumSplitChildIn] = Field(min_length=2, max_length=20)
+
+
+class StandardAlignmentIn(BaseModel):
+    concept_id: str
+    external_ref: str = Field(min_length=1, max_length=1000)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    rationale_md: str | None = Field(default=None, max_length=5000)
+
+
+class RelationReviewIn(BaseModel):
+    review_state: Literal["unverified", "verified", "rejected"]
 
 
 class AssetOut(BaseModel):
@@ -251,6 +394,27 @@ class ReviewQueueOut(BaseModel):
     total: int
 
 
+class AdaptiveStudyActivityOut(BaseModel):
+    activity_type: Literal["flashcard", "question"]
+    activity_id: str
+    concept_id: str | None
+    learning_claim_id: str | None
+    reason: Literal[
+        "targeted_remediation",
+        "evidence_exploration",
+        "due_review",
+        "forgetting_risk",
+        "retention_probe",
+    ]
+    readiness_state: str
+    due_at: datetime | None
+    payload: dict[str, Any]
+
+
+class AdaptiveStudyQueueOut(BaseModel):
+    activities: list[AdaptiveStudyActivityOut]
+
+
 class GradeCardIn(BaseModel):
     grade: int
     elapsed_ms: int | None = None
@@ -367,8 +531,9 @@ class PracticeAnsweredOut(BaseModel):
     correct: bool
     correct_index: int
     explanation_md: str
-    points_delta: int
-    mastery_points: int
+    readiness_estimate: float | None
+    evidence_state: str
+    evidence_count: int
     answered_at: datetime
 
 
@@ -402,8 +567,9 @@ class SubmitPracticeAnswerOut(BaseModel):
     correct_index: int
     explanation_md: str
     concept: PracticeConceptOut
-    points_delta: int
-    mastery_points: int
+    readiness_estimate: float | None
+    evidence_state: str
+    evidence_count: int
     already_answered: bool
 
 
@@ -592,16 +758,26 @@ class SkillNodeOut(BaseModel):
     slug: str
     label: str
     level: int
-    mastery: int
     status: str
-    blocked: bool
-    unlock_note: str | None = None
+    readiness_estimate: float | None = None
+    evidence_state: str | None = None
+    uncertainty: float | None = None
+    posterior_lower: float | None = None
+    posterior_upper: float | None = None
+    quiz_estimate: float | None = None
+    review_estimate: float | None = None
+    effective_evidence_count: float | None = None
+    distinct_item_count: int | None = None
+    distinct_session_count: int | None = None
+    trend: str | None = None
+    forgetting_risk: float | None = None
+    last_evidence_at: datetime | None = None
 
 
 class SkillEdgeOut(BaseModel):
     from_id: str
     to_id: str
-    kind: str  # "met" | "weak"
+    kind: str  # "ready" | "review_suggested"
 
 
 class SkillMapOut(BaseModel):
@@ -625,18 +801,125 @@ class SkillMissedQuestionOut(BaseModel):
     attempted_at: datetime
 
 
-class SkillFixPlanOut(BaseModel):
-    prereq_id: str
-    prereq_label: str
-    section_id: str | None
-
-
 class SkillDetailOut(BaseModel):
     node: SkillNodeOut
     taught_in: list[SkillTaughtInOut]
     missed_questions: list[SkillMissedQuestionOut]
-    blocked_skill_labels: list[str]
     cards_count: int
     quiz_correct: int
     quiz_wrong: int
-    fix_plan: SkillFixPlanOut | None
+
+
+class DiagnosticBlindCaseOut(BaseModel):
+    concept_id: str
+    concept_label: str
+    concept_description_md: str
+    evidence_available: bool
+
+
+class DiagnosticJudgmentIn(BaseModel):
+    concept_id: str
+    judgment: Literal["insufficient", "not_struggling", "uncertain", "likely_struggling"]
+    disagreement_reason: Literal[
+        "model_estimate",
+        "item_mapping",
+        "concept_granularity",
+        "insufficient_student_evidence",
+        "instructor_disagreement",
+    ] | None = None
+    notes_md: str | None = None
+
+
+class DiagnosticJudgmentOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    concept_id: str
+    judgment: str
+    disagreement_reason: str | None
+    model_state: str
+    readiness_estimate: float | None
+    evidence_count: int
+    model_version: str
+    agreement: bool
+    created_at: datetime
+
+    @computed_field
+    @property
+    def requires_disagreement_reason(self) -> bool:
+        return not self.agreement and self.disagreement_reason is None
+
+
+class DiagnosticDisagreementReasonIn(BaseModel):
+    disagreement_reason: Literal[
+        "model_estimate",
+        "item_mapping",
+        "concept_granularity",
+        "insufficient_student_evidence",
+        "instructor_disagreement",
+    ]
+
+
+class DiagnosticValidationSummaryOut(BaseModel):
+    sample_size: int
+    agreement_count: int
+    raw_agreement: float | None
+    chance_adjusted_agreement: float | None
+    sufficient_sample: bool
+    pending_reason_count: int
+    disagreement_reasons: dict[str, int]
+    disagreements_by_concept: dict[str, int]
+
+
+class RetentionStudyIn(BaseModel):
+    name: str
+    assignment_seed: str
+    delay_start_days: int = Field(default=7, ge=1)
+    delay_end_days: int = Field(default=14, ge=1)
+    minimum_per_group: int = Field(default=20, ge=1)
+
+
+class RetentionStudyOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    course_id: str
+    name: str
+    status: str
+    assignment_seed: str
+    protocol_version: str
+    delay_start_days: int
+    delay_end_days: int
+    minimum_per_group: int
+    created_at: datetime
+
+
+class RetentionAssignmentIn(BaseModel):
+    concept_id: str
+    workload_target: int = Field(default=12, ge=1, le=100)
+
+
+class RetentionAssignmentOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    study_id: str
+    concept_id: str
+    study_group: str
+    workload_target: int
+    assigned_at: datetime
+
+
+class RetentionProbeIn(BaseModel):
+    learning_claim_id: str
+
+
+class RetentionProbeOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: str
+    assignment_id: str
+    evidence_item_id: str
+    learning_claim_id: str
+    scheduled_for: datetime
+    status: str

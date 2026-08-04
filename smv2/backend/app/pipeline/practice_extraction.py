@@ -15,27 +15,37 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Concept, Job, PracticeExtractionRun, PracticeQuestion, Section
+from app.db.models import (
+    Concept,
+    Job,
+    LearningClaim,
+    PracticeExtractionRun,
+    PracticeQuestion,
+    Section,
+)
 from app.llm.ledger import ensure_spend_cap
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
 from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
+from app.services import evidence_items_service
 
 logger = logging.getLogger(__name__)
 
 _MAX_TOKENS = 4096
 
 
-def parse_practice_questions(text: str) -> list[dict[str, Any]]:
+def parse_practice_questions(
+    text: str, allowed_claim_ids: set[str] | None = None
+) -> list[dict[str, Any]]:
     data = json.loads(_strip_leading_fence(text), parse_constant=_reject_json_constant)
     if not isinstance(data, list):
         raise ValueError("expected a JSON array of practice questions")
 
     questions: list[dict[str, Any]] = []
     for i, item in enumerate(data):
-        parsed = _parse_practice_question_item(item)
+        parsed = _parse_practice_question_item(item, allowed_claim_ids)
         if parsed is None:
             logger.warning("dropping malformed practice question item %d", i)
             continue
@@ -43,7 +53,9 @@ def parse_practice_questions(text: str) -> list[dict[str, Any]]:
     return questions
 
 
-def _parse_practice_question_item(item: Any) -> dict[str, Any] | None:
+def _parse_practice_question_item(
+    item: Any, allowed_claim_ids: set[str] | None = None
+) -> dict[str, Any] | None:
     if not isinstance(item, dict):
         return None
 
@@ -57,6 +69,7 @@ def _parse_practice_question_item(item: Any) -> dict[str, Any] | None:
     concept_label = _non_empty_str(item.get("concept_label"))
     answer_source_ref = _non_empty_str(item.get("answer_source_ref"))
     confidence = item.get("confidence")
+    claim_id = item.get("claim_id")
 
     if not all(
         [
@@ -85,8 +98,12 @@ def _parse_practice_question_item(item: Any) -> dict[str, Any] | None:
         return None
     if not math.isfinite(float(confidence)) or not 0.7 <= confidence <= 1.0:
         return None
+    if allowed_claim_ids and (
+        not isinstance(claim_id, str) or claim_id not in allowed_claim_ids
+    ):
+        raise ValueError("practice question references an unknown claim id")
 
-    return {
+    parsed = {
         "problem_number": problem_number,
         "stem_md": stem_md,
         "choices": normalized_choices,
@@ -97,6 +114,9 @@ def _parse_practice_question_item(item: Any) -> dict[str, Any] | None:
         "answer_source_ref": answer_source_ref,
         "confidence": float(confidence),
     }
+    if allowed_claim_ids:
+        parsed["claim_id"] = claim_id
+    return parsed
 
 
 def _non_empty_str(value: Any) -> str | None:
@@ -147,8 +167,17 @@ def run_practice_extraction(
     if not answer_sections:
         raise ValueError("no answer key sections found for practice section")
 
+    curriculum_version_id, claim_options = evidence_items_service.claim_options_for_sections(
+        session, course_id, [section.id]
+    )
+    allowed_claim_ids = {option["claim_id"] for option in claim_options}
     system_prompt, prompt_version = load_prompt("practice_assessment")
-    messages = [{"role": "user", "content": _build_user_message(section, answer_sections)}]
+    messages = [
+        {
+            "role": "user",
+            "content": _build_user_message(section, answer_sections, claim_options),
+        }
+    ]
     provider = get_provider()
 
     ensure_spend_cap(course_id)
@@ -162,7 +191,7 @@ def run_practice_extraction(
         wait_for_slot=True,
     )
 
-    questions = parse_practice_questions(result.text)
+    questions = parse_practice_questions(result.text, allowed_claim_ids)
     if not questions:
         raise ValueError("practice assessment extraction produced zero usable questions")
 
@@ -191,6 +220,42 @@ def run_practice_extraction(
             prompt_version=prompt_version,
             source_fingerprint=source_fingerprint,
         )
+        session.flush()
+        content = {
+            "stem_md": question.stem_md,
+            "choices": question.choices,
+            "correct_index": question.correct_index,
+            "explanation_md": question.explanation_md,
+        }
+        evidence_item = evidence_items_service.snapshot_item(
+            session,
+            course_id=course_id,
+            item_type="practice_question",
+            source_record_id=question.id,
+            source_index=-1,
+            content=content,
+            source_ref=question.source_ref,
+            prompt_version=prompt_version,
+            model=result.model,
+        )
+        claim_id = item.get("claim_id")
+        if claim_id is not None and curriculum_version_id is not None:
+            option = next(option for option in claim_options if option["claim_id"] == claim_id)
+            evidence_items_service.map_item_to_claim(
+                session,
+                evidence_item,
+                curriculum_version_id=curriculum_version_id,
+                learning_claim_id=claim_id,
+                role="primary",
+                task_type="multiple_choice",
+                cognitive_demand=option["cognitive_demand"],
+                authored_difficulty_band="authored_practice",
+                mapping_confidence=item["confidence"],
+                source_ref=question.source_ref,
+                prompt_version=prompt_version,
+                model=result.model,
+                review_state="unverified",
+            )
 
     run.status = "ready"
     run.question_count = len(unique_items)
@@ -199,7 +264,11 @@ def run_practice_extraction(
     return {"question_count": len(unique_items)}
 
 
-def _build_user_message(section: Section, answer_sections: list[Section]) -> str:
+def _build_user_message(
+    section: Section,
+    answer_sections: list[Section],
+    claim_options: list[dict[str, Any]] | None = None,
+) -> str:
     practice_body = "\n".join(
         [
             "<practice_section>",
@@ -213,6 +282,9 @@ def _build_user_message(section: Section, answer_sections: list[Section]) -> str
     answer_parts = [_section_tag(answer_section) for answer_section in answer_sections]
     return "\n".join(
         [
+            "<allowed_claims>",
+            json.dumps(claim_options or [], ensure_ascii=False),
+            "</allowed_claims>",
             practice_body,
             "<answer_key_sections>",
             "\n".join(answer_parts),
@@ -235,6 +307,15 @@ def _section_tag(section: Section) -> str:
 
 
 def _upsert_concept(session: Session, section: Section, item: dict[str, Any]) -> Concept:
+    claim_id = item.get("claim_id")
+    if claim_id is not None:
+        claim = session.get(LearningClaim, claim_id)
+        if claim is None or claim.course_id != section.course_id:
+            raise ValueError("practice question claim does not belong to course")
+        concept = session.get(Concept, claim.concept_id)
+        if concept is None:
+            raise ValueError("practice question claim concept not found")
+        return concept
     concept = (
         session.query(Concept)
         .filter(Concept.course_id == section.course_id, Concept.slug == item["concept_slug"])

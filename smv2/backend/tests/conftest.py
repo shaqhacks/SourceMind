@@ -9,8 +9,22 @@ from app.db.engine import dispose_engine
 from app.db.init import init_db
 from app.llm.provider import CompletionResult, Provider
 from app.main import create_app
+from app.services import learner_context
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "pdfs"
+
+
+def _course_profile_id(
+    session, course_id: str, learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID
+) -> str:
+    return learner_context.ensure_course_learning_profile(session, learner_id, course_id).id
+
+
+def _set_learner_cookie(
+    client: TestClient, learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID
+) -> str:
+    client.cookies.set(learner_context.LEARNER_COOKIE, learner_id)
+    return learner_id
 
 
 def _first_section_id(client, course_id: str) -> str:
@@ -150,6 +164,8 @@ _GET_PROVIDER_PATCH_TARGETS = (
     "app.llm.provider.get_provider",
     "app.pipeline.generation.get_provider",
     "app.pipeline.cards_generation.get_provider",
+    "app.pipeline.concept_extraction.get_provider",
+    "app.pipeline.concept_practice_generation.get_provider",
     "app.pipeline.quiz_generation.get_provider",
     "app.pipeline.practice_extraction.get_provider",
     "app.pipeline.embedding.get_provider",

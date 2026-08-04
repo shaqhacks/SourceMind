@@ -25,8 +25,18 @@ from typing import Any
 
 from app.db.engine import get_session
 from app.db.identity import card_id_for
-from app.db.models import Card, Course, ReviewState, Section, Test, TestAttempt, ensure_utc, utcnow
-from app.services import jobs_service
+from app.db.models import (
+    Card,
+    Course,
+    CourseLearningProfile,
+    ReviewState,
+    Section,
+    Test,
+    TestAttempt,
+    ensure_utc,
+    utcnow,
+)
+from app.services import evidence_items_service, evidence_service, jobs_service, learner_context
 from app.services.srs_service import DEFAULT_EASE, GOOD, schedule_next
 
 
@@ -46,6 +56,8 @@ def start_test_generation(
     course_id: str,
     section_ids: list[str] | None = None,
     chapter_label: str | None = None,
+    *,
+    learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID,
 ) -> str:
     session = get_session()
     try:
@@ -74,20 +86,44 @@ def start_test_generation(
                 raise ChapterNotFoundError(
                     f"no practice/content sections found for chapter {chapter_label!r}"
                 )
+        course_profile = learner_context.ensure_course_learning_profile(
+            session, learner_id, course_id
+        )
+        session.commit()
+        course_learning_profile_id = course_profile.id
     finally:
         session.close()
 
     job = jobs_service.create_job(
         "generate_test",
-        {"course_id": course_id, "section_ids": resolved_section_ids, "chapter_label": chapter_label},
+        {
+            "course_id": course_id,
+            "section_ids": resolved_section_ids,
+            "chapter_label": chapter_label,
+            "course_learning_profile_id": course_learning_profile_id,
+        },
     )
     return job.id
 
 
-def get_test(attempt_id: str) -> dict[str, Any] | None:
+def _get_owned_attempt(session, attempt_id: str, learner_id: str) -> TestAttempt | None:
+    return (
+        session.query(TestAttempt)
+        .join(
+            CourseLearningProfile,
+            CourseLearningProfile.id == TestAttempt.course_learning_profile_id,
+        )
+        .filter(TestAttempt.id == attempt_id, CourseLearningProfile.learner_id == learner_id)
+        .one_or_none()
+    )
+
+
+def get_test(
+    attempt_id: str, *, learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID
+) -> dict[str, Any] | None:
     session = get_session()
     try:
-        attempt = session.get(TestAttempt, attempt_id)
+        attempt = _get_owned_attempt(session, attempt_id, learner_id)
         if attempt is None:
             return None
         test = session.get(Test, attempt.test_id)
@@ -112,7 +148,9 @@ def get_test(attempt_id: str) -> dict[str, Any] | None:
         session.close()
 
 
-def retake_test(test_id: str) -> str | None:
+def retake_test(
+    test_id: str, *, learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID
+) -> str | None:
     """Creates a new TestAttempt against test_id's EXISTING, already-
     generated questions — zero LLM calls (ADR-022). Returns the new
     attempt's id, or None if the test doesn't exist.
@@ -122,7 +160,14 @@ def retake_test(test_id: str) -> str | None:
         test = session.get(Test, test_id)
         if test is None:
             return None
-        attempt = TestAttempt(test_id=test.id, course_id=test.course_id)
+        course_profile = learner_context.ensure_course_learning_profile(
+            session, learner_id, test.course_id
+        )
+        attempt = TestAttempt(
+            test_id=test.id,
+            course_id=test.course_id,
+            course_learning_profile_id=course_profile.id,
+        )
         session.add(attempt)
         session.commit()
         return attempt.id
@@ -199,7 +244,7 @@ def _ensure_card(session, course_id: str, section_id: str, question: dict[str, A
     return card_id, True
 
 
-def _seed_missed_card(session, card_id: str) -> None:
+def _seed_missed_card(session, course_learning_profile_id: str, card_id: str) -> None:
     """A miss is evidence the card needs review NOW, not a formal SM-2
     lapse — only due_at moves. A brand-new card (just created by
     _ensure_card, no ReviewState row at all) needs no action here: the
@@ -209,12 +254,18 @@ def _seed_missed_card(session, card_id: str) -> None:
     the review queue is what should ever reduce ease or count as a lapse,
     not a test miss.
     """
-    review_state = session.get(ReviewState, card_id)
+    review_state = session.get(ReviewState, (course_learning_profile_id, card_id))
     if review_state is not None:
         review_state.due_at = utcnow()
 
 
-def _seed_correct_card(session, card_id: str, course_id: str, review_state: ReviewState | None) -> None:
+def _seed_correct_card(
+    session,
+    course_learning_profile_id: str,
+    card_id: str,
+    course_id: str,
+    review_state: ReviewState | None,
+) -> None:
     """ADR-022: a correct answer is real review evidence, not a freebie —
     the whole tested deck should enter Anki rotation with the test as its
     first review event, but a card someone is deliberately CRAMMING (not
@@ -237,6 +288,7 @@ def _seed_correct_card(session, card_id: str, course_id: str, review_state: Revi
         result = schedule_next(GOOD, interval_days=0.0, ease=DEFAULT_EASE, reps=0)
         session.add(
             ReviewState(
+                course_learning_profile_id=course_learning_profile_id,
                 card_id=card_id,
                 course_id=course_id,
                 due_at=result.due_at,
@@ -263,10 +315,15 @@ def _seed_correct_card(session, card_id: str, course_id: str, review_state: Revi
     review_state.last_grade = GOOD
 
 
-def submit_test(attempt_id: str, answers: list[int]) -> dict[str, Any] | None:
+def submit_test(
+    attempt_id: str,
+    answers: list[int],
+    *,
+    learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID,
+) -> dict[str, Any] | None:
     session = get_session()
     try:
-        attempt = session.get(TestAttempt, attempt_id)
+        attempt = _get_owned_attempt(session, attempt_id, learner_id)
         if attempt is None:
             return None
         if attempt.score is not None:
@@ -299,11 +356,25 @@ def submit_test(attempt_id: str, answers: list[int]) -> dict[str, Any] | None:
             if target_section_id is not None:
                 card_id, created_now = _ensure_card(session, attempt.course_id, target_section_id, q)
                 if is_correct:
-                    review_state = None if created_now else session.get(ReviewState, card_id)
-                    _seed_correct_card(session, card_id, attempt.course_id, review_state)
+                    review_state = (
+                        None
+                        if created_now
+                        else session.get(
+                            ReviewState, (attempt.course_learning_profile_id, card_id)
+                        )
+                    )
+                    _seed_correct_card(
+                        session,
+                        attempt.course_learning_profile_id,
+                        card_id,
+                        attempt.course_id,
+                        review_state,
+                    )
                 else:
                     if not created_now:
-                        _seed_missed_card(session, card_id)
+                        _seed_missed_card(
+                            session, attempt.course_learning_profile_id, card_id
+                        )
                     added_card_ids.append(card_id)
                     due_now_count += 1
 
@@ -314,6 +385,44 @@ def submit_test(attempt_id: str, answers: list[int]) -> dict[str, Any] | None:
                     "explanation": q.get("explanation", ""),
                     "your_answer": your_answer,
                 }
+            )
+            evidence_item = evidence_service.find_item(
+                session,
+                item_type="quiz_question",
+                source_record_id=test.id,
+                source_index=i,
+            )
+            if evidence_item is None:
+                evidence_item = evidence_items_service.snapshot_item(
+                    session,
+                    course_id=attempt.course_id,
+                    item_type="quiz_question",
+                    source_record_id=test.id,
+                    source_index=i,
+                    content={
+                        "question": q["question"],
+                        "choices": q["choices"],
+                        "correct_index": q["correct_index"],
+                        "explanation": q.get("explanation", ""),
+                    },
+                    source_ref=test.chapter_label or test.section_id,
+                    prompt_version=test.prompt_version,
+                    model=test.model,
+                )
+            evidence_service.record_event(
+                session,
+                course_learning_profile_id=attempt.course_learning_profile_id,
+                evidence_item=evidence_item,
+                channel="quiz",
+                normalized_outcome=1.0 if is_correct else 0.0,
+                raw_result={
+                    "correct": is_correct,
+                    "selected_index": your_answer,
+                    "correct_index": q["correct_index"],
+                },
+                source_event_key=f"test_attempt:{attempt.id}:question:{i}",
+                event_at=utcnow(),
+                attempt_id=attempt.id,
             )
 
         score = correct_count / len(questions) if questions else 0.0
@@ -332,13 +441,20 @@ def submit_test(attempt_id: str, answers: list[int]) -> dict[str, Any] | None:
         session.close()
 
 
-def list_tests(course_id: str) -> list[dict[str, Any]]:
+def list_tests(
+    course_id: str, learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID
+) -> list[dict[str, Any]]:
     """Test-grouped: one entry per generated deck, each with its own
     ordered attempt history (ADR-022) — a course that's been retaken
     several times shows one card with N attempts, not N flat rows.
     """
     session = get_session()
     try:
+        course_profile_id = (
+            session.query(CourseLearningProfile.id)
+            .filter_by(learner_id=learner_id, course_id=course_id)
+            .scalar()
+        )
         tests = (
             session.query(Test)
             .filter(Test.course_id == course_id)
@@ -349,7 +465,10 @@ def list_tests(course_id: str) -> list[dict[str, Any]]:
         for t in tests:
             attempts = (
                 session.query(TestAttempt)
-                .filter(TestAttempt.test_id == t.id)
+                .filter(
+                    TestAttempt.test_id == t.id,
+                    TestAttempt.course_learning_profile_id == course_profile_id,
+                )
                 .order_by(TestAttempt.created_at.desc())
                 .all()
             )

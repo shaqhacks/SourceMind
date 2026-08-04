@@ -17,11 +17,15 @@ import Skeleton from "@/components/ui/Skeleton";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   getReviewQueue,
+  getAdaptiveStudyQueue,
   getReviewSummary,
   gradeCard,
+  submitPracticeAnswer,
   MAX_QUEUE_FETCH,
   type ReviewQueueCardOut,
   type ReviewSummaryOut,
+  type AdaptiveStudyActivityOut,
+  type SubmitPracticeAnswerOut,
 } from "@/lib/api/client";
 import { useKeyboardShortcuts, type ShortcutMap } from "@/lib/hooks/useKeyboardShortcuts";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
@@ -150,6 +154,10 @@ function ReviewPageInner() {
   const [sessionStartedAt, setSessionStartedAt] = useState(0);
   const [isResumedSession, setIsResumedSession] = useState(false);
   const [cards, setCards] = useState<ReviewQueueCardOut[]>([]);
+  const [questions, setQuestions] = useState<AdaptiveStudyActivityOut[]>([]);
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [selectedChoice, setSelectedChoice] = useState<number | null>(null);
+  const [questionResult, setQuestionResult] = useState<SubmitPracticeAnswerOut | null>(null);
   const [cardIndex, setCardIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [cardShownAt, setCardShownAt] = useState(0);
@@ -236,11 +244,12 @@ function ReviewPageInner() {
 
   const loadChooser = useCallback((id: string) => {
     setChooserState({ kind: "loading" });
-    getReviewQueue(id, MAX_QUEUE_FETCH).then(({ data, status }) => {
-      if (data) {
-        setChooserState({ kind: "ready", due: data.due, new: data.new, total: data.total });
+    Promise.all([getReviewQueue(id, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(id, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
+      if (review.data) {
+        const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
+        setChooserState({ kind: "ready", due: review.data.due, new: review.data.new, total: review.data.total + questionCount });
       } else {
-        setChooserState({ kind: "error", error: describeError(status, "Loading review queue") });
+        setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
       }
     });
   }, []);
@@ -248,12 +257,13 @@ function ReviewPageInner() {
   useEffect(() => {
     if (phase !== "chooser" || !courseId) return;
     let active = true;
-    getReviewQueue(courseId, MAX_QUEUE_FETCH).then(({ data, status }) => {
+    Promise.all([getReviewQueue(courseId, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
       if (!active) return;
-      if (data) {
-        setChooserState({ kind: "ready", due: data.due, new: data.new, total: data.total });
+      if (review.data) {
+        const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
+        setChooserState({ kind: "ready", due: review.data.due, new: review.data.new, total: review.data.total + questionCount });
       } else {
-        setChooserState({ kind: "error", error: describeError(status, "Loading review queue") });
+        setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
       }
     });
     return () => {
@@ -276,17 +286,22 @@ function ReviewPageInner() {
       setSessionSize(size);
       setGradeCounts({});
       setIsResumedSession(false);
-      getReviewQueue(courseId, size).then(({ data, status }) => {
-        if (!data) {
-          setSessionState({ kind: "error", error: describeError(status, "Loading review queue") });
+      Promise.all([getReviewQueue(courseId, size), getAdaptiveStudyQueue(courseId, size)]).then(([review, adaptive]) => {
+        if (!review.data) {
+          setSessionState({ kind: "error", error: describeError(review.status, "Loading review queue") });
           return;
         }
-        if (data.cards.length === 0) {
+        const questionActivities = adaptive.data?.activities.filter((item) => item.activity_type === "question") ?? [];
+        if (review.data.cards.length === 0 && questionActivities.length === 0) {
           setSessionState({ kind: "empty" });
           return;
         }
         const startedAt = Date.now();
-        setCards(data.cards);
+        setCards(review.data.cards);
+        setQuestions(questionActivities);
+        setQuestionIndex(0);
+        setSelectedChoice(null);
+        setQuestionResult(null);
         setCardIndex(0);
         setRevealed(false);
         setCardShownAt(startedAt);
@@ -294,7 +309,7 @@ function ReviewPageInner() {
         writeStoredSession({
           courseId,
           chosenSize: size,
-          remainingCardIds: data.cards.map((card) => card.id),
+          remainingCardIds: review.data.cards.map((card) => card.id),
           gradedTally: {},
           startedAt,
         });
@@ -360,7 +375,8 @@ function ReviewPageInner() {
       const nextIndex = cardIndex + 1;
       if (nextIndex >= cards.length) {
         clearStoredSession();
-        setSessionState({ kind: "done" });
+        if (questions.length === 0) setSessionState({ kind: "done" });
+        else setCardIndex(nextIndex);
       } else {
         if (courseId && sessionSize !== null) {
           writeStoredSession({
@@ -376,14 +392,33 @@ function ReviewPageInner() {
         setCardShownAt(Date.now());
       }
     },
-    [cards, cardIndex, cardShownAt, courseId, sessionSize, sessionStartedAt, gradeCounts],
+    [cards, cardIndex, cardShownAt, courseId, sessionSize, sessionStartedAt, gradeCounts, questions.length],
   );
+
+  const answerQuestion = useCallback(async (choice: number) => {
+    const question = questions[questionIndex];
+    if (!question || !courseId || questionResult) return;
+    setSelectedChoice(choice);
+    const { data } = await submitPracticeAnswer(courseId, question.activity_id, choice);
+    if (data) setQuestionResult(data);
+  }, [courseId, questionIndex, questionResult, questions]);
+
+  const advanceQuestion = useCallback(() => {
+    const next = questionIndex + 1;
+    if (next >= questions.length) {
+      setSessionState({ kind: "done" });
+      return;
+    }
+    setQuestionIndex(next);
+    setSelectedChoice(null);
+    setQuestionResult(null);
+  }, [questionIndex, questions.length]);
 
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
 
   const shortcutMap: ShortcutMap =
-    phase === "session" && sessionState.kind === "active"
+    phase === "session" && sessionState.kind === "active" && cards[cardIndex]
       ? revealed
         ? {
             "1": () => grade(1),
@@ -571,6 +606,9 @@ function ReviewPageInner() {
     );
   } else {
     const card = cards[cardIndex];
+    const question = card ? null : questions[questionIndex];
+    const totalActivities = cards.length + questions.length;
+    const currentActivity = card ? cardIndex + 1 : cards.length + questionIndex + 1;
     mainContent = (
       <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-6 px-9 py-10">
         {isResumedSession && (
@@ -594,17 +632,17 @@ function ReviewPageInner() {
         <div className="flex items-center gap-3.5">
           <div className="flex-1">
             <ProgressBar
-              percent={((cardIndex + 1) / cards.length) * 100}
-              label={`${cardIndex + 1} of ${cards.length}`}
+              percent={(currentActivity / totalActivities) * 100}
+              label={`${currentActivity} of ${totalActivities}`}
               tone="accent"
             />
           </div>
           <p role="status" className="shrink-0 text-sm font-semibold text-muted-foreground">
-            {cardIndex + 1} of {cards.length}
+            {currentActivity} of {totalActivities}
           </p>
         </div>
 
-        <Card className="flex min-h-[320px] flex-col p-10 shadow-md">
+        {card ? <><Card className="flex min-h-[320px] flex-col p-10 shadow-md">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-accent">
             Spaced repetition
           </span>
@@ -657,10 +695,44 @@ function ReviewPageInner() {
               </button>
             ))}
           </div>
-        )}
+        )}</> : question ? (
+          <Card className="flex min-h-[320px] flex-col gap-4 p-10 shadow-md">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-accent">
+              Concept practice · {question.readiness_state.replaceAll("_", " ")}
+            </span>
+            <div className="font-heading text-2xl leading-snug">
+              <Markdown>{String(question.payload.stem_md ?? "")}</Markdown>
+            </div>
+            <div className="grid gap-2">
+              {(Array.isArray(question.payload.choices) ? question.payload.choices : []).map((choice, index) => (
+                <button
+                  key={`${question.activity_id}-${index}`}
+                  type="button"
+                  disabled={questionResult !== null}
+                  onClick={() => void answerQuestion(index)}
+                  className="rounded-md border border-divider px-4 py-3 text-left text-sm hover:bg-accent-soft disabled:cursor-default"
+                >
+                  {String(choice)}
+                </button>
+              ))}
+            </div>
+            {questionResult && (
+              <div role="status" className="rounded-md bg-surface-raised p-4 text-sm">
+                <strong>{questionResult.correct ? "Correct" : "Not yet"}.</strong>{" "}
+                {questionResult.explanation_md}
+                <Button variant="primary" size="sm" onClick={advanceQuestion} className="mt-3">
+                  {questionIndex + 1 >= questions.length ? "Finish" : "Next question"}
+                </Button>
+              </div>
+            )}
+            {selectedChoice !== null && !questionResult && (
+              <p className="text-sm text-muted-foreground">Checking answer…</p>
+            )}
+          </Card>
+        ) : null}
 
         <p className="text-center text-xs text-muted-foreground">
-          {SHORTCUT_HINTS.map((hint, i) => (
+          {(card ? SHORTCUT_HINTS : SHORTCUT_HINTS.filter((hint) => hint.keys === "?")).map((hint, i) => (
             <span key={hint.keys}>
               {i > 0 ? " · " : null}
               <kbd className="rounded border border-divider bg-surface-raised px-1.5 text-xs">

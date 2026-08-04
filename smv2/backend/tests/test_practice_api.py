@@ -413,7 +413,11 @@ def test_answer_endpoint_sets_learner_cookie_and_reveals_answer(client):
     assert body["question_id"] == question.id
     assert body["correct"] is False
     assert body["correct_index"] == 0
-    assert body["points_delta"] == -1
+    assert body["readiness_estimate"] is None
+    assert body["evidence_state"] == "insufficient_evidence"
+    assert body["evidence_count"] == 0
+    assert "points_delta" not in body
+    assert "mastery_points" not in body
     assert body["explanation_md"] == "$42/12 = 7/2$."
 
 
@@ -469,8 +473,11 @@ def test_ready_assessment_includes_answered_summary_for_same_learner_only(client
     assert answered["correct"] is False
     assert answered["correct_index"] == 0
     assert answered["explanation_md"] == "$42/12 = 7/2$."
-    assert answered["points_delta"] == -1
-    assert answered["mastery_points"] == -1
+    assert answered["readiness_estimate"] is None
+    assert answered["evidence_state"] == "insufficient_evidence"
+    assert answered["evidence_count"] == 0
+    assert "points_delta" not in answered
+    assert "mastery_points" not in answered
     assert answered["answered_at"]
 
     with TestClient(client.app) as fresh_client:

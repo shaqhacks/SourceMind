@@ -8,7 +8,7 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import ProgressBar, { type ProgressBarTone } from "@/components/ui/ProgressBar";
 import { useSkillMap } from "@/lib/hooks/useSkillMap";
-import { describeNode, rootCause } from "@/lib/skills/derive";
+import { describeNode, mostNeedsReview } from "@/lib/skills/derive";
 
 export interface SkillSnapshotCardProps {
   /** A course id to scope the "Full map"/"Review the prerequisite" links to. */
@@ -19,17 +19,19 @@ export interface SkillSnapshotCardProps {
 // "accent" (the mock distinguishes them with a mid vs. deep accent shade,
 // which the shared primitive doesn't expose).
 const BAR_TONES: Record<SkillStatus, ProgressBarTone> = {
-  solid: "sage",
-  growing: "accent",
-  struggling: "accent",
-  locked: "neutral",
+  retained: "sage",
+  watch: "neutral",
+  building: "accent",
+  likely_struggling: "accent",
+  insufficient_evidence: "neutral",
 };
 
 const SCORE_TEXT: Record<SkillStatus, string> = {
-  solid: "text-sage-700",
-  growing: "text-accent-700",
-  struggling: "text-accent-800",
-  locked: "text-neutral-600",
+  retained: "text-sage-700",
+  watch: "text-neutral-700",
+  building: "text-accent-700",
+  likely_struggling: "text-accent-800",
+  insufficient_evidence: "text-neutral-600",
 };
 
 const SNAPSHOT_COUNT = 3;
@@ -46,8 +48,8 @@ export default function SkillSnapshotCard({ courseId }: SkillSnapshotCardProps) 
 
   if (error || map === null || map.nodes.length === 0) return null;
 
-  const { nodes, edges } = map;
-  const cause = rootCause(nodes, edges);
+  const { nodes } = map;
+  const reviewTarget = mostNeedsReview(nodes);
   const snapshot = nodes.slice(0, SNAPSHOT_COUNT);
 
   return (
@@ -71,27 +73,33 @@ export default function SkillSnapshotCard({ courseId }: SkillSnapshotCardProps) 
             <div key={node.id}>
               <div className="mb-1.5 flex items-center justify-between text-[13px] font-semibold">
                 <span>{node.label}</span>
-                <span className={SCORE_TEXT[status]}>{node.mastery}</span>
+                <span className={SCORE_TEXT[status]}>
+                  {node.readiness_estimate == null ? "—" : Math.round(node.readiness_estimate * 100)}
+                </span>
               </div>
-              <ProgressBar percent={node.mastery} label={`${node.label} mastery`} tone={BAR_TONES[status]} />
+              {node.readiness_estimate == null ? (
+                <p className="text-xs text-muted-foreground">Needs more evidence</p>
+              ) : (
+                <ProgressBar percent={Math.round(node.readiness_estimate * 100)} label={`${node.label} readiness`} tone={BAR_TONES[status]} />
+              )}
             </div>
           );
         })}
       </div>
 
-      {cause && (
+      {reviewTarget && (
         <Card variant="tinted" className="gap-2 text-sm leading-relaxed">
           <p>
-            <strong>Why you&apos;re stuck:</strong> {cause.skill.label} builds on{" "}
-            <strong>{cause.prereq.label}</strong>. {describeNode(cause.skill, nodes, edges)}
+            <strong>Suggested review:</strong> Current answer evidence points to{" "}
+            <strong>{reviewTarget.label}</strong>. {describeNode(reviewTarget)}
           </p>
           <Button
             variant="primary"
             size="sm"
             className="self-start"
-            onClick={() => router.push(`/course/${courseId}/skills/${cause.prereq.id}`)}
+            onClick={() => router.push(`/course/${courseId}/skills/${reviewTarget.id}`)}
           >
-            Review the prerequisite
+            Review the evidence
           </Button>
         </Card>
       )}

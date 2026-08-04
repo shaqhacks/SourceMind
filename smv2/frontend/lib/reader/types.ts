@@ -60,7 +60,7 @@ export type SectionBodyState =
 
 /** Per-chapter test aggregate — the pinned shape of list_chapters' own
  * `test_stats` field (null when a chapter has no attempts yet). Shared by
- * Sidebar's "Test" affordance and the chapter mastery bar so both read the
+ * Sidebar's "Test" affordance and the chapter test-score bar so both read the
  * same field names once the real endpoint is wired up. */
 export interface ChapterTestStats {
   attempts: number;

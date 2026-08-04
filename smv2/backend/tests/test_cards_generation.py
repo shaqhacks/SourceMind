@@ -58,7 +58,7 @@ def test_generate_cards_records_prompt_version_on_each_card(client, ingest_cours
     session = get_session()
     try:
         card = session.get(Card, cards[0]["id"])
-        assert card.prompt_version == "v2"
+        assert card.prompt_version == "v3"
     finally:
         session.close()
 
@@ -221,7 +221,7 @@ def test_generate_cards_fails_after_two_parse_failures_records_parse_failure_led
     assert [c.status for c in calls] == ["ok", "ok", "parse_failure"]
     parse_failure_row = calls[-1]
     assert parse_failure_row.cost_estimate is None
-    assert parse_failure_row.prompt_version == "v2"
+    assert parse_failure_row.prompt_version == "v3"
     assert parse_failure_row.course_id == course_id
 
 
@@ -251,8 +251,8 @@ def test_regenerate_cards_preserves_review_state_for_unchanged_cards(client, ing
 
     session = get_session()
     try:
-        assert session.get(ReviewState, keep_card["id"]) is not None
-        assert session.get(ReviewState, change_card["id"]) is not None
+        assert session.query(ReviewState).filter_by(card_id=keep_card["id"]).one_or_none() is not None
+        assert session.query(ReviewState).filter_by(card_id=change_card["id"]).one_or_none() is not None
     finally:
         session.close()
 
@@ -282,8 +282,8 @@ def test_regenerate_cards_preserves_review_state_for_unchanged_cards(client, ing
 
     session = get_session()
     try:
-        assert session.get(ReviewState, keep_card["id"]) is not None  # survived
-        assert session.get(ReviewState, change_card["id"]) is None  # cascaded away with the old card
+        assert session.query(ReviewState).filter_by(card_id=keep_card["id"]).one_or_none() is not None  # survived
+        assert session.query(ReviewState).filter_by(card_id=change_card["id"]).one_or_none() is None  # cascaded away with the old card
     finally:
         session.close()
 
@@ -406,6 +406,6 @@ def test_regenerate_cards_skips_insert_when_id_collides_with_user_card(client, i
 
     session = get_session()
     try:
-        assert session.get(ReviewState, converged_card_id) is not None  # the user's grade survived
+        assert session.query(ReviewState).filter_by(card_id=converged_card_id).one_or_none() is not None  # the user's grade survived
     finally:
         session.close()

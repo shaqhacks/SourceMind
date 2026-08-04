@@ -1023,3 +1023,21 @@ avoiding a fourth LLM-call site or a second deterministic tagging pass for
 a feature whose section-level granularity already suffices for the mastery
 signal it feeds. No `_EXTRACTOR_ALGO_VERSION` bump — nothing in
 extraction/outline changed this round.
+
+## ADR-028 — Evidence-led learner model supersedes read-time mastery (2026-08-02)
+
+ADR-027's learner-scoring, section-attribution, blocking, and deferred item-tagging decisions are superseded. Its stable `Concept`, graph-import, and topological-layout decisions remain valid as a legacy import surface.
+
+SourceMind now separates four boundaries: a versioned curriculum of stable concepts and observable learning claims; immutable assessment/card snapshots with explicit claim mappings; an append-only, learner- and course-scoped evidence ledger; and rebuildable learner-state projections. Historical section-level quiz/card data remains `legacy_unmapped` and cannot contribute trusted negative evidence. Every new generated quiz, practice question, and card is claim-first and source-grounded.
+
+The learner-facing estimate is `readiness_estimate`, not proven mastery. Missing or insufficient evidence stays nullable and is labeled `insufficient_evidence`; it is never displayed as zero. Quiz/application and review/recall estimates remain visible separately. Structural prerequisite relations may produce a `review_suggested` edge, but never lock navigation or claim that a prerequisite caused the learner's difficulty. The UI recommends a concept only when the projection has enough evidence, and it explains that the recommendation is an inference from observed answers.
+
+The transparent Bayesian baseline (`transparent-beta-v1`) is the initial read and scheduling authority. BKT, PFA, and DAS3H-style challengers consume the same time-ordered evidence snapshot and store immutable shadow predictions. Promotion is prospective only: a challenger must pass documented minimum-data, calibration, delayed-prediction, stability, subgroup, interpretability, and rollback gates. Historical `ConceptMastery` and `ConceptMasteryEvent` tables are retained for migration compatibility, but production grading no longer writes them and no learner estimate reads them.
+
+Adaptive study chooses a concept before an item, preserves due-card obligations, mixes cards with concept-linked questions, varies items, and caps remediation so other concepts are not starved. Active retention-study controls suppress targeted-remediation boosts; future and treatment-used probe items cannot leak into the queue. Delayed, preferably unseen probes are the primary outcome for intervention validation.
+
+Instructor review is part of the validity argument, not ground truth. Curriculum candidates and item mappings are reviewable and versioned. Diagnostic validation is blinded until an instructor judgment is recorded; disagreements require a post-reveal reason before aggregation. Reports include raw and chance-adjusted agreement and remain insufficient-sample until their configured floor is met.
+
+The first release uses one persistent local learner identity with a distinct `CourseLearningProfile` per course. This repairs cross-surface isolation without implying remote authentication or classroom authorization. Any remote or multi-tenant deployment requires a separate authorization project before instructor and learner data are exposed.
+
+Research basis and validation limits are recorded in `sources/research_student_learning_diagnostic_system_2026-08-02.md`; the operational pilot and model-promotion gates are in `docs/validation/student-learning-model-pilot.md`.

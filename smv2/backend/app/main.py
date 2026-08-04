@@ -18,6 +18,8 @@ from app.routers import (
     chapters,
     chat,
     courses,
+    curriculum,
+    diagnostic_validation,
     export,
     health,
     highlights,
@@ -29,8 +31,10 @@ from app.routers import (
     llm_usage,
     practice,
     review,
+    retention_studies,
     sections,
     skills,
+    study,
     tests,
 )
 from app.services import jobs_service
@@ -77,6 +81,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(jobs.router)
     app.include_router(courses.router)
+    app.include_router(curriculum.router)
+    app.include_router(diagnostic_validation.router)
     app.include_router(assets.router)
     app.include_router(assets.asset_router)
     app.include_router(ingest.router)
@@ -93,8 +99,10 @@ def create_app() -> FastAPI:
     app.include_router(llm_usage.router)
     app.include_router(cards.router)
     app.include_router(review.router)
+    app.include_router(retention_studies.router)
     app.include_router(practice.router)
     app.include_router(skills.router)
+    app.include_router(study.router)
     app.include_router(tests.router)
     app.include_router(chat.router)
 

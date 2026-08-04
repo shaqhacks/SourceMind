@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CourseReader from "@/components/reader/CourseReader";
 import {
+  deleteHighlight,
   editOutline,
   findActiveCardsJob,
   findActiveLessonJob,
@@ -17,6 +18,7 @@ import {
   listHighlights,
   listSections,
   saveProgress,
+  updateHighlight,
 } from "@/lib/api/client";
 import type { ReaderCourse, ReaderProgress } from "@/lib/reader/types";
 
@@ -81,6 +83,8 @@ const mockedListChapters = vi.mocked(listChapters);
 const mockedGetDocument = vi.mocked(getDocument);
 const mockedListAssets = vi.mocked(listAssets);
 const mockedListHighlights = vi.mocked(listHighlights);
+const mockedUpdateHighlight = vi.mocked(updateHighlight);
+const mockedDeleteHighlight = vi.mocked(deleteHighlight);
 
 // A minimal 3-section fixture keeps these assertions about
 // active-chapter bookkeeping (not content) easy to follow.
@@ -137,6 +141,24 @@ const BODIES: Record<string, string> = {
 };
 
 const NO_PROGRESS: ReaderProgress = { section_id: null, scroll_pos: 0 };
+
+function selectPhrase(root: HTMLElement, phrase: string): void {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node: Text | null;
+  while ((node = walker.nextNode() as Text | null)) {
+    const index = node.data.indexOf(phrase);
+    if (index === -1) continue;
+
+    const range = document.createRange();
+    range.setStart(node, index);
+    range.setEnd(node, index + phrase.length);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return;
+  }
+  throw new Error(`phrase not found: ${phrase}`);
+}
 
 describe("CourseReader", () => {
   beforeEach(() => {
@@ -279,6 +301,24 @@ describe("CourseReader", () => {
     await user.click(screen.getByRole("button", { name: /chapter three/i }));
 
     expect(screen.getByRole("heading", { level: 2, name: /chapter three/i })).toHaveFocus();
+  });
+
+  it("disposes section-local annotation UI when navigating to another chapter", async () => {
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    const firstBody = await screen.findByText(/first body/i);
+
+    selectPhrase(firstBody, "First body.");
+    fireEvent.mouseUp(firstBody);
+    expect(await screen.findByRole("dialog", { name: "Selection actions" })).toBeInTheDocument();
+
+    const outline = screen.getByRole("navigation", { name: "Chapter outline" });
+    await user.click(within(outline).getByRole("button", { name: /chapter two/i }));
+
+    expect(await screen.findByText(/second body/i)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Selection actions" })).not.toBeInTheDocument();
+    expect(mockedUpdateHighlight).not.toHaveBeenCalled();
+    expect(mockedDeleteHighlight).not.toHaveBeenCalled();
   });
 
   it("opens the shortcuts overlay with '?' and suppresses chapter navigation while it's open", async () => {

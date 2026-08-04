@@ -191,7 +191,7 @@ def test_reingest_mid_write_failure_rolls_back_fully_intact(client, ingest_cours
     session = get_session()
     try:
         assert session.get(Card, card.id) is not None
-        assert session.get(ReviewState, card.id) is not None
+        assert session.query(ReviewState).filter_by(card_id=card.id).one_or_none() is not None
     finally:
         session.close()
 

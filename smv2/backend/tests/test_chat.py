@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import httpx
+import uuid
+from fastapi.testclient import TestClient
 
 from app.db.engine import get_session
-from app.db.models import ChatTurn, Chunk
+from app.db.models import ChatTurn, Chunk, Section, Test, TestAttempt
 from app.llm.limiter import LLMBusyError
 from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, CompletionResult, ProviderNotConfiguredError
+from app.main import create_app
+from app.services.learner_context import ensure_course_learning_profile
 
 
 def test_send_chat_happy_path_with_citations(client, ingest_course, stub_provider):
@@ -115,6 +119,68 @@ def test_send_chat_injects_study_suggestions_for_an_unopened_course(client, inge
     sent_content = stub_provider.received_messages[-1][-1]["content"]
     assert "<study_suggestions>" in sent_content
     assert "not started yet" in sent_content
+
+
+def test_send_chat_injects_only_requesting_learners_test_state(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    learner_a = str(uuid.uuid4())
+    learner_b = str(uuid.uuid4())
+    session = get_session()
+    try:
+        chapter_label = next(
+            label
+            for (label,) in session.query(Section.chapter_label)
+            .filter(Section.course_id == course_id, Section.chapter_label.isnot(None))
+            .all()
+        )
+        test = Test(
+            course_id=course_id,
+            chapter_label=chapter_label,
+            questions=[{"question": "Q"}],
+        )
+        session.add(test)
+        session.flush()
+        profile_a = ensure_course_learning_profile(session, learner_a, course_id)
+        profile_b = ensure_course_learning_profile(session, learner_b, course_id)
+        session.add_all(
+            [
+                TestAttempt(
+                    test_id=test.id,
+                    course_id=course_id,
+                    course_learning_profile_id=profile_a.id,
+                    score=0.25,
+                ),
+                TestAttempt(
+                    test_id=test.id,
+                    course_id=course_id,
+                    course_learning_profile_id=profile_b.id,
+                    score=1.0,
+                ),
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    stub_provider.responses = [
+        CompletionResult(text="Reply.", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(text="Reply.", input_tokens=1, output_tokens=1, model="stub-model"),
+    ]
+    client.cookies.set("smv2_learner", learner_a)
+    first = client.post(f"/api/courses/{course_id}/chat", json={"message": chapter_label})
+    with TestClient(create_app(), cookies={"smv2_learner": learner_b}) as other_learner:
+        second = other_learner.post(
+            f"/api/courses/{course_id}/chat", json={"message": chapter_label}
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_prompt = stub_provider.received_messages[-2][-1]["content"]
+    second_prompt = stub_provider.received_messages[-1][-1]["content"]
+    assert "best test score 25%" in first_prompt
+    assert "best test score 100%" in second_prompt
 
 
 def test_send_chat_omits_learner_state_and_suggestions_when_course_has_no_chapters(

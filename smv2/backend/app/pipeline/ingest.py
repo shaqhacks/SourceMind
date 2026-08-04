@@ -40,11 +40,11 @@ from app.db.models import (
     Asset,
     ChatTurn,
     Chunk,
-    Concept,
     ConceptEdge,
     ConceptMastery,
     ConceptMasteryEvent,
     ConceptSectionLink,
+    ConceptSourceLink,
     Course,
     Highlight,
     Job,
@@ -400,6 +400,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
         s.id: s for s in session.query(Section).filter(Section.course_id == course_id).all()
     }
     new_ids = {s["id"] for s in new_sections}
+    removed_section_ids = set(existing_sections) - new_ids
 
     # Course-scoped, non-diffable derived history does not survive re-ingest
     # (per the derived-tables registry). Review state / progress survive
@@ -423,14 +424,21 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     session.query(PracticeExtractionRun).filter(
         PracticeExtractionRun.course_id == course_id
     ).delete()
-    # ConceptEdge/ConceptSectionLink before Concept: both FK to concepts.id
-    # ON DELETE CASCADE, so deleting Concept first would already remove
-    # these via the DB itself, but every REPLACED table gets its own
-    # explicit delete here regardless (ADR-022), same rationale as
-    # TestAttempt before Test above.
+    # Legacy derived graph links are regenerated, but stable Concept anchors
+    # are retained by the versioned curriculum layer below.
     session.query(ConceptEdge).filter(ConceptEdge.course_id == course_id).delete()
     session.query(ConceptSectionLink).filter(ConceptSectionLink.course_id == course_id).delete()
-    session.query(Concept).filter(Concept.course_id == course_id).delete()
+    # Stable curriculum anchors and published versions survive re-ingest.
+    # Their exact historical source attribution must not silently jump to a
+    # newly generated section, so links to removed content are marked stale;
+    # the section FK becomes NULL via ON DELETE SET NULL below while the
+    # source reference, excerpt, and content hash remain auditable.
+    if removed_section_ids:
+        (
+            session.query(ConceptSourceLink)
+            .filter(ConceptSourceLink.section_id.in_(removed_section_ids))
+            .update({ConceptSourceLink.stale: True}, synchronize_session=False)
+        )
 
     for existing_id, existing in list(existing_sections.items()):
         if existing_id not in new_ids:

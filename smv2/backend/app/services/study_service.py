@@ -23,9 +23,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import and_
+
 from app.db.engine import get_session
-from app.db.models import Card, ProgressState, ReviewState, ensure_utc, utcnow
+from app.db.models import (
+    Card,
+    CourseLearningProfile,
+    ProgressState,
+    ReviewState,
+    ensure_utc,
+    utcnow,
+)
 from app.services.chapters_service import get_chapters
+from app.services.learner_context import LEGACY_LOCAL_LEARNER_ID
 
 # A chapter's best graded score below this reads as "not mastered yet" —
 # a C-/D-range cutoff, not a passing/failing line the owner specified.
@@ -47,26 +57,49 @@ _STALE_PRIORITY_WEIGHT = 1.0
 _NEUTRAL_SCORE_NORM = 0.5
 
 
-def _due_card_count(session, section_ids: list[str], now) -> int:
+def _due_card_count(
+    session, section_ids: list[str], course_profile_id: str | None, now
+) -> int:
     if not section_ids:
         return 0
+    if course_profile_id is None:
+        return session.query(Card).filter(Card.section_id.in_(section_ids)).count()
     return (
         session.query(Card)
-        .outerjoin(ReviewState, ReviewState.card_id == Card.id)
+        .outerjoin(
+            ReviewState,
+            and_(
+                ReviewState.card_id == Card.id,
+                ReviewState.course_learning_profile_id == course_profile_id,
+            ),
+        )
         .filter(Card.section_id.in_(section_ids))
         .filter((ReviewState.due_at.is_(None)) | (ReviewState.due_at <= now))
         .count()
     )
 
 
-def study_next(course_id: str, limit: int = 3) -> list[dict[str, Any]]:
+def study_next(
+    course_id: str,
+    limit: int = 3,
+    learner_id: str = LEGACY_LOCAL_LEARNER_ID,
+) -> list[dict[str, Any]]:
     session = get_session()
     try:
         now = utcnow()
+        course_profile_id = (
+            session.query(CourseLearningProfile.id)
+            .filter_by(learner_id=learner_id, course_id=course_id)
+            .scalar()
+        )
         # Real chapters only — the None-labeled "front matter" group
         # (chapters_service's own client-side "Front matter" bucket) isn't
         # a chapter a learner can be meaningfully pointed at to study.
-        chapters = [c for c in get_chapters(course_id) if c["chapter_label"] is not None]
+        chapters = [
+            c
+            for c in get_chapters(course_id, learner_id=learner_id)
+            if c["chapter_label"] is not None
+        ]
 
         suggested: set[str] = set()
         ordered: list[dict[str, Any]] = []
@@ -99,7 +132,7 @@ def study_next(course_id: str, limit: int = 3) -> list[dict[str, Any]]:
             if c["chapter_label"] in suggested:
                 continue
             section_ids = c["section_ids"] + c["practice_section_ids"]
-            due_count = _due_card_count(session, section_ids, now)
+            due_count = _due_card_count(session, section_ids, course_profile_id, now)
             if due_count >= _MIN_DUE_CARDS_FOR_SUGGESTION:
                 due_candidates.append((c, due_count))
         due_candidates.sort(key=lambda pair: -pair[1])

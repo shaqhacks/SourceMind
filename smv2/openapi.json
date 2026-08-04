@@ -1,6 +1,104 @@
 {
   "components": {
     "schemas": {
+      "AdaptiveStudyActivityOut": {
+        "properties": {
+          "activity_id": {
+            "title": "Activity Id",
+            "type": "string"
+          },
+          "activity_type": {
+            "enum": [
+              "flashcard",
+              "question"
+            ],
+            "title": "Activity Type",
+            "type": "string"
+          },
+          "concept_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concept Id"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "learning_claim_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning Claim Id"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "readiness_state": {
+            "title": "Readiness State",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "targeted_remediation",
+              "evidence_exploration",
+              "due_review",
+              "forgetting_risk",
+              "retention_probe"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activity_type",
+          "activity_id",
+          "concept_id",
+          "learning_claim_id",
+          "reason",
+          "readiness_state",
+          "due_at",
+          "payload"
+        ],
+        "title": "AdaptiveStudyActivityOut",
+        "type": "object"
+      },
+      "AdaptiveStudyQueueOut": {
+        "properties": {
+          "activities": {
+            "items": {
+              "$ref": "#/components/schemas/AdaptiveStudyActivityOut"
+            },
+            "title": "Activities",
+            "type": "array"
+          }
+        },
+        "required": [
+          "activities"
+        ],
+        "title": "AdaptiveStudyQueueOut",
+        "type": "object"
+      },
       "AssetOut": {
         "properties": {
           "content_type": {
@@ -486,6 +584,665 @@
         "title": "CourseReviewSummaryOut",
         "type": "object"
       },
+      "CurriculumClaimEditIn": {
+        "properties": {
+          "aliases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aliases"
+          },
+          "cognitive_demand": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cognitive Demand"
+          },
+          "concept_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concept Id"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "review_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unverified",
+                  "verified",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review State"
+          },
+          "statement": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statement"
+          },
+          "success_criteria_md": {
+            "anyOf": [
+              {
+                "maxLength": 10000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success Criteria Md"
+          }
+        },
+        "title": "CurriculumClaimEditIn",
+        "type": "object"
+      },
+      "CurriculumClaimOut": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "cognitive_demand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cognitive Demand"
+          },
+          "concept_id": {
+            "title": "Concept Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "review_state": {
+            "title": "Review State",
+            "type": "string"
+          },
+          "stable_key": {
+            "title": "Stable Key",
+            "type": "string"
+          },
+          "statement": {
+            "title": "Statement",
+            "type": "string"
+          },
+          "success_criteria_md": {
+            "title": "Success Criteria Md",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "stable_key",
+          "concept_id",
+          "statement",
+          "success_criteria_md",
+          "aliases",
+          "cognitive_demand",
+          "review_state",
+          "is_active"
+        ],
+        "title": "CurriculumClaimOut",
+        "type": "object"
+      },
+      "CurriculumConceptEditIn": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Aliases",
+            "type": "array"
+          },
+          "chapter_label": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
+          "description_md": {
+            "maxLength": 20000,
+            "title": "Description Md",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "description_md"
+        ],
+        "title": "CurriculumConceptEditIn",
+        "type": "object"
+      },
+      "CurriculumConceptOut": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
+          "description_md": {
+            "title": "Description Md",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "review_state": {
+            "title": "Review State",
+            "type": "string"
+          },
+          "stable_key": {
+            "title": "Stable Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "stable_key",
+          "label",
+          "description_md",
+          "aliases",
+          "chapter_label",
+          "review_state",
+          "is_active"
+        ],
+        "title": "CurriculumConceptOut",
+        "type": "object"
+      },
+      "CurriculumDraftIn": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "title": "CurriculumDraftIn",
+        "type": "object"
+      },
+      "CurriculumDraftOut": {
+        "properties": {
+          "curriculum_version_id": {
+            "title": "Curriculum Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "curriculum_version_id"
+        ],
+        "title": "CurriculumDraftOut",
+        "type": "object"
+      },
+      "CurriculumExtractionOut": {
+        "properties": {
+          "curriculum_version_id": {
+            "title": "Curriculum Version Id",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "curriculum_version_id"
+        ],
+        "title": "CurriculumExtractionOut",
+        "type": "object"
+      },
+      "CurriculumMergeIn": {
+        "properties": {
+          "source_concept_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Source Concept Ids",
+            "type": "array"
+          },
+          "target_concept_id": {
+            "title": "Target Concept Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_concept_ids",
+          "target_concept_id"
+        ],
+        "title": "CurriculumMergeIn",
+        "type": "object"
+      },
+      "CurriculumRelationOut": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "external_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Ref"
+          },
+          "from_concept_id": {
+            "title": "From Concept Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "rationale_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale Md"
+          },
+          "review_state": {
+            "title": "Review State",
+            "type": "string"
+          },
+          "to_concept_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Concept Id"
+          }
+        },
+        "required": [
+          "id",
+          "from_concept_id",
+          "to_concept_id",
+          "kind",
+          "external_ref",
+          "confidence",
+          "rationale_md",
+          "review_state"
+        ],
+        "title": "CurriculumRelationOut",
+        "type": "object"
+      },
+      "CurriculumSourceOut": {
+        "properties": {
+          "concept_id": {
+            "title": "Concept Id",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "excerpt_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excerpt Md"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "learning_claim_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learning Claim Id"
+          },
+          "rationale_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale Md"
+          },
+          "review_state": {
+            "title": "Review State",
+            "type": "string"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "source_content_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Content Hash"
+          },
+          "source_ref": {
+            "title": "Source Ref",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "concept_id",
+          "learning_claim_id",
+          "section_id",
+          "source_ref",
+          "excerpt_md",
+          "source_content_hash",
+          "confidence",
+          "rationale_md",
+          "review_state",
+          "stale"
+        ],
+        "title": "CurriculumSourceOut",
+        "type": "object"
+      },
+      "CurriculumSplitChildIn": {
+        "properties": {
+          "description_md": {
+            "default": "",
+            "maxLength": 20000,
+            "title": "Description Md",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "stable_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Stable Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stable_key",
+          "label"
+        ],
+        "title": "CurriculumSplitChildIn",
+        "type": "object"
+      },
+      "CurriculumSplitIn": {
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/CurriculumSplitChildIn"
+            },
+            "maxItems": 20,
+            "minItems": 2,
+            "title": "Children",
+            "type": "array"
+          }
+        },
+        "required": [
+          "children"
+        ],
+        "title": "CurriculumSplitIn",
+        "type": "object"
+      },
+      "CurriculumVersionOut": {
+        "properties": {
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/CurriculumClaimOut"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "concepts": {
+            "items": {
+              "$ref": "#/components/schemas/CurriculumConceptOut"
+            },
+            "title": "Concepts",
+            "type": "array"
+          },
+          "course_id": {
+            "title": "Course Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_current": {
+            "title": "Is Current",
+            "type": "boolean"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "parent_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Version Id"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "relations": {
+            "items": {
+              "$ref": "#/components/schemas/CurriculumRelationOut"
+            },
+            "title": "Relations",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/CurriculumSourceOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "course_id",
+          "parent_version_id",
+          "status",
+          "is_current",
+          "label",
+          "created_at",
+          "published_at",
+          "concepts",
+          "claims",
+          "relations",
+          "sources"
+        ],
+        "title": "CurriculumVersionOut",
+        "type": "object"
+      },
       "DeleteOp": {
         "properties": {
           "section_id": {
@@ -503,6 +1260,370 @@
           "section_id"
         ],
         "title": "DeleteOp",
+        "type": "object"
+      },
+      "DiagnosticBlindCaseOut": {
+        "properties": {
+          "concept_description_md": {
+            "title": "Concept Description Md",
+            "type": "string"
+          },
+          "concept_id": {
+            "title": "Concept Id",
+            "type": "string"
+          },
+          "concept_label": {
+            "title": "Concept Label",
+            "type": "string"
+          },
+          "evidence_available": {
+            "title": "Evidence Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "concept_id",
+          "concept_label",
+          "concept_description_md",
+          "evidence_available"
+        ],
+        "title": "DiagnosticBlindCaseOut",
+        "type": "object"
+      },
+      "DiagnosticDisagreementReasonIn": {
+        "properties": {
+          "disagreement_reason": {
+            "enum": [
+              "model_estimate",
+              "item_mapping",
+              "concept_granularity",
+              "insufficient_student_evidence",
+              "instructor_disagreement"
+            ],
+            "title": "Disagreement Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "disagreement_reason"
+        ],
+        "title": "DiagnosticDisagreementReasonIn",
+        "type": "object"
+      },
+      "DiagnosticJudgmentIn": {
+        "properties": {
+          "concept_id": {
+            "title": "Concept Id",
+            "type": "string"
+          },
+          "disagreement_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "model_estimate",
+                  "item_mapping",
+                  "concept_granularity",
+                  "insufficient_student_evidence",
+                  "instructor_disagreement"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disagreement Reason"
+          },
+          "judgment": {
+            "enum": [
+              "insufficient",
+              "not_struggling",
+              "uncertain",
+              "likely_struggling"
+            ],
+            "title": "Judgment",
+            "type": "string"
+          },
+          "notes_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes Md"
+          }
+        },
+        "required": [
+          "concept_id",
+          "judgment"
+        ],
+        "title": "DiagnosticJudgmentIn",
+        "type": "object"
+      },
+      "DiagnosticJudgmentOut": {
+        "properties": {
+          "agreement": {
+            "title": "Agreement",
+            "type": "boolean"
+          },
+          "concept_id": {
+            "title": "Concept Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "disagreement_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disagreement Reason"
+          },
+          "evidence_count": {
+            "title": "Evidence Count",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "judgment": {
+            "title": "Judgment",
+            "type": "string"
+          },
+          "model_state": {
+            "title": "Model State",
+            "type": "string"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "readiness_estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readiness Estimate"
+          },
+          "requires_disagreement_reason": {
+            "readOnly": true,
+            "title": "Requires Disagreement Reason",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "concept_id",
+          "judgment",
+          "disagreement_reason",
+          "model_state",
+          "readiness_estimate",
+          "evidence_count",
+          "model_version",
+          "agreement",
+          "created_at",
+          "requires_disagreement_reason"
+        ],
+        "title": "DiagnosticJudgmentOut",
+        "type": "object"
+      },
+      "DiagnosticValidationSummaryOut": {
+        "properties": {
+          "agreement_count": {
+            "title": "Agreement Count",
+            "type": "integer"
+          },
+          "chance_adjusted_agreement": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chance Adjusted Agreement"
+          },
+          "disagreement_reasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Disagreement Reasons",
+            "type": "object"
+          },
+          "disagreements_by_concept": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Disagreements By Concept",
+            "type": "object"
+          },
+          "pending_reason_count": {
+            "title": "Pending Reason Count",
+            "type": "integer"
+          },
+          "raw_agreement": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Agreement"
+          },
+          "sample_size": {
+            "title": "Sample Size",
+            "type": "integer"
+          },
+          "sufficient_sample": {
+            "title": "Sufficient Sample",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sample_size",
+          "agreement_count",
+          "raw_agreement",
+          "chance_adjusted_agreement",
+          "sufficient_sample",
+          "pending_reason_count",
+          "disagreement_reasons",
+          "disagreements_by_concept"
+        ],
+        "title": "DiagnosticValidationSummaryOut",
+        "type": "object"
+      },
+      "EvidenceMappingReviewIn": {
+        "properties": {
+          "review_state": {
+            "enum": [
+              "verified",
+              "rejected"
+            ],
+            "title": "Review State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_state"
+        ],
+        "title": "EvidenceMappingReviewIn",
+        "type": "object"
+      },
+      "EvidenceMappingReviewOut": {
+        "properties": {
+          "claim_statement": {
+            "title": "Claim Statement",
+            "type": "string"
+          },
+          "cognitive_demand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cognitive Demand"
+          },
+          "concept_id": {
+            "title": "Concept Id",
+            "type": "string"
+          },
+          "concept_label": {
+            "title": "Concept Label",
+            "type": "string"
+          },
+          "evidence_item_id": {
+            "title": "Evidence Item Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "item_preview": {
+            "title": "Item Preview",
+            "type": "string"
+          },
+          "item_type": {
+            "title": "Item Type",
+            "type": "string"
+          },
+          "learning_claim_id": {
+            "title": "Learning Claim Id",
+            "type": "string"
+          },
+          "mapping_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Confidence"
+          },
+          "review_state": {
+            "title": "Review State",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ref"
+          },
+          "task_type": {
+            "title": "Task Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "evidence_item_id",
+          "item_type",
+          "item_preview",
+          "concept_id",
+          "concept_label",
+          "learning_claim_id",
+          "claim_statement",
+          "role",
+          "task_type",
+          "cognitive_demand",
+          "mapping_confidence",
+          "review_state",
+          "source_ref"
+        ],
+        "title": "EvidenceMappingReviewOut",
         "type": "object"
       },
       "GenerateAllLessonsOut": {
@@ -1239,17 +2360,28 @@
             "title": "Correct Index",
             "type": "integer"
           },
+          "evidence_count": {
+            "title": "Evidence Count",
+            "type": "integer"
+          },
+          "evidence_state": {
+            "title": "Evidence State",
+            "type": "string"
+          },
           "explanation_md": {
             "title": "Explanation Md",
             "type": "string"
           },
-          "mastery_points": {
-            "title": "Mastery Points",
-            "type": "integer"
-          },
-          "points_delta": {
-            "title": "Points Delta",
-            "type": "integer"
+          "readiness_estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readiness Estimate"
           },
           "selected_index": {
             "title": "Selected Index",
@@ -1261,8 +2393,9 @@
           "correct",
           "correct_index",
           "explanation_md",
-          "points_delta",
-          "mastery_points",
+          "readiness_estimate",
+          "evidence_state",
+          "evidence_count",
           "answered_at"
         ],
         "title": "PracticeAnsweredOut",
@@ -1509,6 +2642,24 @@
         "title": "ProgressSummary",
         "type": "object"
       },
+      "RelationReviewIn": {
+        "properties": {
+          "review_state": {
+            "enum": [
+              "unverified",
+              "verified",
+              "rejected"
+            ],
+            "title": "Review State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_state"
+        ],
+        "title": "RelationReviewIn",
+        "type": "object"
+      },
       "RenameOp": {
         "properties": {
           "section_id": {
@@ -1566,6 +2717,212 @@
           "attempt_id"
         ],
         "title": "RetakeTestOut",
+        "type": "object"
+      },
+      "RetentionAssignmentIn": {
+        "properties": {
+          "concept_id": {
+            "title": "Concept Id",
+            "type": "string"
+          },
+          "workload_target": {
+            "default": 12,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Workload Target",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "concept_id"
+        ],
+        "title": "RetentionAssignmentIn",
+        "type": "object"
+      },
+      "RetentionAssignmentOut": {
+        "properties": {
+          "assigned_at": {
+            "format": "date-time",
+            "title": "Assigned At",
+            "type": "string"
+          },
+          "concept_id": {
+            "title": "Concept Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "study_group": {
+            "title": "Study Group",
+            "type": "string"
+          },
+          "study_id": {
+            "title": "Study Id",
+            "type": "string"
+          },
+          "workload_target": {
+            "title": "Workload Target",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "study_id",
+          "concept_id",
+          "study_group",
+          "workload_target",
+          "assigned_at"
+        ],
+        "title": "RetentionAssignmentOut",
+        "type": "object"
+      },
+      "RetentionProbeIn": {
+        "properties": {
+          "learning_claim_id": {
+            "title": "Learning Claim Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "learning_claim_id"
+        ],
+        "title": "RetentionProbeIn",
+        "type": "object"
+      },
+      "RetentionProbeOut": {
+        "properties": {
+          "assignment_id": {
+            "title": "Assignment Id",
+            "type": "string"
+          },
+          "evidence_item_id": {
+            "title": "Evidence Item Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "learning_claim_id": {
+            "title": "Learning Claim Id",
+            "type": "string"
+          },
+          "scheduled_for": {
+            "format": "date-time",
+            "title": "Scheduled For",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "assignment_id",
+          "evidence_item_id",
+          "learning_claim_id",
+          "scheduled_for",
+          "status"
+        ],
+        "title": "RetentionProbeOut",
+        "type": "object"
+      },
+      "RetentionStudyIn": {
+        "properties": {
+          "assignment_seed": {
+            "title": "Assignment Seed",
+            "type": "string"
+          },
+          "delay_end_days": {
+            "default": 14,
+            "minimum": 1.0,
+            "title": "Delay End Days",
+            "type": "integer"
+          },
+          "delay_start_days": {
+            "default": 7,
+            "minimum": 1.0,
+            "title": "Delay Start Days",
+            "type": "integer"
+          },
+          "minimum_per_group": {
+            "default": 20,
+            "minimum": 1.0,
+            "title": "Minimum Per Group",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "assignment_seed"
+        ],
+        "title": "RetentionStudyIn",
+        "type": "object"
+      },
+      "RetentionStudyOut": {
+        "properties": {
+          "assignment_seed": {
+            "title": "Assignment Seed",
+            "type": "string"
+          },
+          "course_id": {
+            "title": "Course Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delay_end_days": {
+            "title": "Delay End Days",
+            "type": "integer"
+          },
+          "delay_start_days": {
+            "title": "Delay Start Days",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "minimum_per_group": {
+            "title": "Minimum Per Group",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "protocol_version": {
+            "title": "Protocol Version",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "course_id",
+          "name",
+          "status",
+          "assignment_seed",
+          "protocol_version",
+          "delay_start_days",
+          "delay_end_days",
+          "minimum_per_group",
+          "created_at"
+        ],
+        "title": "RetentionStudyOut",
         "type": "object"
       },
       "ReviewQueueCardOut": {
@@ -1957,26 +3314,9 @@
       },
       "SkillDetailOut": {
         "properties": {
-          "blocked_skill_labels": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Blocked Skill Labels",
-            "type": "array"
-          },
           "cards_count": {
             "title": "Cards Count",
             "type": "integer"
-          },
-          "fix_plan": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SkillFixPlanOut"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "missed_questions": {
             "items": {
@@ -2008,11 +3348,9 @@
           "node",
           "taught_in",
           "missed_questions",
-          "blocked_skill_labels",
           "cards_count",
           "quiz_correct",
-          "quiz_wrong",
-          "fix_plan"
+          "quiz_wrong"
         ],
         "title": "SkillDetailOut",
         "type": "object"
@@ -2038,36 +3376,6 @@
           "kind"
         ],
         "title": "SkillEdgeOut",
-        "type": "object"
-      },
-      "SkillFixPlanOut": {
-        "properties": {
-          "prereq_id": {
-            "title": "Prereq Id",
-            "type": "string"
-          },
-          "prereq_label": {
-            "title": "Prereq Label",
-            "type": "string"
-          },
-          "section_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Section Id"
-          }
-        },
-        "required": [
-          "prereq_id",
-          "prereq_label",
-          "section_id"
-        ],
-        "title": "SkillFixPlanOut",
         "type": "object"
       },
       "SkillGraphConceptIn": {
@@ -2266,9 +3574,60 @@
       },
       "SkillNodeOut": {
         "properties": {
-          "blocked": {
-            "title": "Blocked",
-            "type": "boolean"
+          "distinct_item_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distinct Item Count"
+          },
+          "distinct_session_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distinct Session Count"
+          },
+          "effective_evidence_count": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Evidence Count"
+          },
+          "evidence_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence State"
+          },
+          "forgetting_risk": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forgetting Risk"
           },
           "id": {
             "title": "Id",
@@ -2278,13 +3637,76 @@
             "title": "Label",
             "type": "string"
           },
+          "last_evidence_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Evidence At"
+          },
           "level": {
             "title": "Level",
             "type": "integer"
           },
-          "mastery": {
-            "title": "Mastery",
-            "type": "integer"
+          "posterior_lower": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posterior Lower"
+          },
+          "posterior_upper": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posterior Upper"
+          },
+          "quiz_estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quiz Estimate"
+          },
+          "readiness_estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readiness Estimate"
+          },
+          "review_estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Estimate"
           },
           "slug": {
             "title": "Slug",
@@ -2294,7 +3716,7 @@
             "title": "Status",
             "type": "string"
           },
-          "unlock_note": {
+          "trend": {
             "anyOf": [
               {
                 "type": "string"
@@ -2303,7 +3725,18 @@
                 "type": "null"
               }
             ],
-            "title": "Unlock Note"
+            "title": "Trend"
+          },
+          "uncertainty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertainty"
           }
         },
         "required": [
@@ -2311,9 +3744,7 @@
           "slug",
           "label",
           "level",
-          "mastery",
-          "status",
-          "blocked"
+          "status"
         ],
         "title": "SkillNodeOut",
         "type": "object"
@@ -2389,6 +3820,51 @@
         "title": "SplitOp",
         "type": "object"
       },
+      "StandardAlignmentIn": {
+        "properties": {
+          "concept_id": {
+            "title": "Concept Id",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "external_ref": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "External Ref",
+            "type": "string"
+          },
+          "rationale_md": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale Md"
+          }
+        },
+        "required": [
+          "concept_id",
+          "external_ref"
+        ],
+        "title": "StandardAlignmentIn",
+        "type": "object"
+      },
       "StudyNextItemOut": {
         "description": "One deterministic study suggestion (ADR-022, app.services.study_service).\n`detail` holds whatever raw numbers back `reason` \u2014 {\"best_score\":\n...} for low_test_score, {\"due_count\": ...} for due_cards, {} for\nunread, {\"days_since\": ...} for stale.",
         "properties": {
@@ -2457,21 +3933,32 @@
             "title": "Correct Index",
             "type": "integer"
           },
+          "evidence_count": {
+            "title": "Evidence Count",
+            "type": "integer"
+          },
+          "evidence_state": {
+            "title": "Evidence State",
+            "type": "string"
+          },
           "explanation_md": {
             "title": "Explanation Md",
             "type": "string"
           },
-          "mastery_points": {
-            "title": "Mastery Points",
-            "type": "integer"
-          },
-          "points_delta": {
-            "title": "Points Delta",
-            "type": "integer"
-          },
           "question_id": {
             "title": "Question Id",
             "type": "string"
+          },
+          "readiness_estimate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readiness Estimate"
           },
           "selected_index": {
             "title": "Selected Index",
@@ -2485,8 +3972,9 @@
           "correct_index",
           "explanation_md",
           "concept",
-          "points_delta",
-          "mastery_points",
+          "readiness_estimate",
+          "evidence_state",
+          "evidence_count",
           "already_answered"
         ],
         "title": "SubmitPracticeAnswerOut",
@@ -3503,6 +4991,407 @@
         ]
       }
     },
+    "/api/courses/{course_id}/curriculum": {
+      "get": {
+        "operationId": "get_curriculum_api_courses__course_id__curriculum_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "default": "current",
+              "enum": [
+                "current",
+                "draft"
+              ],
+              "title": "View",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurriculumVersionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Curriculum",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/curriculum/drafts": {
+      "post": {
+        "operationId": "create_curriculum_draft_api_courses__course_id__curriculum_drafts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurriculumDraftIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurriculumDraftOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Curriculum Draft",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/curriculum/extract": {
+      "post": {
+        "operationId": "start_curriculum_extraction_api_courses__course_id__curriculum_extract_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurriculumExtractionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Curriculum Extraction",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/curriculum/mappings": {
+      "get": {
+        "operationId": "list_evidence_mappings_api_courses__course_id__curriculum_mappings_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvidenceMappingReviewOut"
+                  },
+                  "title": "Response List Evidence Mappings Api Courses  Course Id  Curriculum Mappings Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Evidence Mappings",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/diagnostics/validation/judgments": {
+      "post": {
+        "operationId": "submit_diagnostic_judgment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiagnosticJudgmentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosticJudgmentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Diagnostic Judgment",
+        "tags": [
+          "diagnostic-validation"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/diagnostics/validation/judgments/{judgment_id}/reason": {
+      "patch": {
+        "operationId": "record_diagnostic_disagreement_reason",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "judgment_id",
+            "required": true,
+            "schema": {
+              "title": "Judgment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiagnosticDisagreementReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosticJudgmentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Diagnostic Disagreement Reason",
+        "tags": [
+          "diagnostic-validation"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/diagnostics/validation/next": {
+      "get": {
+        "operationId": "next_diagnostic_validation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DiagnosticBlindCaseOut"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Next Diagnostic Validation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Next Diagnostic Validation",
+        "tags": [
+          "diagnostic-validation"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/diagnostics/validation/summary": {
+      "get": {
+        "operationId": "diagnostic_validation_summary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosticValidationSummaryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diagnostic Validation Summary",
+        "tags": [
+          "diagnostic-validation"
+        ]
+      }
+    },
     "/api/courses/{course_id}/export": {
       "get": {
         "operationId": "export_course",
@@ -4077,6 +5966,189 @@
         ]
       }
     },
+    "/api/courses/{course_id}/retention-studies": {
+      "post": {
+        "operationId": "create_retention_study",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionStudyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionStudyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Retention Study",
+        "tags": [
+          "retention-studies"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/retention-studies/{study_id}/assignments": {
+      "post": {
+        "operationId": "create_retention_assignment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "study_id",
+            "required": true,
+            "schema": {
+              "title": "Study Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionAssignmentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionAssignmentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Retention Assignment",
+        "tags": [
+          "retention-studies"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/retention-studies/{study_id}/assignments/{assignment_id}/probes": {
+      "post": {
+        "operationId": "schedule_retention_probe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "study_id",
+            "required": true,
+            "schema": {
+              "title": "Study Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "schema": {
+              "title": "Assignment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetentionProbeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionProbeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Schedule Retention Probe",
+        "tags": [
+          "retention-studies"
+        ]
+      }
+    },
     "/api/courses/{course_id}/review/queue": {
       "get": {
         "operationId": "review_queue",
@@ -4468,6 +6540,111 @@
         ]
       }
     },
+    "/api/courses/{course_id}/study/concepts/{concept_id}/replenish": {
+      "post": {
+        "operationId": "replenish_concept_practice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "concept_id",
+            "required": true,
+            "schema": {
+              "title": "Concept Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replenish Concept Practice",
+        "tags": [
+          "study"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/study/queue": {
+      "get": {
+        "operationId": "adaptive_study_queue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdaptiveStudyQueueOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Adaptive Study Queue",
+        "tags": [
+          "study"
+        ]
+      }
+    },
     "/api/courses/{course_id}/tests": {
       "get": {
         "operationId": "list_tests",
@@ -4561,6 +6738,523 @@
         "summary": "Generate Test",
         "tags": [
           "tests"
+        ]
+      }
+    },
+    "/api/curriculum/mappings/{mapping_id}": {
+      "patch": {
+        "operationId": "review_evidence_mapping_api_curriculum_mappings__mapping_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mapping_id",
+            "required": true,
+            "schema": {
+              "title": "Mapping Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceMappingReviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceMappingReviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Evidence Mapping",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/curriculum/relations/{relation_id}": {
+      "patch": {
+        "operationId": "review_relation_api_curriculum_relations__relation_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "relation_id",
+            "required": true,
+            "schema": {
+              "title": "Relation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelationReviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Review Relation Api Curriculum Relations  Relation Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Relation",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/curriculum/{version_id}/claims/{claim_id}": {
+      "patch": {
+        "operationId": "edit_claim_api_curriculum__version_id__claims__claim_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "claim_id",
+            "required": true,
+            "schema": {
+              "title": "Claim Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurriculumClaimEditIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Edit Claim Api Curriculum  Version Id  Claims  Claim Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Claim",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/curriculum/{version_id}/concepts/merge": {
+      "post": {
+        "operationId": "merge_concepts_api_curriculum__version_id__concepts_merge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurriculumMergeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Merge Concepts Api Curriculum  Version Id  Concepts Merge Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge Concepts",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/curriculum/{version_id}/concepts/{concept_id}": {
+      "patch": {
+        "operationId": "edit_concept_api_curriculum__version_id__concepts__concept_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "concept_id",
+            "required": true,
+            "schema": {
+              "title": "Concept Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurriculumConceptEditIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Edit Concept Api Curriculum  Version Id  Concepts  Concept Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Edit Concept",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/curriculum/{version_id}/concepts/{concept_id}/split": {
+      "post": {
+        "operationId": "split_concept_api_curriculum__version_id__concepts__concept_id__split_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "concept_id",
+            "required": true,
+            "schema": {
+              "title": "Concept Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurriculumSplitIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "title": "Response Split Concept Api Curriculum  Version Id  Concepts  Concept Id  Split Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Split Concept",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/curriculum/{version_id}/publish": {
+      "post": {
+        "operationId": "publish_curriculum_api_curriculum__version_id__publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ]
+                  },
+                  "title": "Response Publish Curriculum Api Curriculum  Version Id  Publish Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish Curriculum",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/curriculum/{version_id}/reject": {
+      "post": {
+        "operationId": "reject_curriculum_api_curriculum__version_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Reject Curriculum Api Curriculum  Version Id  Reject Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Curriculum",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/curriculum/{version_id}/standards": {
+      "post": {
+        "operationId": "add_standard_alignment_api_curriculum__version_id__standards_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StandardAlignmentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Add Standard Alignment Api Curriculum  Version Id  Standards Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Standard Alignment",
+        "tags": [
+          "curriculum"
         ]
       }
     },

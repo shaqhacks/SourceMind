@@ -32,6 +32,8 @@ export type UpdateCardIn = components["schemas"]["UpdateCardIn"];
 export type GenerateCardsOut = components["schemas"]["GenerateCardsOut"];
 export type ReviewQueueOut = components["schemas"]["ReviewQueueOut"];
 export type ReviewQueueCardOut = components["schemas"]["ReviewQueueCardOut"];
+export type AdaptiveStudyActivityOut = components["schemas"]["AdaptiveStudyActivityOut"];
+export type AdaptiveStudyQueueOut = components["schemas"]["AdaptiveStudyQueueOut"];
 export type GradeCardIn = components["schemas"]["GradeCardIn"];
 export type GradeCardOut = components["schemas"]["GradeCardOut"];
 export type ReviewSummaryOut = components["schemas"]["ReviewSummaryOut"];
@@ -69,8 +71,15 @@ export type SkillEdgeOut = components["schemas"]["SkillEdgeOut"];
 export type SkillMapOut = components["schemas"]["SkillMapOut"];
 export type SkillTaughtInOut = components["schemas"]["SkillTaughtInOut"];
 export type SkillMissedQuestionOut = components["schemas"]["SkillMissedQuestionOut"];
-export type SkillFixPlanOut = components["schemas"]["SkillFixPlanOut"];
 export type SkillDetailOut = components["schemas"]["SkillDetailOut"];
+export type CurriculumVersionOut = components["schemas"]["CurriculumVersionOut"];
+export type CurriculumConceptOut = components["schemas"]["CurriculumConceptOut"];
+export type CurriculumClaimOut = components["schemas"]["CurriculumClaimOut"];
+export type EvidenceMappingReviewOut = components["schemas"]["EvidenceMappingReviewOut"];
+export type DiagnosticBlindCaseOut = components["schemas"]["DiagnosticBlindCaseOut"];
+export type DiagnosticJudgmentIn = components["schemas"]["DiagnosticJudgmentIn"];
+export type DiagnosticJudgmentOut = components["schemas"]["DiagnosticJudgmentOut"];
+export type DiagnosticValidationSummaryOut = components["schemas"]["DiagnosticValidationSummaryOut"];
 export type OutlineOp =
   | components["schemas"]["RenameOp"]
   | components["schemas"]["ReorderOp"]
@@ -140,6 +149,115 @@ export function createCourse(body: CourseCreate) {
 export function getCourse(courseId: string) {
   return request(
     client.GET("/api/courses/{course_id}", { params: { path: { course_id: courseId } } }),
+  );
+}
+
+export function getCurriculum(courseId: string, view: "current" | "draft" = "current") {
+  return request(
+    client.GET("/api/courses/{course_id}/curriculum", {
+      params: { path: { course_id: courseId }, query: { view } },
+    }),
+  );
+}
+
+export function createCurriculumDraft(courseId: string, label?: string) {
+  return request(
+    client.POST("/api/courses/{course_id}/curriculum/drafts", {
+      params: { path: { course_id: courseId } },
+      body: { label: label ?? null },
+    }),
+  );
+}
+
+export function editCurriculumConcept(
+  versionId: string,
+  conceptId: string,
+  body: components["schemas"]["CurriculumConceptEditIn"],
+) {
+  return request(
+    client.PATCH("/api/curriculum/{version_id}/concepts/{concept_id}", {
+      params: { path: { version_id: versionId, concept_id: conceptId } },
+      body,
+    }),
+  );
+}
+
+export function editCurriculumClaim(
+  versionId: string,
+  claimId: string,
+  body: components["schemas"]["CurriculumClaimEditIn"],
+) {
+  return request(
+    client.PATCH("/api/curriculum/{version_id}/claims/{claim_id}", {
+      params: { path: { version_id: versionId, claim_id: claimId } },
+      body,
+    }),
+  );
+}
+
+export function publishCurriculum(versionId: string) {
+  return request(
+    client.POST("/api/curriculum/{version_id}/publish", {
+      params: { path: { version_id: versionId } },
+    }),
+  );
+}
+
+export function listEvidenceMappings(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/curriculum/mappings", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function reviewEvidenceMapping(mappingId: string, reviewState: "verified" | "rejected") {
+  return request(
+    client.PATCH("/api/curriculum/mappings/{mapping_id}", {
+      params: { path: { mapping_id: mappingId } },
+      body: { review_state: reviewState },
+    }),
+  );
+}
+
+export function getNextDiagnosticValidation(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/diagnostics/validation/next", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function submitDiagnosticJudgment(courseId: string, body: DiagnosticJudgmentIn) {
+  return request(
+    client.POST("/api/courses/{course_id}/diagnostics/validation/judgments", {
+      params: { path: { course_id: courseId } },
+      body,
+    }),
+  );
+}
+
+export function recordDiagnosticDisagreementReason(
+  courseId: string,
+  judgmentId: string,
+  disagreementReason: components["schemas"]["DiagnosticDisagreementReasonIn"]["disagreement_reason"],
+) {
+  return request(
+    client.PATCH(
+      "/api/courses/{course_id}/diagnostics/validation/judgments/{judgment_id}/reason",
+      {
+        params: { path: { course_id: courseId, judgment_id: judgmentId } },
+        body: { disagreement_reason: disagreementReason },
+      },
+    ),
+  );
+}
+
+export function getDiagnosticValidationSummary(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/diagnostics/validation/summary", {
+      params: { path: { course_id: courseId } },
+    }),
   );
 }
 
@@ -475,6 +593,14 @@ export const MAX_QUEUE_FETCH = 200;
 export function getReviewQueue(courseId: string, limit?: number) {
   return request(
     client.GET("/api/courses/{course_id}/review/queue", {
+      params: { path: { course_id: courseId }, query: limit === undefined ? {} : { limit } },
+    }),
+  );
+}
+
+export function getAdaptiveStudyQueue(courseId: string, limit?: number) {
+  return request(
+    client.GET("/api/courses/{course_id}/study/queue", {
       params: { path: { course_id: courseId }, query: limit === undefined ? {} : { limit } },
     }),
   );

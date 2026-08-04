@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
+import { useCallback, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
 import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
@@ -354,6 +354,21 @@ export default function ReadingColumn({
     page: number | null;
   } | null>(null);
 
+  // Positional margin notes (Pages view). `noteComposer` = create at a gutter
+  // click; `noteEditPopover` = click an existing pin to edit/delete. Kept as
+  // separate state and rendered as plain sibling popovers, same convention as
+  // the highlight popovers above. Opening one closes the other so two note
+  // popovers are never open at once.
+  const [noteComposer, setNoteComposer] = useState<{
+    page: number;
+    anchorY: number;
+    anchorRect: DOMRect;
+  } | null>(null);
+  const [noteEditPopover, setNoteEditPopover] = useState<{
+    note: NoteOut;
+    anchorRect: DOMRect;
+  } | null>(null);
+
   const closePagesPopover = useCallback(() => setPagesPopover(null), []);
 
   // Scoped to the pages wrapper via React's onMouseUp, same bubble-scoping
@@ -521,39 +536,8 @@ export default function ReadingColumn({
     setPagesEditPopover(null);
   }, [pagesEditPopover, onExplainSelection]);
 
-  // Positional margin notes (Pages view). `noteComposer` = create at a gutter
-  // click; `noteEditPopover` = click an existing pin to edit/delete. Kept as
-  // separate state and rendered as plain sibling popovers, same convention as
-  // the highlight popovers above. Opening one closes the other so two note
-  // popovers are never open at once.
-  const [noteComposer, setNoteComposer] = useState<{
-    page: number;
-    anchorY: number;
-    anchorRect: DOMRect;
-  } | null>(null);
-  const [noteEditPopover, setNoteEditPopover] = useState<{
-    note: NoteOut;
-    anchorRect: DOMRect;
-  } | null>(null);
-
   const closeNoteComposer = useCallback(() => setNoteComposer(null), []);
   const closeNoteEditPopover = useCallback(() => setNoteEditPopover(null), []);
-
-  // A section switch (chapter nav, keyboard j/k, a "Re-read" deep link)
-  // remounts both the source article wrapper and the pages wrapper (both
-  // keyed on section.id above), which would otherwise leave any of these
-  // six popovers anchored to a DOMRect/highlight/note from a subtree that
-  // no longer exists. Closes all of them across both view modes whenever
-  // the section changes, rather than relying on each view's own dismiss
-  // handlers (which only fire on user interaction within that view).
-  useEffect(() => {
-    setSelectionPopover(null);
-    setEditPopover(null);
-    setPagesPopover(null);
-    setPagesEditPopover(null);
-    setNoteComposer(null);
-    setNoteEditPopover(null);
-  }, [section.id]);
 
   const handleNoteGutterClick = useCallback<NoteGutterClick>((page, anchorY, clientX, clientY) => {
     // Also dismiss any open highlight popover: a gutter click's mouseup can

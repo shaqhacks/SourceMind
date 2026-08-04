@@ -4,17 +4,23 @@ import type { ProgressBarTone } from "@/components/ui/ProgressBar";
 /**
  * The API types SkillNodeOut.status/SkillDetailOut.node.status as a plain
  * `string` (FastAPI has no enum here) — this is the closed set
- * `status_for` (app/services/skills_service.py) actually produces. Callers
+ * the learner projection actually produces. Callers
  * index STATUS_LABEL/STATUS_BADGE_TONE/STATUS_BAR_TONE with
  * `node.status as SkillStatus`.
  */
-export type SkillStatus = "solid" | "growing" | "struggling" | "locked";
+export type SkillStatus =
+  | "retained"
+  | "watch"
+  | "building"
+  | "likely_struggling"
+  | "insufficient_evidence";
 
 export const STATUS_LABEL: Record<SkillStatus, string> = {
-  solid: "Solid",
-  growing: "Growing",
-  struggling: "Struggling",
-  locked: "Locked",
+  retained: "Retained",
+  watch: "Watch",
+  building: "Building",
+  likely_struggling: "Likely struggling",
+  insufficient_evidence: "Needs evidence",
 };
 
 // Badge's "good" tone renders in the sage ramp and "accent" in the
@@ -22,17 +28,19 @@ export const STATUS_LABEL: Record<SkillStatus, string> = {
 // mapping already matches the design system's sage=met/solid,
 // accent=weak/struggling semantics without inventing new tones.
 export const STATUS_BADGE_TONE: Record<SkillStatus, BadgeTone> = {
-  solid: "good",
-  growing: "neutral",
-  struggling: "accent",
-  locked: "neutral",
+  retained: "good",
+  watch: "neutral",
+  building: "neutral",
+  likely_struggling: "accent",
+  insufficient_evidence: "neutral",
 };
 
 export const STATUS_BAR_TONE: Record<SkillStatus, ProgressBarTone> = {
-  solid: "sage",
-  growing: "neutral",
-  struggling: "accent",
-  locked: "neutral",
+  retained: "sage",
+  watch: "neutral",
+  building: "neutral",
+  likely_struggling: "accent",
+  insufficient_evidence: "neutral",
 };
 
 /** "A" / "A and B" / "A, B, and C" */

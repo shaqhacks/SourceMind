@@ -299,13 +299,13 @@ describe("TestsPage", () => {
     );
     const diagnosisMap: SkillMapOut = {
       nodes: [
-        { id: "tc", slug: "tc", label: "Token counting", level: 1, mastery: 31, status: "struggling", blocked: false, unlock_note: null },
-        { id: "ce", slug: "ce", label: "Cost estimation", level: 2, mastery: 24, status: "struggling", blocked: true, unlock_note: null },
-        { id: "cm", slug: "cm", label: "Context management", level: 2, mastery: 52, status: "growing", blocked: true, unlock_note: null },
+        { id: "tc", slug: "tc", label: "Token counting", level: 1, status: "likely_struggling", readiness_estimate: 0.31, evidence_state: "likely_struggling", distinct_item_count: 6 },
+        { id: "ce", slug: "ce", label: "Cost estimation", level: 2, status: "building", readiness_estimate: 0.24, evidence_state: "building", distinct_item_count: 5 },
+        { id: "cm", slug: "cm", label: "Context management", level: 2, status: "watch", readiness_estimate: 0.52, evidence_state: "watch", distinct_item_count: 4 },
       ],
       edges: [
-        { from_id: "tc", to_id: "ce", kind: "weak" },
-        { from_id: "tc", to_id: "cm", kind: "weak" },
+        { from_id: "tc", to_id: "ce", kind: "review_suggested" },
+        { from_id: "tc", to_id: "cm", kind: "review_suggested" },
       ],
     };
     mockedGetSkillMap.mockResolvedValue(ok(diagnosisMap));
@@ -322,17 +322,13 @@ describe("TestsPage", () => {
     // off separate fetches (listChapters/listTests vs. DiagnosisCard's own
     // useSkillMap), so "Score history" appearing above gives no ordering
     // guarantee that the skill map fetch has resolved yet.
-    expect(await screen.findByText("Diagnosis")).toBeInTheDocument();
-    // Two assertions, not one regex spanning both: the message's prereq
-    // name sits inside its own <strong>, and RTL's getByText only matches
-    // an element's own direct text nodes, not text a nested element covers.
-    expect(screen.getByText(/misses cluster on/i)).toBeInTheDocument();
+    expect(await screen.findByText("Learning signal")).toBeInTheDocument();
+    expect(screen.getByText(/quiz and review history suggests more practice/i)).toBeInTheDocument();
     expect(screen.getByText("Token counting")).toBeInTheDocument();
-    expect(screen.getByText(/underpins 2 other skills/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /drill token counting/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /review token counting/i })).toBeInTheDocument();
   });
 
-  it("shows a quiet note instead of a diagnosis when nothing is both struggling and blocked", async () => {
+  it("shows a quiet note when no concept has enough evidence", async () => {
     mockedListCourses.mockResolvedValue(ok([makeCourse()]));
     mockedListChapters.mockResolvedValue(
       ok([makeChapter({ chapter_label: "Chapter 1", test_stats: { attempts: 1, best_score: 0.6, latest_score: 0.6 } })]),
@@ -343,7 +339,7 @@ describe("TestsPage", () => {
     mockedGetSkillMap.mockResolvedValue(
       ok({
         nodes: [
-          { id: "a", slug: "a", label: "Tokenization basics", level: 1, mastery: 86, status: "solid", blocked: false, unlock_note: null },
+          { id: "a", slug: "a", label: "Tokenization basics", level: 1, status: "insufficient_evidence", readiness_estimate: null, evidence_state: "insufficient_evidence", distinct_item_count: 0 },
         ],
         edges: [],
       }),
@@ -351,8 +347,8 @@ describe("TestsPage", () => {
 
     render(<TestsPage />);
 
-    await screen.findByText("Diagnosis");
-    expect(screen.getByText("No diagnosis available right now.")).toBeInTheDocument();
+    await screen.findByText("Learning signal");
+    expect(screen.getByText("More evidence is needed before suggesting a concept.")).toBeInTheDocument();
   });
 
   it("hides the diagnosis card entirely when the course has no skill graph yet", async () => {

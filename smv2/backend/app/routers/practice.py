@@ -1,33 +1,19 @@
 from __future__ import annotations
 
-import uuid
-
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.schemas import PracticeAssessmentOut, SubmitPracticeAnswerIn, SubmitPracticeAnswerOut
-from app.services import practice_service
+from app.services import learner_context, practice_service
 
 router = APIRouter(tags=["practice"])
 
 
 def _existing_learner_key(request: Request) -> str | None:
-    return request.cookies.get(practice_service.LEARNER_COOKIE)
+    return learner_context.existing_learner_key(request)
 
 
 def _ensure_learner_key(request: Request, response: Response) -> str:
-    learner_key = request.cookies.get(practice_service.LEARNER_COOKIE)
-    if learner_key is not None:
-        return learner_key
-
-    learner_key = str(uuid.uuid4())
-    response.set_cookie(
-        practice_service.LEARNER_COOKIE,
-        learner_key,
-        httponly=True,
-        samesite="lax",
-        secure=request.url.scheme == "https",
-    )
-    return learner_key
+    return learner_context.ensure_learner_key(request, response)
 
 
 @router.get(

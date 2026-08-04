@@ -10,7 +10,7 @@ function toPercent(score: number | null): number | null {
 }
 
 /**
- * "Chapter mastery: N%" — best_score as the headline number (what the
+ * "Best chapter test score: N%" — best_score as the headline number (what the
  * chapter test page's progress bar is meant to answer: "have I mastered
  * this yet"), latest_score as secondary context. A real width-based fill,
  * not a color-only indicator (WCAG 1.4.1) — same --accent used for the
@@ -32,12 +32,12 @@ export default function ChapterMasteryBar({ stats }: ChapterMasteryBarProps) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-baseline justify-between gap-3 text-sm">
-        <span className="font-medium">Chapter mastery: {bestPercent}%</span>
+        <span className="font-medium">Best chapter test score: {bestPercent}%</span>
         {latestPercent !== null && (
           <span className="text-muted-foreground">Latest: {latestPercent}%</span>
         )}
       </div>
-      <ProgressBar percent={bestPercent} label="Chapter mastery" />
+      <ProgressBar percent={bestPercent} label="Best chapter test score" />
     </div>
   );
 }

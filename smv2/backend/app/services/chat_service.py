@@ -13,13 +13,24 @@ from typing import Any
 
 from app.config import chat_history_turns, chat_top_k
 from app.db.engine import get_session
-from app.db.models import Card, ChatTurn, Chunk, Course, Job, ReviewState, Section, utcnow
+from app.db.models import (
+    Card,
+    ChatTurn,
+    Chunk,
+    Course,
+    CourseLearningProfile,
+    Job,
+    ReviewState,
+    Section,
+    utcnow,
+)
 from app.llm.ledger import ensure_spend_cap
 from app.llm.prompts import load_prompt
 from app.llm.provider import ProviderTimeoutError, get_provider
 from app.llm.retry import is_timeout
 from app.pipeline.retrieval import rank_chunks
 from app.services import chapters_service, jobs_service
+from app.services.learner_context import LEGACY_LOCAL_LEARNER_ID
 from app.services.study_service import study_next
 
 _CITATION_RE = re.compile(r"\[(\d+)\]")
@@ -127,26 +138,40 @@ def _distinct_chapter_labels_hit(session, ranked) -> list[str]:
     return labels
 
 
-def _due_and_lapsed_card_counts(session, section_ids: list[str], now) -> tuple[int, int]:
+def _due_and_lapsed_card_counts(
+    session, section_ids: list[str], course_profile_id: str | None, now
+) -> tuple[int, int]:
     if not section_ids:
         return 0, 0
+    if course_profile_id is None:
+        return session.query(Card).filter(Card.section_id.in_(section_ids)).count(), 0
     due_count = (
         session.query(Card)
-        .outerjoin(ReviewState, ReviewState.card_id == Card.id)
+        .outerjoin(
+            ReviewState,
+            (ReviewState.card_id == Card.id)
+            & (ReviewState.course_learning_profile_id == course_profile_id),
+        )
         .filter(Card.section_id.in_(section_ids))
         .filter((ReviewState.due_at.is_(None)) | (ReviewState.due_at <= now))
         .count()
     )
     lapsed_count = (
         session.query(Card)
-        .join(ReviewState, ReviewState.card_id == Card.id)
+        .join(
+            ReviewState,
+            (ReviewState.card_id == Card.id)
+            & (ReviewState.course_learning_profile_id == course_profile_id),
+        )
         .filter(Card.section_id.in_(section_ids), ReviewState.lapses > 0)
         .count()
     )
     return due_count, lapsed_count
 
 
-def _build_learner_state_block(session, course_id: str, ranked) -> str:
+def _build_learner_state_block(
+    session, course_id: str, learner_id: str, ranked
+) -> str:
     """Deterministic learner-state lines for the chapters this turn's
     retrieval hit — chapter test best/latest scores, due+lapsed card
     counts, whether a lesson exists — one line per chapter, values
@@ -158,7 +183,15 @@ def _build_learner_state_block(session, course_id: str, ranked) -> str:
     if not labels:
         return ""
 
-    chapters_by_label = {c["chapter_label"]: c for c in chapters_service.get_chapters(course_id)}
+    course_profile_id = (
+        session.query(CourseLearningProfile.id)
+        .filter_by(learner_id=learner_id, course_id=course_id)
+        .scalar()
+    )
+    chapters_by_label = {
+        c["chapter_label"]: c
+        for c in chapters_service.get_chapters(course_id, learner_id=learner_id)
+    }
     now = utcnow()
     lines = []
     for label in labels:
@@ -178,7 +211,9 @@ def _build_learner_state_block(session, course_id: str, ranked) -> str:
 
         content_section_ids = chapter["section_ids"]
         all_section_ids = content_section_ids + chapter["practice_section_ids"]
-        due_count, lapsed_count = _due_and_lapsed_card_counts(session, all_section_ids, now)
+        due_count, lapsed_count = _due_and_lapsed_card_counts(
+            session, all_section_ids, course_profile_id, now
+        )
 
         lesson_ready = False
         if content_section_ids:
@@ -194,13 +229,13 @@ def _build_learner_state_block(session, course_id: str, ranked) -> str:
     return "\n".join(lines)
 
 
-def _build_study_suggestions_block(course_id: str) -> str:
+def _build_study_suggestions_block(course_id: str, learner_id: str) -> str:
     """Top-3 deterministic study suggestions (app.services.study_service),
     formatted as plain lines for the chat prompt's "the app suggests"
     block — the v3 prompt may weave ONE of these into its closing line,
     never fabricate its own.
     """
-    suggestions = study_next(course_id, limit=3)
+    suggestions = study_next(course_id, limit=3, learner_id=learner_id)
     if not suggestions:
         return ""
 
@@ -238,7 +273,13 @@ def _build_history_messages(session, course_id: str, limit: int) -> list[dict]:
     return [{"role": t.role, "content": t.content} for t in reversed(turns)]
 
 
-def send_chat(course_id: str, message: str, selection: dict | None = None) -> dict[str, Any]:
+def send_chat(
+    course_id: str,
+    message: str,
+    selection: dict | None = None,
+    *,
+    learner_id: str = LEGACY_LOCAL_LEARNER_ID,
+) -> dict[str, Any]:
     session = get_session()
     try:
         course = session.get(Course, course_id)
@@ -263,8 +304,10 @@ def send_chat(course_id: str, message: str, selection: dict | None = None) -> di
         # never left to the model to estimate. learner_state is scoped to
         # only the chapters THIS turn's retrieval hit; study_suggestions is
         # course-wide (independent of what was asked this turn).
-        learner_state_block = _build_learner_state_block(session, course_id, ranked)
-        study_suggestions_block = _build_study_suggestions_block(course_id)
+        learner_state_block = _build_learner_state_block(
+            session, course_id, learner_id, ranked
+        )
+        study_suggestions_block = _build_study_suggestions_block(course_id, learner_id)
 
         system_prompt, prompt_version = load_prompt("chat")
         history_messages = _build_history_messages(session, course_id, chat_history_turns())

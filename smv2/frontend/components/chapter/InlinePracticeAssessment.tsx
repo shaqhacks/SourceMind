@@ -29,9 +29,10 @@ type AnswerState = Pick<
   PracticeAnsweredOut | SubmitPracticeAnswerOut,
   | "correct"
   | "correct_index"
+  | "evidence_count"
+  | "evidence_state"
   | "explanation_md"
-  | "mastery_points"
-  | "points_delta"
+  | "readiness_estimate"
   | "selected_index"
 >;
 type AnswerMap = Record<string, AnswerState>;
@@ -422,7 +423,14 @@ export default function InlinePracticeAssessment({
               <div className="mt-4 rounded-md border border-border bg-muted-foreground/5 p-3">
                 <div className="mb-2 flex flex-wrap items-center gap-3 text-sm font-medium">
                   <span>{answerSummary(answer)}</span>
-                  <span>Concept points {answer.mastery_points}</span>
+                  <span>
+                    {answer.readiness_estimate == null
+                      ? "Readiness needs more evidence"
+                      : `${Math.round(answer.readiness_estimate * 100)}% readiness`}
+                  </span>
+                  <span>
+                    {answer.evidence_count} evidence item{answer.evidence_count === 1 ? "" : "s"}
+                  </span>
                 </div>
                 <div className="prose prose-sm max-w-none dark:prose-invert">
                   <Markdown>{answer.explanation_md}</Markdown>

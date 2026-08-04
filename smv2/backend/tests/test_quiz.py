@@ -22,6 +22,10 @@ def _make_questions(n: int = 8) -> list[dict]:
     ]
 
 
+def _attempt_profile_id(session, attempt_id: str) -> str:
+    return session.get(TestAttempt, attempt_id).course_learning_profile_id
+
+
 def test_generate_test_happy_path(client, ingest_course, stub_provider):
     course_id, *_ = ingest_course("with_bookmarks.pdf")
 
@@ -65,7 +69,7 @@ def test_generate_test_records_prompt_version_and_model_on_the_test_deck(client,
     session = get_session()
     try:
         test = session.get(Test, job_result["test_id"])
-        assert test.prompt_version == "v2"
+        assert test.prompt_version == "v3"
         assert test.model == "stub-model"
     finally:
         session.close()
@@ -162,7 +166,7 @@ def test_generate_test_fails_after_two_parse_failures_records_parse_failure_ledg
     assert [c.status for c in calls] == ["ok", "ok", "parse_failure"]
     parse_failure_row = calls[-1]
     assert parse_failure_row.cost_estimate is None
-    assert parse_failure_row.prompt_version == "v2"
+    assert parse_failure_row.prompt_version == "v3"
     assert parse_failure_row.course_id == course_id
 
 
@@ -418,6 +422,7 @@ def test_submit_test_wrong_answers_create_cards_due_now(client, ingest_course, s
 
     session = get_session()
     try:
+        profile_id = _attempt_profile_id(session, attempt_id)
         for card_id in body["added_card_ids"]:
             card = session.get(Card, card_id)
             assert card is not None
@@ -425,7 +430,7 @@ def test_submit_test_wrong_answers_create_cards_due_now(client, ingest_course, s
             # Brand-new cards get no ReviewState row at all -- a card with
             # none is already picked up as "new" (and thus due) by the
             # review queue without one.
-            assert session.get(ReviewState, card_id) is None
+            assert session.get(ReviewState, (profile_id, card_id)) is None
     finally:
         session.close()
 
@@ -459,10 +464,11 @@ def test_submit_test_all_correct_seeds_cards_as_good_reviews_not_added_card_ids(
     section_id = client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
     session = get_session()
     try:
+        profile_id = _attempt_profile_id(session, attempt_id)
         cards = session.query(Card).filter(Card.section_id == section_id).all()
         assert len(cards) == 3
         for card in cards:
-            state = session.get(ReviewState, card.id)
+            state = session.get(ReviewState, (profile_id, card.id))
             assert state is not None
             assert state.reps == 1
             assert state.last_grade == 3  # GOOD
@@ -497,8 +503,9 @@ def test_submit_test_correct_on_not_yet_due_card_is_a_cramming_guard_noop(
     section_id = client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
     session = get_session()
     try:
+        profile_id = _attempt_profile_id(session, attempt_id)
         card = session.query(Card).filter(Card.section_id == section_id).first()
-        state_before = session.get(ReviewState, card.id)
+        state_before = session.get(ReviewState, (profile_id, card.id))
         due_before, interval_before, ease_before, reps_before = (
             state_before.due_at, state_before.interval_days, state_before.ease, state_before.reps
         )
@@ -516,7 +523,7 @@ def test_submit_test_correct_on_not_yet_due_card_is_a_cramming_guard_noop(
 
     session = get_session()
     try:
-        state_after = session.get(ReviewState, card_id)
+        state_after = session.get(ReviewState, (profile_id, card_id))
         assert state_after.due_at == due_before
         assert state_after.interval_days == interval_before
         assert state_after.ease == ease_before
@@ -550,11 +557,12 @@ def test_submit_test_correct_on_a_due_existing_card_advances_via_real_schedule_n
     section_id = client.get(f"/api/courses/{course_id}/sections").json()[0]["id"]
     session = get_session()
     try:
+        profile_id = _attempt_profile_id(session, attempt_id)
         card = session.query(Card).filter(Card.section_id == section_id).first()
         card_id = card.id
         # Force the seeded ReviewState into the past so it's genuinely due
         # again, then note its state right before the second correct answer.
-        state = session.get(ReviewState, card_id)
+        state = session.get(ReviewState, (profile_id, card_id))
         state.due_at = utcnow() - timedelta(days=1)
         ease_before, interval_before, reps_before = state.ease, state.interval_days, state.reps
         session.commit()
@@ -567,7 +575,7 @@ def test_submit_test_correct_on_a_due_existing_card_advances_via_real_schedule_n
 
     session = get_session()
     try:
-        state_after = session.get(ReviewState, card_id)
+        state_after = session.get(ReviewState, (profile_id, card_id))
         assert state_after.reps == reps_before + 1
         assert state_after.last_grade == 3  # GOOD
         # Good's own formula at reps>=2 multiplies by ease; below that it's
@@ -609,7 +617,8 @@ def test_submit_test_repeat_miss_dedupes_and_refreshes_due_at_without_touching_s
 
     session = get_session()
     try:
-        state_before = session.get(ReviewState, graded_card_id)
+        profile_id = _attempt_profile_id(session, attempt_id)
+        state_before = session.get(ReviewState, (profile_id, graded_card_id))
         assert state_before is not None
         ease_before, interval_before, reps_before = (
             state_before.ease,
@@ -632,7 +641,7 @@ def test_submit_test_repeat_miss_dedupes_and_refreshes_due_at_without_touching_s
 
     session = get_session()
     try:
-        state_after = session.get(ReviewState, graded_card_id)
+        state_after = session.get(ReviewState, (profile_id, graded_card_id))
         assert state_after is not None
         assert state_after.ease == ease_before
         assert state_after.interval_days == interval_before

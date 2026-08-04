@@ -202,6 +202,14 @@ export default function AppSidebar() {
                 >
                   Skill map
                 </Link>
+                <span aria-hidden="true" className="text-muted-foreground">·</span>
+                <Link href={`/course/${course.id}/curriculum`} className="text-accent-700 hover:underline">
+                  Curriculum
+                </Link>
+                <span aria-hidden="true" className="text-muted-foreground">·</span>
+                <Link href={`/course/${course.id}/diagnostics/validate`} className="text-accent-700 hover:underline">
+                  Validate
+                </Link>
               </p>
             </div>
           );

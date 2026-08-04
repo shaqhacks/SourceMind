@@ -13,7 +13,7 @@ import StatTile from "@/components/ui/StatTile";
 import { getSkillDetail, type SkillDetailOut } from "@/lib/api/client";
 import { describeError, type FetchError } from "@/lib/api/errors";
 
-import { STATUS_BADGE_TONE, STATUS_BAR_TONE, STATUS_LABEL, joinNames, type SkillStatus } from "./format";
+import { STATUS_BADGE_TONE, STATUS_BAR_TONE, STATUS_LABEL, type SkillStatus } from "./format";
 import LinkButton from "./LinkButton";
 import { useCourseTitle } from "./useCourseTitle";
 
@@ -33,8 +33,7 @@ function formatAttemptDate(iso: string): string {
  * Competency detail page (design handoff §8) — reads the real competency
  * graph via GET /api/courses/{course_id}/skills/{concept_id}. Only the
  * course title is a separate fetch (useCourseTitle); everything else comes
- * straight off the one SkillDetailOut response, including blocked-skill
- * labels and the fix plan, which the backend already computes.
+ * straight off the one SkillDetailOut response.
  */
 export default function CompetencyDetailView({ courseId, skillId }: CompetencyDetailViewProps) {
   const { title: courseTitle, error: titleError, reload: reloadTitle } = useCourseTitle(courseId);
@@ -106,10 +105,12 @@ export default function CompetencyDetailView({ courseId, skillId }: CompetencyDe
     );
   }
 
-  const { node, taught_in: taughtIn, missed_questions: missed, blocked_skill_labels: blockedLabels } = detail;
+  const { node, taught_in: taughtIn, missed_questions: missed } = detail;
   const status = node.status as SkillStatus;
   const primaryTaught = taughtIn[0];
   const quizTotal = detail.quiz_correct + detail.quiz_wrong;
+  const readinessPercent = node.readiness_estimate == null ? null : Math.round(node.readiness_estimate * 100);
+  const uncertaintyPercent = node.uncertainty == null ? null : Math.round(node.uncertainty * 100);
 
   return (
     <div className="mx-auto flex w-full max-w-[880px] flex-col gap-6 px-9 py-8">
@@ -128,28 +129,53 @@ export default function CompetencyDetailView({ courseId, skillId }: CompetencyDe
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-[34px]">{node.label}</h1>
           <Badge tone={STATUS_BADGE_TONE[status]}>
-            {STATUS_LABEL[status]} · {node.mastery} mastery
+            {STATUS_LABEL[status]}
+            {readinessPercent == null ? " · estimate pending" : ` · ${readinessPercent}% readiness`}
           </Badge>
         </div>
-        {blockedLabels.length > 0 && (
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            Blocks <strong className="text-foreground">{joinNames(blockedLabels)}</strong>
-          </p>
-        )}
       </div>
 
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
         <StatTile
-          value={node.mastery}
-          label="Mastery"
-          hint={<ProgressBar percent={node.mastery} label={`${node.label} mastery`} tone={STATUS_BAR_TONE[status]} />}
+          value={readinessPercent == null ? "—" : `${readinessPercent}%`}
+          label="Readiness estimate"
+          hint={readinessPercent == null ? (
+            <span className="text-xs text-muted-foreground">More varied evidence is needed.</span>
+          ) : (
+            <ProgressBar percent={readinessPercent} label={`${node.label} readiness`} tone={STATUS_BAR_TONE[status]} />
+          )}
         />
-        <StatTile value={detail.cards_count} label="Cards on this skill" />
+        <StatTile
+          value={node.distinct_item_count ?? 0}
+          label="Distinct evidence items"
+          hint={uncertaintyPercent == null ? undefined : `Uncertainty range: ${uncertaintyPercent} points`}
+        />
         <StatTile
           value={quizTotal === 0 ? "—" : `${detail.quiz_correct}/${quizTotal}`}
           label="Quiz record"
         />
       </div>
+
+      <Card className="flex flex-col gap-3 py-5">
+        <div>
+          <h4 className="text-base font-semibold">Why this estimate</h4>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Based on {node.distinct_item_count ?? 0} distinct item{(node.distinct_item_count ?? 0) === 1 ? "" : "s"}
+            {node.last_evidence_at ? ` through ${formatAttemptDate(node.last_evidence_at)}` : ""}.
+            Repeated exposure to the same item is discounted.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <StatTile
+            value={node.quiz_estimate == null ? "—" : `${Math.round(node.quiz_estimate * 100)}%`}
+            label="Quiz / application evidence"
+          />
+          <StatTile
+            value={node.review_estimate == null ? "—" : `${Math.round(node.review_estimate * 100)}%`}
+            label="Flashcard / retrieval evidence"
+          />
+        </div>
+      </Card>
 
       <section id="taught" className="flex flex-col gap-3">
         <h4 className="text-base font-semibold">Where this skill is taught — review these</h4>
@@ -204,29 +230,21 @@ export default function CompetencyDetailView({ courseId, skillId }: CompetencyDe
 
       <Card className="flex flex-row items-center gap-4 py-5 shadow-md">
         <div className="flex-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-accent-800">Fix plan</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-accent-800">Next study step</span>
           <p className="mt-1.5 text-[15px] leading-relaxed">
-            {detail.fix_plan
-              ? `This skill is blocked by weak ${detail.fix_plan.prereq_label}. Fix that first, then drill this skill's cards.`
-              : primaryTaught
-                ? `Re-read "${primaryTaught.title}", then drill this skill's cards.`
-                : "Drill this skill's cards."}
+            {primaryTaught
+              ? `Re-read "${primaryTaught.title}", then answer varied questions and review cards linked to this concept.`
+              : "Answer varied questions and review cards linked to this concept."}
           </p>
         </div>
-        {detail.fix_plan ? (
-          <LinkButton href={`/course/${courseId}/skills/${detail.fix_plan.prereq_id}`} variant="primary">
-            Fix {detail.fix_plan.prereq_label}
-          </LinkButton>
-        ) : (
-          <LinkButton
-            href={primaryTaught ? `/course/${courseId}?section=${primaryTaught.section_id}` : `/course/${courseId}`}
-            variant="primary"
-          >
-            {primaryTaught ? `Start with ${primaryTaught.title}` : "Open the reader"}
-          </LinkButton>
-        )}
-        <LinkButton href="/review" variant="secondary">
-          Drill cards
+        <LinkButton
+          href={primaryTaught ? `/course/${courseId}?section=${primaryTaught.section_id}` : `/course/${courseId}`}
+          variant="primary"
+        >
+          {primaryTaught ? `Start with ${primaryTaught.title}` : "Open the reader"}
+        </LinkButton>
+        <LinkButton href={`/review?course=${courseId}`} variant="secondary">
+          Practice and review
         </LinkButton>
       </Card>
     </div>

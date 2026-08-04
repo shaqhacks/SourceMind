@@ -13,18 +13,18 @@ from app.db.models import (
     PracticeQuestion,
     Section,
 )
-from app.db.registry import REPLACED_ON_REINGEST
+from app.db.registry import REMAPPED_ON_REINGEST, REPLACED_ON_REINGEST
 
 
 def test_practice_models_are_registered_for_reingest(client):
     assert {
-        Concept,
         PracticeQuestion,
         PracticeExtractionRun,
         PracticeAnswer,
         ConceptMastery,
         ConceptMasteryEvent,
     }.issubset(set(REPLACED_ON_REINGEST))
+    assert Concept in REMAPPED_ON_REINGEST
 
 
 def test_practice_question_unique_fingerprint_per_section(client):

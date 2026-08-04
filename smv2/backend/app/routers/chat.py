@@ -1,22 +1,26 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.llm.ledger import SpendCapExceededError
 from app.llm.provider import ProviderNotConfiguredError, ProviderTimeoutError
 from app.schemas import ChatIn, ChatOut, ChatTurnOut
-from app.services import chat_service, courses_service
+from app.services import chat_service, courses_service, learner_context
 
 router = APIRouter(tags=["chat"])
 
 
 @router.post("/api/courses/{course_id}/chat", operation_id="send_chat", response_model=ChatOut)
-def send_chat(course_id: str, body: ChatIn) -> ChatOut:
+def send_chat(
+    course_id: str, body: ChatIn, request: Request, response: Response
+) -> ChatOut:
+    learner_id = learner_context.ensure_learner_key(request, response)
     try:
         result = chat_service.send_chat(
             course_id,
             body.message,
             selection=body.selection.model_dump() if body.selection else None,
+            learner_id=learner_id,
         )
     except chat_service.SelectionSectionMismatchError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -7,9 +7,24 @@ from pathlib import Path
 import fitz
 import pytest
 
+from conftest import _course_profile_id
+
 from app.db.engine import get_session
-from app.db.models import Asset, Card, ProgressState, ReviewState, Section
+from app.db.models import (
+    Asset,
+    Card,
+    Concept,
+    ConceptSourceLink,
+    CurriculumVersion,
+    EvidenceItem,
+    EvidenceItemConceptLink,
+    LearnerEvidenceEvent,
+    ProgressState,
+    ReviewState,
+    Section,
+)
 from app.jobs.worker import run_due_jobs_once
+from app.services import curriculum_service
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "pdfs"
 
@@ -75,6 +90,7 @@ def test_reingest_replaces_not_duplicates(client, tmp_path):
     # Seed review/progress state that must survive an identical re-ingest.
     session = get_session()
     try:
+        profile_id = _course_profile_id(session, course_id)
         section = session.query(Section).filter(Section.course_id == course_id).first()
         card = Card(
             id=str(uuid.uuid4())[:24],
@@ -88,6 +104,7 @@ def test_reingest_replaces_not_duplicates(client, tmp_path):
         session.flush()
         session.add(
             ReviewState(
+                course_learning_profile_id=profile_id,
                 card_id=card.id,
                 course_id=course_id,
                 due_at=datetime.now(timezone.utc),
@@ -114,7 +131,7 @@ def test_reingest_replaces_not_duplicates(client, tmp_path):
     session = get_session()
     try:
         assert session.get(Card, card_id) is not None
-        assert session.get(ReviewState, card_id) is not None
+        assert session.get(ReviewState, (profile_id, card_id)) is not None
         progress = session.get(ProgressState, course_id)
         assert progress is not None
         assert progress.section_id in first_ids
@@ -172,6 +189,7 @@ def test_reingest_preserves_review_state_for_unchanged_section(client, tmp_path)
 
     session = get_session()
     try:
+        profile_id = _course_profile_id(session, course_id)
         card = Card(
             id=str(uuid.uuid4())[:24],
             course_id=course_id,
@@ -184,6 +202,7 @@ def test_reingest_preserves_review_state_for_unchanged_section(client, tmp_path)
         session.flush()
         session.add(
             ReviewState(
+                course_learning_profile_id=profile_id,
                 card_id=card.id,
                 course_id=course_id,
                 due_at=datetime.now(timezone.utc),
@@ -215,7 +234,7 @@ def test_reingest_preserves_review_state_for_unchanged_section(client, tmp_path)
 
     session = get_session()
     try:
-        review_state = session.get(ReviewState, card_id)
+        review_state = session.get(ReviewState, (profile_id, card_id))
         assert review_state is not None
         assert review_state.reps == 2  # untouched by re-ingest
         assert session.get(Card, card_id) is not None  # card's own section still exists
@@ -263,5 +282,116 @@ def test_reingest_clears_progress_section_id_when_that_section_is_removed(client
         progress = session.get(ProgressState, course_id)
         assert progress is not None  # row survives
         assert progress.section_id is None  # SET NULL, since chapter 2's old id is gone
+    finally:
+        session.close()
+
+
+def test_reingest_preserves_published_curriculum_and_stales_removed_source_link(
+    client, tmp_path
+):
+    response = client.post("/api/courses", json={"title": "Curriculum survival"})
+    course_id = response.json()["id"]
+    pdf_path = tmp_path / "three_chapter.pdf"
+    _build_three_chapter_pdf(pdf_path)
+    _upload_and_ingest(client, course_id, pdf_path)
+    changing_section = _sections_by_title(course_id)["Chapter 2: Structures"]
+
+    draft = curriculum_service.create_draft(course_id)
+    concept = curriculum_service.add_concept(
+        draft.id,
+        stable_key="structures",
+        label="Structures",
+        description_md="Reason about structures.",
+    )
+    claim = curriculum_service.add_claim(
+        draft.id,
+        concept_id=concept.id,
+        stable_key="identify-structures",
+        statement="Identify a structure.",
+        success_criteria_md="Correctly identifies the structure.",
+        review_state="verified",
+    )
+    published = curriculum_service.publish(draft.id)
+    session = get_session()
+    try:
+        course_profile_id = _course_profile_id(session, course_id)
+        concept.section_id = changing_section.id
+        source_link = ConceptSourceLink(
+            course_id=course_id,
+            curriculum_version_id=published.id,
+            concept_id=concept.id,
+            learning_claim_id=claim.id,
+            section_id=changing_section.id,
+            source_ref="Chapter 2: Structures",
+            excerpt_md=changing_section.body_md,
+            source_content_hash=changing_section.content_hash,
+            confidence=1.0,
+            review_state="verified",
+        )
+        evidence_item = EvidenceItem(
+            course_id=course_id,
+            item_type="quiz_question",
+            source_record_id="historical-quiz",
+            source_index=0,
+            content_json={"question": "Which is a structure?"},
+            content_fingerprint="historical-evidence-fingerprint",
+            mapping_status="mapped",
+        )
+        session.add_all([source_link, evidence_item])
+        session.flush()
+        mapping = EvidenceItemConceptLink(
+            course_id=course_id,
+            evidence_item_id=evidence_item.id,
+            curriculum_version_id=published.id,
+            learning_claim_id=claim.id,
+            role="primary",
+            task_type="multiple_choice",
+            review_state="verified",
+        )
+        session.add(mapping)
+        session.flush()
+        evidence_event = LearnerEvidenceEvent(
+            course_id=course_id,
+            course_learning_profile_id=course_profile_id,
+            evidence_item_id=evidence_item.id,
+            evidence_mapping_id=mapping.id,
+            learning_claim_id=claim.id,
+            curriculum_version_id=published.id,
+            channel="quiz",
+            normalized_outcome=0.0,
+            raw_result={"correct": False},
+            source_event_key="historical-quiz:0",
+        )
+        session.add(evidence_event)
+        session.commit()
+        source_link_id = source_link.id
+        concept_id = concept.id
+        version_id = published.id
+        evidence_item_id = evidence_item.id
+        mapping_id = mapping.id
+        evidence_event_id = evidence_event.id
+        asset = session.query(Asset).filter(Asset.course_id == course_id).one()
+        stored_path = Path(asset.stored_path)
+    finally:
+        session.close()
+
+    _build_three_chapter_pdf(stored_path, chapter2_extra_line="The source changed.")
+    assert client.post(f"/api/courses/{course_id}/ingest").status_code == 202
+    assert run_due_jobs_once() is True
+
+    session = get_session()
+    try:
+        assert session.get(CurriculumVersion, version_id) is not None
+        preserved_concept = session.get(Concept, concept_id)
+        assert preserved_concept is not None
+        assert preserved_concept.section_id is None
+        stale_link = session.get(ConceptSourceLink, source_link_id)
+        assert stale_link is not None
+        assert stale_link.section_id is None
+        assert stale_link.stale is True
+        assert stale_link.source_content_hash == changing_section.content_hash
+        assert session.get(EvidenceItem, evidence_item_id) is not None
+        assert session.get(EvidenceItemConceptLink, mapping_id) is not None
+        assert session.get(LearnerEvidenceEvent, evidence_event_id) is not None
     finally:
         session.close()

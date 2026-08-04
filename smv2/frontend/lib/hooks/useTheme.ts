@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
-export type ThemePreference = "system" | "light" | "dark";
-export type EffectiveTheme = "light" | "dark";
+import {
+  THEME_STORAGE_KEY,
+  type EffectiveTheme,
+  type ThemePreference,
+} from "@/lib/theme/bootstrap";
 
-export const THEME_STORAGE_KEY = "smv2.theme";
+export { THEME_STORAGE_KEY } from "@/lib/theme/bootstrap";
+export type { EffectiveTheme, ThemePreference } from "@/lib/theme/bootstrap";
 
 const DARK_MEDIA_QUERY = "(prefers-color-scheme: dark)";
 

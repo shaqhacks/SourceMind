@@ -19,9 +19,21 @@ from app.db.models import (
     ConceptEdge,
     ConceptMastery,
     ConceptMasteryEvent,
+    ConceptRelation,
+    ConceptRevision,
     ConceptSectionLink,
+    ConceptSourceLink,
+    CourseLearningProfile,
+    CurriculumVersion,
+    DiagnosticJudgment,
+    EvidenceItem,
+    EvidenceItemConceptLink,
     Highlight,
     LlmCall,
+    LearningClaim,
+    LearningClaimRevision,
+    LearnerConceptState,
+    LearnerEvidenceEvent,
     Note,
     PracticeAnswer,
     PracticeExtractionRun,
@@ -29,7 +41,11 @@ from app.db.models import (
     ProgressState,
     ReviewLog,
     ReviewState,
+    RetentionAssignment,
+    RetentionProbe,
+    RetentionStudy,
     Section,
+    ShadowLearnerPrediction,
     Test,
     TestAttempt,
 )
@@ -50,14 +66,34 @@ REPLACED_ON_REINGEST = [
     ConceptMastery,
     PracticeQuestion,
     PracticeExtractionRun,
-    Concept,
     ConceptEdge,
     ConceptSectionLink,
 ]
 
 # Survive re-ingest by remapping onto the new content-addressed ids (spaced
 # repetition history must not reset just because the PDF was re-uploaded).
-REMAPPED_ON_REINGEST = [ReviewState, ReviewLog, ProgressState]
+REMAPPED_ON_REINGEST = [
+    CourseLearningProfile,
+    ReviewState,
+    ReviewLog,
+    ProgressState,
+    Concept,
+    CurriculumVersion,
+    ConceptRevision,
+    LearningClaim,
+    LearningClaimRevision,
+    ConceptRelation,
+    ConceptSourceLink,
+    EvidenceItem,
+    EvidenceItemConceptLink,
+    LearnerEvidenceEvent,
+    LearnerConceptState,
+    ShadowLearnerPrediction,
+    DiagnosticJudgment,
+    RetentionStudy,
+    RetentionAssignment,
+    RetentionProbe,
+]
 
 # Append-only audit log — neither wiped nor remapped, and course_id is
 # nullable via ON DELETE SET NULL so a deleted course doesn't erase spend

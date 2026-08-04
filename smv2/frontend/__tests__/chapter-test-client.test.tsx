@@ -305,7 +305,7 @@ describe("ChapterTestClient", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/no chapter named "chapter 1"/i);
   });
 
-  it("feeds the chapter's test_stats into the mastery bar", async () => {
+  it("feeds the chapter's test_stats into the score bar", async () => {
     mockedListChapters.mockResolvedValue(
       ok([makeChapter({ test_stats: { attempts: 2, best_score: 0.75, latest_score: 0.5 } })]),
     );
@@ -314,7 +314,7 @@ describe("ChapterTestClient", () => {
 
     render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
 
-    expect(await screen.findByText("Chapter mastery: 75%")).toBeInTheDocument();
+    expect(await screen.findByText("Best chapter test score: 75%")).toBeInTheDocument();
     const bar = screen.getByRole("progressbar");
     expect(bar).toHaveAttribute("aria-valuenow", "75");
   });

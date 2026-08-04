@@ -28,10 +28,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import and_, func
 
 from app.db.engine import get_session
 from app.db.models import Card, Course, ReviewLog, ReviewState, utcnow
+from app.services import evidence_items_service, evidence_service, learner_context
 
 AGAIN, HARD, GOOD, EASY = 1, 2, 3, 4
 _VALID_GRADES = {AGAIN, HARD, GOOD, EASY}
@@ -115,15 +116,27 @@ def schedule_next(grade: int, *, interval_days: float, ease: float, reps: int) -
     )
 
 
-def _due_counts(session, course_id: str, now: datetime) -> dict[str, int]:
+def _due_counts(
+    session, course_id: str, course_learning_profile_id: str, now: datetime
+) -> dict[str, int]:
     due_count = (
         session.query(ReviewState)
-        .filter(ReviewState.course_id == course_id, ReviewState.due_at <= now)
+        .filter(
+            ReviewState.course_id == course_id,
+            ReviewState.course_learning_profile_id == course_learning_profile_id,
+            ReviewState.due_at <= now,
+        )
         .count()
     )
     new_count = (
         session.query(Card)
-        .outerjoin(ReviewState, ReviewState.card_id == Card.id)
+        .outerjoin(
+            ReviewState,
+            and_(
+                ReviewState.card_id == Card.id,
+                ReviewState.course_learning_profile_id == course_learning_profile_id,
+            ),
+        )
         .filter(Card.course_id == course_id, ReviewState.card_id.is_(None))
         .count()
     )
@@ -131,7 +144,12 @@ def _due_counts(session, course_id: str, now: datetime) -> dict[str, int]:
     return {"due": due_count, "new": new_count, "total": total_count}
 
 
-def get_review_queue(course_id: str, limit: int = 20) -> dict[str, Any]:
+def get_review_queue(
+    course_id: str,
+    limit: int = 20,
+    *,
+    learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID,
+) -> dict[str, Any]:
     """due cards: ReviewState.due_at <= now OR no ReviewState yet (new).
     Ordered by COALESCE(due_at, created_at) then created_at — a fully
     stable sort (never changes between two calls against the same data),
@@ -143,11 +161,20 @@ def get_review_queue(course_id: str, limit: int = 20) -> dict[str, Any]:
     session = get_session()
     try:
         now = utcnow()
+        course_profile = learner_context.ensure_course_learning_profile(
+            session, learner_id, course_id
+        )
         order_key = func.coalesce(ReviewState.due_at, Card.created_at)
 
         rows = (
             session.query(Card, ReviewState)
-            .outerjoin(ReviewState, ReviewState.card_id == Card.id)
+            .outerjoin(
+                ReviewState,
+                and_(
+                    ReviewState.card_id == Card.id,
+                    ReviewState.course_learning_profile_id == course_profile.id,
+                ),
+            )
             .filter(Card.course_id == course_id)
             .filter((ReviewState.due_at.is_(None)) | (ReviewState.due_at <= now))
             .order_by(order_key.asc(), Card.created_at.asc())
@@ -174,20 +201,30 @@ def get_review_queue(course_id: str, limit: int = 20) -> dict[str, Any]:
             for card, review_state in rows
         ]
 
-        counts = _due_counts(session, course_id, now)
+        counts = _due_counts(session, course_id, course_profile.id, now)
         return {"cards": cards, **counts}
     finally:
         session.close()
 
 
-def grade_card(card_id: str, grade: int, elapsed_ms: int | None = None) -> dict[str, Any] | None:
+def grade_card(
+    card_id: str,
+    grade: int,
+    elapsed_ms: int | None = None,
+    *,
+    learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID,
+) -> dict[str, Any] | None:
     session = get_session()
     try:
         card = session.get(Card, card_id)
         if card is None:
             return None
 
-        review_state = session.get(ReviewState, card_id)
+        course_profile = learner_context.ensure_course_learning_profile(
+            session, learner_id, card.course_id
+        )
+
+        review_state = session.get(ReviewState, (course_profile.id, card_id))
         if review_state is None:
             current_interval, current_ease, current_reps = 0.0, DEFAULT_EASE, 0
         else:
@@ -199,6 +236,7 @@ def grade_card(card_id: str, grade: int, elapsed_ms: int | None = None) -> dict[
 
         if review_state is None:
             review_state = ReviewState(
+                course_learning_profile_id=course_profile.id,
                 card_id=card_id,
                 course_id=card.course_id,
                 due_at=result.due_at,
@@ -217,21 +255,53 @@ def grade_card(card_id: str, grade: int, elapsed_ms: int | None = None) -> dict[
             review_state.lapses += result.lapses_delta
             review_state.last_grade = grade
 
-        session.add(
-            ReviewLog(
-                card_id=card_id, course_id=card.course_id, graded_at=utcnow(), grade=grade,
-                elapsed_ms=elapsed_ms,
+        review_log = ReviewLog(
+            course_learning_profile_id=course_profile.id,
+            card_id=card_id,
+            course_id=card.course_id,
+            graded_at=utcnow(),
+            grade=grade,
+            elapsed_ms=elapsed_ms,
+        )
+        session.add(review_log)
+        session.flush()
+        evidence_item = evidence_service.find_item(
+            session, item_type="flashcard", source_record_id=card.id
+        )
+        if evidence_item is None:
+            evidence_item = evidence_items_service.snapshot_item(
+                session,
+                course_id=card.course_id,
+                item_type="flashcard",
+                source_record_id=card.id,
+                source_index=-1,
+                content={"front": card.front_md, "back": card.back_md},
+                source_ref=card.section_id,
+                prompt_version=card.prompt_version,
+                model=None,
             )
+        evidence_service.record_event(
+            session,
+            course_learning_profile_id=course_profile.id,
+            evidence_item=evidence_item,
+            channel="review",
+            normalized_outcome=max(0.0, min(1.0, (grade - AGAIN) / (EASY - AGAIN))),
+            raw_result={"grade": grade, "interval_days": result.interval_days},
+            source_event_key=f"review_log:{review_log.id}",
+            event_at=review_log.graded_at,
+            elapsed_ms=elapsed_ms,
         )
         session.commit()
 
-        counts = _due_counts(session, card.course_id, utcnow())
+        counts = _due_counts(session, card.course_id, course_profile.id, utcnow())
         return {"next_due_at": result.due_at, "remaining_due": counts["due"] + counts["new"]}
     finally:
         session.close()
 
 
-def get_review_summary() -> dict[str, Any]:
+def get_review_summary(
+    *, learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID
+) -> dict[str, Any]:
     session = get_session()
     try:
         now = utcnow()
@@ -239,15 +309,29 @@ def get_review_summary() -> dict[str, Any]:
 
         per_course = []
         due_total = 0
+        course_profile_ids: list[str] = []
         for course in courses:
-            counts = _due_counts(session, course.id, now)
+            course_profile = learner_context.ensure_course_learning_profile(
+                session, learner_id, course.id
+            )
+            course_profile_ids.append(course_profile.id)
+            counts = _due_counts(session, course.id, course_profile.id, now)
             per_course.append(
                 {"course_id": course.id, "title": course.title, "due_count": counts["due"], "new_count": counts["new"]}
             )
             due_total += counts["due"]
 
         seven_days_ago = now - timedelta(days=7)
-        grades_last_7d = session.query(ReviewLog).filter(ReviewLog.graded_at >= seven_days_ago).count()
+        grades_last_7d = (
+            session.query(ReviewLog)
+            .filter(
+                ReviewLog.course_learning_profile_id.in_(course_profile_ids),
+                ReviewLog.graded_at >= seven_days_ago,
+            )
+            .count()
+            if course_profile_ids
+            else 0
+        )
         daily_throughput = grades_last_7d / 7.0
 
         backlog_warning = due_total > 2 * daily_throughput and due_total > 20

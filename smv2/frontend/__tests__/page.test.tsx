@@ -195,7 +195,7 @@ describe("Home page", () => {
 
       expect(await screen.findByText(/keep reading — loops and recursion/i)).toBeInTheDocument();
       expect(screen.getByText(/newer progress · 50% through/i)).toBeInTheDocument();
-      // SkillSnapshotCard renders its own progressbars (mastery bars) —
+      // SkillSnapshotCard renders its own readiness progress bars —
       // target the task card's specifically by its aria-label (= card title).
       expect(
         screen.getByRole("progressbar", { name: /keep reading — loops and recursion/i }),
@@ -275,14 +275,14 @@ describe("Home page", () => {
   describe("skill snapshot", () => {
     const STRUGGLING_MAP: SkillMapOut = {
       nodes: [
-        { id: "tokenization", slug: "tokenization", label: "Tokenization basics", level: 1, mastery: 86, status: "solid", blocked: false, unlock_note: null },
-        { id: "token-counting", slug: "token-counting", label: "Token counting", level: 1, mastery: 31, status: "struggling", blocked: false, unlock_note: null },
-        { id: "cost-estimation", slug: "cost-estimation", label: "Cost estimation", level: 2, mastery: 24, status: "struggling", blocked: true, unlock_note: null },
+        { id: "tokenization", slug: "tokenization", label: "Tokenization basics", level: 1, status: "retained", readiness_estimate: 0.86, evidence_state: "retained", distinct_item_count: 7 },
+        { id: "token-counting", slug: "token-counting", label: "Token counting", level: 1, status: "building", readiness_estimate: 0.31, evidence_state: "building", distinct_item_count: 5 },
+        { id: "cost-estimation", slug: "cost-estimation", label: "Cost estimation", level: 2, status: "likely_struggling", readiness_estimate: 0.24, evidence_state: "likely_struggling", distinct_item_count: 6 },
       ],
-      edges: [{ from_id: "token-counting", to_id: "cost-estimation", kind: "weak" }],
+      edges: [{ from_id: "token-counting", to_id: "cost-estimation", kind: "review_suggested" }],
     };
 
-    it("renders the top skills and a data-driven 'why you're stuck' callout", async () => {
+    it("renders the top skills and an evidence-based suggested review callout", async () => {
       mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a" })]));
       mockedGetSkillMap.mockResolvedValue(ok(STRUGGLING_MAP));
 
@@ -293,16 +293,16 @@ describe("Home page", () => {
       // getAllByText (not getByText): "Token counting" also appears a
       // second time, as the weak prereq's own <strong> in the callout below.
       expect(screen.getAllByText("Token counting").length).toBeGreaterThan(0);
-      expect(screen.getByText("Cost estimation")).toBeInTheDocument();
+      expect(screen.getAllByText("Cost estimation").length).toBeGreaterThan(0);
 
-      expect(screen.getByText(/why you're stuck/i)).toBeInTheDocument();
-      expect(screen.getByText(/24 mastery · requires Token counting/)).toBeInTheDocument();
+      expect(screen.getByText(/suggested review/i)).toBeInTheDocument();
+      expect(screen.getByText(/current answer evidence points to/i)).toBeInTheDocument();
 
       const link = screen.getByRole("link", { name: /full map/i });
       expect(link).toHaveAttribute("href", "/course/a/skills");
 
-      await userEvent.setup().click(screen.getByRole("button", { name: /review the prerequisite/i }));
-      expect(mockPush).toHaveBeenCalledWith("/course/a/skills/token-counting");
+      await userEvent.setup().click(screen.getByRole("button", { name: /review the evidence/i }));
+      expect(mockPush).toHaveBeenCalledWith("/course/a/skills/cost-estimation");
     });
 
     it("renders nothing when the course has no skill graph yet", async () => {

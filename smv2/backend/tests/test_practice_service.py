@@ -3,15 +3,12 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import update
-from sqlalchemy.exc import IntegrityError
 
 from app.db.engine import get_session
 from app.db.models import (
     Concept,
-    ConceptMastery,
-    ConceptMasteryEvent,
     Course,
+    LearnerEvidenceEvent,
     PracticeAnswer,
     PracticeQuestion,
     Section,
@@ -141,7 +138,7 @@ def seed_two_ready_practice_questions_same_concept() -> tuple[str, str, str]:
         session.close()
 
 
-def test_submit_wrong_answer_records_negative_mastery(client):
+def test_submit_wrong_answer_records_evidence_without_legacy_mastery(client):
     question_id, course_id = seed_ready_practice_question(correct_index=0)
 
     result = practice_service.submit_answer(course_id, question_id, "learner-1", 1)
@@ -150,45 +147,45 @@ def test_submit_wrong_answer_records_negative_mastery(client):
     assert result["selected_index"] == 1
     assert result["correct"] is False
     assert result["correct_index"] == 0
-    assert result["points_delta"] == -1
-    assert result["mastery_points"] == -1
+    assert result["readiness_estimate"] is None
+    assert result["evidence_state"] == "insufficient_evidence"
+    assert result["evidence_count"] == 0
+    assert "points_delta" not in result
+    assert "mastery_points" not in result
     assert result["already_answered"] is False
 
     session = get_session()
     try:
         assert session.query(PracticeAnswer).count() == 1
-        assert session.query(ConceptMasteryEvent).count() == 1
-        mastery = session.query(ConceptMastery).one()
-        assert mastery.wrong_count == 1
-        assert mastery.correct_count == 0
-        assert mastery.points == -1
+        event = session.query(LearnerEvidenceEvent).one()
+        assert event.channel == "practice"
+        assert event.normalized_outcome == 0.0
     finally:
         session.close()
 
 
-def test_submit_correct_answer_records_positive_mastery(client):
+def test_submit_correct_answer_records_positive_evidence(client):
     question_id, course_id = seed_ready_practice_question(correct_index=0)
 
     result = practice_service.submit_answer(course_id, question_id, "learner-1", 0)
 
     assert result["correct"] is True
-    assert result["points_delta"] == 1
-    assert result["mastery_points"] == 1
+    assert result["readiness_estimate"] is None
+    assert result["evidence_state"] == "insufficient_evidence"
+    assert result["evidence_count"] == 0
     assert result["already_answered"] is False
 
     session = get_session()
     try:
         assert session.query(PracticeAnswer).count() == 1
-        assert session.query(ConceptMasteryEvent).count() == 1
-        mastery = session.query(ConceptMastery).one()
-        assert mastery.correct_count == 1
-        assert mastery.wrong_count == 0
-        assert mastery.points == 1
+        event = session.query(LearnerEvidenceEvent).one()
+        assert event.channel == "practice"
+        assert event.normalized_outcome == 1.0
     finally:
         session.close()
 
 
-def test_duplicate_submit_returns_original_result_without_second_delta(client):
+def test_duplicate_submit_returns_original_result_without_second_evidence_event(client):
     question_id, course_id = seed_ready_practice_question(correct_index=0)
 
     practice_service.submit_answer(course_id, question_id, "learner-1", 1)
@@ -197,21 +194,17 @@ def test_duplicate_submit_returns_original_result_without_second_delta(client):
     assert result["selected_index"] == 1
     assert result["correct"] is False
     assert result["already_answered"] is True
-    assert result["mastery_points"] == -1
+    assert result["evidence_state"] == "insufficient_evidence"
 
     session = get_session()
     try:
         assert session.query(PracticeAnswer).count() == 1
-        assert session.query(ConceptMasteryEvent).count() == 1
-        mastery = session.query(ConceptMastery).one()
-        assert mastery.correct_count == 0
-        assert mastery.wrong_count == 1
-        assert mastery.points == -1
+        assert session.query(LearnerEvidenceEvent).count() == 1
     finally:
         session.close()
 
 
-def test_submit_answer_retries_mastery_collision_for_different_question(client, monkeypatch):
+def test_two_answers_append_independent_evidence_events(client):
     (
         first_question_id,
         second_question_id,
@@ -220,122 +213,20 @@ def test_submit_answer_retries_mastery_collision_for_different_question(client, 
     learner_key = "learner-1"
     practice_service.submit_answer(course_id, first_question_id, learner_key, 0)
 
-    original_get_mastery = practice_service._get_mastery
-    calls = 0
-
-    def collide_once(session, course_id, concept_id, learner_key):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise IntegrityError("concept_masteries collision", params=None, orig=None)
-        return original_get_mastery(session, course_id, concept_id, learner_key)
-
-    monkeypatch.setattr(practice_service, "_get_mastery", collide_once)
-
     result = practice_service.submit_answer(course_id, second_question_id, learner_key, 0)
 
     assert result["question_id"] == second_question_id
     assert result["correct"] is True
-    assert result["points_delta"] == 1
-    assert result["mastery_points"] == 2
     assert result["already_answered"] is False
-    assert calls == 2
 
     session = get_session()
     try:
         assert session.query(PracticeAnswer).count() == 2
-        assert session.query(ConceptMasteryEvent).count() == 2
-        mastery = session.query(ConceptMastery).one()
-        assert mastery.correct_count == 2
-        assert mastery.wrong_count == 0
-        assert mastery.points == 2
-    finally:
-        session.close()
-
-
-def test_submit_answer_uses_atomic_mastery_increment_for_existing_row(client, monkeypatch):
-    first_question_id, second_question_id, course_id = (
-        seed_two_ready_practice_questions_same_concept()
-    )
-    learner_key = "learner-1"
-
-    session = get_session()
-    try:
-        first_question = session.get(PracticeQuestion, first_question_id)
-        assert first_question is not None
-        mastery = ConceptMastery(
-            course_id=course_id,
-            concept_id=first_question.concept_id,
-            learner_key=learner_key,
-            points=0,
-            correct_count=0,
-            wrong_count=0,
-        )
-        session.add(mastery)
-        session.commit()
-    finally:
-        session.close()
-
-    original_get_mastery = practice_service._get_mastery
-    simulated_once = False
-
-    def simulate_concurrent_increment(session, course_id, concept_id, learner_key):
-        nonlocal simulated_once
-        mastery = original_get_mastery(session, course_id, concept_id, learner_key)
-        if not simulated_once:
-            simulated_once = True
-            answer = PracticeAnswer(
-                course_id=course_id,
-                question_id=first_question_id,
-                learner_key=learner_key,
-                selected_index=0,
-                correct=True,
-                points_delta=1,
-            )
-            session.add(answer)
-            session.flush()
-            session.add(
-                ConceptMasteryEvent(
-                    course_id=course_id,
-                    concept_id=concept_id,
-                    question_id=first_question_id,
-                    practice_answer_id=answer.id,
-                    learner_key=learner_key,
-                    delta=1,
-                )
-            )
-            session.execute(
-                update(ConceptMastery)
-                .where(
-                    ConceptMastery.course_id == course_id,
-                    ConceptMastery.concept_id == concept_id,
-                    ConceptMastery.learner_key == learner_key,
-                )
-                .values(
-                    points=ConceptMastery.points + 1,
-                    correct_count=ConceptMastery.correct_count + 1,
-                )
-                .execution_options(synchronize_session=False)
-            )
-        return mastery
-
-    monkeypatch.setattr(practice_service, "_get_mastery", simulate_concurrent_increment)
-
-    result = practice_service.submit_answer(course_id, second_question_id, learner_key, 0)
-
-    assert result["question_id"] == second_question_id
-    assert result["correct"] is True
-    assert result["points_delta"] == 1
-    assert result["mastery_points"] == 2
-
-    session = get_session()
-    try:
-        assert session.query(PracticeAnswer).count() == 2
-        assert session.query(ConceptMasteryEvent).count() == 2
-        mastery = session.query(ConceptMastery).one()
-        assert mastery.correct_count == 2
-        assert mastery.wrong_count == 0
-        assert mastery.points == 2
+        events = session.query(LearnerEvidenceEvent).order_by(LearnerEvidenceEvent.created_at).all()
+        assert len(events) == 2
+        assert {event.attempt_id for event in events} == {
+            answer.id for answer in session.query(PracticeAnswer).all()
+        }
     finally:
         session.close()
 

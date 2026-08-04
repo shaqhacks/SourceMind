@@ -1,42 +1,42 @@
 import type { Metadata } from "next";
-import { Caprasimo, Figtree, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
 import AppShell from "@/components/AppShell";
 import SiteHeader from "@/components/SiteHeader";
 import SkipToMainLink from "@/components/SkipToMainLink";
-import { THEME_STORAGE_KEY } from "@/lib/hooks/useTheme";
+import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/theme/bootstrap";
 
-// Organic design system faces (self-hosted via next/font, replacing the
-// handoff CSS's Google Fonts @import): Caprasimo ships a single 400
-// weight; Figtree is a variable font, so no weight list is needed.
-const caprasimo = Caprasimo({
+// Organic design system faces, vendored so production builds and page loads
+// never depend on Google Fonts network availability.
+const caprasimo = localFont({
+  src: "./fonts/caprasimo-latin-400.woff2",
   weight: "400",
+  style: "normal",
   variable: "--font-caprasimo",
-  subsets: ["latin"],
+  display: "swap",
 });
 
-const figtree = Figtree({
+const figtree = localFont({
+  src: "./fonts/figtree-latin-variable.woff2",
+  weight: "300 900",
+  style: "normal",
   variable: "--font-figtree",
-  subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/geist-mono-latin-variable.woff2",
+  weight: "100 900",
+  style: "normal",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
   title: "SourceMind",
   description: "Local-first course workbook generator",
 };
-
-// Runs synchronously during HTML parsing, before first paint, so the
-// correct theme is applied with no flash — see
-// https://nextjs.org/docs/app/guides/preventing-flash-before-hydration#themes.
-// Mirrors useTheme.ts's resolution logic (system falls back to
-// prefers-color-scheme); keep the two in sync if either changes.
-const noFlashThemeScript = `(function(){try{var s=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});var p=(s==="light"||s==="dark"||s==="system")?s:"system";var e=p==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):p;document.documentElement.setAttribute("data-theme",e);}catch(err){}})();`;
 
 export default function RootLayout({
   children,
@@ -51,7 +51,7 @@ export default function RootLayout({
       className={`${caprasimo.variable} ${figtree.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: noFlashThemeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
       </head>
       <body className="h-full">
         <SkipToMainLink />

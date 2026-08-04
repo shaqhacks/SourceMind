@@ -35,26 +35,23 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   };
 }
 
-// Mirrors the design mock's 6-node graph: token-counting's own weakness
-// (mastery 31) makes it a "weak" prereq source for cost-estimation and
-// context-management, which is what makes those two blocked=true and
-// makes cost-estimation ("struggling" + "blocked") the map's root cause.
+// Mirrors a six-node map with transparent learner-model evidence attached.
 const NODES: SkillNodeOut[] = [
-  { id: "tokenization", slug: "tokenization", label: "Tokenization basics", level: 1, mastery: 86, status: "solid", blocked: false, unlock_note: null },
-  { id: "token-counting", slug: "token-counting", label: "Token counting", level: 1, mastery: 31, status: "struggling", blocked: false, unlock_note: null },
-  { id: "prompt-structure", slug: "prompt-structure", label: "Prompt structure", level: 1, mastery: 58, status: "growing", blocked: false, unlock_note: null },
-  { id: "cost-estimation", slug: "cost-estimation", label: "Cost estimation", level: 2, mastery: 24, status: "struggling", blocked: true, unlock_note: null },
-  { id: "context-management", slug: "context-management", label: "Context management", level: 2, mastery: 52, status: "growing", blocked: true, unlock_note: null },
-  { id: "caching", slug: "caching", label: "Prompt caching", level: 3, mastery: 0, status: "locked", blocked: true, unlock_note: "Unlocks at 60 mastery of Cost estimation" },
+  { id: "tokenization", slug: "tokenization", label: "Tokenization basics", level: 1, status: "retained", readiness_estimate: 0.86, evidence_state: "retained", distinct_item_count: 8 },
+  { id: "token-counting", slug: "token-counting", label: "Token counting", level: 1, status: "building", readiness_estimate: 0.31, evidence_state: "building", distinct_item_count: 5 },
+  { id: "prompt-structure", slug: "prompt-structure", label: "Prompt structure", level: 1, status: "building", readiness_estimate: 0.58, evidence_state: "building", distinct_item_count: 4 },
+  { id: "cost-estimation", slug: "cost-estimation", label: "Cost estimation", level: 2, status: "likely_struggling", readiness_estimate: 0.24, evidence_state: "likely_struggling", distinct_item_count: 6 },
+  { id: "context-management", slug: "context-management", label: "Context management", level: 2, status: "watch", readiness_estimate: 0.52, evidence_state: "watch", distinct_item_count: 5 },
+  { id: "caching", slug: "caching", label: "Prompt caching", level: 3, status: "insufficient_evidence", readiness_estimate: null, evidence_state: "insufficient_evidence", distinct_item_count: 0 },
 ];
 
 const EDGES: SkillEdgeOut[] = [
-  { from_id: "tokenization", to_id: "token-counting", kind: "met" },
-  { from_id: "token-counting", to_id: "cost-estimation", kind: "weak" },
-  { from_id: "token-counting", to_id: "context-management", kind: "weak" },
-  { from_id: "prompt-structure", to_id: "context-management", kind: "weak" },
-  { from_id: "cost-estimation", to_id: "caching", kind: "weak" },
-  { from_id: "context-management", to_id: "caching", kind: "weak" },
+  { from_id: "tokenization", to_id: "token-counting", kind: "ready" },
+  { from_id: "token-counting", to_id: "cost-estimation", kind: "review_suggested" },
+  { from_id: "token-counting", to_id: "context-management", kind: "review_suggested" },
+  { from_id: "prompt-structure", to_id: "context-management", kind: "review_suggested" },
+  { from_id: "cost-estimation", to_id: "caching", kind: "review_suggested" },
+  { from_id: "context-management", to_id: "caching", kind: "review_suggested" },
 ];
 
 function makeSkillMap(overrides: Partial<SkillMapOut> = {}): SkillMapOut {
@@ -81,9 +78,7 @@ describe("SkillMapView", () => {
       expect(screen.getAllByText(node.label).length).toBeGreaterThan(0);
     }
 
-    // A struggling skill's whole card is a link to its competency page.
-    // Anchored to the start: cost-estimation's own note text now reads
-    // "...requires Token counting", so an unanchored match is ambiguous.
+    // A concept card links to its evidence detail page.
     const strugglingLink = screen.getByRole("link", { name: /^Token counting/ });
     expect(strugglingLink).toHaveAttribute("href", "/course/course-1/skills/token-counting");
   });
@@ -98,10 +93,10 @@ describe("SkillMapView", () => {
     const paths = container.querySelectorAll("svg path");
     expect(paths.length).toBe(EDGES.length);
     const dashed = container.querySelectorAll("path[stroke-dasharray]");
-    expect(dashed.length).toBe(EDGES.filter((e) => e.kind === "weak").length);
+    expect(dashed.length).toBe(EDGES.filter((e) => e.kind === "review_suggested").length);
   });
 
-  it("shows the legend and the data-driven recommended fix card", async () => {
+  it("shows the legend and the evidence-based recommended review card", async () => {
     mockedGetCourse.mockResolvedValue(ok(makeCourse()));
     mockedGetSkillMap.mockResolvedValue(ok(makeSkillMap()));
 
@@ -109,14 +104,13 @@ describe("SkillMapView", () => {
     await screen.findByText("Skill map — Prompt Engineering Basics");
 
     expect(screen.getByText("prerequisite met")).toBeInTheDocument();
-    expect(screen.getByText("weak prerequisite — fix first")).toBeInTheDocument();
+    expect(screen.getByText("prerequisite review suggested")).toBeInTheDocument();
 
-    expect(screen.getByText("Recommended fix")).toBeInTheDocument();
-    expect(screen.getByText("Cost estimation and Context management")).toBeInTheDocument();
-    const startFix = screen.getByRole("link", { name: "Start 4-min fix" });
-    // rootCause() resolves to { skill: cost-estimation, prereq: token-counting }
-    // for this dataset — the fix points at the weak prereq's own detail page.
-    expect(startFix).toHaveAttribute("href", "/course/course-1/skills/token-counting");
+    expect(screen.getByText("Recommended review")).toBeInTheDocument();
+    expect(screen.getAllByText("Cost estimation").length).toBeGreaterThan(1);
+    expect(screen.getByText(/not a claim about the cause of difficulty/i)).toBeInTheDocument();
+    const startReview = screen.getByRole("link", { name: "Practice this concept" });
+    expect(startReview).toHaveAttribute("href", "/course/course-1/skills/cost-estimation");
   });
 
   it("disables the By chapter toggle with an explanatory title", async () => {

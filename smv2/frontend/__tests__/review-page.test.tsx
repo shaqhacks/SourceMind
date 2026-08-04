@@ -5,11 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ReviewPage from "@/app/review/page";
 import {
   getReviewQueue,
+  getAdaptiveStudyQueue,
   getReviewSummary,
   gradeCard,
+  submitPracticeAnswer,
   type ReviewQueueCardOut,
   type ReviewQueueOut,
   type ReviewSummaryOut,
+  type AdaptiveStudyActivityOut,
+  type AdaptiveStudyQueueOut,
 } from "@/lib/api/client";
 
 import { ok } from "./support/api-result";
@@ -27,12 +31,16 @@ vi.mock("@/lib/api/client", () => ({
   MAX_QUEUE_FETCH: 200,
   getReviewSummary: vi.fn(),
   getReviewQueue: vi.fn(),
+  getAdaptiveStudyQueue: vi.fn(),
   gradeCard: vi.fn(),
+  submitPracticeAnswer: vi.fn(),
 }));
 
 const mockedGetReviewSummary = vi.mocked(getReviewSummary);
 const mockedGetReviewQueue = vi.mocked(getReviewQueue);
+const mockedGetAdaptiveStudyQueue = vi.mocked(getAdaptiveStudyQueue);
 const mockedGradeCard = vi.mocked(gradeCard);
+const mockedSubmitPracticeAnswer = vi.mocked(submitPracticeAnswer);
 
 function makeSummary(overrides: Partial<ReviewSummaryOut> = {}): ReviewSummaryOut {
   return {
@@ -66,10 +74,44 @@ function makeQueueCard(overrides: Partial<ReviewQueueCardOut> = {}): ReviewQueue
   };
 }
 
+function makeAdaptiveQueue(overrides: Partial<AdaptiveStudyQueueOut> = {}): AdaptiveStudyQueueOut {
+  return { activities: [], ...overrides };
+}
+
+function makeQuestion(overrides: Partial<AdaptiveStudyActivityOut> = {}): AdaptiveStudyActivityOut {
+  return {
+    activity_id: "question-1",
+    activity_type: "question",
+    concept_id: "concept-1",
+    learning_claim_id: "claim-1",
+    due_at: null,
+    readiness_state: "likely_struggling",
+    reason: "targeted_remediation",
+    payload: {
+      stem_md: "Which statement matches the reading?",
+      choices: ["The supported statement", "A distractor"],
+    },
+    ...overrides,
+  };
+}
+
 describe("ReviewPage", () => {
   beforeEach(() => {
     mockSearchParams = new URLSearchParams();
     mockedGradeCard.mockResolvedValue(ok({ next_due_at: "2026-01-02T00:00:00Z", remaining_due: 0 }));
+    mockedGetAdaptiveStudyQueue.mockResolvedValue(ok(makeAdaptiveQueue()));
+    mockedSubmitPracticeAnswer.mockResolvedValue(ok({
+      question_id: "question-1",
+      selected_index: 0,
+      correct: true,
+      correct_index: 0,
+      explanation_md: "Because the source says so.",
+      concept: { id: "concept-1", slug: "concept-1", label: "Concept 1" },
+      readiness_estimate: null,
+      evidence_state: "insufficient_evidence",
+      evidence_count: 0,
+      already_answered: false,
+    }));
   });
 
   afterEach(() => {
@@ -200,6 +242,26 @@ describe("ReviewPage", () => {
       expect(within(summary).getByText(/again: 0/i)).toBeInTheDocument();
       expect(within(summary).getByText(/hard: 0/i)).toBeInTheDocument();
     }
+  });
+
+  it("session: includes concept questions, records the answer, and keeps answers out of the queue payload", async () => {
+    mockSearchParams = new URLSearchParams({ course: "course-1" });
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 0, due: 0, new: 0 })));
+    mockedGetAdaptiveStudyQueue.mockResolvedValue(ok(makeAdaptiveQueue({ activities: [makeQuestion()] })));
+    const user = userEvent.setup();
+
+    render(<ReviewPage />);
+
+    await user.click(await screen.findByRole("button", { name: /review all \(1\)/i }));
+    expect(await screen.findByText("Which statement matches the reading?")).toBeInTheDocument();
+    expect(screen.queryByText(/because the source says so/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "The supported statement" }));
+
+    expect(mockedSubmitPracticeAnswer).toHaveBeenCalledWith("course-1", "question-1", 0);
+    expect(await screen.findByText(/because the source says so/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Finish" }));
+    expect(await screen.findByText("Session complete")).toBeInTheDocument();
   });
 
   it("'?' opens the shortcuts overlay from any phase (e.g. the hub)", async () => {

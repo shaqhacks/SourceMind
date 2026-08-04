@@ -8,12 +8,20 @@ from __future__ import annotations
 from typing import Any
 
 from app.db.engine import get_session
-from app.db.models import Section, Test, TestAttempt
+from app.db.models import CourseLearningProfile, Section, Test, TestAttempt
+from app.services.learner_context import LEGACY_LOCAL_LEARNER_ID
 
 
-def get_chapters(course_id: str) -> list[dict[str, Any]]:
+def get_chapters(
+    course_id: str, learner_id: str = LEGACY_LOCAL_LEARNER_ID
+) -> list[dict[str, Any]]:
     session = get_session()
     try:
+        course_profile_id = (
+            session.query(CourseLearningProfile.id)
+            .filter_by(learner_id=learner_id, course_id=course_id)
+            .scalar()
+        )
         sections = (
             session.query(Section)
             .filter(Section.course_id == course_id)
@@ -46,7 +54,10 @@ def get_chapters(course_id: str) -> list[dict[str, Any]]:
         attempts = (
             session.query(TestAttempt.score, Test.chapter_label)
             .join(Test, TestAttempt.test_id == Test.id)
-            .filter(TestAttempt.course_id == course_id)
+            .filter(
+                TestAttempt.course_id == course_id,
+                TestAttempt.course_learning_profile_id == course_profile_id,
+            )
             .order_by(TestAttempt.created_at.asc())
             .all()
         )

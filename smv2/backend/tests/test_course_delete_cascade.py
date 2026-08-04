@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+from conftest import _course_profile_id
+
 from app.db.engine import get_session
 from app.db.models import (
     Asset,
@@ -13,10 +15,20 @@ from app.db.models import (
     ConceptEdge,
     ConceptMastery,
     ConceptMasteryEvent,
+    ConceptRelation,
+    ConceptRevision,
     ConceptSectionLink,
+    ConceptSourceLink,
     Course,
+    CurriculumVersion,
+    EvidenceItem,
+    EvidenceItemConceptLink,
     Highlight,
     LlmCall,
+    LearningClaim,
+    LearningClaimRevision,
+    LearnerConceptState,
+    LearnerEvidenceEvent,
     Note,
     PracticeAnswer,
     PracticeExtractionRun,
@@ -25,6 +37,7 @@ from app.db.models import (
     ReviewLog,
     ReviewState,
     Section,
+    ShadowLearnerPrediction,
     Test,
     TestAttempt,
 )
@@ -37,6 +50,7 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         course = Course(id=str(uuid.uuid4()), title="Cascade Course", status="created")
         session.add(course)
         session.flush()
+        course_profile_id = _course_profile_id(session, course.id)
 
         section = Section(
             id="section-cascade-1",
@@ -79,6 +93,7 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         session.flush()
 
         review_state = ReviewState(
+            course_learning_profile_id=course_profile_id,
             card_id=card.id,
             course_id=course.id,
             due_at=datetime.now(timezone.utc),
@@ -89,6 +104,7 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         )
         review_log = ReviewLog(
             id=str(uuid.uuid4()),
+            course_learning_profile_id=course_profile_id,
             card_id=card.id,
             course_id=course.id,
             graded_at=datetime.now(timezone.utc),
@@ -99,7 +115,12 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         test = Test(
             id=str(uuid.uuid4()), course_id=course.id, section_id=section.id, questions=[{"q": 1}]
         )
-        test_attempt = TestAttempt(id=str(uuid.uuid4()), test_id=test.id, course_id=course.id)
+        test_attempt = TestAttempt(
+            id=str(uuid.uuid4()),
+            test_id=test.id,
+            course_id=course.id,
+            course_learning_profile_id=course_profile_id,
+        )
         note = Note(
             course_id=course.id,
             section_id=section.id,
@@ -122,6 +143,121 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         )
         session.add_all([concept, concept_2])
         session.flush()
+        curriculum_version = CurriculumVersion(
+            course_id=course.id,
+            status="published",
+            is_current=True,
+        )
+        session.add(curriculum_version)
+        session.flush()
+        concept_revision = ConceptRevision(
+            curriculum_version_id=curriculum_version.id,
+            concept_id=concept.id,
+            label=concept.label,
+            description_md="Cascade description",
+            aliases=[],
+        )
+        learning_claim = LearningClaim(
+            course_id=course.id,
+            concept_id=concept.id,
+            stable_key="cascade-claim",
+        )
+        session.add_all([concept_revision, learning_claim])
+        session.flush()
+        learning_claim_revision = LearningClaimRevision(
+            curriculum_version_id=curriculum_version.id,
+            learning_claim_id=learning_claim.id,
+            concept_id=concept.id,
+            statement="Demonstrate the cascade claim.",
+            success_criteria_md="Succeeds.",
+            aliases=[],
+        )
+        evidence_item = EvidenceItem(
+            course_id=course.id,
+            item_type="practice_question",
+            source_record_id="cascade-evidence-source",
+            source_index=0,
+            content_json={"stem_md": "2 + 2?"},
+            content_fingerprint="cascade-evidence-fingerprint",
+            mapping_status="mapped",
+        )
+        session.add(evidence_item)
+        session.flush()
+        evidence_mapping = EvidenceItemConceptLink(
+            course_id=course.id,
+            evidence_item_id=evidence_item.id,
+            curriculum_version_id=curriculum_version.id,
+            learning_claim_id=learning_claim.id,
+            role="primary",
+            task_type="multiple_choice",
+            review_state="verified",
+        )
+        session.add(evidence_mapping)
+        session.flush()
+        learner_evidence_event = LearnerEvidenceEvent(
+            course_id=course.id,
+            course_learning_profile_id=course_profile_id,
+            evidence_item_id=evidence_item.id,
+            evidence_mapping_id=evidence_mapping.id,
+            learning_claim_id=learning_claim.id,
+            curriculum_version_id=curriculum_version.id,
+            channel="practice",
+            normalized_outcome=1.0,
+            raw_result={"correct": True},
+            source_event_key="cascade-evidence-event",
+        )
+        learner_concept_state = LearnerConceptState(
+            course_id=course.id,
+            course_learning_profile_id=course_profile_id,
+            curriculum_version_id=curriculum_version.id,
+            concept_id=concept.id,
+            learning_claim_id=learning_claim.id,
+            state_scope="claim",
+            state_key=f"claim:{learning_claim.id}",
+            readiness_estimate=0.5,
+            lower_bound=0.2,
+            upper_bound=0.8,
+            uncertainty=0.6,
+            effective_evidence_count=1.0,
+            distinct_item_count=1,
+            distinct_session_count=1,
+            trend="unknown",
+            status="insufficient_evidence",
+            forgetting_risk=0.0,
+            calculated_through=datetime.now(timezone.utc),
+            model_version="transparent-beta-v1",
+        )
+        shadow_prediction = ShadowLearnerPrediction(
+            course_id=course.id,
+            course_learning_profile_id=course_profile_id,
+            curriculum_version_id=curriculum_version.id,
+            learning_claim_id=learning_claim.id,
+            model_name="bkt",
+            model_version="bkt-v1",
+            status="insufficient_data",
+            evidence_snapshot_hash="cascade-shadow-snapshot",
+            training_cutoff=datetime.now(timezone.utc),
+            feature_schema_version="learner-evidence-v1",
+            prediction_horizon="next_representative_item",
+            target_definition="correctness",
+            config_json={},
+        )
+        concept_relation = ConceptRelation(
+            course_id=course.id,
+            curriculum_version_id=curriculum_version.id,
+            from_concept_id=concept.id,
+            to_concept_id=concept_2.id,
+            kind="requires",
+        )
+        concept_source_link = ConceptSourceLink(
+            course_id=course.id,
+            curriculum_version_id=curriculum_version.id,
+            concept_id=concept.id,
+            learning_claim_id=learning_claim.id,
+            section_id=section.id,
+            source_ref="Intro",
+            source_content_hash=section.content_hash,
+        )
         concept_edge = ConceptEdge(
             course_id=course.id,
             from_concept_id=concept.id,
@@ -137,7 +273,19 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
             section_id=section.id,
             exact="cascade highlight",
         )
-        session.add_all([concept_edge, concept_section_link, highlight])
+        session.add_all(
+            [
+                learning_claim_revision,
+                concept_relation,
+                concept_source_link,
+                concept_edge,
+                concept_section_link,
+                highlight,
+                learner_evidence_event,
+                learner_concept_state,
+                shadow_prediction,
+            ]
+        )
         session.flush()
         practice_question = PracticeQuestion(
             course_id=course.id,
@@ -239,6 +387,22 @@ def test_delete_course_cascades_to_every_fk_bearing_table(client):
         assert session.query(Concept).filter_by(course_id=course_id).count() == 0
         assert session.query(ConceptEdge).filter_by(course_id=course_id).count() == 0
         assert session.query(ConceptSectionLink).filter_by(course_id=course_id).count() == 0
+        assert session.query(CurriculumVersion).filter_by(course_id=course_id).count() == 0
+        assert session.query(ConceptRevision).filter_by(concept_id=concept.id).count() == 0
+        assert session.query(LearningClaim).filter_by(course_id=course_id).count() == 0
+        assert (
+            session.query(LearningClaimRevision)
+            .filter_by(learning_claim_id=learning_claim.id)
+            .count()
+            == 0
+        )
+        assert session.query(ConceptRelation).filter_by(course_id=course_id).count() == 0
+        assert session.query(ConceptSourceLink).filter_by(course_id=course_id).count() == 0
+        assert session.query(EvidenceItem).filter_by(course_id=course_id).count() == 0
+        assert session.query(EvidenceItemConceptLink).filter_by(course_id=course_id).count() == 0
+        assert session.query(LearnerEvidenceEvent).filter_by(course_id=course_id).count() == 0
+        assert session.query(LearnerConceptState).filter_by(course_id=course_id).count() == 0
+        assert session.query(ShadowLearnerPrediction).filter_by(course_id=course_id).count() == 0
         assert session.query(PracticeQuestion).filter_by(course_id=course_id).count() == 0
         assert session.query(PracticeExtractionRun).filter_by(course_id=course_id).count() == 0
         assert session.query(PracticeAnswer).filter_by(course_id=course_id).count() == 0
