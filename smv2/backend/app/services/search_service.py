@@ -31,11 +31,18 @@ def _decode_cursor(cursor: str | None) -> tuple[Any, ...] | None:
     try:
         raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
         decoded = json.loads(raw)
-        if not isinstance(decoded, list):
-            return None
+        if (
+            not isinstance(decoded, list)
+            or len(decoded) != 4
+            or not isinstance(decoded[0], int | float)
+            or not isinstance(decoded[1], int)
+            or not isinstance(decoded[2], str)
+            or not isinstance(decoded[3], int)
+        ):
+            raise ValueError
         return tuple(decoded)
     except Exception:
-        return None
+        raise ValueError("invalid cursor") from None
 
 
 def _token_count(text: str, tokens: list[str]) -> int:

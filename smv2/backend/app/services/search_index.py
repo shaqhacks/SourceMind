@@ -66,19 +66,24 @@ def ensure_search_backend(session: Session) -> SearchBackend:
     if not fts5_available(session):
         _drop_fts(session)
         return "like"
-    _ensure_fts(session)
+    if _ensure_fts(session):
+        _rebuild_fts(session)
     return "fts5"
 
 
-def _ensure_fts(session: Session) -> None:
+def _ensure_fts(session: Session) -> bool:
+    if _has_fts(session) and _fts_has_legacy_doc_key_column(session):
+        _drop_fts(session)
+    already_exists = _has_fts(session)
     session.execute(
         text(
             """
             CREATE VIRTUAL TABLE IF NOT EXISTS search_documents_fts
-            USING fts5(doc_key UNINDEXED, title, body)
+            USING fts5(title, body, content='search_documents', content_rowid='rowid')
             """
         )
     )
+    return not already_exists
 
 
 def _drop_fts(session: Session) -> None:
@@ -93,6 +98,17 @@ def _has_fts(session: Session) -> bool:
         )
     ).first()
     return row is not None
+
+
+def _fts_has_legacy_doc_key_column(session: Session) -> bool:
+    rows = session.execute(text("PRAGMA table_info(search_documents_fts)")).mappings()
+    return any(row["name"] == "doc_key" for row in rows)
+
+
+def _rebuild_fts(session: Session) -> None:
+    # Disposable external-content FTS: `search_documents` is the canonical
+    # derived row store, while FTS only carries its rebuildable term index.
+    session.execute(text("INSERT INTO search_documents_fts(search_documents_fts) VALUES('rebuild')"))
 
 
 def _doc_key(doc_type: str, source_id: str) -> str:
@@ -165,21 +181,14 @@ def _upsert_document(
         },
     )
     if _has_fts(session):
-        session.execute(text("DELETE FROM search_documents_fts WHERE doc_key = :doc_key"), {"doc_key": doc_key})
-        session.execute(
-            text(
-                "INSERT INTO search_documents_fts (doc_key, title, body) "
-                "VALUES (:doc_key, :title, :body)"
-            ),
-            {"doc_key": doc_key, "title": title, "body": body_text},
-        )
+        _rebuild_fts(session)
 
 
 def _delete_document(session: Session, doc_key: str) -> None:
     ensure_core_table(session)
     session.execute(text("DELETE FROM search_documents WHERE doc_key = :doc_key"), {"doc_key": doc_key})
     if _has_fts(session):
-        session.execute(text("DELETE FROM search_documents_fts WHERE doc_key = :doc_key"), {"doc_key": doc_key})
+        _rebuild_fts(session)
 
 
 def upsert_section_document(session: Session, section: Section) -> None:
@@ -265,14 +274,7 @@ def delete_course_documents(session: Session, course_id: str) -> None:
     ensure_core_table(session)
     session.execute(text("DELETE FROM search_documents WHERE course_id = :course_id"), {"course_id": course_id})
     if _has_fts(session):
-        session.execute(
-            text(
-                """
-                DELETE FROM search_documents_fts
-                WHERE doc_key NOT IN (SELECT doc_key FROM search_documents)
-                """
-            )
-        )
+        _rebuild_fts(session)
 
 
 def rebuild_course_documents(session: Session, course_id: str | None = None) -> int:
@@ -280,7 +282,7 @@ def rebuild_course_documents(session: Session, course_id: str | None = None) -> 
     if course_id is None:
         session.execute(text("DELETE FROM search_documents"))
         if _has_fts(session):
-            session.execute(text("DELETE FROM search_documents_fts"))
+            _rebuild_fts(session)
     else:
         delete_course_documents(session, course_id)
 
@@ -324,9 +326,9 @@ def matching_fts_doc_keys(session: Session, course_id: str, query: str) -> set[s
     rows = session.execute(
         text(
             """
-            SELECT f.doc_key
+            SELECT d.doc_key
             FROM search_documents_fts f
-            JOIN search_documents d ON d.doc_key = f.doc_key
+            JOIN search_documents d ON d.rowid = f.rowid
             WHERE d.course_id = :course_id
             AND search_documents_fts MATCH :query
             """

@@ -119,6 +119,16 @@ def test_equal_score_ordering_and_cursor_pagination_are_stable(client, monkeypat
     assert second_page.next_cursor is None
 
 
+@pytest.mark.parametrize("cursor", ["not-a-token", "W10=", "eyJub3QiOiJhLWxpc3QifQ=="])
+def test_malformed_cursor_raises_value_error_instead_of_restart(client, cursor):
+    from app.services import search_service
+
+    course_id = _seed_course("course-bad-cursor")
+
+    with pytest.raises(ValueError, match="invalid cursor"):
+        search_service.search_course(course_id, "alpha", cursor=cursor)
+
+
 def test_fts5_backend_is_used_when_available(client):
     from app.services import search_index, search_service
 
@@ -128,6 +138,42 @@ def test_fts5_backend_is_used_when_available(client):
 
     assert results.backend == search_index.ensure_search_backend(get_session())
     assert _result_ids(results) == ["fts-section"]
+
+
+def test_fts5_transition_populates_historical_like_rows(client, monkeypatch):
+    from app.services import search_index, search_service
+
+    monkeypatch.setattr(search_index, "fts5_available", lambda session: False)
+    course_id = _seed_course(
+        "course-transition",
+        section_bodies=[("transition-section", "Transition", "historicalword")],
+    )
+    assert search_service.search_course(course_id, "historicalword").backend == "like"
+
+    monkeypatch.setattr(search_index, "fts5_available", lambda session: True)
+    session = get_session()
+    try:
+        assert search_index.ensure_search_backend(session) == "fts5"
+        fts_keys = search_index.matching_fts_doc_keys(session, course_id, "historicalword")
+        assert fts_keys == {"section:transition-section"}
+    finally:
+        session.close()
+
+    results = search_service.search_course(course_id, "historicalword")
+    assert results.backend == "fts5"
+    assert _result_ids(results) == ["transition-section"]
+
+
+def test_fts5_enablement_handles_empty_search_documents(client):
+    from app.services import search_index
+
+    session = get_session()
+    try:
+        assert search_index.ensure_search_backend(session) in {"fts5", "like"}
+        if search_index.fts5_available(session):
+            assert search_index.matching_fts_doc_keys(session, "missing-course", "anything") == set()
+    finally:
+        session.close()
 
 
 def test_like_fallback_is_used_when_fts5_is_unavailable(client, monkeypatch):

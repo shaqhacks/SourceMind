@@ -47,7 +47,7 @@ def upgrade() -> None:
         bind.exec_driver_sql(
             """
             CREATE VIRTUAL TABLE IF NOT EXISTS search_documents_fts
-            USING fts5(doc_key UNINDEXED, title, body)
+            USING fts5(title, body, content='search_documents', content_rowid='rowid')
             """
         )
 

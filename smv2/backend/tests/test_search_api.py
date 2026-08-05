@@ -101,6 +101,22 @@ def test_search_next_cursor_round_trips(client):
     assert first_ids.isdisjoint(second_ids)
 
 
+def test_search_rejects_malformed_cursor_without_restart(client):
+    course_id = _seed_api_course("bad-cursor-api-course")
+
+    first_page = client.get(f"/api/courses/{course_id}/search", params={"query": "alpha", "limit": 1})
+    assert first_page.status_code == 200
+    assert len(first_page.json()["items"]) == 1
+
+    bad_cursor = client.get(
+        f"/api/courses/{course_id}/search",
+        params={"query": "alpha", "limit": 1, "cursor": "not-a-token"},
+    )
+
+    assert bad_cursor.status_code == 422
+    assert "invalid cursor" in bad_cursor.json()["detail"]
+
+
 def test_search_missing_course_returns_404(client):
     resp = client.get("/api/courses/missing/search", params={"query": "alpha"})
 
