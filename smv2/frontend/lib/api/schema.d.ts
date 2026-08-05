@@ -14,8 +14,8 @@ export interface paths {
         /**
          * Get Asset File
          * @description Serves the original uploaded PDF as-is, for the reader's
-         *     original-PDF page view. Inline disposition (not attachment) so a
-         *     browser embeds/views it (e.g. via pdf.js) instead of downloading it.
+         *     original-source page view. Inline disposition keeps browser-viewable
+         *     sources embedded where supported instead of forcing a download.
          */
         get: operations["get_asset_file"];
         put?: never;

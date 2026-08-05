@@ -27,8 +27,6 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any
 
@@ -72,7 +70,6 @@ from app.pipeline.import_adapters import (
 from app.pipeline.ingest_paths import images_dir_for_course
 from app.services import search_index
 
-_EXTRACTOR_ALGO_VERSION = "algo-7"
 _LOW_TEXT_YIELD_CHARS_PER_PAGE = 20
 # Page-batch granularity for extraction-phase progress heartbeats — bounds
 # the number of report_progress DB writes per asset regardless of document
@@ -82,14 +79,6 @@ _EXTRACT_PROGRESS_BATCH_PAGES = 20
 
 class IngestAllAssetsFailedError(Exception):
     pass
-
-
-def extractor_version() -> str:
-    try:
-        pymupdf4llm_version = _pkg_version("pymupdf4llm")
-    except PackageNotFoundError:
-        pymupdf4llm_version = "unknown"
-    return f"pymupdf4llm-{pymupdf4llm_version}+{_EXTRACTOR_ALGO_VERSION}"
 
 
 @dataclass
@@ -117,8 +106,8 @@ def _asset_page_count(asset: Asset) -> int:
         doc.close()
 
 
-def _extract_one_asset(asset: Asset, *, on_batch=None) -> _ExtractedAsset:
-    adapter = choose_document_adapter(
+def _document_adapter_for_asset(asset: Asset, *, on_batch=None):
+    return choose_document_adapter(
         asset,
         adapters=[
             PdfDocumentAdapter(
@@ -128,6 +117,10 @@ def _extract_one_asset(asset: Asset, *, on_batch=None) -> _ExtractedAsset:
             )
         ],
     )
+
+
+def _extract_one_asset(asset: Asset, *, on_batch=None) -> _ExtractedAsset:
+    adapter = _document_adapter_for_asset(asset, on_batch=on_batch)
     document = adapter.extract(asset)
     page_count = int(document.metadata.get("page_count") or 0)
 
@@ -214,8 +207,6 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
         shutil.rmtree(html_dir_path)
     for asset in assets:
         asset.html_status = "none"
-
-    version_tag = extractor_version()
 
     # Sized up front so extraction progress is a real, global 0->80 measure
     # across every asset's pages, not a per-asset counter that resets (or
@@ -328,6 +319,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                     "page_end": normalized_section.page_end,
                     "source_format": normalized_section.source_format,
                     "source_locator": normalized_section.source_locator.to_dict(),
+                    "extractor_version": item.document.extractor_version,
                     "body_md": normalized_section.body_md,
                     "content_hash": normalized_section.content_hash,
                     "kind": normalized_section.kind,
@@ -421,7 +413,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
             existing.page_end = data["page_end"]
             existing.source_format = data["source_format"]
             existing.source_locator = data["source_locator"]
-            existing.extractor_version = version_tag
+            existing.extractor_version = data["extractor_version"]
             existing.kind = data["kind"]
             existing.chapter_label = data["chapter_label"]
             section_row = existing
@@ -440,7 +432,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                 body_md=data["body_md"],
                 content_hash=data["content_hash"],
                 lesson_status="none",
-                extractor_version=version_tag,
+                extractor_version=data["extractor_version"],
                 kind=data["kind"],
                 chapter_label=data["chapter_label"],
             )

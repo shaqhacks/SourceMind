@@ -13,6 +13,7 @@ from app.pipeline.extract import (
     extract_markdown_pages_in_batches,
     get_toc,
     open_pdf,
+    pdf_extractor_version,
     rewrite_image_refs_to_api_path,
 )
 from app.pipeline.ingest_paths import images_dir_for_course
@@ -100,8 +101,6 @@ class PdfDocumentAdapter:
         return sniff_pdf_path(Path(asset.stored_path))
 
     def extract(self, asset: Any) -> NormalizedSourceDocument:
-        from app.pipeline.ingest import extractor_version
-
         pdf_path = Path(asset.stored_path)
         doc = open_pdf(pdf_path)
         try:
@@ -184,7 +183,7 @@ class PdfDocumentAdapter:
             warnings=warnings,
             failures=[],
             extractor_name="pymupdf4llm",
-            extractor_version=extractor_version(),
+            extractor_version=pdf_extractor_version(),
             source_format=self.format_name,
         )
 

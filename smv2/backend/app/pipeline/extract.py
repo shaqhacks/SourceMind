@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
-from typing import Callable
 
 import fitz
 import pymupdf4llm
@@ -28,10 +30,19 @@ import pymupdf4llm
 from pymupdf4llm.helpers.pymupdf_rag import IdentifyHeaders
 
 logger = logging.getLogger(__name__)
+_PDF_EXTRACTOR_ALGO_VERSION = "algo-7"
 
 
 class PdfExtractionError(Exception):
     pass
+
+
+def pdf_extractor_version() -> str:
+    try:
+        pymupdf4llm_version = _pkg_version("pymupdf4llm")
+    except PackageNotFoundError:
+        pymupdf4llm_version = "unknown"
+    return f"pymupdf4llm-{pymupdf4llm_version}+{_PDF_EXTRACTOR_ALGO_VERSION}"
 
 
 def open_pdf(pdf_path: Path) -> fitz.Document:
@@ -57,7 +68,7 @@ def get_toc(doc: fitz.Document) -> list[tuple[int, str, int]]:
     """
     try:
         raw = doc.get_toc(simple=True) or []
-    except Exception:
+    except Exception:  # noqa: BLE001 - malformed PDF outlines should disable ToC use, not fail ingest.
         return []
 
     entries: list[tuple[int, str, int]] = []

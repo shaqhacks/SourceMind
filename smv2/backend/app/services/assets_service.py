@@ -125,7 +125,7 @@ class AssetFileMissingError(ValueError):
     pass
 
 
-def resolve_asset_file_path(asset_id: str) -> tuple[Path, str, str]:
+def resolve_asset_file_path(asset_id: str) -> tuple[Path, str, str, str]:
     """Returns (absolute path, original filename) for serving asset_id's
     stored PDF as-is (original-PDF page view). Asset.stored_path is a
     server-minted value written once at upload time (assets_service.
@@ -151,4 +151,4 @@ def resolve_asset_file_path(asset_id: str) -> tuple[Path, str, str]:
     if not candidate.is_file():
         raise AssetFileMissingError(f"asset file missing on disk: {asset_id!r}")
 
-    return candidate, asset.filename, asset.media_type
+    return candidate, asset.filename, asset.media_type, asset.source_format

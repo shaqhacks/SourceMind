@@ -260,6 +260,30 @@ def test_upload_records_detected_format_even_when_client_header_is_wrong(client)
     assert served.headers["content-type"] == "application/pdf"
 
 
+def test_download_filename_preserves_truthful_non_pdf_extension():
+    """Catches the asset file route forcing every original source download
+    to look like a PDF after the stored source format says otherwise.
+    """
+    from app.routers.assets import _sanitize_download_filename
+
+    assert (
+        _sanitize_download_filename(
+            "lesson notes.markdown",
+            source_format="markdown",
+            media_type="text/markdown",
+        )
+        == "lesson-notes.md"
+    )
+    assert (
+        _sanitize_download_filename(
+            "reading.txt",
+            source_format="text",
+            media_type="text/plain",
+        )
+        == "reading.txt"
+    )
+
+
 def test_get_asset_file_supports_range_requests(client, ingest_course):
     """pdf.js relies on byte-range requests for progressive loading —
     confirm the installed Starlette FileResponse actually honors Range,
