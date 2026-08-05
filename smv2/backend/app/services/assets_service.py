@@ -116,12 +116,12 @@ class AssetFileMissingError(ValueError):
 
 def resolve_asset_file_path(asset_id: str) -> tuple[Path, str, str, str]:
     """Returns (absolute path, original filename) for serving asset_id's
-    stored PDF as-is (original-PDF page view). Asset.stored_path is a
-    server-minted value written once at upload time (assets_service.
-    save_upload), never user input at request time — but we still assert it
-    resolves under data_dir()/assets before returning it, belt and braces,
-    the same reasoning as images_service.resolve_image_path's containment
-    check for a path that's normally trustworthy by construction.
+    stored source as-is. Asset.stored_path is a server-minted value written
+    once at upload time (assets_service.save_upload), never user input at
+    request time — but we still assert it resolves under data_dir()/assets
+    before returning it, belt and braces, the same reasoning as
+    images_service.resolve_image_path's containment check for a path that's
+    normally trustworthy by construction.
     """
     session = get_session()
     try:

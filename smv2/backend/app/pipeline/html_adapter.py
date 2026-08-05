@@ -4,7 +4,7 @@ import re
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from app.db.identity import content_hash_for, normalize_text
 from app.pipeline.import_adapters import NormalizedSection, NormalizedSourceDocument
@@ -18,6 +18,8 @@ _BLOCK_TAGS = {"address", "article", "aside", "blockquote", "div", "footer", "he
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 _SKIP_CONTENT_TAGS = {"script", "style", "iframe", "object", "embed", "svg", "math"}
 _SAFE_LINK_SCHEMES = {"", "http", "https", "mailto"}
+_MARKDOWN_TEXT_ESCAPE_RE = re.compile(r"([\\`*_{}\[\]()<>])")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def looks_like_html_text(text: str) -> bool:
@@ -26,10 +28,17 @@ def looks_like_html_text(text: str) -> bool:
 
 
 def _safe_href(href: str) -> str | None:
-    parsed = urlparse(href.strip())
+    href = _CONTROL_CHARS_RE.sub("", href.strip())
+    if any(char in href for char in "[]()<>"):
+        return None
+    parsed = urlparse(href)
     if parsed.scheme.lower() in _SAFE_LINK_SCHEMES:
-        return href.strip()
+        return quote(href, safe="/:#?&=@%+~,.;-")
     return None
+
+
+def _escape_markdown_text(text: str) -> str:
+    return _MARKDOWN_TEXT_ESCAPE_RE.sub(r"\\\1", text)
 
 
 class _MarkdownHTMLParser(HTMLParser):
@@ -93,6 +102,8 @@ class _MarkdownHTMLParser(HTMLParser):
         if tag == "a" and self.link_href_stack:
             href = self.link_href_stack.pop()
             if href:
+                while self.parts and self.parts[-1] == " ":
+                    self.parts.pop()
                 self.parts.append(f"]({href})")
 
     def handle_data(self, data: str) -> None:
@@ -106,7 +117,7 @@ class _MarkdownHTMLParser(HTMLParser):
                 return
             if self.parts and not self.parts[-1].endswith((" ", "\n", "[")):
                 self.parts.append(" ")
-            self.parts.append(collapsed)
+            self.parts.append(_escape_markdown_text(collapsed))
             if not collapsed.endswith((".", ",", ";", ":", "!", "?")):
                 self.parts.append(" ")
 

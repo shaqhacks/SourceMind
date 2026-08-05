@@ -38,13 +38,28 @@ def _heading_title(line: str) -> str:
     return match.group(2).strip() if match else "Document"
 
 
+def _heading_indices_outside_fences(lines: list[str]) -> list[int]:
+    heading_indices: list[int] = []
+    fence_marker: str | None = None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            if fence_marker is None:
+                fence_marker = marker
+            elif marker == fence_marker:
+                fence_marker = None
+            continue
+        if fence_marker is None and _HEADING_RE.match(line):
+            heading_indices.append(index)
+    return heading_indices
+
+
 def extract_markdown_document(path: Path, *, asset_id: str | None) -> NormalizedSourceDocument:
     text = _read_text(path)
     normalized_doc = normalize_text(text)
     lines = normalized_doc.splitlines()
-    heading_indices = [
-        index for index, line in enumerate(lines) if _HEADING_RE.match(line)
-    ]
+    heading_indices = _heading_indices_outside_fences(lines)
     if not heading_indices:
         heading_indices = [0]
 

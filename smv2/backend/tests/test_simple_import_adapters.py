@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -80,6 +81,37 @@ def test_markdown_adapter_preserves_headings_code_fences_and_links(client, monke
     assert sections[0]["source_locator"]["heading_path"] == ["Course Overview"]
 
 
+def test_markdown_adapter_ignores_atx_headings_inside_fenced_code(client, monkeypatch):
+    """Catches splitting a code sample when it contains heading-shaped text."""
+    markdown = b"""# Real Heading
+
+```markdown
+# Not A Section
+## Also Not A Section
+```
+
+After the fenced example.
+
+## Next Real Heading
+
+Actual second section.
+"""
+
+    _course_id, sections = _upload_and_ingest(
+        client,
+        monkeypatch,
+        filename="fenced.md",
+        content=markdown,
+        content_type="text/markdown",
+        flags={"SMV2_IMPORT_MARKDOWN_EXPERIMENTAL": "1"},
+    )
+
+    assert [section["title"] for section in sections] == ["Real Heading", "Next Real Heading"]
+    first_body = _section_bodies(client, sections)[0]
+    assert "```markdown\n# Not A Section\n## Also Not A Section\n```" in first_body
+    assert "After the fenced example." in first_body
+
+
 def test_text_adapter_splits_paragraphs_with_stable_filename_heading(client, monkeypatch):
     """Catches treating plain text as one unstable blob or deriving titles from upload order."""
     text = (IMPORT_FIXTURES / "text" / "basic.txt").read_bytes()
@@ -128,6 +160,48 @@ def test_html_adapter_sanitizes_hostile_html_and_keeps_readable_content(client, 
     assert "onclick" not in joined.lower()
     assert "javascript:" not in joined.lower()
     assert all(section["source_format"] == "html" for section in sections)
+
+
+def test_html_adapter_escapes_entity_decoded_constructs_and_sanitizes_links(
+    client, monkeypatch
+):
+    """Catches entity-decoded tag text or hostile hrefs becoming active Markdown/HTML."""
+    html = b"""<!doctype html>
+<html><body>
+  <h1>Escaped Payloads</h1>
+  <p>&lt;script&gt;alert(1)&lt;/script&gt; and &lt;img src=x onerror=steal()&gt;</p>
+  <!-- hidden comment must not survive -->
+  <p><a href="https://example.com/safe?q=1">safe link</a></p>
+  <p><a href="javascript:alert(1)">javascript link</a></p>
+  <p><a href="data:text/html,boom">data link</a></p>
+  <p><a href="https://example.com/a)b\n[Injected](javascript:alert(1))">hostile href punctuation</a></p>
+</body></html>
+"""
+
+    _course_id, sections = _upload_and_ingest(
+        client,
+        monkeypatch,
+        filename="escaped.html",
+        content=html,
+        content_type="text/html",
+        flags={"SMV2_IMPORT_HTML_EXPERIMENTAL": "1"},
+    )
+
+    body = "\n\n".join(_section_bodies(client, sections))
+    assert "\\<script\\>alert\\(1\\)\\</script\\>" in body
+    assert "\\<img src=x onerror=steal\\(\\)\\>" in body
+    assert "hidden comment" not in body
+    assert "[safe link](https://example.com/safe?q=1)" in body
+    assert "javascript link" in body
+    assert "[javascript link]" not in body
+    assert "data link" in body
+    assert "[data link]" not in body
+    assert "[hostile href punctuation]" not in body
+    assert "Injected" not in body
+    assert "javascript:" not in body.lower()
+    assert "data:text/html" not in body.lower()
+    assert re.search(r"(?<!\\)<script", body, flags=re.IGNORECASE) is None
+    assert re.search(r"(?<!\\)<img", body, flags=re.IGNORECASE) is None
 
 
 def test_unsupported_upload_returns_stable_415_code(client):
