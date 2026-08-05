@@ -21,7 +21,12 @@ const ACTIONS = [
 
 function activeCourseFromPath(pathname: string): string | null {
   const match = /^\/course\/([^/]+)/.exec(pathname);
-  return match ? decodeURIComponent(match[1]) : null;
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 export default function CommandPalette() {

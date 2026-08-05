@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CourseSearchClient from "@/components/search/CourseSearchClient";
 import { listCourses, searchCourse } from "@/lib/api/client";
+import type { ApiResult, SearchResultsOut } from "@/lib/api/client";
 
 vi.mock("@/lib/api/client", () => ({
   listCourses: vi.fn(),
@@ -38,8 +39,31 @@ const courses = [
   },
 ];
 
-function ok<T>(data: T) {
+function ok<T>(data: T): ApiResult<T> {
   return { status: 200, ok: true, data };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
+function result(overrides = {}) {
+  return {
+    doc_type: "section" as const,
+    course_id: "course-1",
+    section_id: "sec-1",
+    asset_id: "asset-1",
+    title: "Cell membranes",
+    excerpt_md: "Membranes keep &lt;script&gt; out of cells.",
+    source_locator: { page: 12, heading: "Transport Proteins", chapter: "Chapter 2", slide: null },
+    score: 9.7,
+    cursor_token: "cursor-1",
+    ...overrides,
+  };
 }
 
 function searchPayload(overrides = {}) {
@@ -47,19 +71,7 @@ function searchPayload(overrides = {}) {
     backend: "fts5" as const,
     next_cursor: null,
     sanitized_excerpts: true,
-    items: [
-      {
-        doc_type: "section" as const,
-        course_id: "course-1",
-        section_id: "sec-1",
-        asset_id: "asset-1",
-        title: "Cell membranes",
-        excerpt_md: "Membranes keep &lt;script&gt; out of cells.",
-        source_locator: { page: 12, heading: "Transport Proteins", chapter: "Chapter 2", slide: null },
-        score: 9.7,
-        cursor_token: "cursor-1",
-      },
-    ],
+    items: [result()],
     ...overrides,
   };
 }
@@ -152,5 +164,100 @@ describe("CourseSearchClient", () => {
       cursor: "cursor-2",
       limit: 10,
     });
+  });
+
+  it("ignores an older search response that resolves after the latest search", async () => {
+    const user = userEvent.setup();
+    const first = deferred<ApiResult<SearchResultsOut>>();
+    const second = deferred<ApiResult<SearchResultsOut>>();
+    mockedSearchCourse
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    render(<CourseSearchClient />);
+
+    await user.type(await screen.findByRole("searchbox", { name: "Search course text" }), "alpha");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.clear(screen.getByRole("searchbox", { name: "Search course text" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search course text" }), "beta");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    second.resolve(
+      ok(searchPayload({ items: [result({ title: "Beta result", cursor_token: "beta" })] })),
+    );
+    expect(await screen.findByRole("article", { name: "Beta result" })).toBeInTheDocument();
+
+    first.resolve(
+      ok(searchPayload({ items: [result({ title: "Alpha result", cursor_token: "alpha" })] })),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("article", { name: "Alpha result" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps the latest loading state when a stale request settles", async () => {
+    const user = userEvent.setup();
+    const first = deferred<ApiResult<SearchResultsOut>>();
+    const second = deferred<ApiResult<SearchResultsOut>>();
+    mockedSearchCourse
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    render(<CourseSearchClient />);
+
+    await user.type(await screen.findByRole("searchbox", { name: "Search course text" }), "alpha");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.clear(screen.getByRole("searchbox", { name: "Search course text" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search course text" }), "beta");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    first.resolve(ok(searchPayload({ items: [result({ title: "Alpha result" })] })));
+
+    await waitFor(() => {
+      expect(screen.getByText("Searching course text...")).toBeInTheDocument();
+    });
+    second.resolve(ok(searchPayload({ items: [result({ title: "Beta result" })] })));
+    expect(await screen.findByRole("article", { name: "Beta result" })).toBeInTheDocument();
+  });
+
+  it("paginates with the submitted params even after live inputs change and skips duplicate rows", async () => {
+    const user = userEvent.setup();
+    mockedSearchCourse
+      .mockResolvedValueOnce(
+        ok(
+          searchPayload({
+            next_cursor: "cursor-2",
+            items: [result({ title: "Page one", cursor_token: "shared" })],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        ok(
+          searchPayload({
+            next_cursor: null,
+            items: [
+              result({ title: "Page one duplicate", cursor_token: "shared" }),
+              result({ title: "Page two", cursor_token: "page-two" }),
+            ],
+          }),
+        ),
+      );
+    render(<CourseSearchClient />);
+
+    await user.click(await screen.findByRole("checkbox", { name: "Lessons" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search course text" }), "transport");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByRole("article", { name: "Page one" })).toBeInTheDocument();
+
+    await user.clear(screen.getByRole("searchbox", { name: "Search course text" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search course text" }), "edited live query");
+    await user.click(screen.getByRole("checkbox", { name: "Lessons" }));
+    await user.click(screen.getByRole("button", { name: "Load more results" }));
+
+    expect(mockedSearchCourse).toHaveBeenLastCalledWith("course-1", "transport", {
+      documentTypes: ["lesson"],
+      cursor: "cursor-2",
+      limit: 10,
+    });
+    expect(await screen.findByRole("article", { name: "Page two" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Page one duplicate" })).not.toBeInTheDocument();
   });
 });

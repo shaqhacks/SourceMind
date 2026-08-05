@@ -74,10 +74,11 @@ export default function SearchBar({
         </label>
         <button
           type="submit"
-          disabled={loading || !selectedCourseId || query.trim().length === 0}
+          aria-label="Search"
+          disabled={!selectedCourseId || query.trim().length === 0}
           className="h-10 self-end rounded-md bg-accent-700 px-4 text-sm font-semibold text-background hover:bg-accent-800 disabled:opacity-60"
         >
-          Search
+          {loading ? "Searching..." : "Search"}
         </button>
       </div>
       <fieldset className="flex flex-wrap gap-3">

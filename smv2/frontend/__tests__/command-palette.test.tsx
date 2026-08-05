@@ -124,6 +124,18 @@ describe("CommandPalette", () => {
     expect(screen.getByText(/open the Search page to choose a course/i)).toBeInTheDocument();
   });
 
+  it("does not crash on a malformed active course route segment", async () => {
+    const user = userEvent.setup();
+    mockPathname = "/course/%E0%A4%A";
+    render(<CommandPalette />);
+
+    await user.click(screen.getByRole("button", { name: "Open command palette" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search commands and active course" }), "membrane");
+
+    expect(mockedSearchCourse).not.toHaveBeenCalled();
+    expect(screen.getByText(/open the Search page to choose a course/i)).toBeInTheDocument();
+  });
+
   it("closes when the route changes", async () => {
     const { rerender } = render(<CommandPalette />);
     await userEvent.click(screen.getByRole("button", { name: "Open command palette" }));

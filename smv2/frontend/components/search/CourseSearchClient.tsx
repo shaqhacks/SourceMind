@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import SearchBar from "@/components/search/SearchBar";
 import SearchResults from "@/components/search/SearchResults";
@@ -12,6 +12,22 @@ import {
 } from "@/lib/api/client";
 
 const PAGE_SIZE = 10;
+
+interface SubmittedSearch {
+  courseId: string;
+  query: string;
+  documentTypes: string[];
+}
+
+function appendUniqueResults(current: SearchResultOut[], incoming: SearchResultOut[]) {
+  const seen = new Set(current.map((item) => item.cursor_token));
+  const unique = incoming.filter((item) => {
+    if (seen.has(item.cursor_token)) return false;
+    seen.add(item.cursor_token);
+    return true;
+  });
+  return [...current, ...unique];
+}
 
 export default function CourseSearchClient() {
   const [courses, setCourses] = useState<CourseOut[]>([]);
@@ -26,6 +42,8 @@ export default function CourseSearchClient() {
   const [hasSearched, setHasSearched] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [submittedSearch, setSubmittedSearch] = useState<SubmittedSearch | null>(null);
+  const latestRequestId = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -53,18 +71,30 @@ export default function CourseSearchClient() {
   );
 
   async function runSearch(cursor?: string | null) {
-    const trimmed = query.trim();
-    if (!selectedCourseId || trimmed.length === 0) return;
+    const isNextPage = Boolean(cursor);
+    const params = isNextPage
+      ? submittedSearch
+      : {
+          courseId: selectedCourseId,
+          query: query.trim(),
+          documentTypes: [...documentTypes],
+        };
+    if (!params || !params.courseId || params.query.length === 0) return;
+    const requestId = latestRequestId.current + 1;
+    latestRequestId.current = requestId;
     setSearchLoading(true);
     setSearchError(null);
     setHasSearched(true);
-    setSubmittedQuery(trimmed);
+    setSubmittedQuery(params.query);
+    setSubmittedSearch(params);
 
-    const { data, ok } = await searchCourse(selectedCourseId, trimmed, {
-      documentTypes,
+    const { data, ok } = await searchCourse(params.courseId, params.query, {
+      documentTypes: params.documentTypes,
       cursor: cursor ?? undefined,
       limit: PAGE_SIZE,
     });
+
+    if (latestRequestId.current !== requestId) return;
 
     if (!ok || !data) {
       setSearchError("Search failed. Try again.");
@@ -72,7 +102,7 @@ export default function CourseSearchClient() {
       return;
     }
 
-    setResults((current) => (cursor ? [...current, ...data.items] : data.items));
+    setResults((current) => (isNextPage ? appendUniqueResults(current, data.items) : data.items));
     setNextCursor(data.next_cursor);
     setSearchLoading(false);
   }
@@ -118,6 +148,7 @@ export default function CourseSearchClient() {
           setResults([]);
           setNextCursor(null);
           setHasSearched(false);
+          setSubmittedSearch(null);
         }}
         onQueryChange={setQuery}
         onDocumentTypesChange={setDocumentTypes}
