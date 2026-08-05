@@ -37,7 +37,10 @@ def generate_all_lessons(course_id: str) -> GenerateAllLessonsOut:
     if courses_service.get_course(course_id) is None:
         raise HTTPException(status_code=404, detail="course not found")
 
-    job_ids, skipped = lessons_service.start_all_lesson_generations(course_id)
+    try:
+        job_ids, skipped = lessons_service.start_all_lesson_generations(course_id)
+    except llm_readiness_service.LlmReadinessUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.detail) from exc
     return GenerateAllLessonsOut(job_ids=job_ids, skipped=skipped)
 
 

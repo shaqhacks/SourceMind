@@ -13,6 +13,8 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 def create_job(body: JobCreate) -> JobOut:
     try:
         job = jobs_service.create_job(body.type, body.payload)
+    except llm_readiness_service.LlmReadinessUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return JobOut.model_validate(job)

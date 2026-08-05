@@ -31,6 +31,50 @@ def write_local_settings(path: Path, values: dict[str, Any]) -> None:
             tmp_path.unlink()
 
 
+def write_local_settings_pair(
+    first_path: Path,
+    first_values: dict[str, Any],
+    second_path: Path,
+    second_values: dict[str, Any],
+) -> None:
+    snapshots = {
+        first_path: _snapshot_path(first_path),
+        second_path: _snapshot_path(second_path),
+    }
+    try:
+        write_local_settings(first_path, first_values)
+        write_local_settings(second_path, second_values)
+    except Exception:
+        for path, snapshot in snapshots.items():
+            _restore_path(path, snapshot)
+        raise
+
+
+def _snapshot_path(path: Path) -> tuple[bytes | None, int | None]:
+    if not path.exists():
+        return None, None
+    return path.read_bytes(), path.stat().st_mode & 0o777
+
+
+def _restore_path(path: Path, snapshot: tuple[bytes | None, int | None]) -> None:
+    content, mode = snapshot
+    if content is None:
+        if path.exists():
+            path.unlink()
+        return
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.rollback.tmp")
+    try:
+        tmp_path.write_bytes(content)
+        os.chmod(tmp_path, mode or _OWNER_ONLY_MODE)
+        os.replace(tmp_path, path)
+        os.chmod(path, mode or _OWNER_ONLY_MODE)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
 def _to_toml(values: dict[str, Any]) -> str:
     lines: list[str] = []
     for key in sorted(values):

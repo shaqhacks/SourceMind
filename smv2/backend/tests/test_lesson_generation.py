@@ -396,6 +396,24 @@ def test_generate_all_lessons_enqueues_none_and_failed_only(client, ingest_cours
     assert all(s["lesson_status"] == "ready" for s in refreshed)
 
 
+def test_generate_all_lessons_maps_readiness_unavailable_to_503_and_creates_no_jobs(
+    client, ingest_course
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    before_jobs = client.get("/api/jobs").json()
+    before_sections = client.get(f"/api/courses/{course_id}/sections").json()
+
+    resp = client.post(f"/api/courses/{course_id}/lessons")
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["failure_category"] == "missing_credentials"
+    assert "ANTHROPIC_API_KEY" in body["detail"]["remediation"]
+    assert client.get("/api/jobs").json() == before_jobs
+    assert all(job["type"] != "generate_lesson" for job in before_jobs)
+    assert client.get(f"/api/courses/{course_id}/sections").json() == before_sections
+
+
 def test_generate_all_lessons_404_for_missing_course(client):
     resp = client.post("/api/courses/does-not-exist/lessons")
     assert resp.status_code == 404

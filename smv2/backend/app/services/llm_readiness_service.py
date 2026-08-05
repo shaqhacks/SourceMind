@@ -147,7 +147,12 @@ def _configured_state(provider: str) -> tuple[bool, str | None, str | None]:
             None if configured else _remediation(provider),
         )
     if provider == "ollama":
-        return True, None, None
+        configured = config.ollama_base_url_configured()
+        return (
+            configured,
+            None if configured else "missing_credentials",
+            None if configured else _remediation(provider),
+        )
     return False, "unknown_provider", f"Select a supported provider before using AI features."
 
 

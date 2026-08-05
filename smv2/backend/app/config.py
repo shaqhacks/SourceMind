@@ -171,6 +171,14 @@ def ollama_base_url() -> str:
     return "http://localhost:11434"
 
 
+def ollama_base_url_configured() -> bool:
+    env = os.environ.get("SMV2_OLLAMA_BASE_URL")
+    if env:
+        return True
+    from_secrets = _read_secrets().get("ollama_base_url")
+    return isinstance(from_secrets, str) and bool(from_secrets)
+
+
 def anthropic_api_key() -> str | None:
     """Precedence: ANTHROPIC_API_KEY env var > secrets.toml > None (the SDK's
     own env-based resolution still applies when this returns None — see

@@ -34,7 +34,7 @@ def test_settings_round_trips_provider_model_and_redacted_credentials(client):
     assert body["provider"] == "anthropic"
     assert body["model"] == "claude-3-5-sonnet-latest"
     assert body["credentials_present"]["anthropic"] is True
-    assert body["credentials"]["anthropic_api_key"] == "[redacted]"
+    assert body["credentials"] == {}
     assert "sk-ant-test-secret" not in get_resp.text
 
     local_settings = tomllib.loads((data_dir() / "local_settings.toml").read_text())
@@ -107,3 +107,38 @@ def test_settings_check_flow_reports_ready_after_local_ollama_selection(client, 
     assert body["model"] == "llama3.2"
     assert body["available"] is True
     assert body["failure_category"] is None
+
+
+def test_settings_response_does_not_treat_default_ollama_url_as_configured_or_return_endpoint(
+    client,
+):
+    resp = client.get("/api/settings")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["credentials_present"]["ollama"] is False
+    assert body["credentials"] == {}
+    assert "localhost:11434" not in resp.text
+
+
+def test_settings_response_omits_stored_ollama_endpoint_string(client):
+    headers = _csrf_headers(client)
+    secret_endpoint = "http://127.0.0.1:11434/private"
+    put_resp = client.put(
+        "/api/settings",
+        json={
+            "provider": "ollama",
+            "model": "llama3.2",
+            "credentials": {"ollama_base_url": secret_endpoint},
+        },
+        headers=headers,
+    )
+    assert put_resp.status_code == 200
+
+    get_resp = client.get("/api/settings")
+
+    assert get_resp.status_code == 200
+    body = get_resp.json()
+    assert body["credentials_present"]["ollama"] is True
+    assert body["credentials"] == {}
+    assert secret_endpoint not in get_resp.text

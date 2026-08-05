@@ -5,6 +5,7 @@ import copy
 from app.db.engine import get_session
 from app.db.models import Job
 from app.jobs.error_envelope import encode_job_error
+from app.jobs.registry import LLM_READINESS_REQUIRED_JOB_TYPES
 
 
 def _seed_job(
@@ -156,3 +157,57 @@ def test_retry_missing_job_is_404(client):
     resp = client.post("/api/jobs/does-not-exist/retry")
 
     assert resp.status_code == 404
+
+
+def test_create_job_rejects_llm_required_type_when_readiness_unavailable_without_persisting(
+    client,
+):
+    resp = client.post(
+        "/api/jobs",
+        json={"type": "generate_lesson", "payload": {"section_id": "section-1"}},
+    )
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["failure_category"] == "missing_credentials"
+    assert client.get("/api/jobs").json() == []
+
+
+def test_create_job_rejects_recursive_credential_like_payload_without_persisting(
+    client, monkeypatch
+):
+    monkeypatch.setattr(
+        "app.services.llm_readiness_service.assert_ready_for_generation",
+        lambda: None,
+    )
+
+    for job_type in sorted(LLM_READINESS_REQUIRED_JOB_TYPES):
+        resp = client.post(
+            "/api/jobs",
+            json={
+                "type": job_type,
+                "payload": {
+                    "course_id": "course-1",
+                    "sections": [
+                        {"metadata": {"apiKey": "sk-ant-nested-secret"}},
+                        {"notes": ["safe", {"token": "bearer-secret"}]},
+                    ],
+                },
+            },
+        )
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "job payload contains credential-like data"
+
+    assert client.get("/api/jobs").json() == []
+
+
+def test_create_job_preserves_safe_noop_payload(client):
+    payload = {"metadata": {"label": "api key concepts", "items": ["tokenization"]}}
+
+    resp = client.post("/api/jobs", json={"type": "noop", "payload": payload})
+
+    assert resp.status_code == 202
+    job = resp.json()
+    assert job["type"] == "noop"
+    assert job["payload"] == payload

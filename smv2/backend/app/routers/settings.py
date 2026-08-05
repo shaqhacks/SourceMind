@@ -8,7 +8,7 @@ from app import config
 from app.schemas import SettingsBootstrapOut, SettingsClearIn, SettingsOut, SettingsUpdateIn
 from app.security.local_settings import csrf_token, require_local_settings_write
 from app.services import llm_readiness_service
-from app.services.local_settings_service import read_local_settings, write_local_settings
+from app.services import local_settings_service
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -27,19 +27,25 @@ def bootstrap(response: Response) -> SettingsBootstrapOut:
 @router.put("", response_model=SettingsOut)
 def update_settings(body: SettingsUpdateIn, request: Request, response: Response) -> SettingsOut:
     require_local_settings_write(request)
-    current = read_local_settings(config.local_settings_path())
+    current = local_settings_service.read_local_settings(config.local_settings_path())
     if body.provider is not None:
         current["provider"] = body.provider
     if body.model is not None:
         current["model"] = body.model
-    secrets = read_local_settings(config.secrets_path())
+    secrets = local_settings_service.read_local_settings(config.secrets_path())
     for key in ("anthropic_api_key", "ollama_base_url"):
         value = body.credentials.get(key)
         if value:
             secrets[key] = value
-    write_local_settings(config.local_settings_path(), current)
     if body.credentials:
-        write_local_settings(config.secrets_path(), secrets)
+        local_settings_service.write_local_settings_pair(
+            config.local_settings_path(),
+            current,
+            config.secrets_path(),
+            secrets,
+        )
+    else:
+        local_settings_service.write_local_settings(config.local_settings_path(), current)
     response.headers["Cache-Control"] = "no-store"
     return SettingsOut.model_validate(_settings_payload())
 
@@ -50,29 +56,24 @@ def clear_settings(body: SettingsClearIn, request: Request, response: Response) 
     expected = f"clear {body.provider} credential"
     if body.confirmation != expected:
         raise HTTPException(status_code=409, detail=f"confirmation must be {expected!r}")
-    secrets = read_local_settings(config.secrets_path())
+    secrets = local_settings_service.read_local_settings(config.secrets_path())
     if body.provider == "anthropic":
         secrets.pop("anthropic_api_key", None)
     if body.provider == "ollama":
         secrets.pop("ollama_base_url", None)
-    write_local_settings(config.secrets_path(), secrets)
+    local_settings_service.write_local_settings(config.secrets_path(), secrets)
     response.headers["Cache-Control"] = "no-store"
     return SettingsOut.model_validate(_settings_payload())
 
 
 def _settings_payload() -> dict[str, Any]:
     anthropic_present = bool(config.anthropic_api_key())
-    ollama_present = bool(config.ollama_base_url())
-    credentials: dict[str, str] = {}
-    if anthropic_present:
-        credentials["anthropic_api_key"] = "[redacted]"
-    if ollama_present:
-        credentials["ollama_base_url"] = config.ollama_base_url()
+    ollama_present = config.ollama_base_url_configured()
     return {
         "provider": config.llm_provider(),
         "model": config.llm_model(),
         "credentials_present": {"anthropic": anthropic_present, "ollama": ollama_present},
-        "credentials": credentials,
+        "credentials": {},
         "rollout": _rollout(),
         "readiness": llm_readiness_service.settings_summary(),
     }

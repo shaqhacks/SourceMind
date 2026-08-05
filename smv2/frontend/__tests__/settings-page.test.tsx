@@ -78,7 +78,7 @@ describe("SettingsPage", () => {
     expect(screen.getByDisplayValue("claude-sonnet-4-5")).toBeInTheDocument();
     expect(screen.getByText(/ready/i)).toBeInTheDocument();
     expect(screen.getByText(/anthropic credential saved/i)).toBeInTheDocument();
-    expect(screen.getByText("[redacted]")).toBeInTheDocument();
+    expect(screen.queryByText("[redacted]")).not.toBeInTheDocument();
   });
 
   it("tests the configured connection without saving credentials", async () => {
@@ -112,6 +112,21 @@ describe("SettingsPage", () => {
 
     expect(await screen.findByLabelText(/anthropic api key/i)).toBeDisabled();
     expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
+  });
+
+  it("clears all credential-like inputs after a successful save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    const anthropicInput = await screen.findByLabelText(/anthropic api key/i);
+    const ollamaInput = screen.getByLabelText(/ollama base url/i);
+    await user.type(anthropicInput, "sk-ant-new-secret");
+    await user.type(ollamaInput, "http://127.0.0.1:11434");
+    await user.click(screen.getByRole("button", { name: /save settings/i }));
+
+    await waitFor(() => expect(mockedSaveSettings).toHaveBeenCalledTimes(1));
+    expect(anthropicInput).toHaveValue("");
+    expect(ollamaInput).toHaveValue("");
   });
 });
 

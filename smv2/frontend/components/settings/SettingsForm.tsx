@@ -50,6 +50,7 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
       setStatus(result.data.readiness);
       setMessage("Settings saved.");
       setAnthropicKey("");
+      setOllamaBaseUrl("");
       return;
     }
     setMessage(describeError(result.status, "Saving settings").message);
@@ -115,9 +116,6 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
         <p className="mt-2 text-sm text-muted-foreground">
           {settings.credentials_present.anthropic ? "anthropic credential saved" : "anthropic credential missing"}
         </p>
-        {settings.credentials.anthropic_api_key && (
-          <p className="text-sm text-muted-foreground">{settings.credentials.anthropic_api_key}</p>
-        )}
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm font-medium">
             Anthropic API key

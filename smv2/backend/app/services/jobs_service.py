@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import re
 import time
 from typing import Any, AsyncIterator
 
@@ -24,6 +25,14 @@ from app.services import llm_readiness_service
 SSE_POLL_INTERVAL_SECONDS = 0.3
 SSE_MAX_SECONDS = 600
 TERMINAL_JOB_STATUSES = {"succeeded", "failed"}
+_CREDENTIAL_KEY_RE = re.compile(
+    r"(api[_-]?key|apikey|token|secret|password|credential|authorization|ollama[_-]?base[_-]?url)",
+    re.IGNORECASE,
+)
+_CREDENTIAL_VALUE_RE = re.compile(
+    r"(sk-[A-Za-z0-9_-]+|bearer\s+[A-Za-z0-9._-]+)",
+    re.IGNORECASE,
+)
 
 
 class JobNotRetryableError(ValueError):
@@ -40,6 +49,10 @@ def create_job_in_session(session: Session, job_type: str, payload: dict[str, An
     """
     if job_type not in JOB_HANDLERS:
         raise ValueError(f"unknown job type: {job_type}")
+    if job_type in LLM_READINESS_REQUIRED_JOB_TYPES:
+        llm_readiness_service.assert_ready_for_generation()
+        if payload_contains_credential_like_data(payload):
+            raise ValueError("job payload contains credential-like data")
     job = Job(type=job_type, status="queued", payload=payload)
     session.add(job)
     return job
@@ -74,6 +87,21 @@ def list_jobs(limit: int = 50) -> list[Job]:
         )
     finally:
         session.close()
+
+
+def payload_contains_credential_like_data(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if isinstance(key, str) and _CREDENTIAL_KEY_RE.search(key):
+                return True
+            if payload_contains_credential_like_data(nested):
+                return True
+        return False
+    if isinstance(value, list | tuple):
+        return any(payload_contains_credential_like_data(item) for item in value)
+    if isinstance(value, str):
+        return bool(_CREDENTIAL_VALUE_RE.search(value))
+    return False
 
 
 def retry_job(job_id: str) -> Job:

@@ -196,10 +196,16 @@ def test_llm_status_config_identity_change_invalidates_stale_check(client, monke
     assert model_changed["failure_category"] is None
 
     monkeypatch.setenv("SMV2_LLM_PROVIDER", "ollama")
-    provider_changed = client.get("/api/llm/status").json()
-    assert provider_changed["provider"] == "ollama"
-    assert provider_changed["available"] is True
-    assert provider_changed["capabilities"] == {"completion": True, "embeddings": True}
+    provider_changed_without_endpoint = client.get("/api/llm/status").json()
+    assert provider_changed_without_endpoint["provider"] == "ollama"
+    assert provider_changed_without_endpoint["configured"] is False
+    assert provider_changed_without_endpoint["available"] is False
+
+    monkeypatch.setenv("SMV2_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    provider_changed_with_endpoint = client.get("/api/llm/status").json()
+    assert provider_changed_with_endpoint["provider"] == "ollama"
+    assert provider_changed_with_endpoint["available"] is True
+    assert provider_changed_with_endpoint["capabilities"] == {"completion": True, "embeddings": True}
 
 
 def test_llm_status_check_calls_ollama_probe_without_metering(client, monkeypatch):
