@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
-    JSON,
     DateTime,
     Float,
     ForeignKey,
@@ -126,6 +126,8 @@ class Asset(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String, nullable=False)
     stored_path: Mapped[str] = mapped_column(String, nullable=False)
+    source_format: Mapped[str] = mapped_column(String, nullable=False, default="pdf")
+    media_type: Mapped[str] = mapped_column(String, nullable=False, default="application/pdf")
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="stored")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -168,6 +170,8 @@ class Section(Base):
     )
     page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_format: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_locator: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     body_md: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     lesson_md: Mapped[str | None] = mapped_column(Text, nullable=True)

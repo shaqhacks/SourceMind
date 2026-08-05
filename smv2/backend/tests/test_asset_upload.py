@@ -28,6 +28,8 @@ def test_upload_valid_pdf_creates_asset(client):
     assert body["course_id"] == course_id
     assert body["filename"] == "no_bookmarks.pdf"
     assert body["status"] == "stored"
+    assert body["source_format"] == "pdf"
+    assert body["media_type"] == "application/pdf"
     assert body["size_bytes"] == pdf_path.stat().st_size
     assert len(body["sha256"]) == 64
 
@@ -226,7 +228,7 @@ def test_section_responses_tolerate_null_asset_id(client, ingest_course):
 
 
 def test_get_asset_file_serves_exact_bytes_and_content_type(client, ingest_course):
-    course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
+    _course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
     asset_id = upload_resp.json()["id"]
 
     resp = client.get(f"/api/assets/{asset_id}/file")
@@ -236,12 +238,34 @@ def test_get_asset_file_serves_exact_bytes_and_content_type(client, ingest_cours
     assert resp.content == (FIXTURES_DIR / "with_bookmarks.pdf").read_bytes()
 
 
+def test_upload_records_detected_format_even_when_client_header_is_wrong(client):
+    """Catches trusting the upload's content-type header for future adapter
+    dispatch or file serving after the file body has already proven PDF.
+    """
+    course_id = _create_course(client)
+    pdf_path = FIXTURES_DIR / "with_bookmarks.pdf"
+
+    with pdf_path.open("rb") as f:
+        upload = client.post(
+            f"/api/courses/{course_id}/assets",
+            files={"file": ("lecture.bin", f, "application/octet-stream")},
+        )
+    assert upload.status_code == 201
+    body = upload.json()
+    assert body["source_format"] == "pdf"
+    assert body["media_type"] == "application/pdf"
+
+    served = client.get(f"/api/assets/{body['id']}/file")
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "application/pdf"
+
+
 def test_get_asset_file_supports_range_requests(client, ingest_course):
     """pdf.js relies on byte-range requests for progressive loading —
     confirm the installed Starlette FileResponse actually honors Range,
     not just that a full-file GET works.
     """
-    course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
+    _course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
     asset_id = upload_resp.json()["id"]
     full_bytes = (FIXTURES_DIR / "with_bookmarks.pdf").read_bytes()
 
@@ -257,7 +281,7 @@ def test_get_asset_file_404_for_missing_asset(client):
 
 
 def test_get_asset_file_404_when_stored_file_missing_on_disk(client, ingest_course):
-    course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
+    _course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
     asset_id = upload_resp.json()["id"]
 
     from app.db.engine import get_session
@@ -279,7 +303,7 @@ def test_resolve_asset_file_path_rejects_stored_path_outside_assets_dir(client, 
     the containment check must still hold as defense in depth — belt and
     braces, same reasoning as images_service.resolve_image_path.
     """
-    course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
+    _course_id, upload_resp, *_ = ingest_course("with_bookmarks.pdf")
     asset_id = upload_resp.json()["id"]
 
     from app.db.engine import get_session

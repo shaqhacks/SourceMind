@@ -40,6 +40,8 @@ function makeAsset(overrides: Partial<AssetOut> = {}): AssetOut {
     course_id: "course-1",
     filename: "book.pdf",
     content_type: "application/pdf",
+    source_format: "pdf",
+    media_type: "application/pdf",
     size_bytes: 1024,
     sha256: "abc",
     html_status: "none",

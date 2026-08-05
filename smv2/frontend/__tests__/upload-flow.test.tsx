@@ -10,6 +10,7 @@ import {
   listSections,
   startIngest,
   uploadAsset,
+  type AssetOut,
   type CourseOut,
   type JobOut,
   type SectionOut,
@@ -95,12 +96,14 @@ function pdfFile(name: string): File {
   return new File(["%PDF-1.4 fake"], name, { type: "application/pdf" });
 }
 
-function makeAsset(filename: string) {
+function makeAsset(filename: string): AssetOut {
   return {
     id: `asset-${filename}`,
     course_id: "course-1",
     filename,
     content_type: "application/pdf",
+    source_format: "pdf",
+    media_type: "application/pdf",
     size_bytes: 1024,
     sha256: "abc",
     page_count: 10,

@@ -1273,12 +1273,22 @@ export interface components {
             html_status: "none" | "converting" | "ready" | "failed";
             /** Id */
             id: string;
+            /**
+             * Media Type
+             * @default application/pdf
+             */
+            media_type: string;
             /** Page Count */
             page_count: number | null;
             /** Sha256 */
             sha256: string;
             /** Size Bytes */
             size_bytes: number;
+            /**
+             * Source Format
+             * @default pdf
+             */
+            source_format: string;
             /** Status */
             status: string;
             /**
@@ -2441,6 +2451,12 @@ export interface components {
             page_end: number | null;
             /** Page Start */
             page_start: number | null;
+            /** Source Format */
+            source_format?: string | null;
+            /** Source Locator */
+            source_locator?: {
+                [key: string]: unknown;
+            } | null;
             /** Title */
             title: string;
             /**
@@ -2483,6 +2499,12 @@ export interface components {
             page_end: number | null;
             /** Page Start */
             page_start: number | null;
+            /** Source Format */
+            source_format?: string | null;
+            /** Source Locator */
+            source_locator?: {
+                [key: string]: unknown;
+            } | null;
             /** Title */
             title: string;
             /** Word Count */

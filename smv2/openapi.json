@@ -143,6 +143,11 @@
             "title": "Id",
             "type": "string"
           },
+          "media_type": {
+            "default": "application/pdf",
+            "title": "Media Type",
+            "type": "string"
+          },
           "page_count": {
             "anyOf": [
               {
@@ -161,6 +166,11 @@
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
+          },
+          "source_format": {
+            "default": "pdf",
+            "title": "Source Format",
+            "type": "string"
           },
           "status": {
             "title": "Status",
@@ -3453,6 +3463,29 @@
             ],
             "title": "Page Start"
           },
+          "source_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Format"
+          },
+          "source_locator": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Locator"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -3558,6 +3591,29 @@
               }
             ],
             "title": "Page Start"
+          },
+          "source_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Format"
+          },
+          "source_locator": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Locator"
           },
           "title": {
             "title": "Title",

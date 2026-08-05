@@ -10,9 +10,9 @@ service layer is responsible for the +1/-1 conversion at this boundary.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, computed_field, Field, model_validator, StrictInt
+from pydantic import BaseModel, Field, StrictInt, computed_field, model_validator
 
 from app.jobs.error_envelope import decode_job_error
 
@@ -44,19 +44,19 @@ class JobOut(BaseModel):
             decoded_error, detail = decode_job_error(value.get("error"))
             return {**value, "error": decoded_error, "error_detail": detail}
         if hasattr(value, "error"):
-            decoded_error, detail = decode_job_error(getattr(value, "error"))
+            decoded_error, detail = decode_job_error(value.error)
             return {
-                "id": getattr(value, "id"),
-                "type": getattr(value, "type"),
-                "status": getattr(value, "status"),
-                "payload": getattr(value, "payload"),
-                "result": getattr(value, "result"),
-                "progress": getattr(value, "progress"),
+                "id": value.id,
+                "type": value.type,
+                "status": value.status,
+                "payload": value.payload,
+                "result": value.result,
+                "progress": value.progress,
                 "error": decoded_error,
                 "error_detail": detail,
-                "attempts": getattr(value, "attempts"),
-                "created_at": getattr(value, "created_at"),
-                "updated_at": getattr(value, "updated_at"),
+                "attempts": value.attempts,
+                "created_at": value.created_at,
+                "updated_at": value.updated_at,
             }
         return value
 
@@ -240,6 +240,8 @@ class AssetOut(BaseModel):
     course_id: str
     filename: str
     content_type: str
+    source_format: str = "pdf"
+    media_type: str = "application/pdf"
     size_bytes: int
     sha256: str
     page_count: int | None
@@ -274,6 +276,8 @@ class SectionOut(BaseModel):
     asset_id: str | None
     page_start: int | None
     page_end: int | None
+    source_format: str | None = None
+    source_locator: dict[str, Any] | None = None
     lesson_status: str
     has_content: bool
     word_count: int
@@ -292,6 +296,8 @@ class SectionDetailOut(BaseModel):
     asset_id: str | None
     page_start: int | None
     page_end: int | None
+    source_format: str | None = None
+    source_locator: dict[str, Any] | None = None
     body_md: str
     content_hash: str
     lesson_md: str | None
@@ -346,7 +352,7 @@ class SplitOp(BaseModel):
 
 
 OutlineOp = Annotated[
-    Union[RenameOp, ReorderOp, DeleteOp, MergeOp, SplitOp],
+    RenameOp | ReorderOp | DeleteOp | MergeOp | SplitOp,
     Field(discriminator="type"),
 ]
 

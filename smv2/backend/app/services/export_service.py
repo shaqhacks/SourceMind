@@ -22,6 +22,7 @@ from pathlib import Path
 
 from app.db.engine import get_session
 from app.db.models import Asset, Course, Section
+from app.pipeline.source_locators import locator_export_label
 from app.services import highlights_service, notes_service
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -66,7 +67,7 @@ def build_export_zip(course_id: str) -> tuple[tempfile.SpooledTemporaryFile, str
         assets = session.query(Asset).filter(Asset.course_id == course_id).all()
         width = len(str(max(len(sections) - 1, 0))) or 1
 
-        spool = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_BYTES, mode="w+b")
+        spool = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_BYTES, mode="w+b")  # noqa: SIM115
         with zipfile.ZipFile(spool, "w", zipfile.ZIP_DEFLATED) as zf:
             outline_lines = [f"# {course.title}", ""]
             for s in sections:
@@ -82,6 +83,9 @@ def build_export_zip(course_id: str) -> tuple[tempfile.SpooledTemporaryFile, str
                         "order_index": s.order_index,
                         "content_hash": s.content_hash,
                         "extractor_version": s.extractor_version,
+                        "source_format": s.source_format,
+                        "source_locator": s.source_locator,
+                        "source_label": locator_export_label(s.source_locator),
                         "lesson": (
                             {
                                 "status": s.lesson_status,

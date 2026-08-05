@@ -85,7 +85,7 @@ def get_asset_file(asset_id: str) -> FileResponse:
     browser embeds/views it (e.g. via pdf.js) instead of downloading it.
     """
     try:
-        path, filename = assets_service.resolve_asset_file_path(asset_id)
+        path, filename, media_type = assets_service.resolve_asset_file_path(asset_id)
     except AssetNotFoundError as exc:
         raise HTTPException(status_code=404, detail="asset not found") from exc
     except AssetFileMissingError as exc:
@@ -93,7 +93,7 @@ def get_asset_file(asset_id: str) -> FileResponse:
 
     return FileResponse(
         path,
-        media_type="application/pdf",
+        media_type=media_type,
         filename=_sanitize_download_filename(filename),
         content_disposition_type="inline",
     )

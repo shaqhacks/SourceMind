@@ -20,6 +20,8 @@ from app.db.engine import get_session
 from app.db.models import Asset
 
 _PDF_MAGIC = b"%PDF-"
+_PDF_SOURCE_FORMAT = "pdf"
+_PDF_MEDIA_TYPE = "application/pdf"
 # fitz itself tolerates the %PDF- marker appearing anywhere in roughly the
 # first 1KB (some PDFs are preceded by junk bytes/comments) rather than
 # strictly at offset 0 — match that same tolerance here.
@@ -88,6 +90,8 @@ async def save_upload(course_id: str, filename: str, content_type: str, file: _A
             course_id=course_id,
             filename=filename,
             content_type=content_type,
+            source_format=_PDF_SOURCE_FORMAT,
+            media_type=_PDF_MEDIA_TYPE,
             size_bytes=total_bytes,
             sha256=sha256_hash.hexdigest(),
             stored_path=str(stored_path),
@@ -121,7 +125,7 @@ class AssetFileMissingError(ValueError):
     pass
 
 
-def resolve_asset_file_path(asset_id: str) -> tuple[Path, str]:
+def resolve_asset_file_path(asset_id: str) -> tuple[Path, str, str]:
     """Returns (absolute path, original filename) for serving asset_id's
     stored PDF as-is (original-PDF page view). Asset.stored_path is a
     server-minted value written once at upload time (assets_service.
@@ -147,4 +151,4 @@ def resolve_asset_file_path(asset_id: str) -> tuple[Path, str]:
     if not candidate.is_file():
         raise AssetFileMissingError(f"asset file missing on disk: {asset_id!r}")
 
-    return candidate, asset.filename
+    return candidate, asset.filename, asset.media_type
