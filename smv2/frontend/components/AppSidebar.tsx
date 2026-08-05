@@ -16,6 +16,11 @@ import {
 import { subscribeReviewSettled } from "@/lib/review/reviewBus";
 import { useSidebarCollapsed } from "@/lib/hooks/useSidebarCollapsed";
 import { useWorkspaceMode } from "@/lib/hooks/useWorkspaceMode";
+import {
+  getImportFileDecision,
+  IMPORT_ACCEPT_ATTRIBUTE,
+  IMPORT_PICKER_ARIA_LABEL,
+} from "@/lib/importFormats";
 import UploadFlow from "@/components/upload/UploadFlow";
 
 const NAV_ITEMS: { href: string; label: string }[] = [
@@ -29,10 +34,6 @@ const NAV_ITEMS: { href: string; label: string }[] = [
 
 export interface AppSidebarProps {
   variant?: "persistent" | "drawer";
-}
-
-function isPdf(file: File): boolean {
-  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
 /**
@@ -54,13 +55,21 @@ export default function AppSidebar({ variant = "persistent" }: AppSidebarProps) 
   const [summary, setSummary] = useState<ReviewSummaryOut | null>(null);
   const [usage, setUsage] = useState<LlmUsageOut | null>(null);
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
+  const [importFeedback, setImportFeedback] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleFilesChosen(chosen: FileList | File[]) {
-    const pdfs = Array.from(chosen).filter(isPdf);
-    if (pdfs.length > 0) setPendingFiles(pdfs);
+    const supported: File[] = [];
+    const messages: string[] = [];
+    for (const file of Array.from(chosen)) {
+      const decision = getImportFileDecision(file);
+      if (decision.status === "supported") supported.push(file);
+      else messages.push(decision.message);
+    }
+    setImportFeedback(messages.length > 0 ? messages.join(" ") : null);
+    if (supported.length > 0) setPendingFiles(supported);
   }
 
   function handleDropZoneDragEnter(event: DragEvent<HTMLDivElement>) {
@@ -139,10 +148,10 @@ export default function AppSidebar({ variant = "persistent" }: AppSidebarProps) 
       <input
         ref={fileInputRef}
         type="file"
-        accept="application/pdf"
+        accept={IMPORT_ACCEPT_ATTRIBUTE}
         multiple
         className="hidden"
-        aria-label="Upload course PDF"
+        aria-label={IMPORT_PICKER_ARIA_LABEL}
         onChange={(event) => {
           if (event.target.files) handleFilesChosen(event.target.files);
           event.target.value = "";
@@ -261,8 +270,13 @@ export default function AppSidebar({ variant = "persistent" }: AppSidebarProps) 
               : "border-border text-muted-foreground hover:border-accent hover:text-accent-700"
           }`}
         >
-          Drop a PDF here to add one
+          Drop files here to add one
         </div>
+        {importFeedback && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {importFeedback}
+          </p>
+        )}
       </div>
 
       {usage ? (

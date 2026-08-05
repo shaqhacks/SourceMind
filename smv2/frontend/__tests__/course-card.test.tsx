@@ -288,7 +288,9 @@ describe("CourseCard", () => {
       />,
     );
 
-    expect(screen.getByText(/this is a sample course — drop any pdf to create your own/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/this is a sample course — drop your own file to create a course/i),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /dismiss hint/i }));
     expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();

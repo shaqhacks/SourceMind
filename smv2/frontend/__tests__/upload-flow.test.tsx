@@ -10,6 +10,7 @@ import {
   listSections,
   startIngest,
   uploadAsset,
+  type ApiResult,
   type AssetOut,
   type CourseOut,
   type JobOut,
@@ -94,6 +95,10 @@ function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
 
 function pdfFile(name: string): File {
   return new File(["%PDF-1.4 fake"], name, { type: "application/pdf" });
+}
+
+function textFile(name: string): File {
+  return new File(["plain text"], name, { type: "text/plain" });
 }
 
 function makeAsset(filename: string): AssetOut {
@@ -187,7 +192,7 @@ describe("UploadFlow", () => {
     await waitFor(() => expect(mockedStartIngest).toHaveBeenCalledWith("course-1"));
   });
 
-  it("shows the uploaded page count once known", async () => {
+  it("shows the uploaded page count once known for PDFs", async () => {
     const user = userEvent.setup();
     mockedUploadAsset.mockResolvedValue(ok(makeAsset("book.pdf"), 201));
 
@@ -195,6 +200,35 @@ describe("UploadFlow", () => {
     await user.click(screen.getByRole("button", { name: /create.*upload/i }));
 
     await waitFor(() => expect(screen.getByText(/uploaded.*10 pages/i)).toBeInTheDocument());
+  });
+
+  it("keeps uploaded status format-neutral when a non-PDF has no page count", async () => {
+    const user = userEvent.setup();
+    mockedUploadAsset.mockResolvedValue(
+      ok({ ...makeAsset("notes.txt"), page_count: null, source_format: "text", media_type: "text/plain" }, 201),
+    );
+
+    render(<UploadFlow files={[textFile("notes.txt")]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+
+    await waitFor(() => expect(screen.getByText("Uploaded")).toBeInTheDocument());
+    expect(screen.queryByText(/uploaded.*pages/i)).not.toBeInTheDocument();
+  });
+
+  it("maps unsupported_source_format upload detail to actionable student copy", async () => {
+    const user = userEvent.setup();
+    mockedUploadAsset.mockResolvedValue({
+      status: 415,
+      ok: false,
+      error: { detail: { code: "unsupported_source_format" } },
+    } as ApiResult<AssetOut>);
+
+    render(<UploadFlow files={[new File(["PK"], "deck.pptx")]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+
+    await waitFor(() => expect(screen.getByText(/deck\.pptx/i)).toBeInTheDocument());
+    expect(screen.getByText(/not supported yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/pdf, markdown, text, or html/i)).toBeInTheDocument();
   });
 
   it("shows live SSE stage/pct/message once the ingest job starts, never a bare spinner", async () => {
@@ -331,6 +365,8 @@ describe("UploadFlow", () => {
     await renderThroughIngestSuccess();
 
     expect(mockedListSections).toHaveBeenCalledWith("course-1");
+    expect(screen.getByText("Detected outline — 1 chapter")).toBeInTheDocument();
+    expect(screen.queryByText(/pdf's bookmarks/i)).not.toBeInTheDocument();
     expect(screen.getByText("Chapter One")).toBeInTheDocument();
     expect(mockPush).not.toHaveBeenCalled();
   });

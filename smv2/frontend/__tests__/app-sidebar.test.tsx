@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import AppSidebar from "@/components/AppSidebar";
@@ -15,7 +15,13 @@ vi.mock("@/lib/hooks/useSidebarCollapsed", () => ({
 }));
 
 vi.mock("@/components/upload/UploadFlow", () => ({
-  default: () => null,
+  default: ({ files }: { files: File[] }) => (
+    <div role="dialog" aria-label="Start a new course">
+      {files.map((file) => (
+        <span key={file.name}>{file.name}</span>
+      ))}
+    </div>
+  ),
 }));
 
 vi.mock("@/lib/api/client", () => ({
@@ -104,5 +110,41 @@ describe("AppSidebar", () => {
     expect(flashcardsLink).toHaveAttribute("href", "/flashcards");
     expect(within(flashcardsLink).getByText("4")).toBeInTheDocument();
     expect(await screen.findByText(/3 sections · 4 due/i)).toBeInTheDocument();
+  });
+
+  it("uses the shared picker contract for supported Markdown files", () => {
+    render(<AppSidebar />);
+
+    const input = screen.getByLabelText("Upload course files");
+    expect(input).toHaveAttribute(
+      "accept",
+      ".pdf,.md,.markdown,.txt,.text,.html,.htm,application/pdf,text/markdown,text/plain,text/html",
+    );
+
+    fireEvent.change(input, {
+      target: { files: [new File(["# Intro"], "intro.md", { type: "text/markdown" })] },
+    });
+
+    expect(screen.getByRole("dialog", { name: /start a new course/i })).toHaveTextContent(
+      "intro.md",
+    );
+  });
+
+  it("keeps blocked archive drops visible with actionable feedback instead of silently ignoring them", () => {
+    render(<AppSidebar />);
+
+    const dropZone = screen.getByText(/drop files here/i);
+    fireEvent.drop(dropZone, {
+      dataTransfer: {
+        files: [
+          new File(["PK"], "deck.pptx", {
+            type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          }),
+        ],
+      },
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(/deck\.pptx/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/not supported yet/i);
   });
 });

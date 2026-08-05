@@ -154,7 +154,7 @@ export default function TopBar({
               type="button"
               aria-pressed={viewMode === mode}
               disabled={disabled}
-              title={disabled ? "Re-ingest this course to enable original pages" : undefined}
+              title={disabled ? "Original pages are available for PDF sections only" : undefined}
               onClick={() => onChangeViewMode(mode)}
               className={`rounded-[6px] px-3 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 viewMode === mode

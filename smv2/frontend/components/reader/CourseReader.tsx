@@ -79,6 +79,16 @@ function scrollElementIntoView(el: HTMLElement): void {
   el.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
 }
 
+function hasPdfPageProvenance(section: SectionOut | ReaderCourse["sections"][number]): boolean {
+  if (section.source_format?.toLowerCase() !== "pdf") return false;
+  if (!section.asset_id) return false;
+  const pageStart = section.page_start;
+  const pageEnd = section.page_end;
+  if (typeof pageStart !== "number" || typeof pageEnd !== "number") return false;
+  if (!Number.isInteger(pageStart) || !Number.isInteger(pageEnd)) return false;
+  return pageStart > 0 && pageEnd >= pageStart;
+}
+
 export default function CourseReader({ course, initialProgress }: CourseReaderProps) {
   // Patched wholesale after an outline edit applies (rename/reorder/
   // delete/merge/split) — editOutline's response is the fresh source of
@@ -160,11 +170,10 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const safeActiveIndex = Math.min(activeIndex, Math.max(sections.length - 1, 0));
   const activeSection = sections[safeActiveIndex];
 
-  // "pages" (the original PDF via pdf.js) needs an asset_id on the active
-  // section — a stored preference of "pages" from a different section (or
-  // a course whose asset backfill hasn't landed) degrades to "source"
-  // rather than rendering a disabled view.
-  const pagesAvailable = activeSection.asset_id != null;
+  // "pages" (the original PDF via pdf.js) needs PDF page provenance on
+  // the active section. A stored "pages" preference for a text/HTML/Markdown
+  // course degrades to Source instead of opening an empty PDF pane.
+  const pagesAvailable = hasPdfPageProvenance(activeSection);
   const mode: ViewMode = storedMode === "pages" && !pagesAvailable ? "source" : storedMode;
 
   useProgressSync(course.id, activeSection.id, columnRef);
@@ -391,10 +400,11 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const handleNotesNavigate = useCallback(
     (sectionId: string, surface: HighlightOut["surface"]) => {
       goToSection(sectionId);
-      if (surface === "pdf") setStoredMode("pages");
+      const target = sections.find((section) => section.id === sectionId);
+      if (surface === "pdf" && target && hasPdfPageProvenance(target)) setStoredMode("pages");
       closeNotes();
     },
-    [goToSection, setStoredMode, closeNotes],
+    [goToSection, sections, setStoredMode, closeNotes],
   );
   const openOutlineEditor = useCallback(() => setOutlineEditorOpen(true), []);
   const closeOutlineEditor = useCallback(() => setOutlineEditorOpen(false), []);

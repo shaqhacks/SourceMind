@@ -166,7 +166,7 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
           role="note"
           className="flex items-center justify-between gap-3 rounded-md border border-border bg-accent/5 px-3 py-2 text-xs"
         >
-          <span>This is a sample course — drop any PDF to create your own.</span>
+          <span>This is a sample course — drop your own file to create a course.</span>
           <button
             type="button"
             onClick={dismissSampleHint}

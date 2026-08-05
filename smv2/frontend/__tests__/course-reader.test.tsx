@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { getDocument } from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -513,7 +513,7 @@ describe("CourseReader", () => {
       await screen.findByText(/second body/i);
 
       // scrollable = 1000 - 500 = 500; 60% of that = 300.
-      expect(column.scrollTop).toBe(300);
+      await waitFor(() => expect(column.scrollTop).toBe(300));
     });
   });
 
@@ -894,6 +894,8 @@ describe("CourseReader", () => {
           kind: "content",
           chapter_label: "Chapter 1",
           asset_id: "asset-1",
+          source_format: "pdf",
+          source_locator: { type: "page", page_start: 1, page_end: 2 },
         },
       ],
     };
@@ -942,6 +944,8 @@ describe("CourseReader", () => {
             kind: "content" as const,
             chapter_label: "Chapter 1",
             asset_id: "asset-1",
+            source_format: "pdf",
+            source_locator: { type: "page", page_start: 1, page_end: 2 },
             body_md: "# Chapter One\n\nSource body.",
             content_hash: "hash",
             lesson_md: null,
@@ -957,13 +961,68 @@ describe("CourseReader", () => {
       });
     });
 
-    it("disables the Pages option (with a tooltip) when the active section has no asset_id", async () => {
+    it("disables the Pages option (with a tooltip) when the active section has no PDF page provenance", async () => {
       render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
       await screen.findByText(/first body/i);
 
       const pagesButton = screen.getByRole("button", { name: "Pages" });
       expect(pagesButton).toBeDisabled();
-      expect(pagesButton).toHaveAttribute("title", "Re-ingest this course to enable original pages");
+      expect(pagesButton).toHaveAttribute("title", "Original pages are available for PDF sections only");
+    });
+
+    it("does not offer Pages for a non-PDF section even when it has an asset_id", async () => {
+      const textSection = {
+        id: "sec-text",
+        title: "Text Chapter",
+        order_index: 0,
+        page_start: null,
+        page_end: null,
+        lesson_status: "none",
+        has_content: true,
+        word_count: 100,
+        kind: "content" as const,
+        chapter_label: "Chapter 1",
+        asset_id: "asset-text",
+        source_format: "text",
+        source_locator: { type: "heading", ordinal: 1 },
+      };
+      const textCourse = {
+        id: "course-text",
+        title: "Text Course",
+        sections: [textSection],
+      } as ReaderCourse;
+      mockedGetSection.mockResolvedValue(
+        ok({
+          ...textSection,
+          course_id: "course-text",
+          body_md: "# Text Chapter\n\nSource body.",
+          content_hash: "hash",
+          lesson_md: null,
+          lesson_stale: false,
+          lesson_model: null,
+          lesson_prompt_version: null,
+          extractor_version: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        }),
+      );
+
+      const user = userEvent.setup();
+      window.localStorage.setItem("smv2.readerView.course-text", "pages");
+      render(<CourseReader course={textCourse} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/source body/i);
+
+      const pagesButton = screen.getByRole("button", { name: "Pages" });
+      expect(pagesButton).toBeDisabled();
+      expect(screen.getByRole("button", { name: /source/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+
+      await user.keyboard("s");
+
+      expect(await screen.findByRole("button", { name: /generate lesson/i })).toBeInTheDocument();
+      expect(mockedGetDocument).not.toHaveBeenCalled();
     });
 
     it("cycling with 's' skips the disabled Pages option, going straight from source to lesson", async () => {
@@ -1203,7 +1262,14 @@ describe("CourseReader", () => {
         ...COURSE,
         sections: COURSE.sections.map((section) =>
           section.id === "sec-2"
-            ? { ...section, asset_id: "asset-2", page_start: 1, page_end: 2 }
+            ? {
+                ...section,
+                asset_id: "asset-2",
+                page_start: 1,
+                page_end: 2,
+                source_format: "pdf",
+                source_locator: { type: "page", page_start: 1, page_end: 2 },
+              }
             : section,
         ),
       };

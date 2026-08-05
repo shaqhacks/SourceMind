@@ -26,10 +26,11 @@ import { pickMostRecentCourse } from "@/lib/dashboard/continue";
 import { buildTaskCards } from "@/lib/dashboard/taskCards";
 import { useContinueChapter } from "@/lib/dashboard/useContinueChapter";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
-
-function isPdf(file: File): boolean {
-  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-}
+import {
+  getImportFileDecision,
+  IMPORT_ACCEPT_ATTRIBUTE,
+  IMPORT_PICKER_ARIA_LABEL,
+} from "@/lib/importFormats";
 
 const DATE_FORMAT: Intl.DateTimeFormatOptions = {
   weekday: "long",
@@ -64,6 +65,7 @@ export default function Home() {
   } | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
+  const [importFeedback, setImportFeedback] = useState<string | null>(null);
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -116,8 +118,16 @@ export default function Home() {
   }, []);
 
   function handleFilesChosen(files: FileList | File[]) {
-    const pdfs = Array.from(files).filter(isPdf);
-    if (pdfs.length > 0) setPendingFiles(pdfs);
+    const chosen = Array.from(files);
+    const supported: File[] = [];
+    const messages: string[] = [];
+    for (const file of chosen) {
+      const decision = getImportFileDecision(file);
+      if (decision.status === "supported") supported.push(file);
+      else messages.push(decision.message);
+    }
+    setImportFeedback(messages.length > 0 ? messages.join(" ") : null);
+    if (supported.length > 0) setPendingFiles(supported);
   }
 
   function handleDragEnter(event: DragEvent<HTMLDivElement>) {
@@ -275,10 +285,10 @@ export default function Home() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="application/pdf"
+              accept={IMPORT_ACCEPT_ATTRIBUTE}
               multiple
               className="hidden"
-              aria-label="Start a new course"
+              aria-label={IMPORT_PICKER_ARIA_LABEL}
               onChange={(event) => {
                 if (event.target.files) handleFilesChosen(event.target.files);
                 event.target.value = "";
@@ -299,6 +309,12 @@ export default function Home() {
         />
       )}
 
+      {importFeedback && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {importFeedback}
+        </p>
+      )}
+
       {!loaded ? (
         <div className="flex flex-col gap-4">
           <Skeleton className="h-24" />
@@ -308,7 +324,7 @@ export default function Home() {
       ) : isEmpty ? (
         <EmptyState
           icon="📚"
-          title="Drop a PDF anywhere to start"
+          title="Drop files anywhere to start"
           body="Or use the Start a new course button above."
         />
       ) : (

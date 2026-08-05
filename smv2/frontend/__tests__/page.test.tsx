@@ -96,6 +96,10 @@ function pdfFile(name: string): File {
   return new File(["%PDF-1.4 fake"], name, { type: "application/pdf" });
 }
 
+function markdownFile(name: string): File {
+  return new File(["# Chapter\n\nBody"], name, { type: "text/markdown" });
+}
+
 // Four content sections, saved progress sitting on the second one — gives
 // useContinueChapter a real {title, percent} to derive (50%).
 const CONTENT_SECTIONS: SectionOut[] = [
@@ -129,7 +133,7 @@ describe("Home page", () => {
     mockedListCourses.mockResolvedValue(ok([]));
     render(<Home />);
 
-    expect(await screen.findByText(/drop a pdf anywhere to start/i)).toBeInTheDocument();
+    expect(await screen.findByText(/drop files anywhere to start/i)).toBeInTheDocument();
   });
 
   it("shows a retryable error banner when loading courses fails", async () => {
@@ -142,7 +146,18 @@ describe("Home page", () => {
     mockedListCourses.mockResolvedValue(ok([]));
     await userEvent.setup().click(screen.getByRole("button", { name: /retry/i }));
 
-    expect(await screen.findByText(/drop a pdf anywhere to start/i)).toBeInTheDocument();
+    expect(await screen.findByText(/drop files anywhere to start/i)).toBeInTheDocument();
+  });
+
+  it("opens the upload flow for Markdown files selected from the dashboard picker", async () => {
+    mockedListCourses.mockResolvedValue(ok([]));
+    render(<Home />);
+
+    const input = await screen.findByLabelText("Upload course files");
+    fireEvent.change(input, { target: { files: [markdownFile("chapter.md")] } });
+
+    expect(screen.getByRole("dialog", { name: /start a new course/i })).toBeInTheDocument();
+    expect(screen.getByText("chapter.md")).toBeInTheDocument();
   });
 
   it("shows the heading and renders a course card for each course", async () => {
@@ -400,9 +415,9 @@ describe("Home page", () => {
   it("opens the upload flow after choosing files via the Start a new course button", async () => {
     mockedListCourses.mockResolvedValue(ok([]));
     render(<Home />);
-    await screen.findByText(/drop a pdf anywhere to start/i);
+    await screen.findByText(/drop files anywhere to start/i);
 
-    const input = screen.getByLabelText(/start a new course/i) as HTMLInputElement;
+    const input = screen.getByLabelText("Upload course files") as HTMLInputElement;
     await userEvent.setup().upload(input, pdfFile("book.pdf"));
 
     expect(screen.getByRole("dialog", { name: /start a new course/i })).toBeInTheDocument();
@@ -411,7 +426,7 @@ describe("Home page", () => {
   it("opens the upload flow when PDFs are dropped anywhere on the dashboard", async () => {
     mockedListCourses.mockResolvedValue(ok([]));
     const { container } = render(<Home />);
-    await screen.findByText(/drop a pdf anywhere to start/i);
+    await screen.findByText(/drop files anywhere to start/i);
 
     const dropTarget = container.firstChild as HTMLElement;
     const file = pdfFile("dropped.pdf");
@@ -420,16 +435,18 @@ describe("Home page", () => {
     expect(await screen.findByRole("dialog", { name: /start a new course/i })).toBeInTheDocument();
   });
 
-  it("ignores non-PDF files dropped on the dashboard", async () => {
+  it("keeps blocked archive drops visible on the dashboard without opening upload", async () => {
     mockedListCourses.mockResolvedValue(ok([]));
     const { container } = render(<Home />);
-    await screen.findByText(/drop a pdf anywhere to start/i);
+    await screen.findByText(/drop files anywhere to start/i);
 
     const dropTarget = container.firstChild as HTMLElement;
-    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+    const file = new File(["PK"], "notes.docx");
     fireEvent.drop(dropTarget, { dataTransfer: { files: [file], types: ["Files"] } });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/notes\.docx/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/not supported yet/i);
   });
 
   describe("sample course hint", () => {
@@ -458,7 +475,7 @@ describe("Home page", () => {
       render(<Home />);
 
       expect(
-        await screen.findByText(/this is a sample course — drop any pdf to create your own/i),
+        await screen.findByText(/this is a sample course — drop your own file to create a course/i),
       ).toBeInTheDocument();
     });
 
