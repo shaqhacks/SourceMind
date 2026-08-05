@@ -34,6 +34,13 @@ class JobOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @computed_field
+    @property
+    def retryable(self) -> bool:
+        from app.jobs.registry import RETRYABLE_JOB_TYPES
+
+        return self.type in RETRYABLE_JOB_TYPES
+
 
 class CourseCreate(BaseModel):
     title: str

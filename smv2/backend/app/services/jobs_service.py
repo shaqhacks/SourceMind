@@ -5,6 +5,7 @@ and delegate here — this module owns the actual DB work.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import time
 from typing import Any, AsyncIterator
@@ -13,11 +14,20 @@ from sqlalchemy.orm import Session
 
 from app.db.engine import get_session
 from app.db.models import Job
-from app.jobs.registry import JOB_HANDLERS
+from app.jobs.registry import (
+    JOB_HANDLERS,
+    LLM_READINESS_REQUIRED_JOB_TYPES,
+    RETRYABLE_JOB_TYPES,
+)
+from app.services import llm_readiness_service
 
 SSE_POLL_INTERVAL_SECONDS = 0.3
 SSE_MAX_SECONDS = 600
 TERMINAL_JOB_STATUSES = {"succeeded", "failed"}
+
+
+class JobNotRetryableError(ValueError):
+    pass
 
 
 def create_job_in_session(session: Session, job_type: str, payload: dict[str, Any] | None = None) -> Job:
@@ -62,6 +72,29 @@ def list_jobs(limit: int = 50) -> list[Job]:
             .limit(limit)
             .all()
         )
+    finally:
+        session.close()
+
+
+def retry_job(job_id: str) -> Job:
+    session = get_session()
+    try:
+        original = session.get(Job, job_id)
+        if original is None:
+            raise LookupError(f"job not found: {job_id}")
+        if original.type not in RETRYABLE_JOB_TYPES:
+            raise JobNotRetryableError(f"job type is not retryable: {original.type}")
+        if original.type in LLM_READINESS_REQUIRED_JOB_TYPES:
+            llm_readiness_service.assert_ready_for_generation()
+
+        job = Job(
+            type=original.type,
+            status="queued",
+            payload=copy.deepcopy(original.payload),
+        )
+        session.add(job)
+        session.commit()
+        return job
     finally:
         session.close()
 
