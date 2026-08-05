@@ -130,46 +130,61 @@ class CompositeLocator:
 
 
 LocatorValue = PdfPageLocator | HeadingLocator | SlideRangeLocator | ChapterFragmentLocator | CompositeLocator
+_MAX_LOCATOR_DEPTH = 20
 
 
-def locator_from_dict(payload: dict[str, Any] | None) -> LocatorValue | None:
+def _require_list(value: Any, field: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise ValueError(f"{field} must be a list")  # noqa: TRY004 - stored locator JSON errors are ValueError
+    return value
+
+
+def locator_from_dict(payload: dict[str, Any] | None, *, _depth: int = 0) -> LocatorValue | None:
     if payload is None:
         return None
+    if not isinstance(payload, dict):
+        raise ValueError("source locator payload must be a dict")  # noqa: TRY004 - stored locator JSON errors are ValueError
+    if _depth > _MAX_LOCATOR_DEPTH:
+        raise ValueError("source locator is too deeply nested")
+
     locator_type = payload.get("type")
-    if locator_type == "pdf_pages":
-        return PdfPageLocator(
-            asset_id=str(payload["asset_id"]),
-            page_start=int(payload["page_start"]) - 1,
-            page_end=int(payload["page_end"]) - 1,
-        )
-    if locator_type == "heading":
-        return HeadingLocator(
-            asset_id=payload.get("asset_id"),
-            heading_path=[str(part) for part in payload.get("heading_path", [])],
-        )
-    if locator_type == "slide_range":
-        return SlideRangeLocator(
-            asset_id=payload.get("asset_id"),
-            slide_start=int(payload["slide_start"]),
-            slide_end=int(payload["slide_end"]),
-        )
-    if locator_type == "chapter_fragment":
-        return ChapterFragmentLocator(
-            asset_id=payload.get("asset_id"),
-            chapter_label=str(payload["chapter_label"]),
-            fragment_id=payload.get("fragment_id"),
-        )
-    if locator_type == "composite":
-        child_locators: list[LocatorValue] = []
-        for child in payload.get("locators", []):
-            child_locator = locator_from_dict(child)
-            if child_locator is None:
-                raise ValueError("composite locator child cannot be null")
-            child_locators.append(child_locator)
-        locator = CompositeLocator.from_locators(child_locators)
-        if payload.get("asset_id") is not None and payload.get("asset_id") != locator.asset_id:
-            raise ValueError("composite locator asset_id does not match child locators")
-        return locator
+    try:
+        if locator_type == "pdf_pages":
+            return PdfPageLocator(
+                asset_id=str(payload["asset_id"]),
+                page_start=int(payload["page_start"]) - 1,
+                page_end=int(payload["page_end"]) - 1,
+            )
+        if locator_type == "heading":
+            return HeadingLocator(
+                asset_id=payload.get("asset_id"),
+                heading_path=[str(part) for part in _require_list(payload.get("heading_path", []), "heading_path")],
+            )
+        if locator_type == "slide_range":
+            return SlideRangeLocator(
+                asset_id=payload.get("asset_id"),
+                slide_start=int(payload["slide_start"]),
+                slide_end=int(payload["slide_end"]),
+            )
+        if locator_type == "chapter_fragment":
+            return ChapterFragmentLocator(
+                asset_id=payload.get("asset_id"),
+                chapter_label=str(payload["chapter_label"]),
+                fragment_id=payload.get("fragment_id"),
+            )
+        if locator_type == "composite":
+            child_locators: list[LocatorValue] = []
+            for child in _require_list(payload.get("locators"), "locators"):
+                child_locator = locator_from_dict(child, _depth=_depth + 1)
+                if child_locator is None:
+                    raise ValueError("composite locator child cannot be null")
+                child_locators.append(child_locator)
+            locator = CompositeLocator.from_locators(child_locators)
+            if payload.get("asset_id") is not None and payload.get("asset_id") != locator.asset_id:
+                raise ValueError("composite locator asset_id does not match child locators")
+            return locator
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"invalid {locator_type!r} source locator") from exc
     raise ValueError(f"unknown source locator type: {locator_type!r}")
 
 

@@ -4,6 +4,8 @@ import io
 import json
 import zipfile
 
+import pytest
+
 
 def test_pdf_locator_serializes_round_trips_and_renders_for_export():
     """Catches losing the structured locator boundary or switching exported
@@ -66,6 +68,26 @@ def test_composite_locator_flattens_round_trips_and_renders_for_export():
     }
     assert nested.export_label() == "Alpha + Beta"
     assert locator_from_dict(payload) == nested
+
+
+def test_locator_from_dict_rejects_malformed_payloads_with_value_error():
+    """Catches malformed stored JSON escaping as AttributeError/RecursionError."""
+    from app.pipeline.source_locators import locator_from_dict
+
+    nested = {"type": "heading", "asset_id": "asset-123", "heading_path": ["Leaf"]}
+    for _ in range(40):
+        nested = {"type": "composite", "asset_id": "asset-123", "locators": [nested]}
+
+    malformed_payloads = [
+        "not-a-dict",
+        {"type": "composite", "asset_id": "asset-123", "locators": "not-a-list"},
+        {"type": "composite", "asset_id": "asset-123", "locators": ["not-a-dict"]},
+        nested,
+    ]
+
+    for payload in malformed_payloads:
+        with pytest.raises(ValueError):
+            locator_from_dict(payload)
 
 
 def test_export_manifest_preserves_structured_pdf_locators(client, ingest_course):

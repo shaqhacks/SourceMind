@@ -350,6 +350,66 @@ def test_merge_non_pdf_sections_creates_composite_locator_and_export_label(clien
     assert manifest["sections"][0]["source_label"] == "Alpha + Beta"
 
 
+def test_merge_rejects_malformed_nested_composite_locator_and_rolls_back(client):
+    course_id = _create_course(client)
+    asset_id = _upload(
+        client,
+        course_id,
+        "units.md",
+        b"# Alpha\n\nAlpha body.\n\n# Beta\n\nBeta body.\n",
+        "text/markdown",
+    )
+    _run_ingest(client, course_id)
+    before = _sections(client, course_id)
+
+    session = get_session()
+    try:
+        second = session.get(Section, before[1]["id"])
+        second.source_locator = {
+            "type": "composite",
+            "asset_id": asset_id,
+            "locators": ["not-a-dict"],
+        }
+        session.commit()
+    finally:
+        session.close()
+    before = _sections(client, course_id)
+
+    _assert_failed_merge_rolls_back(client, course_id, before)
+
+
+def test_merge_rejects_locator_asset_mismatch_and_rolls_back(client):
+    course_id = _create_course(client)
+    asset_id = _upload(
+        client,
+        course_id,
+        "units.md",
+        b"# Alpha\n\nAlpha body.\n\n# Beta\n\nBeta body.\n",
+        "text/markdown",
+    )
+    _run_ingest(client, course_id)
+    before = _sections(client, course_id)
+    wrong_asset_id = "asset-not-on-section-row"
+
+    session = get_session()
+    try:
+        for section in before:
+            row = session.get(Section, section["id"])
+            row.source_locator = {
+                "type": "heading",
+                "asset_id": wrong_asset_id,
+                "heading_path": [row.title],
+            }
+        session.commit()
+    finally:
+        session.close()
+    before = _sections(client, course_id)
+    assert all(section["asset_id"] == asset_id for section in before)
+    assert all(section["source_locator"]["asset_id"] == wrong_asset_id for section in before)
+
+    _assert_failed_merge_rolls_back(client, course_id, before)
+
+
 def _assert_failed_merge_rolls_back(client, course_id: str, before: list[dict]) -> None:
     before_ids = [section["id"] for section in before]
 

@@ -126,6 +126,8 @@ def _merge_source_locator(sections: list[Section], page_start: int | None, page_
             raise OutlineOperationError("merge requires valid source locators") from exc
         if locator is None:
             raise OutlineOperationError("merge requires valid source locators")
+        if locator.asset_id != section.asset_id:
+            raise OutlineOperationError("section source locator does not match its source asset")
         locators.append(locator)
 
     try:
