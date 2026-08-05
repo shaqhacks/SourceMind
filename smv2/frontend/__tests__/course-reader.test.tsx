@@ -694,6 +694,163 @@ describe("CourseReader", () => {
         await within(sidebar).findByRole("button", { name: /renamed chapter/i }),
       ).toBeInTheDocument();
     });
+
+    it("keeps Pages enabled after a PDF outline edit response preserves provenance", async () => {
+      const pdfSections: ReaderCourse["sections"] = [
+        {
+          id: "pdf-sec-1",
+          title: "First PDF Chapter",
+          order_index: 0,
+          page_start: 1,
+          page_end: 2,
+          lesson_status: "none",
+          has_content: true,
+          word_count: 100,
+          kind: "content",
+          chapter_label: "Chapter 1",
+          asset_id: "asset-pdf",
+          source_format: "pdf",
+          source_locator: { type: "pdf_pages", page_start: 1, page_end: 2 },
+        },
+        {
+          id: "pdf-sec-2",
+          title: "Second PDF Chapter",
+          order_index: 1,
+          page_start: 3,
+          page_end: 4,
+          lesson_status: "none",
+          has_content: true,
+          word_count: 120,
+          kind: "content",
+          chapter_label: "Chapter 2",
+          asset_id: "asset-pdf",
+          source_format: "pdf",
+          source_locator: { type: "pdf_pages", page_start: 3, page_end: 4 },
+        },
+      ];
+      const pdfCourse: ReaderCourse = { id: "course-pdf", title: "PDF Course", sections: pdfSections };
+      const updatedSections = [
+        { ...pdfSections[1], order_index: 0 },
+        { ...pdfSections[0], title: "Renamed PDF Chapter", order_index: 1 },
+      ];
+      mockedGetSection.mockImplementation((id: string) => {
+        const section = [...pdfSections, ...updatedSections].find((candidate) => candidate.id === id);
+        if (!section) return Promise.resolve(err(404));
+        return Promise.resolve(
+          ok({
+            ...section,
+            course_id: pdfCourse.id,
+            body_md: `# ${section.title}\n\nPDF source body.`,
+            content_hash: "hash",
+            lesson_md: null,
+            lesson_stale: false,
+            lesson_model: null,
+            lesson_prompt_version: null,
+            extractor_version: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          }),
+        );
+      });
+      mockedListSections.mockResolvedValue(ok(pdfSections));
+      mockedEditOutline.mockResolvedValue(ok(updatedSections));
+      mockedGetDocument.mockReturnValue({
+        promise: Promise.resolve(makeFakeDocument({ 3: makeFakePage(), 4: makeFakePage() })),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      const user = userEvent.setup();
+      render(<CourseReader course={pdfCourse} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/pdf source body/i);
+
+      await user.click(screen.getByRole("button", { name: /edit outline/i }));
+      const dialog = await screen.findByRole("dialog", { name: /edit outline/i });
+      await user.click(await within(dialog).findByRole("button", { name: "First PDF Chapter" }));
+      const input = within(dialog).getByRole("textbox", { name: /rename first pdf chapter/i });
+      await user.clear(input);
+      await user.type(input, "Renamed PDF Chapter{Enter}");
+      await user.click(within(dialog).getByRole("button", { name: /move second pdf chapter up/i }));
+      await user.click(within(dialog).getByRole("button", { name: /save changes/i }));
+
+      expect(mockedEditOutline).toHaveBeenCalledWith("course-pdf", [
+        { type: "rename", section_id: "pdf-sec-1", title: "Renamed PDF Chapter" },
+        { type: "reorder", order: ["pdf-sec-2", "pdf-sec-1"] },
+      ]);
+      const sidebar = screen.getByRole("navigation", { name: /chapter outline/i });
+      await user.click(within(sidebar).getByRole("button", { name: /^chapter 1$/i }));
+      expect(
+        await within(sidebar).findByRole("button", { name: /renamed pdf chapter/i }),
+      ).toBeInTheDocument();
+      const pagesButton = screen.getByRole("button", { name: "Pages" });
+      expect(pagesButton).toBeEnabled();
+
+      await user.click(pagesButton);
+
+      expect(await screen.findByLabelText("Page 3")).toBeInTheDocument();
+      expect(mockedGetDocument).toHaveBeenCalledWith({
+        url: "https://mock/api/assets/asset-pdf/file",
+      });
+    });
+
+    it("keeps Pages disabled after a non-PDF outline edit response carries an asset without PDF provenance", async () => {
+      const originalSection: ReaderCourse["sections"][number] = {
+        id: "text-sec-1",
+        title: "Text Chapter",
+        order_index: 0,
+        page_start: null,
+        page_end: null,
+        lesson_status: "none",
+        has_content: true,
+        word_count: 80,
+        kind: "content",
+        chapter_label: "Chapter 1",
+        asset_id: "asset-text",
+        source_format: "text",
+        source_locator: { type: "heading", ordinal: 1 },
+      };
+      const updatedSection = { ...originalSection, title: "Renamed Text Chapter" };
+      const textCourse: ReaderCourse = {
+        id: "course-text-outline",
+        title: "Text Course",
+        sections: [originalSection],
+      };
+      mockedGetSection.mockResolvedValue(
+        ok({
+          ...updatedSection,
+          course_id: textCourse.id,
+          body_md: "# Text Chapter\n\nText source body.",
+          content_hash: "hash",
+          lesson_md: null,
+          lesson_stale: false,
+          lesson_model: null,
+          lesson_prompt_version: null,
+          extractor_version: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        }),
+      );
+      mockedListSections.mockResolvedValue(ok([originalSection]));
+      mockedEditOutline.mockResolvedValue(ok([updatedSection]));
+
+      const user = userEvent.setup();
+      render(<CourseReader course={textCourse} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/text source body/i);
+
+      await user.click(screen.getByRole("button", { name: /edit outline/i }));
+      const dialog = await screen.findByRole("dialog", { name: /edit outline/i });
+      await user.click(await within(dialog).findByRole("button", { name: "Text Chapter" }));
+      const input = within(dialog).getByRole("textbox", { name: /rename text chapter/i });
+      await user.clear(input);
+      await user.type(input, "Renamed Text Chapter{Enter}");
+      await user.click(within(dialog).getByRole("button", { name: /save changes/i }));
+
+      expect(mockedEditOutline).toHaveBeenCalledWith("course-text-outline", [
+        { type: "rename", section_id: "text-sec-1", title: "Renamed Text Chapter" },
+      ]);
+      const pagesButton = screen.getByRole("button", { name: "Pages" });
+      expect(pagesButton).toBeDisabled();
+      expect(pagesButton).toHaveAttribute("title", "Original pages are available for PDF sections only");
+      expect(mockedGetDocument).not.toHaveBeenCalled();
+    });
   });
 
   describe("non-content sections (practice/answers)", () => {
