@@ -156,4 +156,34 @@ describe("JobsPage", () => {
     expect(within(retryable).queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
   });
+
+  it("hides retry while readiness is still loading", async () => {
+    mockedGetLlmStatus.mockReturnValue(new Promise(() => {}));
+    mockedListJobs.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [makeJob({ id: "retryable", retryable: true, status: "failed" })],
+    });
+
+    render(<JobsPage />);
+
+    const retryable = await screen.findByTestId("job-retryable");
+    expect(within(retryable).queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(within(retryable).getByText(/checking provider readiness/i)).toBeInTheDocument();
+  });
+
+  it("hides retry when readiness cannot be fetched", async () => {
+    mockedGetLlmStatus.mockResolvedValue({ status: 500, ok: false });
+    mockedListJobs.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [makeJob({ id: "retryable", retryable: true, status: "failed" })],
+    });
+
+    render(<JobsPage />);
+
+    const retryable = await screen.findByTestId("job-retryable");
+    expect(within(retryable).queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(within(retryable).getByText(/provider readiness unavailable/i)).toBeInTheDocument();
+  });
 });

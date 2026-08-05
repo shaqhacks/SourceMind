@@ -13,6 +13,11 @@ type LoadState =
   | { kind: "error"; error: FetchError }
   | { kind: "ready"; jobs: JobOut[] };
 
+type ReadinessState =
+  | { kind: "loading" }
+  | { kind: "ready"; status: LlmStatusOut }
+  | { kind: "error" };
+
 function payloadCourseId(job: JobOut): string {
   return job.payload && typeof job.payload.course_id === "string" ? job.payload.course_id : "unknown course";
 }
@@ -31,7 +36,7 @@ function groupJobs(jobs: JobOut[]): Map<string, Map<string, JobOut[]>> {
 export default function JobsClient() {
   const highlightedJobId = useSearchParams().get("job");
   const [state, setState] = useState<LoadState>({ kind: "loading" });
-  const [readiness, setReadiness] = useState<LlmStatusOut | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessState>({ kind: "loading" });
   const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -44,7 +49,8 @@ export default function JobsClient() {
   useEffect(() => {
     load();
     getLlmStatus().then(({ data }) => {
-      if (data) setReadiness(data);
+      if (data) setReadiness({ kind: "ready", status: data });
+      else setReadiness({ kind: "error" });
     });
   }, [load]);
 

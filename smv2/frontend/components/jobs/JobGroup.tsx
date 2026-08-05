@@ -6,12 +6,17 @@ import { recoveryHref } from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import type { JobOut, LlmStatusOut } from "@/lib/api/client";
 
+type ReadinessState =
+  | { kind: "loading" }
+  | { kind: "ready"; status: LlmStatusOut }
+  | { kind: "error" };
+
 export interface JobGroupProps {
   courseId: string;
   type: string;
   jobs: JobOut[];
   highlightedJobId: string | null;
-  readiness: LlmStatusOut | null;
+  readiness: ReadinessState;
   onRetry: (jobId: string) => void;
 }
 
@@ -24,7 +29,11 @@ function sectionId(job: JobOut): string | null {
 }
 
 export default function JobGroup({ courseId, type, jobs, highlightedJobId, readiness, onRetry }: JobGroupProps) {
-  const readinessAllowsRetry = readiness?.available !== false && readiness?.capabilities.completion !== false;
+  const readinessAllowsRetry =
+    readiness.kind === "ready" &&
+    readiness.status.available === true &&
+    readiness.status.capabilities.completion === true;
+  const readinessRecoveryDetail = readiness.kind === "ready" ? readiness.status : null;
   return (
     <section className="flex flex-col gap-3">
       <h3 className="font-heading text-lg capitalize">{labelType(type)}</h3>
@@ -60,9 +69,20 @@ export default function JobGroup({ courseId, type, jobs, highlightedJobId, readi
                 </Link>
               )}
               {job.status === "failed" && !readinessAllowsRetry && (
-                <Link href={recoveryHref({ errorDetail: readiness })} className="text-accent hover:underline">
-                  Open Settings
-                </Link>
+                <>
+                  <span className="text-muted-foreground">
+                    {readiness.kind === "loading"
+                      ? "Checking provider readiness..."
+                      : readiness.kind === "error"
+                        ? "Provider readiness unavailable."
+                        : "Provider readiness blocks retry."}
+                  </span>
+                  {readiness.kind === "ready" && (
+                    <Link href={recoveryHref({ errorDetail: readinessRecoveryDetail })} className="text-accent hover:underline">
+                      Open Settings
+                    </Link>
+                  )}
+                </>
               )}
             </div>
           </article>
