@@ -153,6 +153,32 @@ def test_retryable_ai_job_rejects_when_llm_readiness_is_unavailable(client):
     assert [job["id"] for job in jobs] == [original_id]
 
 
+def test_retry_rejects_historical_payload_with_credential_like_data_without_persisting(
+    client, monkeypatch
+):
+    original_id = _seed_job(
+        "generate_lesson",
+        {
+            "section_id": "section-1",
+            "metadata": {"nested": [{"apiKey": "sk-ant-legacy-secret"}]},
+        },
+    )
+    before = client.get(f"/api/jobs/{original_id}").json()
+    monkeypatch.setattr(
+        "app.services.llm_readiness_service.assert_ready_for_generation",
+        lambda: None,
+    )
+
+    resp = client.post(f"/api/jobs/{original_id}/retry")
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "job payload contains credential-like data"
+    assert "sk-ant-legacy-secret" not in resp.text
+    assert client.get(f"/api/jobs/{original_id}").json() == before
+    jobs = client.get("/api/jobs").json()
+    assert [job["id"] for job in jobs] == [original_id]
+
+
 def test_retry_missing_job_is_404(client):
     resp = client.post("/api/jobs/does-not-exist/retry")
 
@@ -199,6 +225,26 @@ def test_create_job_rejects_recursive_credential_like_payload_without_persisting
         assert resp.status_code == 422
         assert resp.json()["detail"] == "job payload contains credential-like data"
 
+    assert client.get("/api/jobs").json() == []
+
+
+def test_create_noop_rejects_recursive_credential_like_payload_without_persisting(client):
+    resp = client.post(
+        "/api/jobs",
+        json={
+            "type": "noop",
+            "payload": {
+                "metadata": [
+                    {"label": "safe"},
+                    {"headers": {"authorization": "Bearer sk-ant-noop-secret"}},
+                ],
+            },
+        },
+    )
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "job payload contains credential-like data"
+    assert "sk-ant-noop-secret" not in resp.text
     assert client.get("/api/jobs").json() == []
 
 

@@ -25,6 +25,7 @@ from app.services import llm_readiness_service
 SSE_POLL_INTERVAL_SECONDS = 0.3
 SSE_MAX_SECONDS = 600
 TERMINAL_JOB_STATUSES = {"succeeded", "failed"}
+_CREDENTIAL_PAYLOAD_ERROR = "job payload contains credential-like data"
 _CREDENTIAL_KEY_RE = re.compile(
     r"(api[_-]?key|apikey|token|secret|password|credential|authorization|ollama[_-]?base[_-]?url)",
     re.IGNORECASE,
@@ -49,10 +50,10 @@ def create_job_in_session(session: Session, job_type: str, payload: dict[str, An
     """
     if job_type not in JOB_HANDLERS:
         raise ValueError(f"unknown job type: {job_type}")
+    if payload_contains_credential_like_data(payload):
+        raise ValueError(_CREDENTIAL_PAYLOAD_ERROR)
     if job_type in LLM_READINESS_REQUIRED_JOB_TYPES:
         llm_readiness_service.assert_ready_for_generation()
-        if payload_contains_credential_like_data(payload):
-            raise ValueError("job payload contains credential-like data")
     job = Job(type=job_type, status="queued", payload=payload)
     session.add(job)
     return job
@@ -114,11 +115,14 @@ def retry_job(job_id: str) -> Job:
             raise JobNotRetryableError(f"job type is not retryable: {original.type}")
         if original.type in LLM_READINESS_REQUIRED_JOB_TYPES:
             llm_readiness_service.assert_ready_for_generation()
+        payload = copy.deepcopy(original.payload)
+        if payload_contains_credential_like_data(payload):
+            raise JobNotRetryableError(_CREDENTIAL_PAYLOAD_ERROR)
 
         job = Job(
             type=original.type,
             status="queued",
-            payload=copy.deepcopy(original.payload),
+            payload=payload,
         )
         session.add(job)
         session.commit()
