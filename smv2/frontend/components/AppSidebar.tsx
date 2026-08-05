@@ -113,9 +113,11 @@ export default function AppSidebar() {
 
   if (collapsed) return null;
 
-  const dueByCourse = new Map(
-    (summary?.courses ?? []).map((c) => [c.course_id, c.due_count]),
+  const overdueByCourse = new Map(
+    (summary?.courses ?? []).map((c) => [c.course_id, c.overdue_count ?? 0]),
   );
+  const overdueTotal =
+    summary?.courses.reduce((total, course) => total + (course.overdue_count ?? 0), 0) ?? 0;
 
   return (
     <nav
@@ -159,9 +161,9 @@ export default function AppSidebar() {
                 }`}
               >
                 {item.label}
-                {item.href === "/flashcards" && summary && summary.due_total > 0 ? (
+                {item.href === "/flashcards" && overdueTotal > 0 ? (
                   <span className="rounded-[6px] bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent-800">
-                    {summary.due_total}
+                    {overdueTotal}
                   </span>
                 ) : null}
               </Link>
@@ -175,7 +177,7 @@ export default function AppSidebar() {
           Your courses
         </p>
         {courses.map((course) => {
-          const due = dueByCourse.get(course.id) ?? 0;
+          const due = overdueByCourse.get(course.id) ?? 0;
           return (
             <div
               key={course.id}

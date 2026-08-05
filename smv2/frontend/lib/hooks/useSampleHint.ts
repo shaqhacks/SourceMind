@@ -4,9 +4,15 @@ import { useCallback, useSyncExternalStore } from "react";
 
 export const SAMPLE_HINT_STORAGE_KEY = "smv2.hints.sample";
 
-function readDismissed(): boolean {
+function storageKey(courseId: string): string {
+  return `${SAMPLE_HINT_STORAGE_KEY}.${courseId}`;
+}
+
+function readDismissed(courseId: string): boolean {
   if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(SAMPLE_HINT_STORAGE_KEY) === "1";
+  // Deliberately do not treat the legacy global key as dismissed here:
+  // that old shape suppressed every sample course after one dismissal.
+  return window.localStorage.getItem(storageKey(courseId)) === "1";
 }
 
 function getServerSnapshot(): boolean {
@@ -18,8 +24,8 @@ function getServerSnapshot(): boolean {
 }
 
 // Module-level pub/sub — same idiom as useTheme.ts's preferenceListeners,
-// so every useSampleHintDismissed() instance stays in sync if dismiss()
-// is ever called from more than one place.
+// so every useSampleHintDismissed(courseId) instance stays in sync if
+// dismiss() is ever called from more than one place.
 const listeners = new Set<() => void>();
 
 function subscribe(onChange: () => void): () => void {
@@ -37,13 +43,17 @@ export interface UseSampleHintResult {
 }
 
 /** One-time, permanently-dismissible "this is the sample course" hint. */
-export function useSampleHintDismissed(): UseSampleHintResult {
-  const dismissed = useSyncExternalStore(subscribe, readDismissed, getServerSnapshot);
+export function useSampleHintDismissed(courseId: string): UseSampleHintResult {
+  const dismissed = useSyncExternalStore(
+    subscribe,
+    () => readDismissed(courseId),
+    getServerSnapshot,
+  );
 
   const dismiss = useCallback(() => {
-    window.localStorage.setItem(SAMPLE_HINT_STORAGE_KEY, "1");
+    window.localStorage.setItem(storageKey(courseId), "1");
     notify();
-  }, []);
+  }, [courseId]);
 
   return { dismissed, dismiss };
 }

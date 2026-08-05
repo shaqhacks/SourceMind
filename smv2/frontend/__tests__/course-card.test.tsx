@@ -103,6 +103,7 @@ describe("CourseCard", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    localStorage.clear();
     globalThis.EventSource = originalEventSource;
   });
 
@@ -300,6 +301,33 @@ describe("CourseCard", () => {
     );
 
     expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+  });
+
+  it("dismissing one sample course hint does not hide a different sample course", async () => {
+    const user = userEvent.setup();
+
+    const { unmount } = render(
+      <CourseCard
+        course={makeCourse({ id: "sample-a", is_sample: true })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/this is a sample course/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /dismiss hint/i }));
+    expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <CourseCard
+        course={makeCourse({ id: "sample-b", is_sample: true })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/this is a sample course/i)).toBeInTheDocument();
   });
 
   it("does not show the sample-course hint for a user-created course", () => {

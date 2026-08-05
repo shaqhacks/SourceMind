@@ -44,7 +44,8 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
   const [retrying, setRetrying] = useState(false);
   const [readyFailuresExpanded, setReadyFailuresExpanded] = useState(false);
   const [readyFailedAssets, setReadyFailedAssets] = useState<AssetOut[] | null>(null);
-  const { dismissed: sampleHintDismissed, dismiss: dismissSampleHint } = useSampleHintDismissed();
+  const { dismissed: sampleHintDismissed, dismiss: dismissSampleHint } =
+    useSampleHintDismissed(course.id);
 
   // A local retry always wins over the (possibly stale) `course.status`
   // prop — startIngest's own response already tells us a new job exists,
