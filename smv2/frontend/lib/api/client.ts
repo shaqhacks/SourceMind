@@ -14,7 +14,16 @@ export const API_BASE = process.env.NEXT_PUBLIC_SMV2_API_URL ?? "http://localhos
 
 export const client = createClient<paths>({ baseUrl: API_BASE });
 
-export type JobOut = components["schemas"]["JobOut"] & { retryable?: boolean };
+export interface ApiErrorDetail {
+  code?: string | null;
+  failure_category?: string | null;
+  message?: string | null;
+  remediation?: string | null;
+}
+export type JobOut = components["schemas"]["JobOut"] & {
+  retryable?: boolean;
+  error_detail?: ApiErrorDetail | null;
+};
 export type JobCreate = components["schemas"]["JobCreate"];
 export type CourseOut = components["schemas"]["CourseOut"];
 export type CourseCreate = components["schemas"]["CourseCreate"];

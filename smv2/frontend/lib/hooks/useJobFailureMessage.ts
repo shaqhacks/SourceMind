@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 
-import { getJob } from "@/lib/api/client";
+import { getJob, type ApiErrorDetail } from "@/lib/api/client";
+
+export interface JobFailureInfo {
+  message: string | null;
+  detail: ApiErrorDetail | null;
+}
 
 /**
  * JobEvent (the SSE snapshot) carries no error text — only {id, status,
@@ -17,8 +22,8 @@ import { getJob } from "@/lib/api/client";
  * useJobEvents' own internal state, so a fetch for a since-abandoned job
  * can never leak its message onto a newer one.
  */
-export function useJobFailureMessage(jobFailed: boolean, jobId: string | null): string | null {
-  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
+export function useJobFailure(jobFailed: boolean, jobId: string | null): JobFailureInfo {
+  const [failureInfo, setFailureInfo] = useState<{ jobId: string; info: JobFailureInfo } | null>(
     null,
   );
 
@@ -26,12 +31,19 @@ export function useJobFailureMessage(jobFailed: boolean, jobId: string | null): 
     if (!jobFailed || !jobId) return;
     let active = true;
     getJob(jobId).then(({ data }) => {
-      if (active) setFailureInfo({ jobId, message: data?.error ?? null });
+      if (active) {
+        const detail = (data as { error_detail?: ApiErrorDetail | null } | undefined)?.error_detail ?? null;
+        setFailureInfo({ jobId, info: { message: data?.error ?? null, detail } });
+      }
     });
     return () => {
       active = false;
     };
   }, [jobFailed, jobId]);
 
-  return failureInfo?.jobId === jobId ? failureInfo.message : null;
+  return failureInfo?.jobId === jobId ? failureInfo.info : { message: null, detail: null };
+}
+
+export function useJobFailureMessage(jobFailed: boolean, jobId: string | null): string | null {
+  return useJobFailure(jobFailed, jobId).message;
 }

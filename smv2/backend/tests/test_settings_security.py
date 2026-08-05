@@ -20,7 +20,7 @@ def test_settings_write_rejects_non_loopback_client(client):
         "/api/settings",
         json={"provider": "anthropic", "model": "claude-sonnet-5"},
         headers={
-            "x-smv2-csrf": token,
+            "X-CSRF-Token": token,
             "origin": "http://testserver",
             "host": "testserver",
             "x-forwarded-for": "203.0.113.9",
@@ -42,6 +42,25 @@ def test_settings_write_requires_csrf_token(client):
     assert "CSRF" in resp.json()["detail"]
 
 
+def test_settings_write_accepts_plan_csrf_header_and_rejects_legacy_header(client):
+    token = client.get("/api/settings/bootstrap").json()["csrf_token"]
+    base_headers = {"origin": "http://testserver", "host": "testserver"}
+
+    legacy_resp = client.put(
+        "/api/settings",
+        json={"provider": "anthropic", "model": "claude-sonnet-5"},
+        headers={**base_headers, "x-smv2-csrf": token},
+    )
+    assert legacy_resp.status_code == 403
+
+    resp = client.put(
+        "/api/settings",
+        json={"provider": "anthropic", "model": "claude-sonnet-5"},
+        headers={**base_headers, "X-CSRF-Token": token},
+    )
+    assert resp.status_code == 200
+
+
 def test_settings_write_rejects_mismatched_origin(client):
     token = client.get("/api/settings/bootstrap").json()["csrf_token"]
 
@@ -49,7 +68,7 @@ def test_settings_write_rejects_mismatched_origin(client):
         "/api/settings",
         json={"provider": "anthropic", "model": "claude-sonnet-5"},
         headers={
-            "x-smv2-csrf": token,
+            "X-CSRF-Token": token,
             "origin": "https://evil.example",
             "host": "testserver",
         },
@@ -68,7 +87,7 @@ def test_settings_redacts_secret_material_from_responses_and_logs(client, caplog
         "/api/settings",
         json={"provider": "anthropic", "credentials": {"anthropic_api_key": secret}},
         headers={
-            "x-smv2-csrf": token,
+            "X-CSRF-Token": token,
             "origin": "http://testserver",
             "host": "testserver",
         },
@@ -82,7 +101,7 @@ def test_settings_redacts_secret_material_from_responses_and_logs(client, caplog
 def test_settings_mutation_responses_are_no_store(client):
     token = client.get("/api/settings/bootstrap").json()["csrf_token"]
     headers = {
-        "x-smv2-csrf": token,
+        "X-CSRF-Token": token,
         "origin": "http://testserver",
         "host": "testserver",
     }

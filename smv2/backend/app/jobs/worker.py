@@ -18,12 +18,14 @@ from sqlalchemy.orm import Session
 
 from app.db.engine import get_session
 from app.db.models import Job, ensure_utc, utcnow
+from app.jobs.error_envelope import encode_job_error
 from app.jobs.registry import (
     JOB_HANDLERS,
     MAX_ORPHAN_ATTEMPTS,
     ON_ORPHAN_HOOKS,
     default_on_orphan,
 )
+from app.services.llm_readiness_service import LlmReadinessUnavailableError
 
 LEASE_SECONDS = 60
 POLL_INTERVAL_SECONDS = 0.5
@@ -85,18 +87,32 @@ def execute_job(session: Session, job: Job) -> None:
     handler = JOB_HANDLERS.get(job.type)
     if handler is None:
         job.status = "failed"
-        job.error = f"unknown job type: {job.type}"
+        message = f"unknown job type: {job.type}"
+        job.error = encode_job_error(message, {"code": "unknown_job_type", "message": message})
         session.commit()
         return
 
     try:
         result = handler(session, job)
+    except LlmReadinessUnavailableError as exc:
+        session.rollback()
+        failed_job = session.get(Job, job_id)
+        assert failed_job is not None
+        failed_job.status = "failed"
+        message = exc.detail.get("message", "LLM provider is not ready")
+        failed_job.error = encode_job_error(
+            message,
+            {"code": "llm_readiness_unavailable", **exc.detail},
+        )
+        session.commit()
+        return
     except Exception as exc:  # noqa: BLE001 - any handler failure must be persisted
         session.rollback()
         failed_job = session.get(Job, job_id)
         assert failed_job is not None
         failed_job.status = "failed"
-        failed_job.error = str(exc)
+        message = str(exc)
+        failed_job.error = encode_job_error(message, {"code": "job_failed", "message": message})
         session.commit()
         return
 

@@ -8,7 +8,7 @@ from app.config import data_dir
 def _csrf_headers(client) -> dict[str, str]:
     token = client.get("/api/settings/bootstrap").json()["csrf_token"]
     return {
-        "x-smv2-csrf": token,
+        "X-CSRF-Token": token,
         "origin": "http://testserver",
         "host": "testserver",
     }

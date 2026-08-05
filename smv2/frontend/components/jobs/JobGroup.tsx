@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 
+import { recoveryHref } from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
-import type { JobOut } from "@/lib/api/client";
+import type { JobOut, LlmStatusOut } from "@/lib/api/client";
 
 export interface JobGroupProps {
   courseId: string;
   type: string;
   jobs: JobOut[];
   highlightedJobId: string | null;
+  readiness: LlmStatusOut | null;
   onRetry: (jobId: string) => void;
 }
 
@@ -21,7 +23,8 @@ function sectionId(job: JobOut): string | null {
   return job.payload && typeof job.payload.section_id === "string" ? job.payload.section_id : null;
 }
 
-export default function JobGroup({ courseId, type, jobs, highlightedJobId, onRetry }: JobGroupProps) {
+export default function JobGroup({ courseId, type, jobs, highlightedJobId, readiness, onRetry }: JobGroupProps) {
+  const readinessAllowsRetry = readiness?.available !== false && readiness?.capabilities.completion !== false;
   return (
     <section className="flex flex-col gap-3">
       <h3 className="font-heading text-lg capitalize">{labelType(type)}</h3>
@@ -41,7 +44,7 @@ export default function JobGroup({ courseId, type, jobs, highlightedJobId, onRet
                 <p className="mt-1 text-sm font-semibold capitalize">{job.status}</p>
                 {job.error && <p className="mt-1 text-sm text-status-serious">{job.error}</p>}
               </div>
-              {job.status === "failed" && job.retryable ? (
+              {job.status === "failed" && job.retryable && readinessAllowsRetry ? (
                 <Button size="sm" onClick={() => onRetry(job.id)}>
                   Retry
                 </Button>
@@ -54,6 +57,11 @@ export default function JobGroup({ courseId, type, jobs, highlightedJobId, onRet
               {section && (
                 <Link href={`/course/${courseId}?section=${encodeURIComponent(section)}`} className="text-accent hover:underline">
                   Open section {section}
+                </Link>
+              )}
+              {job.status === "failed" && !readinessAllowsRetry && (
+                <Link href={recoveryHref({ errorDetail: readiness })} className="text-accent hover:underline">
+                  Open Settings
                 </Link>
               )}
             </div>

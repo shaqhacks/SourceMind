@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException, Request
 
 _CSRF_TOKEN = secrets.token_urlsafe(32)
+CSRF_HEADER_NAME = "X-CSRF-Token"
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 
@@ -16,7 +17,7 @@ def csrf_token() -> str:
 def require_local_settings_write(request: Request) -> None:
     _require_loopback(request)
     _require_same_origin(request)
-    supplied = request.headers.get("x-smv2-csrf")
+    supplied = request.headers.get(CSRF_HEADER_NAME)
     if not supplied or not secrets.compare_digest(supplied, _CSRF_TOKEN):
         raise HTTPException(status_code=403, detail="CSRF token is missing or invalid")
 

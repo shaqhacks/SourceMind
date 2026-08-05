@@ -51,6 +51,7 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     result: null,
     progress: null,
     error: null,
+    error_detail: null,
     attempts: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -141,13 +142,21 @@ describe("CardsCTA", () => {
     expect(screen.queryByText(/failed/i)).not.toBeInTheDocument();
   });
 
-  it("shows the job's error text and a retry when generation fails, instead of silently resetting to idle", async () => {
+  it("routes structured provider readiness failures to Settings and hides retry", async () => {
     mockedListCards.mockResolvedValue(ok([]));
-    mockedGenerateCards
-      .mockResolvedValueOnce(ok({ job_id: "job-1" }, 202))
-      .mockResolvedValueOnce(ok({ job_id: "job-2" }, 202));
+    mockedGenerateCards.mockResolvedValueOnce(ok({ job_id: "job-1" }, 202));
     mockedGetJob.mockResolvedValue(
-      ok(makeJob({ id: "job-1", status: "failed", error: "ANTHROPIC_API_KEY is not configured" })),
+      ok(makeJob({
+        id: "job-1",
+        status: "failed",
+        error: "Display-only provider failure",
+        error_detail: {
+          code: "llm_readiness_unavailable",
+          failure_category: "missing_credentials",
+          message: "LLM provider is not ready",
+          remediation: "Add an Anthropic key.",
+        },
+      })),
     );
 
     const user = userEvent.setup();
@@ -165,9 +174,41 @@ describe("CardsCTA", () => {
     });
 
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/generation failed: anthropic_api_key is not configured/i);
+    expect(banner).toHaveTextContent(/generation failed: display-only provider failure/i);
     expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(mockedGenerateCards).toHaveBeenCalledTimes(1);
+  });
 
+  it("routes structured non-readiness failures to the exact job id and keeps safe retry visible", async () => {
+    mockedListCards.mockResolvedValue(ok([]));
+    mockedGenerateCards
+      .mockResolvedValueOnce(ok({ job_id: "job-404" }, 202))
+      .mockResolvedValueOnce(ok({ job_id: "job-405" }, 202));
+    mockedGetJob.mockResolvedValue(
+      ok(makeJob({
+        id: "job-404",
+        status: "failed",
+        error: "Worker crashed",
+        error_detail: { code: "job_failed", failure_category: "worker_error", message: "Worker crashed" },
+      })),
+    );
+
+    const user = userEvent.setup();
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate flashcards/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-404",
+        status: "failed",
+        progress: null,
+      });
+    });
+
+    expect(await screen.findByRole("link", { name: /view job details/i })).toHaveAttribute("href", "/jobs?job=job-404");
     await user.click(screen.getByRole("button", { name: /retry/i }));
     expect(mockedGenerateCards).toHaveBeenCalledTimes(2);
   });

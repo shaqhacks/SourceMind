@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import ErrorBanner from "@/components/ErrorBanner";
 import JobGroup from "@/components/jobs/JobGroup";
 import { describeError, type FetchError } from "@/lib/api/errors";
-import { listJobs, retryJob, TERMINAL_JOB_STATUSES, type JobOut } from "@/lib/api/client";
+import { getLlmStatus, listJobs, retryJob, TERMINAL_JOB_STATUSES, type JobOut, type LlmStatusOut } from "@/lib/api/client";
 
 type LoadState =
   | { kind: "loading" }
@@ -31,6 +31,7 @@ function groupJobs(jobs: JobOut[]): Map<string, Map<string, JobOut[]>> {
 export default function JobsClient() {
   const highlightedJobId = useSearchParams().get("job");
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [readiness, setReadiness] = useState<LlmStatusOut | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -42,6 +43,9 @@ export default function JobsClient() {
 
   useEffect(() => {
     load();
+    getLlmStatus().then(({ data }) => {
+      if (data) setReadiness(data);
+    });
   }, [load]);
 
   async function handleRetry(jobId: string) {
@@ -87,6 +91,7 @@ export default function JobsClient() {
                 type={type}
                 jobs={jobs}
                 highlightedJobId={highlightedJobId}
+                readiness={readiness}
                 onRetry={handleRetry}
               />
             ))}

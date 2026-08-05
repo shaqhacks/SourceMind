@@ -1,9 +1,10 @@
+import { Suspense } from "react";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import JobsPage from "@/app/jobs/page";
-import { listJobs, retryJob, type JobOut } from "@/lib/api/client";
+import { getLlmStatus, listJobs, retryJob, type JobOut } from "@/lib/api/client";
 
 let mockSearchParams = new URLSearchParams();
 
@@ -13,10 +14,12 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api/client", () => ({
   TERMINAL_JOB_STATUSES: new Set(["succeeded", "failed"]),
+  getLlmStatus: vi.fn(),
   listJobs: vi.fn(),
   retryJob: vi.fn(),
 }));
 
+const mockedGetLlmStatus = vi.mocked(getLlmStatus);
 const mockedListJobs = vi.mocked(listJobs);
 const mockedRetryJob = vi.mocked(retryJob);
 
@@ -29,6 +32,7 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     result: null,
     progress: null,
     error: "LLM unavailable",
+    error_detail: null,
     attempts: 1,
     retryable: true,
     created_at: "2026-08-05T12:00:00Z",
@@ -40,12 +44,32 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
 describe("JobsPage", () => {
   beforeEach(() => {
     mockSearchParams = new URLSearchParams();
+    mockedGetLlmStatus.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: {
+        provider: "anthropic",
+        model: "claude-sonnet",
+        configured: true,
+        available: true,
+        capabilities: { completion: true, embeddings: false },
+        last_checked_at: null,
+        failure_category: null,
+        remediation: null,
+      },
+    });
     mockedRetryJob.mockResolvedValue({ status: 202, ok: true, data: makeJob({ id: "retry-1", status: "queued" }) });
   });
 
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+  });
+
+  it("wraps the search-param client in Suspense for static rendering", () => {
+    const element = JobsPage();
+
+    expect(element.type).toBe(Suspense);
   });
 
   it("groups active and recent jobs by course and type with course and section links", async () => {
@@ -103,5 +127,33 @@ describe("JobsPage", () => {
 
     expect(mockedRetryJob).toHaveBeenCalledWith("retryable");
     await waitFor(() => expect(mockedListJobs).toHaveBeenCalledTimes(2));
+  });
+
+  it("hides job retry actions when LLM readiness is unavailable", async () => {
+    mockedGetLlmStatus.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: {
+        provider: "anthropic",
+        model: "claude-sonnet",
+        configured: false,
+        available: false,
+        capabilities: { completion: false, embeddings: false },
+        last_checked_at: null,
+        failure_category: "missing_credentials",
+        remediation: "Add an Anthropic key.",
+      },
+    });
+    mockedListJobs.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: [makeJob({ id: "retryable", retryable: true, status: "failed" })],
+    });
+
+    render(<JobsPage />);
+
+    const retryable = await screen.findByTestId("job-retryable");
+    expect(within(retryable).queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
   });
 });

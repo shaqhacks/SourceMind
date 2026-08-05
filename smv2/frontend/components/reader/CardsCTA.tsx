@@ -14,7 +14,7 @@ import {
 } from "@/lib/api/client";
 import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
-import { useJobFailureMessage } from "@/lib/hooks/useJobFailureMessage";
+import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
 import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
@@ -73,7 +73,7 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
   const { job, done, stalled } = useJobEvents(watchedJobId);
   const isGenerating = watchedJobId !== null && !done;
   const jobFailed = done && job?.status === "failed";
-  const failureMessage = useJobFailureMessage(jobFailed, watchedJobId);
+  const failureInfo = useJobFailure(jobFailed, watchedJobId);
 
   useEffect(() => {
     if (!done) return;
@@ -126,9 +126,10 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
   if (jobFailed) {
     return (
       <RecoveryBanner
-        message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
+        message={`Generation failed${failureInfo.message ? `: ${failureInfo.message}` : "."}`}
         onRetry={() => void handleGenerate()}
         jobId={watchedJobId}
+        errorDetail={failureInfo.detail}
       />
     );
   }

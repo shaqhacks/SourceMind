@@ -67,6 +67,7 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     result: null,
     progress: null,
     error: null,
+    error_detail: null,
     attempts: 1,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -165,7 +166,16 @@ describe("QuizzesPanel", () => {
       .mockResolvedValueOnce(ok({ job_id: "job-1" }, 202))
       .mockResolvedValueOnce(ok({ job_id: "job-2" }, 202));
     mockedGetJob.mockResolvedValue(
-      ok(makeJob({ id: "job-1", error: "ANTHROPIC_API_KEY is not configured" })),
+      ok(makeJob({
+        id: "job-1",
+        error: "ANTHROPIC_API_KEY is not configured",
+        error_detail: {
+          code: "llm_readiness_unavailable",
+          failure_category: "missing_credentials",
+          message: "LLM provider is not ready",
+          remediation: "Add an Anthropic key.",
+        },
+      })),
     );
     const user = userEvent.setup();
 
@@ -188,7 +198,7 @@ describe("QuizzesPanel", () => {
     expect(banner).toHaveTextContent(/generation failed: anthropic_api_key is not configured/i);
     expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
 
-    await user.click(screen.getByRole("button", { name: /retry/i }));
-    expect(mockedGenerateTest).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(mockedGenerateTest).toHaveBeenCalledTimes(1);
   });
 });

@@ -4,6 +4,7 @@ import copy
 
 from app.db.engine import get_session
 from app.db.models import Job
+from app.jobs.error_envelope import encode_job_error
 
 
 def _seed_job(
@@ -14,8 +15,10 @@ def _seed_job(
     result: dict | None = None,
     progress: dict | None = None,
     error: str | None = "provider failed",
+    error_detail: dict | None = None,
     attempts: int = 1,
 ) -> str:
+    stored_error = encode_job_error(error or "", error_detail) if error_detail else error
     session = get_session()
     try:
         job = Job(
@@ -24,7 +27,7 @@ def _seed_job(
             payload=copy.deepcopy(payload),
             result=copy.deepcopy(result),
             progress=copy.deepcopy(progress),
-            error=error,
+            error=stored_error,
             attempts=attempts,
         )
         session.add(job)
@@ -66,6 +69,28 @@ def test_retry_creates_fresh_queued_job_for_retryable_type_without_mutating_orig
     assert retried["error"] is None
     assert retried["attempts"] == 0
     assert client.get(f"/api/jobs/{original_id}").json() == before
+
+
+def test_job_reads_expose_structured_error_detail(client):
+    error_detail = {
+        "code": "llm_readiness_unavailable",
+        "failure_category": "missing_credentials",
+        "message": "LLM provider is not ready",
+        "remediation": "Add an Anthropic key.",
+    }
+    original_id = _seed_job(
+        "generate_lesson",
+        {"section_id": "section-1", "course_id": "course-1"},
+        error="Display-only failure",
+        error_detail=error_detail,
+    )
+
+    single = client.get(f"/api/jobs/{original_id}").json()
+    listed = {job["id"]: job for job in client.get("/api/jobs").json()}[original_id]
+
+    assert single["error"] == "Display-only failure"
+    assert single["error_detail"] == error_detail
+    assert listed["error_detail"] == error_detail
 
 
 def test_retry_rejects_non_retryable_type_and_preserves_original_job(client):

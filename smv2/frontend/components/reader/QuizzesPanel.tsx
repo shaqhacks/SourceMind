@@ -11,7 +11,7 @@ import { generateTest, listTests, type TestSummaryOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
-import { useJobFailureMessage } from "@/lib/hooks/useJobFailureMessage";
+import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
 import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
@@ -44,7 +44,7 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
   const { job, done, stalled } = useJobEvents(jobId);
   const isGenerating = jobId !== null && !done;
   const jobFailed = done && job?.status === "failed";
-  const failureMessage = useJobFailureMessage(jobFailed, jobId);
+  const failureInfo = useJobFailure(jobFailed, jobId);
 
   // Deliberately doesn't reset to "loading" before refetching — the panel
   // just quietly replaces the list once the fresh fetch resolves, so
@@ -115,9 +115,10 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
           {jobFailed && (
             <div className="mb-3">
               <RecoveryBanner
-                message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
+                message={`Generation failed${failureInfo.message ? `: ${failureInfo.message}` : "."}`}
                 onRetry={() => void handleGenerate()}
                 jobId={jobId}
+                errorDetail={failureInfo.detail}
               />
             </div>
           )}

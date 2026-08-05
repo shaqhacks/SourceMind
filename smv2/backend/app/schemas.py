@@ -12,7 +12,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, computed_field, Field, StrictInt
+from pydantic import BaseModel, computed_field, Field, model_validator, StrictInt
+
+from app.jobs.error_envelope import decode_job_error
 
 
 class JobCreate(BaseModel):
@@ -28,11 +30,35 @@ class JobOut(BaseModel):
     result: dict[str, Any] | None
     progress: dict[str, Any] | None
     error: str | None
+    error_detail: dict[str, Any] | None
     attempts: int
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _decode_error_envelope(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            decoded_error, detail = decode_job_error(value.get("error"))
+            return {**value, "error": decoded_error, "error_detail": detail}
+        if hasattr(value, "error"):
+            decoded_error, detail = decode_job_error(getattr(value, "error"))
+            return {
+                "id": getattr(value, "id"),
+                "type": getattr(value, "type"),
+                "status": getattr(value, "status"),
+                "payload": getattr(value, "payload"),
+                "result": getattr(value, "result"),
+                "progress": getattr(value, "progress"),
+                "error": decoded_error,
+                "error_detail": detail,
+                "attempts": getattr(value, "attempts"),
+                "created_at": getattr(value, "created_at"),
+                "updated_at": getattr(value, "updated_at"),
+            }
+        return value
 
     @computed_field
     @property
