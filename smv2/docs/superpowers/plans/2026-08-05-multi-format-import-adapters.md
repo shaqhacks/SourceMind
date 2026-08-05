@@ -17,7 +17,8 @@
 - No new runtime dependency for the first release of the adapter boundary.
 - DOCX, PPTX, and EPUB stay blocked until the dependency-review gate is explicitly passed.
 - Regenerate `openapi.json` and `frontend/lib/api/schema.d.ts` after backend schema changes.
-- `SMV2_IMPORT_MARKDOWN_EXPERIMENTAL`, `SMV2_IMPORT_TEXT_EXPERIMENTAL`, `SMV2_IMPORT_HTML_EXPERIMENTAL`, `SMV2_IMPORT_DOCX_EXPERIMENTAL`, `SMV2_IMPORT_PPTX_EXPERIMENTAL`, and `SMV2_IMPORT_EPUB_EXPERIMENTAL` all start disabled, then move to enabled-by-default only after targeted, full, and manual end-to-end verification, then are removed.
+- `SMV2_IMPORT_MARKDOWN_EXPERIMENTAL`, `SMV2_IMPORT_TEXT_EXPERIMENTAL`, and `SMV2_IMPORT_HTML_EXPERIMENTAL` start disabled, move to enabled-by-default only after targeted, full, and manual end-to-end verification, then are removed.
+- Archive-format rollout flags exist only if the dependency-review gate opens and archive adapters are actually implemented; a closed gate must not create dead flags or parser stubs.
 
 ---
 
@@ -301,6 +302,8 @@ cd backend && uv run pytest -q tests/test_simple_import_adapters.py tests/test_i
 ```
 Expected: PASS before the archive work starts, proving the simple-formats and PDF stages are already stable.
 
+If the recorded decision keeps the gate closed, stop the archive implementation branch here. Add or retain a regression proving representative DOCX, PPTX, and EPUB uploads return the stable 415 `unsupported_source_format` response, do not add dependencies/adapter stubs/flags, and carry that explicit deferral into Task 5. Steps 2-4 below apply only after a later explicit approval opens the gate.
+
 - [ ] **Step 2: Write and run the archive tests after the decision, before adapter implementation**
 
 After the dependency decision is recorded and explicitly approved, create the archive fixture corpus and `backend/tests/test_archive_import_adapters.py` covering valid, malformed, oversized, non-English, image-heavy, traversal, deterministic ordering, and per-adapter disabled/enabled flag cases.
@@ -366,17 +369,17 @@ git commit -m "feat(smv2): add archive import adapters after review"
 - Modify: `backend/app/services/export_service.py`
 - Modify: `backend/tests/test_asset_upload.py`
 - Modify: `backend/tests/test_simple_import_adapters.py`
-- Modify: `backend/tests/test_archive_import_adapters.py`
+- Modify if the archive gate opened: `backend/tests/test_archive_import_adapters.py`
 
 **Interfaces:**
-- PDF, Markdown, text, and HTML are the stable default set once the simple-format stage is complete.
+- PDF, Markdown, text, and HTML are the stable default set once the simple-format stage is complete; with ADR-029's gate closed, DOCX, PPTX, and EPUB remain stable 415 unsupported inputs.
 - The rollout keeps the per-adapter flags in place only long enough to prove the new formats under targeted, full, and manual end-to-end verification, then removes them.
 
 - [ ] **Step 1: Run the exact verification chain**
 
 Run:
 ```bash
-cd backend && uv run pytest -q tests/test_asset_upload.py tests/test_import_adapter_pdf.py tests/test_simple_import_adapters.py tests/test_import_reingest.py tests/test_archive_import_adapters.py -p no:cacheprovider
+cd backend && uv run pytest -q tests/test_asset_upload.py tests/test_import_adapter_pdf.py tests/test_simple_import_adapters.py tests/test_import_reingest.py -p no:cacheprovider
 ```
 Expected: PASS.
 
@@ -398,18 +401,18 @@ Run:
 ```
 Expected: PASS end to end.
 
-- [ ] **Step 2: Enable every non-PDF adapter by default and perform the complete manual local smoke**
+- [ ] **Step 2: Enable every implemented non-PDF adapter by default and perform the complete manual local smoke**
 
-After changing every implemented non-PDF adapter flag to enabled-by-default, rerun the focused import suite, OpenAPI/client generation, frontend suite, and `./build.sh` from Step 1. Then run `./dev.sh` in a dedicated terminal session. Import one PDF, Markdown, text, HTML, DOCX, PPTX, and EPUB asset from the deterministic fixture corpus. For each format, verify readable ordered sections, the correct locator type, source navigation, export provenance, and unaffected processing of a second valid file when the first file is malformed. Repeat hostile HTML and archive traversal/oversize cases and confirm safe rejection without partial course corruption. Stop the dedicated dev session before any later build or release command.
+After changing every implemented non-PDF adapter flag to enabled-by-default, rerun the focused import suite, OpenAPI/client generation, frontend suite, and `./build.sh` from Step 1. Then run `./dev.sh` in a dedicated terminal session. Import one PDF, Markdown, text, and HTML asset from the deterministic fixture corpus. For each implemented format, verify readable ordered sections, the correct locator type, source navigation, export provenance, and unaffected processing of a second valid file when the first file is malformed. Repeat hostile HTML and confirm safe rejection without partial course corruption. Verify representative DOCX, PPTX, and EPUB bytes still receive the stable 415 response without parser execution while ADR-029 remains closed. Stop the dedicated dev session before any later build or release command.
 
 Expected: every enabled-by-default adapter completes its student journey without a rollback-triggering defect; PDF extraction snapshots remain unchanged.
 
 - [ ] **Step 3: Remove the temporary rollout flags**
 
-Once the targeted/full gates and enabled-by-default manual smoke are green, remove all six per-adapter rollout guards and keep the verified adapters enabled unconditionally.
+Once the targeted/full gates and enabled-by-default manual smoke are green, remove the three implemented simple-format rollout guards and keep PDF/Markdown/text/HTML enabled unconditionally. Do not add archive rollout guards while the archive gate is closed.
 
 Commit the cleanup as the final branch commit:
 ```bash
-git add backend/app/config.py backend/app/main.py backend/app/routers/assets.py backend/app/pipeline/import_adapters.py backend/app/services/assets_service.py backend/app/services/export_service.py backend/tests/test_asset_upload.py backend/tests/test_simple_import_adapters.py backend/tests/test_archive_import_adapters.py openapi.json frontend/lib/api/schema.d.ts
+git add backend/app/config.py backend/app/main.py backend/app/routers/assets.py backend/app/pipeline/import_adapters.py backend/app/services/assets_service.py backend/app/services/export_service.py backend/tests/test_asset_upload.py backend/tests/test_simple_import_adapters.py openapi.json frontend/lib/api/schema.d.ts
 git commit -m "chore(smv2): finalize multi-format import rollout"
 ```
