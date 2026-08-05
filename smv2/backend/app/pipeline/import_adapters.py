@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +29,7 @@ from app.pipeline.source_locators import PdfPageLocator, SourceLocator
 PDF_FORMAT_NAME = "pdf"
 PDF_MEDIA_TYPE = "application/pdf"
 PDF_MAGIC = b"%PDF-"
+ZIP_MAGIC_PREFIXES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
 MAGIC_SNIFF_WINDOW = 1024
 TEXT_SNIFF_WINDOW = 64 * 1024
 UNSUPPORTED_SOURCE_FORMAT_CODE = "unsupported_source_format"
@@ -91,9 +91,13 @@ def sniff_pdf_path(path: Path) -> bool:
         return False
 
 
-def _flag_enabled(name: str) -> bool:
-    raw = os.environ.get(name, "0")
-    return raw.strip().lower() not in {"", "0", "false", "no", "off"}
+def sniff_zip_container_path(path: Path) -> bool:
+    try:
+        with path.open("rb") as fh:
+            sample = fh.read(MAGIC_SNIFF_WINDOW)
+    except OSError:
+        return False
+    return sample.startswith(ZIP_MAGIC_PREFIXES)
 
 
 class PdfDocumentAdapter:
@@ -204,25 +208,23 @@ class PdfDocumentAdapter:
 
 
 def supported_adapters() -> list[DocumentAdapter]:
-    adapters: list[DocumentAdapter] = [PdfDocumentAdapter()]
-    if _flag_enabled("SMV2_IMPORT_HTML_EXPERIMENTAL"):
-        from app.pipeline.html_adapter import HtmlDocumentAdapter
+    from app.pipeline.html_adapter import HtmlDocumentAdapter
+    from app.pipeline.markdown_adapter import MarkdownDocumentAdapter
+    from app.pipeline.text_adapter import TextDocumentAdapter
 
-        adapters.append(HtmlDocumentAdapter())
-    if _flag_enabled("SMV2_IMPORT_MARKDOWN_EXPERIMENTAL"):
-        from app.pipeline.markdown_adapter import MarkdownDocumentAdapter
-
-        adapters.append(MarkdownDocumentAdapter())
-    if _flag_enabled("SMV2_IMPORT_TEXT_EXPERIMENTAL"):
-        from app.pipeline.text_adapter import TextDocumentAdapter
-
-        adapters.append(TextDocumentAdapter())
-    return adapters
+    return [
+        PdfDocumentAdapter(),
+        HtmlDocumentAdapter(),
+        MarkdownDocumentAdapter(),
+        TextDocumentAdapter(),
+    ]
 
 
 def candidate_upload_formats(path: Path) -> list[DetectedSourceFormat]:
     if sniff_pdf_path(path):
         return [DetectedSourceFormat(PDF_FORMAT_NAME, PDF_MEDIA_TYPE, ".pdf")]
+    if sniff_zip_container_path(path):
+        return []
 
     try:
         with path.open("rb") as fh:
@@ -260,17 +262,7 @@ def enabled_upload_format(path: Path) -> DetectedSourceFormat:
     candidates = candidate_upload_formats(path)
     if not candidates:
         raise UnsupportedSourceFormatError(UNSUPPORTED_SOURCE_FORMAT_CODE)
-
-    candidate = candidates[0]
-    required_flags = {
-        "html": "SMV2_IMPORT_HTML_EXPERIMENTAL",
-        "markdown": "SMV2_IMPORT_MARKDOWN_EXPERIMENTAL",
-        "text": "SMV2_IMPORT_TEXT_EXPERIMENTAL",
-    }
-    flag = required_flags.get(candidate.source_format)
-    if flag is not None and not _flag_enabled(flag):
-        raise UnsupportedSourceFormatError(UNSUPPORTED_SOURCE_FORMAT_CODE)
-    return candidate
+    return candidates[0]
 
 
 def choose_document_adapter(

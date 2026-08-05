@@ -4,7 +4,6 @@ import hashlib
 import re
 from pathlib import Path
 
-import pytest
 from app.config import data_dir
 
 IMPORT_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "imports"
@@ -40,15 +39,11 @@ def _section_bodies(client, sections: list[dict]) -> list[str]:
 
 def _upload_and_ingest(
     client,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     filename: str,
     content: bytes,
     content_type: str,
-    flags: dict[str, str],
 ) -> tuple[str, list[dict]]:
-    for key, value in flags.items():
-        monkeypatch.setenv(key, value)
     course_id = _create_course(client)
     upload = _upload(client, course_id, filename, content, content_type)
     assert upload.status_code == 201
@@ -58,17 +53,15 @@ def _upload_and_ingest(
     return course_id, sections
 
 
-def test_markdown_adapter_preserves_headings_code_fences_and_links(client, monkeypatch):
+def test_markdown_adapter_preserves_headings_code_fences_and_links(client):
     """Catches flattening Markdown through a lossy text parser."""
     markdown = (IMPORT_FIXTURES / "markdown" / "basic.md").read_bytes()
 
     _course_id, sections = _upload_and_ingest(
         client,
-        monkeypatch,
         filename="renamed.bin",
         content=markdown,
         content_type="application/octet-stream",
-        flags={"SMV2_IMPORT_MARKDOWN_EXPERIMENTAL": "1"},
     )
 
     assert [section["title"] for section in sections] == ["Course Overview", "Code Sample"]
@@ -81,7 +74,7 @@ def test_markdown_adapter_preserves_headings_code_fences_and_links(client, monke
     assert sections[0]["source_locator"]["heading_path"] == ["Course Overview"]
 
 
-def test_markdown_adapter_ignores_atx_headings_inside_fenced_code(client, monkeypatch):
+def test_markdown_adapter_ignores_atx_headings_inside_fenced_code(client):
     """Catches splitting a code sample when it contains heading-shaped text."""
     markdown = b"""# Real Heading
 
@@ -99,11 +92,9 @@ Actual second section.
 
     _course_id, sections = _upload_and_ingest(
         client,
-        monkeypatch,
         filename="fenced.md",
         content=markdown,
         content_type="text/markdown",
-        flags={"SMV2_IMPORT_MARKDOWN_EXPERIMENTAL": "1"},
     )
 
     assert [section["title"] for section in sections] == ["Real Heading", "Next Real Heading"]
@@ -112,17 +103,15 @@ Actual second section.
     assert "After the fenced example." in first_body
 
 
-def test_text_adapter_splits_paragraphs_with_stable_filename_heading(client, monkeypatch):
+def test_text_adapter_splits_paragraphs_with_stable_filename_heading(client):
     """Catches treating plain text as one unstable blob or deriving titles from upload order."""
     text = (IMPORT_FIXTURES / "text" / "basic.txt").read_bytes()
 
     _course_id, sections = _upload_and_ingest(
         client,
-        monkeypatch,
         filename="week 01 notes.data",
         content=text,
         content_type="application/octet-stream",
-        flags={"SMV2_IMPORT_TEXT_EXPERIMENTAL": "1"},
     )
 
     assert [section["title"] for section in sections] == [
@@ -138,17 +127,15 @@ def test_text_adapter_splits_paragraphs_with_stable_filename_heading(client, mon
     ]
 
 
-def test_html_adapter_sanitizes_hostile_html_and_keeps_readable_content(client, monkeypatch):
+def test_html_adapter_sanitizes_hostile_html_and_keeps_readable_content(client):
     """Catches retaining executable constructs while converting HTML."""
     html = (IMPORT_FIXTURES / "html" / "malicious.html").read_bytes()
 
     _course_id, sections = _upload_and_ingest(
         client,
-        monkeypatch,
         filename="malicious.txt",
         content=html,
         content_type="text/plain",
-        flags={"SMV2_IMPORT_HTML_EXPERIMENTAL": "1"},
     )
 
     joined = "\n\n".join(_section_bodies(client, sections))
@@ -162,9 +149,7 @@ def test_html_adapter_sanitizes_hostile_html_and_keeps_readable_content(client, 
     assert all(section["source_format"] == "html" for section in sections)
 
 
-def test_html_adapter_escapes_entity_decoded_constructs_and_sanitizes_links(
-    client, monkeypatch
-):
+def test_html_adapter_escapes_entity_decoded_constructs_and_sanitizes_links(client):
     """Catches entity-decoded tag text or hostile hrefs becoming active Markdown/HTML."""
     html = b"""<!doctype html>
 <html><body>
@@ -180,11 +165,9 @@ def test_html_adapter_escapes_entity_decoded_constructs_and_sanitizes_links(
 
     _course_id, sections = _upload_and_ingest(
         client,
-        monkeypatch,
         filename="escaped.html",
         content=html,
         content_type="text/html",
-        flags={"SMV2_IMPORT_HTML_EXPERIMENTAL": "1"},
     )
 
     body = "\n\n".join(_section_bodies(client, sections))
@@ -220,60 +203,59 @@ def test_unsupported_upload_returns_stable_415_code(client):
     assert resp.json()["detail"] == {"code": "unsupported_source_format"}
 
 
-@pytest.mark.parametrize(
-    ("env_name", "filename", "content", "content_type", "allowed_format"),
-    [
+def test_archive_container_magic_is_rejected_before_text_fallback(client):
+    """Catches ZIP-container bytes being accepted by permissive UTF-8 text sniffing."""
+    samples = [
+        ("lecture.docx", b"PK\x03\x04docx bytes that are also utf-8", "text/plain"),
+        ("slides.pptx", b"PK\x03\x04pptx bytes that are also utf-8", "application/octet-stream"),
+        ("book.epub", b"PK\x03\x04epub bytes that are also utf-8", "application/epub+zip"),
+        ("archive.txt", b"PK\x03\x04generic zip bytes that are also utf-8", "text/plain"),
+        ("empty.zip", b"PK\x05\x06" + (b"\x00" * 18), "text/plain"),
+        ("spanned.zip", b"PK\x07\x08zip descriptor bytes that are also utf-8", "text/plain"),
+    ]
+
+    for filename, content, content_type in samples:
+        course_id = _create_course(client, f"Blocked {filename}")
+        resp = _upload(client, course_id, filename, content, content_type)
+        assert resp.status_code == 415
+        assert resp.json()["detail"] == {"code": "unsupported_source_format"}
+
+
+def test_simple_formats_are_enabled_without_rollout_flags(client):
+    """Catches leaving temporary simple-format rollout flags in the stable path."""
+    cases = [
         (
-            "SMV2_IMPORT_MARKDOWN_EXPERIMENTAL",
             "notes.md",
             (IMPORT_FIXTURES / "markdown" / "basic.md").read_bytes(),
             "text/markdown",
             "markdown",
         ),
         (
-            "SMV2_IMPORT_TEXT_EXPERIMENTAL",
             "notes.txt",
             (IMPORT_FIXTURES / "text" / "basic.txt").read_bytes(),
             "text/plain",
             "text",
         ),
         (
-            "SMV2_IMPORT_HTML_EXPERIMENTAL",
             "notes.html",
             (IMPORT_FIXTURES / "html" / "basic.html").read_bytes(),
             "text/html",
             "html",
         ),
-    ],
-)
-def test_each_simple_format_flag_gates_only_its_own_format(
-    client,
-    monkeypatch,
-    env_name: str,
-    filename: str,
-    content: bytes,
-    content_type: str,
-    allowed_format: str,
-):
-    """Catches a single shared rollout switch hiding which adapter failed."""
-    course_id = _create_course(client)
-    disabled = _upload(client, course_id, filename, content, content_type)
-    assert disabled.status_code == 415
-    assert disabled.json()["detail"] == {"code": "unsupported_source_format"}
+    ]
 
-    monkeypatch.setenv(env_name, "1")
-    enabled = _upload(client, course_id, filename, content, content_type)
-    assert enabled.status_code == 201
-    body = enabled.json()
-    assert body["source_format"] == allowed_format
+    for filename, content, content_type, allowed_format in cases:
+        course_id = _create_course(client, f"Stable {allowed_format}")
+        response = _upload(client, course_id, filename, content, content_type)
+        assert response.status_code == 201
+        assert response.json()["source_format"] == allowed_format
 
 
-def test_one_bad_file_does_not_prevent_second_supported_file_from_importing(client, monkeypatch):
+def test_one_bad_file_does_not_prevent_second_supported_file_from_importing(client):
     """Catches ingest aborting the whole course on a single asset parse failure."""
     from app.db.engine import get_session
     from app.db.models import Asset
 
-    monkeypatch.setenv("SMV2_IMPORT_TEXT_EXPERIMENTAL", "1")
     course_id = _create_course(client)
     good = _upload(
         client,

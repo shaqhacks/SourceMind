@@ -66,9 +66,8 @@ def _replace_asset_bytes(course_id: str, content: bytes) -> None:
         session.close()
 
 
-def test_reingest_keeps_section_ids_and_locators_for_unchanged_markdown(client, monkeypatch):
+def test_reingest_keeps_section_ids_and_locators_for_unchanged_markdown(client):
     """Catches treating adapter-produced locators as section identity."""
-    monkeypatch.setenv("SMV2_IMPORT_MARKDOWN_EXPERIMENTAL", "1")
     course_id = _create_course(client)
     body = b"# Stable One\n\nSame text.\n\n# Stable Two\n\nAlso same text.\n"
     _upload_markdown(client, course_id, body)
@@ -88,11 +87,8 @@ def test_reingest_keeps_section_ids_and_locators_for_unchanged_markdown(client, 
     assert after == before
 
 
-def test_reingest_changes_only_changed_section_and_preserves_surviving_state(
-    client, monkeypatch
-):
+def test_reingest_changes_only_changed_section_and_preserves_surviving_state(client):
     """Catches course-wide reset of section-scoped learner state."""
-    monkeypatch.setenv("SMV2_IMPORT_MARKDOWN_EXPERIMENTAL", "1")
     course_id = _create_course(client)
     first = b"# Alpha\n\nAlpha body.\n\n# Beta\n\nBeta body.\n\n# Gamma\n\nGamma body.\n"
     changed = (
@@ -162,9 +158,8 @@ def test_reingest_changes_only_changed_section_and_preserves_surviving_state(
         session.close()
 
 
-def test_reingest_preserves_surviving_annotations_and_rebuilds_search(client, monkeypatch):
+def test_reingest_preserves_surviving_annotations_and_rebuilds_search(client):
     """Catches wiping annotations or failing to rebuild their search rows."""
-    monkeypatch.setenv("SMV2_IMPORT_MARKDOWN_EXPERIMENTAL", "1")
     course_id = _create_course(client)
     _upload_markdown(client, course_id, b"# Keep\n\nKeep body.\n\n# Change\n\nChange body.\n")
     _run_ingest(client, course_id)
@@ -222,9 +217,8 @@ def test_reingest_preserves_surviving_annotations_and_rebuilds_search(client, mo
     assert [item["id"] for item in exported_notes["notes"]] == [note.json()["id"]]
 
 
-def test_reingest_deletes_annotations_only_for_removed_sections(client, monkeypatch):
+def test_reingest_deletes_annotations_only_for_removed_sections(client):
     """Catches deleting annotations whose owning section survived the diff."""
-    monkeypatch.setenv("SMV2_IMPORT_MARKDOWN_EXPERIMENTAL", "1")
     course_id = _create_course(client)
     _upload_markdown(client, course_id, b"# Keep\n\nKeep body.\n\n# Remove\n\nRemove body.\n")
     _run_ingest(client, course_id)
@@ -276,9 +270,8 @@ def test_reingest_deletes_annotations_only_for_removed_sections(client, monkeypa
         session.close()
 
 
-def test_export_preserves_original_asset_markdown_and_source_provenance(client, monkeypatch):
+def test_export_preserves_original_asset_markdown_and_source_provenance(client):
     """Catches export dropping original bytes, exact body text, or locator metadata."""
-    monkeypatch.setenv("SMV2_IMPORT_MARKDOWN_EXPERIMENTAL", "1")
     course_id = _create_course(client)
     original = b"# Exported Unit\n\nExact **Markdown** body.\n"
     asset_id = _upload_markdown(client, course_id, original, filename="original.md")
@@ -308,10 +301,8 @@ def test_export_preserves_original_asset_markdown_and_source_provenance(client, 
     assert section_entry["source_label"] == "Exported Unit"
 
 
-def test_malformed_asset_failure_does_not_delete_good_asset_sections(client, monkeypatch):
+def test_malformed_asset_failure_does_not_delete_good_asset_sections(client):
     """Catches a single extraction failure rolling back unrelated durable rows."""
-    monkeypatch.setenv("SMV2_IMPORT_TEXT_EXPERIMENTAL", "1")
-    monkeypatch.setenv("SMV2_IMPORT_MARKDOWN_EXPERIMENTAL", "1")
     course_id = _create_course(client)
     good = client.post(
         f"/api/courses/{course_id}/assets",

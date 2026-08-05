@@ -40,7 +40,7 @@ def test_export_zip_structure_and_content(client, ingest_course, tmp_path):
         assert all("content_hash" in s for s in manifest["sections"])
         assert all("extractor_version" in s for s in manifest["sections"])
 
-        first_section_file = sorted(section_files)[0]
+        first_section_file = min(section_files)
         section_content = zf.read(first_section_file).decode("utf-8")
         assert "Chapter 1: Foundations" in section_content
 
@@ -53,6 +53,62 @@ def test_export_zip_is_a_valid_zip_readable_via_bytesio(client, ingest_course):
     with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
         bad_file = zf.testzip()
         assert bad_file is None
+
+
+def test_export_assets_use_sanitized_original_filenames_with_deterministic_collisions(
+    client,
+):
+    """Catches exporting opaque stored names or unsafe original filenames."""
+    course_resp = client.post("/api/courses", json={"title": "Export Asset Names"})
+    assert course_resp.status_code == 201
+    course_id = course_resp.json()["id"]
+    first = b"%PDF-1.7\nfirst original bytes\n"
+    second = b"%PDF-1.7\nsecond original bytes\n"
+
+    first_upload = client.post(
+        f"/api/courses/{course_id}/assets",
+        files={"file": ("Lecture Notes.pdf", first, "application/pdf")},
+    )
+    second_upload = client.post(
+        f"/api/courses/{course_id}/assets",
+        files={"file": ("../Lecture Notes.pdf", second, "application/pdf")},
+    )
+    assert first_upload.status_code == 201
+    assert second_upload.status_code == 201
+
+    resp = client.get(f"/api/courses/{course_id}/export")
+    assert resp.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        names = zf.namelist()
+        assert "assets/Lecture-Notes.pdf" in names
+        assert "assets/Lecture-Notes-2.pdf" in names
+        assert all(name.startswith("assets/") or "/" not in name for name in names)
+        assert ".." not in "\n".join(names)
+        assert zf.read("assets/Lecture-Notes.pdf") == first
+        assert zf.read("assets/Lecture-Notes-2.pdf") == second
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+
+    assert manifest["assets"] == [
+        {
+            "id": first_upload.json()["id"],
+            "filename": "Lecture Notes.pdf",
+            "file": "assets/Lecture-Notes.pdf",
+            "source_format": "pdf",
+            "media_type": "application/pdf",
+            "size_bytes": len(first),
+            "sha256": first_upload.json()["sha256"],
+        },
+        {
+            "id": second_upload.json()["id"],
+            "filename": "../Lecture Notes.pdf",
+            "file": "assets/Lecture-Notes-2.pdf",
+            "source_format": "pdf",
+            "media_type": "application/pdf",
+            "size_bytes": len(second),
+            "sha256": second_upload.json()["sha256"],
+        },
+    ]
 
 
 def test_export_404_for_missing_course(client):

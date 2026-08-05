@@ -34,7 +34,7 @@ def test_upload_valid_pdf_creates_asset(client):
     assert len(body["sha256"]) == 64
 
 
-def test_upload_rejects_non_pdf_content_by_magic_bytes(client):
+def test_upload_accepts_text_content_even_with_pdf_name_and_header(client):
     course_id = _create_course(client)
 
     resp = client.post(
@@ -42,7 +42,10 @@ def test_upload_rejects_non_pdf_content_by_magic_bytes(client):
         files={"file": ("fake.pdf", b"this is not a pdf, just text pretending", "application/pdf")},
     )
 
-    assert resp.status_code == 415
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["source_format"] == "text"
+    assert body["media_type"] == "text/plain"
 
 
 def test_upload_rejects_non_pdf_even_with_pdf_extension_and_content_type(client):
@@ -115,14 +118,14 @@ def test_upload_accepts_pdf_with_leading_junk_before_magic_bytes(client):
     assert resp.status_code == 201
 
 
-def test_upload_still_rejects_garbage_with_no_magic_bytes_anywhere(client):
+def test_upload_still_rejects_binary_garbage_with_no_magic_bytes_anywhere(client):
     course_id = _create_course(client)
     resp = client.post(
         f"/api/courses/{course_id}/assets",
         files={
             "file": (
                 "garbage.pdf",
-                b"just plain garbage, no pdf marker at all here",
+                b"\x00\x01\x02\x03not utf-8 text and no pdf marker",
                 "application/pdf",
             )
         },
