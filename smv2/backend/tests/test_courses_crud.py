@@ -7,6 +7,7 @@ def test_course_crud_lifecycle(client):
     course = resp.json()
     assert course["title"] == "My Course"
     assert course["status"] == "created"
+    assert course["is_sample"] is False
     course_id = course["id"]
 
     resp = client.get("/api/courses")

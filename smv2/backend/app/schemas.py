@@ -82,6 +82,7 @@ class CourseOut(BaseModel):
     id: str
     title: str
     status: str
+    is_sample: bool
     created_at: datetime
     updated_at: datetime
     section_count: int = 0

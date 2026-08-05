@@ -1391,6 +1391,8 @@ export interface components {
             failed_asset_count: number;
             /** Id */
             id: string;
+            /** Is Sample */
+            is_sample: boolean;
             progress?: components["schemas"]["ProgressSummary"] | null;
             /**
              * Section Count
@@ -1409,14 +1411,20 @@ export interface components {
         };
         /** CourseReviewSummaryOut */
         CourseReviewSummaryOut: {
+            /** Available Count */
+            available_count?: number | null;
             /** Course Id */
             course_id: string;
             /** Due Count */
             due_count: number;
             /** New Count */
             new_count: number;
+            /** Overdue Count */
+            overdue_count?: number | null;
             /** Title */
             title: string;
+            /** Total Count */
+            total_count?: number | null;
         };
         /** CurriculumClaimEditIn */
         CurriculumClaimEditIn: {
@@ -2305,14 +2313,22 @@ export interface components {
         };
         /** ReviewQueueOut */
         ReviewQueueOut: {
+            /** Available Count */
+            available_count?: number | null;
             /** Cards */
             cards: components["schemas"]["ReviewQueueCardOut"][];
             /** Due */
             due: number;
             /** New */
             new: number;
+            /** New Count */
+            new_count?: number | null;
+            /** Overdue Count */
+            overdue_count?: number | null;
             /** Total */
             total: number;
+            /** Total Count */
+            total_count?: number | null;
         };
         /** ReviewSummaryOut */
         ReviewSummaryOut: {
@@ -2640,8 +2656,8 @@ export interface components {
          * StudyNextItemOut
          * @description One deterministic study suggestion (ADR-022, app.services.study_service).
          *     `detail` holds whatever raw numbers back `reason` — {"best_score":
-         *     ...} for low_test_score, {"due_count": ...} for due_cards, {} for
-         *     unread, {"days_since": ...} for stale.
+         *     ...} for low_test_score, canonical review availability counts for
+         *     due_cards/new_cards, {} for unread, {"days_since": ...} for stale.
          */
         StudyNextItemOut: {
             /** Chapter Label */
@@ -2654,7 +2670,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "low_test_score" | "due_cards" | "unread" | "stale";
+            reason: "low_test_score" | "due_cards" | "new_cards" | "unread" | "stale";
         };
         /** SubmitPracticeAnswerIn */
         SubmitPracticeAnswerIn: {

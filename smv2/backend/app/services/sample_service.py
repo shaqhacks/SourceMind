@@ -13,6 +13,7 @@ courses table.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from app.config import data_dir, sample_course_enabled
@@ -30,6 +31,7 @@ _SAMPLE_PDF_PATH = _BACKEND_ROOT / "assets" / "sample" / "welcome.pdf"
 
 _SAMPLE_COURSE_TITLE = "Welcome to SourceMind"
 _MARKER_FILENAME = "sample_seeded"
+_MARKER_COURSE_ID_RE = re.compile(r"\bcourse_id=([^\s]+)")
 
 
 def _marker_path() -> Path:
@@ -40,6 +42,46 @@ def _any_course_exists() -> bool:
     session = get_session()
     try:
         return session.query(Course).first() is not None
+    finally:
+        session.close()
+
+
+def _course_id_from_marker(marker_text: str) -> str | None:
+    match = _MARKER_COURSE_ID_RE.search(marker_text)
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def reconcile_sample_course_marker() -> bool:
+    """Mark the course recorded in the first-run marker as the bundled sample.
+
+    The marker lives in the data directory, so this filesystem-dependent
+    backfill belongs at startup instead of in an Alembic migration.
+    """
+    marker = _marker_path()
+    try:
+        marker_text = marker.read_text()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        logger.exception("failed to read sample course marker")
+        return False
+
+    course_id = _course_id_from_marker(marker_text)
+    if course_id is None:
+        return False
+
+    session = get_session()
+    try:
+        course = session.get(Course, course_id)
+        if course is None:
+            return False
+        if course.is_sample:
+            return False
+        course.is_sample = True
+        session.commit()
+        return True
     finally:
         session.close()
 
@@ -63,6 +105,7 @@ class _LocalFileReader:
 
 async def _seed() -> None:
     course = courses_service.create_course(_SAMPLE_COURSE_TITLE)
+    _mark_course_as_sample(course.id)
 
     reader = _LocalFileReader(_SAMPLE_PDF_PATH)
     try:
@@ -78,6 +121,19 @@ async def _seed() -> None:
     marker.write_text(f"seeded course_id={course.id} at {utcnow().isoformat()}\n")
 
 
+def _mark_course_as_sample(course_id: str) -> bool:
+    session = get_session()
+    try:
+        course = session.get(Course, course_id)
+        if course is None:
+            return False
+        course.is_sample = True
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
 async def seed_sample_course_if_first_run() -> None:
     """Called from app startup (lifespan), after reconcile_interrupted_jobs.
     Any failure here (e.g. the bundled PDF missing from a broken install) is
@@ -88,6 +144,7 @@ async def seed_sample_course_if_first_run() -> None:
     if not sample_course_enabled():
         return
     if _marker_path().exists():
+        reconcile_sample_course_marker()
         return
     if _any_course_exists():
         return
