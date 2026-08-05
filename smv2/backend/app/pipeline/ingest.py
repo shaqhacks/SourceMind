@@ -411,7 +411,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     session.query(ChatTurn).filter(ChatTurn.course_id == course_id).delete()
     session.query(Highlight).filter(Highlight.course_id == course_id).delete()
     session.query(Note).filter(Note.course_id == course_id).delete()
-    search_index.delete_course_documents(session, course_id)
+    search_index.delete_course_documents(session, course_id, sync_fts=False)
     # TestAttempt before Test: TestAttempt.test_id -> Test.id is ON DELETE
     # CASCADE, so deleting Test first would already remove these via the
     # DB itself, but every REPLACED table gets its own explicit delete here
@@ -506,8 +506,8 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                     source_ref=f"{section_row.id}:p.{tc.page + 1}",
                 )
             )
-        search_index.upsert_section_document(session, section_row)
-        search_index.upsert_lesson_document(session, section_row)
+        search_index.upsert_section_document(session, section_row, sync_fts=False)
+        search_index.upsert_lesson_document(session, section_row, sync_fts=False)
 
     any_extracted_ok = any(a.status == "extracted" for a in assets)
     course.status = "ready" if any_extracted_ok else "ingest_failed"
@@ -518,5 +518,6 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     # so this is nothing more than inserting a queued Job row.
     if any_extracted_ok and html_conversion_enabled():
         session.add(Job(type="convert_html", status="queued", payload={"course_id": course_id}))
+    search_index.rebuild_fts_if_present(session)
     _report_progress_in_session(job, stage="done", pct=100, message="ingest complete")
     session.commit()

@@ -275,3 +275,104 @@ def test_rebuild_reflects_reingest_lesson_note_and_highlight_lifecycle(client):
     rebuilt = search_service.rebuild_course_index(course_id)
     assert rebuilt == 3
     assert search_service.search_course(course_id, "editednoteword").items[0].doc_type == "note"
+
+
+def test_rebuild_course_documents_rebuilds_fts_once_for_many_documents(client, monkeypatch):
+    from app.services import search_index
+
+    course_id = _seed_course(
+        "course-rebuild-count",
+        section_bodies=[
+            ("count-one", "One", "countword one"),
+            ("count-two", "Two", "countword two"),
+            ("count-three", "Three", "countword three"),
+        ],
+    )
+    session = get_session()
+    rebuild_calls = 0
+
+    def _count_rebuild(inner_session):
+        nonlocal rebuild_calls
+        rebuild_calls += 1
+        original_rebuild(inner_session)
+
+    original_rebuild = search_index._rebuild_fts
+    monkeypatch.setattr(search_index, "_rebuild_fts", _count_rebuild)
+    try:
+        search_index.rebuild_course_documents(session, course_id)
+    finally:
+        session.close()
+
+    assert rebuild_calls == 1
+
+
+def test_single_note_mutation_syncs_fts_without_full_rebuild(client, monkeypatch):
+    from app.services import search_index
+
+    course_id = _seed_course(
+        "course-single-sync",
+        section_bodies=[("single-sync-section", "Single", "single source")],
+    )
+    search_service = pytest.importorskip("app.services.search_service")
+    assert search_service.search_course(course_id, "single").backend in {"fts5", "like"}
+    rebuild_calls = 0
+
+    def _count_rebuild(inner_session):
+        nonlocal rebuild_calls
+        rebuild_calls += 1
+        original_rebuild(inner_session)
+
+    original_rebuild = search_index._rebuild_fts
+    monkeypatch.setattr(search_index, "_rebuild_fts", _count_rebuild)
+    session = get_session()
+    try:
+        section = session.get(Section, "single-sync-section")
+        assert section is not None
+        note = Note(
+            id="single-sync-note",
+            course_id=course_id,
+            section_id=section.id,
+            page=0,
+            anchor_y=0.2,
+            note_md="singlenoteword",
+        )
+        session.add(note)
+        session.flush()
+        search_index.upsert_note_document(session, note)
+        session.commit()
+        assert search_index.matching_fts_doc_keys(session, course_id, "singlenoteword") == {
+            "note:single-sync-note"
+        }
+        note.note_md = "updatedsinglenote"
+        search_index.upsert_note_document(session, note)
+        session.commit()
+        assert search_index.matching_fts_doc_keys(session, course_id, "updatedsinglenote") == {
+            "note:single-sync-note"
+        }
+    finally:
+        session.close()
+
+    assert rebuild_calls == 0
+
+
+def test_ingest_rebuilds_fts_once_for_many_sections(client, ingest_course, monkeypatch):
+    from app.jobs.worker import run_due_jobs_once
+    from app.services import search_index
+
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    assert search_index.fts5_available(get_session())
+    rebuild_calls = 0
+
+    def _count_rebuild(inner_session):
+        nonlocal rebuild_calls
+        rebuild_calls += 1
+        original_rebuild(inner_session)
+
+    original_rebuild = search_index._rebuild_fts
+    monkeypatch.setattr(search_index, "_rebuild_fts", _count_rebuild)
+
+    ingest_resp = client.post(f"/api/courses/{course_id}/ingest")
+    assert ingest_resp.status_code == 202
+    assert run_due_jobs_once() is True
+
+    assert rebuild_calls == 1

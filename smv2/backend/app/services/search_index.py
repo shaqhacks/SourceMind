@@ -111,6 +111,32 @@ def _rebuild_fts(session: Session) -> None:
     session.execute(text("INSERT INTO search_documents_fts(search_documents_fts) VALUES('rebuild')"))
 
 
+def rebuild_fts_if_present(session: Session) -> None:
+    if _has_fts(session):
+        _rebuild_fts(session)
+
+
+def _sync_fts_row(session: Session, doc_key: str) -> None:
+    if _has_fts(session):
+        row = session.execute(
+            text("SELECT rowid FROM search_documents WHERE doc_key = :doc_key"),
+            {"doc_key": doc_key},
+        ).first()
+        if row is not None:
+            session.execute(
+                text("INSERT INTO search_documents_fts(rowid, title, body) SELECT rowid, title, body FROM search_documents WHERE rowid = :rowid"),
+                {"rowid": row[0]},
+            )
+
+
+def _delete_fts_row(session: Session, rowid: int | None) -> None:
+    if _has_fts(session) and rowid is not None:
+        session.execute(
+            text("INSERT INTO search_documents_fts(search_documents_fts, rowid) VALUES('delete', :rowid)"),
+            {"rowid": rowid},
+        )
+
+
 def _doc_key(doc_type: str, source_id: str) -> str:
     return f"{doc_type}:{source_id}"
 
@@ -134,6 +160,7 @@ def _upsert_document(
     source_heading: str | None,
     source_chapter: str | None,
     source_slide: str | None = None,
+    sync_fts: bool = True,
 ) -> None:
     ensure_search_backend(session)
     body_text = body or ""
@@ -180,18 +207,23 @@ def _upsert_document(
             "source_slide": source_slide,
         },
     )
-    if _has_fts(session):
-        _rebuild_fts(session)
+    if sync_fts:
+        _sync_fts_row(session, doc_key)
 
 
-def _delete_document(session: Session, doc_key: str) -> None:
+def _delete_document(session: Session, doc_key: str, *, sync_fts: bool = True) -> None:
     ensure_core_table(session)
+    row = session.execute(
+        text("SELECT rowid FROM search_documents WHERE doc_key = :doc_key"),
+        {"doc_key": doc_key},
+    ).first()
+    rowid = int(row[0]) if row is not None else None
+    if sync_fts:
+        _delete_fts_row(session, rowid)
     session.execute(text("DELETE FROM search_documents WHERE doc_key = :doc_key"), {"doc_key": doc_key})
-    if _has_fts(session):
-        _rebuild_fts(session)
 
 
-def upsert_section_document(session: Session, section: Section) -> None:
+def upsert_section_document(session: Session, section: Section, *, sync_fts: bool = True) -> None:
     _upsert_document(
         session,
         doc_key=_doc_key("section", section.id),
@@ -205,10 +237,11 @@ def upsert_section_document(session: Session, section: Section) -> None:
         source_page=_source_page(section),
         source_heading=section.title,
         source_chapter=section.chapter_label,
+        sync_fts=sync_fts,
     )
 
 
-def upsert_lesson_document(session: Session, section: Section) -> None:
+def upsert_lesson_document(session: Session, section: Section, *, sync_fts: bool = True) -> None:
     _upsert_document(
         session,
         doc_key=_doc_key("lesson", section.id),
@@ -222,10 +255,11 @@ def upsert_lesson_document(session: Session, section: Section) -> None:
         source_page=_source_page(section),
         source_heading=section.title,
         source_chapter=section.chapter_label,
+        sync_fts=sync_fts,
     )
 
 
-def upsert_note_document(session: Session, note: Note) -> None:
+def upsert_note_document(session: Session, note: Note, *, sync_fts: bool = True) -> None:
     section = session.get(Section, note.section_id)
     _upsert_document(
         session,
@@ -240,10 +274,11 @@ def upsert_note_document(session: Session, note: Note) -> None:
         source_page=note.page + 1,
         source_heading=section.title if section is not None else None,
         source_chapter=section.chapter_label if section is not None else None,
+        sync_fts=sync_fts,
     )
 
 
-def upsert_highlight_document(session: Session, highlight: Highlight) -> None:
+def upsert_highlight_document(session: Session, highlight: Highlight, *, sync_fts: bool = True) -> None:
     section = session.get(Section, highlight.section_id)
     body = "\n\n".join(part for part in (highlight.exact, highlight.note_md) if part)
     _upsert_document(
@@ -259,21 +294,22 @@ def upsert_highlight_document(session: Session, highlight: Highlight) -> None:
         source_page=highlight.page + 1 if highlight.page is not None else None,
         source_heading=section.title if section is not None else None,
         source_chapter=section.chapter_label if section is not None else None,
+        sync_fts=sync_fts,
     )
 
 
-def delete_note_document(session: Session, note_id: str) -> None:
-    _delete_document(session, _doc_key("note", note_id))
+def delete_note_document(session: Session, note_id: str, *, sync_fts: bool = True) -> None:
+    _delete_document(session, _doc_key("note", note_id), sync_fts=sync_fts)
 
 
-def delete_highlight_document(session: Session, highlight_id: str) -> None:
-    _delete_document(session, _doc_key("highlight", highlight_id))
+def delete_highlight_document(session: Session, highlight_id: str, *, sync_fts: bool = True) -> None:
+    _delete_document(session, _doc_key("highlight", highlight_id), sync_fts=sync_fts)
 
 
-def delete_course_documents(session: Session, course_id: str) -> None:
+def delete_course_documents(session: Session, course_id: str, *, sync_fts: bool = True) -> None:
     ensure_core_table(session)
     session.execute(text("DELETE FROM search_documents WHERE course_id = :course_id"), {"course_id": course_id})
-    if _has_fts(session):
+    if sync_fts and _has_fts(session):
         _rebuild_fts(session)
 
 
@@ -281,30 +317,31 @@ def rebuild_course_documents(session: Session, course_id: str | None = None) -> 
     ensure_search_backend(session)
     if course_id is None:
         session.execute(text("DELETE FROM search_documents"))
-        if _has_fts(session):
-            _rebuild_fts(session)
     else:
-        delete_course_documents(session, course_id)
+        delete_course_documents(session, course_id, sync_fts=False)
 
     section_query = session.query(Section)
     if course_id is not None:
         section_query = section_query.filter(Section.course_id == course_id)
     sections = section_query.order_by(Section.course_id, Section.order_index, Section.id).all()
     for section in sections:
-        upsert_section_document(session, section)
-        upsert_lesson_document(session, section)
+        upsert_section_document(session, section, sync_fts=False)
+        upsert_lesson_document(session, section, sync_fts=False)
 
     note_query = session.query(Note)
     if course_id is not None:
         note_query = note_query.filter(Note.course_id == course_id)
     for note in note_query.order_by(Note.course_id, Note.section_id, Note.id).all():
-        upsert_note_document(session, note)
+        upsert_note_document(session, note, sync_fts=False)
 
     highlight_query = session.query(Highlight)
     if course_id is not None:
         highlight_query = highlight_query.filter(Highlight.course_id == course_id)
     for highlight in highlight_query.order_by(Highlight.course_id, Highlight.section_id, Highlight.id).all():
-        upsert_highlight_document(session, highlight)
+        upsert_highlight_document(session, highlight, sync_fts=False)
+
+    if _has_fts(session):
+        _rebuild_fts(session)
 
     count_row = session.execute(
         text(
