@@ -334,8 +334,9 @@ class Highlight(Base):
     char offset — the same selection must be locatable in more than one
     rendering of the text (markdown DOM, pdf.js text layer). The anchor is
     opaque to the backend; the frontend matcher owns its semantics.
-    Wiped on re-ingest (REPLACED bucket, ADR-024): re-uploading a course's
-    PDF deletes its highlights — the upload UI must warn.
+    Re-ingest preserves highlights when their content-addressed owning
+    section ID survives; highlights are deleted only when that section is
+    removed and the section_id FK cascades.
     page is 0-based per-asset storage, converted at the service boundary
     like Section.page_start.
     """
@@ -371,7 +372,9 @@ class Note(Base):
     Highlight, for annotating a spot with no highlightable passage. anchor_y
     is a 0..1 top-origin fraction of the page height, so it survives the page
     re-rendering at any width. page is 0-based in the DB / 1-based at the API,
-    the same single-conversion rule as Highlight. Wiped on re-ingest (ADR-024).
+    the same single-conversion rule as Highlight. Re-ingest preserves notes
+    when their content-addressed owning section ID survives; notes are deleted
+    only when that section is removed and the section_id FK cascades.
     """
 
     __tablename__ = "notes"
