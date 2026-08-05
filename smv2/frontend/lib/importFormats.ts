@@ -40,12 +40,12 @@ export function getImportFileDecision(file: File): ImportFileDecision {
   const extension = extensionOf(file.name);
   const mimeType = file.type.toLowerCase();
 
-  if (SUPPORTED_EXTENSIONS.has(extension) || SUPPORTED_MIME_TYPES.has(mimeType)) {
-    return { status: "supported" };
-  }
-
   if (BLOCKED_EXTENSIONS.has(extension)) {
     return { status: "blocked", message: `${file.name}: ${UNSUPPORTED_SOURCE_FORMAT_MESSAGE}` };
+  }
+
+  if (SUPPORTED_EXTENSIONS.has(extension) || SUPPORTED_MIME_TYPES.has(mimeType)) {
+    return { status: "supported" };
   }
 
   return { status: "unsupported", message: `${file.name}: ${UNSUPPORTED_SOURCE_FORMAT_MESSAGE}` };
