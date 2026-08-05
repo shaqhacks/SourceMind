@@ -5,11 +5,12 @@ import { Menu } from "lucide-react";
 
 import DueBadge from "@/components/DueBadge";
 import ThemeToggle from "@/components/ThemeToggle";
+import WorkspaceModeMenu from "@/components/workspace/WorkspaceModeMenu";
 import { useSidebarCollapsed } from "@/lib/hooks/useSidebarCollapsed";
 
 /**
  * App header (redesign handoff "App Shell"): sidebar toggle, brand in the
- * display face, due tag + theme toggle + avatar placeholder on the right.
+ * display face, due tag + theme toggle + workspace mode on the right.
  * Extracted out of app/layout.tsx so it's unit-testable on its own — RTL
  * can't cleanly mount RootLayout's own <html>/<head>/next/font wrapper.
  * Brand is a <p>, not a heading: pages own their h1.
@@ -34,13 +35,7 @@ export default function SiteHeader() {
       <div className="ml-auto flex items-center gap-3">
         <DueBadge />
         <ThemeToggle />
-        {/* Decorative avatar per the mock — single-user app, no account. */}
-        <span
-          aria-hidden="true"
-          className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-sage-300 text-xs font-semibold text-sage-900"
-        >
-          S
-        </span>
+        <WorkspaceModeMenu />
       </div>
     </header>
   );

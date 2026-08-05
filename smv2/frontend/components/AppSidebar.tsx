@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/client";
 import { subscribeReviewSettled } from "@/lib/review/reviewBus";
 import { useSidebarCollapsed } from "@/lib/hooks/useSidebarCollapsed";
+import { useWorkspaceMode } from "@/lib/hooks/useWorkspaceMode";
 import UploadFlow from "@/components/upload/UploadFlow";
 
 const NAV_ITEMS: { href: string; label: string }[] = [
@@ -43,6 +44,7 @@ function isPdf(file: File): boolean {
 export default function AppSidebar() {
   const pathname = usePathname();
   const { collapsed } = useSidebarCollapsed();
+  const { mode } = useWorkspaceMode();
   const [courses, setCourses] = useState<CourseOut[]>([]);
   const [summary, setSummary] = useState<ReviewSummaryOut | null>(null);
   const [usage, setUsage] = useState<LlmUsageOut | null>(null);
@@ -178,6 +180,7 @@ export default function AppSidebar() {
         </p>
         {courses.map((course) => {
           const due = overdueByCourse.get(course.id) ?? 0;
+          const showInstructorTools = mode === "instructor";
           return (
             <div
               key={course.id}
@@ -206,15 +209,35 @@ export default function AppSidebar() {
                 >
                   Skill map
                 </Link>
-                <span aria-hidden="true" className="text-muted-foreground">·</span>
-                <Link href={`/course/${course.id}/curriculum`} className="text-accent-700 hover:underline">
-                  Curriculum
-                </Link>
-                <span aria-hidden="true" className="text-muted-foreground">·</span>
-                <Link href={`/course/${course.id}/diagnostics/validate`} className="text-accent-700 hover:underline">
-                  Validate
-                </Link>
               </p>
+              {showInstructorTools ? (
+                <div
+                  role="group"
+                  aria-label={`Instructor tools for ${course.title}`}
+                  className="mt-2 border-t border-divider pt-2"
+                >
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Instructor tools
+                  </p>
+                  <p className="flex gap-2 text-xs">
+                    <Link
+                      href={`/course/${course.id}/curriculum`}
+                      className="text-accent-700 hover:underline"
+                    >
+                      Curriculum
+                    </Link>
+                    <span aria-hidden="true" className="text-muted-foreground">
+                      ·
+                    </span>
+                    <Link
+                      href={`/course/${course.id}/diagnostics/validate`}
+                      className="text-accent-700 hover:underline"
+                    >
+                      Validate
+                    </Link>
+                  </p>
+                </div>
+              ) : null}
             </div>
           );
         })}
