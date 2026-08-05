@@ -25,9 +25,12 @@ vi.mock("@/lib/api/client", () => ({
 
 const realMatchMedia = window.matchMedia;
 
-// useNarrowViewport builds `(max-width: 1023px)`; drive its result by making
-// matchMedia report `matches` for that max-width query.
 function mockViewport(narrow: boolean): void {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: narrow ? 768 : 1024,
+  });
   window.matchMedia = ((query: string) => ({
     matches: narrow && query.includes("max-width"),
     media: query,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import Chat, { type ChatCitation, type ChatSendResult, type ChatTurn } from "@/components/Chat";
@@ -8,12 +8,7 @@ import SelectionContextPill from "@/components/reader/SelectionContextPill";
 import { getChatHistory, sendChat, type ChatSelectionIn, type ChatTurnOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
-import { useNarrowViewport } from "@/lib/hooks/useNarrowViewport";
-
-// Below this, docking the chat as a third column would squeeze the
-// reading column uncomfortably narrow — falls back to the pre-existing
-// overlay-drawer treatment instead of pushing content aside.
-const NARROW_VIEWPORT_BREAKPOINT_PX = 1099;
+import { useShellLayout } from "@/lib/hooks/useShellLayout";
 
 export interface CourseChatDrawerProps {
   courseId: string;
@@ -87,7 +82,9 @@ export default function CourseChatDrawer({
   onConsumeSelection,
 }: CourseChatDrawerProps) {
   const router = useRouter();
-  const isNarrow = useNarrowViewport(NARROW_VIEWPORT_BREAKPOINT_PX);
+  const layout = useShellLayout();
+  const transientDrawer = layout !== "desktop";
+  const shellRef = useRef<HTMLDivElement>(null);
 
   // Own scope while open, same pattern as ShortcutsOverlay: sits on top of
   // the reader's arrow/j/k/s/c scope so those don't fire behind an open
@@ -95,10 +92,22 @@ export default function CourseChatDrawer({
   // shadows the reader's own "c" binding while this is open, so without
   // this, "c" would only ever open the drawer, never close it.
   useKeyboardShortcuts({ escape: onClose, c: onClose }, open);
-  // Not a hard focus trap (this is a side panel, not a blocking modal —
-  // the reader behind it stays reachable), just moves focus in on open
-  // and restores it to the "Chat" toggle button on close.
-  const drawerRef = useDialogFocus<HTMLDivElement>(open, { trap: false });
+  // Mobile/tablet drawers are modal because they cover the reading
+  // column. Desktop chat stays a complementary docked panel.
+  const drawerRef = useDialogFocus<HTMLDivElement>(open, { trap: transientDrawer });
+
+  useEffect(() => {
+    if (!open || !transientDrawer) return undefined;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (shellRef.current && !shellRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open, transientDrawer, onClose]);
 
   const loadHistory = useCallback(async () => {
     const { data } = await getChatHistory(courseId);
@@ -151,21 +160,22 @@ export default function CourseChatDrawer({
       // navigate. Narrow-viewport overlay: it covers the content, so
       // closing it is the only way to actually see the section just
       // navigated to.
-      if (isNarrow) onClose();
+      if (transientDrawer) onClose();
     },
-    [courseId, router, onClose, isNarrow],
+    [courseId, router, onClose, transientDrawer],
   );
 
   if (!open) return null;
 
-  return (
+  const panel = (
     <div
       ref={drawerRef}
-      role="complementary"
+      role={transientDrawer ? "dialog" : "complementary"}
+      aria-modal={transientDrawer ? "true" : undefined}
       aria-label="Course chat"
       tabIndex={-1}
       className={
-        isNarrow
+        transientDrawer
           ? "fixed inset-y-0 right-0 z-40 flex w-96 max-w-[90vw] flex-col border-l border-divider bg-background shadow-lg"
           : "flex w-[340px] shrink-0 flex-col border-l border-divider"
       }
@@ -196,6 +206,14 @@ export default function CourseChatDrawer({
           ) : null
         }
       />
+    </div>
+  );
+
+  if (!transientDrawer) return panel;
+
+  return (
+    <div className="fixed inset-0 z-40 bg-foreground/25">
+      <div ref={shellRef}>{panel}</div>
     </div>
   );
 }

@@ -27,6 +27,10 @@ const NAV_ITEMS: { href: string; label: string }[] = [
   { href: "/settings", label: "Settings" },
 ];
 
+export interface AppSidebarProps {
+  variant?: "persistent" | "drawer";
+}
+
 function isPdf(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
@@ -42,7 +46,7 @@ function isPdf(file: File): boolean {
  * every mount of an always-visible panel. The Home task cards carry the
  * detailed progress instead.
  */
-export default function AppSidebar() {
+export default function AppSidebar({ variant = "persistent" }: AppSidebarProps) {
   const pathname = usePathname();
   const { collapsed } = useSidebarCollapsed();
   const { mode } = useWorkspaceMode();
@@ -114,7 +118,7 @@ export default function AppSidebar() {
     };
   }, []);
 
-  if (collapsed) return null;
+  if (variant === "persistent" && collapsed) return null;
 
   const overdueByCourse = new Map(
     (summary?.courses ?? []).map((c) => [c.course_id, c.overdue_count]),
@@ -126,7 +130,11 @@ export default function AppSidebar() {
     <nav
       id="app-sidebar"
       aria-label="App"
-      className="flex w-[260px] flex-none flex-col gap-5 overflow-y-auto border-r border-divider p-4"
+      className={
+        variant === "drawer"
+          ? "flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4"
+          : "flex w-[260px] flex-none flex-col gap-5 overflow-y-auto border-r border-divider p-4"
+      }
     >
       <input
         ref={fileInputRef}

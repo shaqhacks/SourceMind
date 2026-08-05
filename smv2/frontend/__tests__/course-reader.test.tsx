@@ -141,6 +141,32 @@ const BODIES: Record<string, string> = {
 };
 
 const NO_PROGRESS: ReaderProgress = { section_id: null, scroll_pos: 0 };
+const realMatchMedia = window.matchMedia;
+
+function setViewport(width: number): void {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+  window.matchMedia = ((query: string) => {
+    const min = /\(min-width:\s*(\d+)px\)/.exec(query)?.[1];
+    const max = /\(max-width:\s*(\d+)px\)/.exec(query)?.[1];
+    const matches =
+      (min ? width >= Number(min) : true) && (max ? width <= Number(max) : true);
+    return {
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => true,
+    } as MediaQueryList;
+  }) as typeof window.matchMedia;
+  window.dispatchEvent(new Event("resize"));
+}
 
 function selectPhrase(root: HTMLElement, phrase: string): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -220,6 +246,7 @@ describe("CourseReader", () => {
     cleanup();
     vi.clearAllMocks();
     vi.useRealTimers();
+    window.matchMedia = realMatchMedia;
     window.location.hash = "";
     // useReaderView (view-mode persistence) and useTypographyPrefs both
     // write to real localStorage (see vitest.setup.ts's polyfill, which
@@ -301,6 +328,37 @@ describe("CourseReader", () => {
     await user.click(screen.getByRole("button", { name: /chapter three/i }));
 
     expect(screen.getByRole("heading", { level: 2, name: /chapter three/i })).toHaveFocus();
+  });
+
+  it("uses a modal outline drawer at 768px and restores focus to the outline trigger", async () => {
+    setViewport(768);
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    expect(screen.queryByRole("navigation", { name: "Chapter outline" })).not.toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: /show outline/i });
+    await user.click(trigger);
+
+    const drawer = screen.getByRole("dialog", { name: "Chapter outline" });
+    expect(drawer).toHaveAttribute("aria-modal", "true");
+    expect(within(drawer).getByRole("button", { name: /chapter one/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Chapter outline" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("keeps the reader outline persistent at 1024px", async () => {
+    setViewport(1024);
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    expect(screen.getByRole("navigation", { name: "Chapter outline" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Chapter outline" })).not.toBeInTheDocument();
   });
 
   it("disposes section-local annotation UI when navigating to another chapter", async () => {
