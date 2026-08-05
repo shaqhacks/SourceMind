@@ -160,7 +160,7 @@ def create_draft(
 
 
 def start_extraction(course_id: str) -> tuple[Job, CurriculumVersion]:
-    from app.services import jobs_service
+    from app.services import jobs_service, llm_readiness_service
 
     session = get_session()
     try:
@@ -177,6 +177,7 @@ def start_extraction(course_id: str) -> tuple[Job, CurriculumVersion]:
                 if version is not None:
                     return job, version
 
+        llm_readiness_service.assert_ready_for_generation()
         version = (
             session.query(CurriculumVersion)
             .filter_by(course_id=course_id, status="draft")

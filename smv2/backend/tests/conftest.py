@@ -179,6 +179,7 @@ def stub_provider(client, monkeypatch):
     """Monkeypatches get_provider() everywhere it's already been imported
     by name, so no test ever constructs a real Anthropic/Ollama client.
     """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-configured-readiness")
     provider = StubProvider()
     for target in _GET_PROVIDER_PATCH_TARGETS:
         monkeypatch.setattr(target, lambda: provider)

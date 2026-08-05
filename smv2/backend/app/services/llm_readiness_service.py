@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app import config
-from app.llm import provider as provider_module
 
 _SECRET_RE = re.compile(r"(sk-[A-Za-z0-9_-]+|[A-Za-z0-9_-]{20,})")
 _last_check: dict[str, Any] | None = None
@@ -20,7 +19,7 @@ class LlmReadinessUnavailableError(Exception):
 def status_payload() -> dict[str, Any]:
     provider = config.llm_provider()
     model = config.llm_model()
-    configured, category, remediation = _configured_state(provider, allow_service_provider_patch=False)
+    configured, category, remediation = _configured_state(provider)
     available = configured
     capabilities = _capabilities(provider, available)
     payload = {
@@ -40,7 +39,7 @@ def check_payload() -> dict[str, Any]:
     global _last_check
     provider_name = config.llm_provider()
     model = config.llm_model()
-    configured, category, remediation = _configured_state(provider_name, allow_service_provider_patch=True)
+    configured, category, remediation = _configured_state(provider_name)
     checked_at = datetime.now(timezone.utc).isoformat()
     if not configured:
         _last_check = {
@@ -55,38 +54,15 @@ def check_payload() -> dict[str, Any]:
         }
         return dict(_last_check)
 
-    try:
-        provider = get_provider()
-        provider.complete(
-            [{"role": "user", "content": "health check"}],
-            max_tokens=8,
-            purpose="readiness_check",
-        )
-    except Exception as exc:
-        _last_check = {
-            "provider": provider_name,
-            "model": model,
-            "configured": True,
-            "available": False,
-            "capabilities": _capabilities(provider_name, False),
-            "last_checked_at": checked_at,
-            "failure_category": "provider_error",
-            "remediation": _redact(str(exc)) or _remediation(provider_name),
-        }
-        return dict(_last_check)
-
     _last_check = {
         "provider": provider_name,
-        "model": getattr(provider, "model_name", model),
+        "model": model,
         "configured": True,
-        "available": True,
-        "capabilities": {
-            "completion": True,
-            "embeddings": bool(getattr(provider, "supports_embeddings", False)),
-        },
+        "available": False,
+        "capabilities": _capabilities(provider_name, False),
         "last_checked_at": checked_at,
-        "failure_category": None,
-        "remediation": None,
+        "failure_category": "configured_unverified",
+        "remediation": "Configuration is present; generation will verify connectivity without a metered preflight call.",
     }
     return dict(_last_check)
 
@@ -120,13 +96,9 @@ def settings_summary() -> dict[str, Any]:
     }
 
 
-def _configured_state(
-    provider: str, *, allow_service_provider_patch: bool = False
-) -> tuple[bool, str | None, str | None]:
+def _configured_state(provider: str) -> tuple[bool, str | None, str | None]:
     if provider == "anthropic":
-        configured = bool(config.anthropic_api_key()) or _provider_is_test_patched(
-            allow_service_provider_patch=allow_service_provider_patch
-        )
+        configured = bool(config.anthropic_api_key())
         return (
             configured,
             None if configured else "missing_credentials",
@@ -135,16 +107,6 @@ def _configured_state(
     if provider == "ollama":
         return True, None, None
     return False, "unknown_provider", f"Select a supported provider before using AI features."
-
-
-def get_provider():
-    return provider_module.get_provider()
-
-
-def _provider_is_test_patched(*, allow_service_provider_patch: bool) -> bool:
-    if getattr(provider_module.get_provider, "__module__", "app.llm.provider") != "app.llm.provider":
-        return True
-    return allow_service_provider_patch and getattr(get_provider, "__module__", __name__) != __name__
 
 
 def _capabilities(provider: str, available: bool) -> dict[str, bool]:

@@ -77,3 +77,32 @@ def test_settings_redacts_secret_material_from_responses_and_logs(client, caplog
     assert resp.status_code == 200
     assert secret not in resp.text
     assert secret not in caplog.text
+
+
+def test_settings_mutation_responses_are_no_store(client):
+    token = client.get("/api/settings/bootstrap").json()["csrf_token"]
+    headers = {
+        "x-smv2-csrf": token,
+        "origin": "http://testserver",
+        "host": "testserver",
+    }
+
+    put_resp = client.put(
+        "/api/settings",
+        json={
+            "provider": "anthropic",
+            "credentials": {"anthropic_api_key": "sk-ant-no-store"},
+        },
+        headers=headers,
+    )
+    assert put_resp.status_code == 200
+    assert put_resp.headers["cache-control"] == "no-store"
+
+    delete_resp = client.request(
+        "DELETE",
+        "/api/settings",
+        json={"provider": "anthropic", "confirmation": "clear anthropic credential"},
+        headers=headers,
+    )
+    assert delete_resp.status_code == 200
+    assert delete_resp.headers["cache-control"] == "no-store"

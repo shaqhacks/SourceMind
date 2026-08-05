@@ -25,6 +25,18 @@ def test_local_settings_writes_secrets_atomically_with_owner_only_mode(tmp_path)
     assert read_local_settings(settings_path)["anthropic_api_key"] == "sk-ant-test-secret"
 
 
+def test_secret_settings_use_secrets_toml_contract(tmp_path):
+    from app.services.local_settings_service import read_local_settings, write_local_settings
+
+    secrets_path = tmp_path / "secrets.toml"
+
+    write_local_settings(secrets_path, {"anthropic_api_key": "sk-ant-test-secret"})
+
+    assert secrets_path.name == "secrets.toml"
+    assert oct(secrets_path.stat().st_mode & 0o777) == "0o600"
+    assert read_local_settings(secrets_path) == {"anthropic_api_key": "sk-ant-test-secret"}
+
+
 def test_local_settings_failed_replace_leaves_existing_file_intact(tmp_path, monkeypatch):
     from app.services import local_settings_service
 

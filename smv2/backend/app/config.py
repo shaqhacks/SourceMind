@@ -38,6 +38,13 @@ def local_settings_path() -> Path:
     return data_dir() / "local_settings.toml"
 
 
+def secrets_path() -> Path:
+    override = os.environ.get("SMV2_SECRETS_PATH")
+    if override:
+        return Path(override)
+    return data_dir() / "secrets.toml"
+
+
 def _read_local_settings() -> dict:
     path = local_settings_path()
     if not path.is_file():
@@ -59,7 +66,7 @@ def _read_secrets() -> dict:
     silently; a malformed file logs a warning and also returns {} rather
     than crashing the app over a config typo.
     """
-    path = data_dir() / "secrets.toml"
+    path = secrets_path()
     if not path.is_file():
         return {}
     try:
@@ -158,9 +165,6 @@ def ollama_base_url() -> str:
     env = os.environ.get("SMV2_OLLAMA_BASE_URL")
     if env:
         return env
-    from_local = _read_local_settings().get("ollama_base_url")
-    if isinstance(from_local, str) and from_local:
-        return from_local
     from_secrets = _read_secrets().get("ollama_base_url")
     if isinstance(from_secrets, str) and from_secrets:
         return from_secrets
@@ -176,9 +180,6 @@ def anthropic_api_key() -> str | None:
     env = os.environ.get("ANTHROPIC_API_KEY")
     if env:
         return env
-    from_local = _read_local_settings().get("anthropic_api_key")
-    if isinstance(from_local, str) and from_local:
-        return from_local
     from_secrets = _read_secrets().get("anthropic_api_key")
     return from_secrets if isinstance(from_secrets, str) and from_secrets else None
 

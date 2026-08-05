@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from app.db.engine import get_session
+from app.db.models import CurriculumVersion, Job
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 
@@ -120,6 +122,26 @@ def test_curriculum_extraction_job_is_idempotent_reviewable_and_publishable(
         },
     )
     assert immutable_edit.status_code == 409
+
+
+def test_curriculum_extraction_unconfigured_provider_fails_before_job_creation(
+    client, ingest_course
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+
+    resp = client.post(f"/api/courses/{course_id}/curriculum/extract")
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["failure_category"] == "missing_credentials"
+    assert "ANTHROPIC_API_KEY" in body["detail"]["remediation"]
+
+    session = get_session()
+    try:
+        assert session.query(Job).filter(Job.type == "concept_extraction").count() == 0
+        assert session.query(CurriculumVersion).filter_by(course_id=course_id).count() == 0
+    finally:
+        session.close()
 
 
 def test_curriculum_endpoints_return_404_for_missing_course_or_version(client):

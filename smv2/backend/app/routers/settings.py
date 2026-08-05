@@ -25,38 +25,42 @@ def bootstrap(response: Response) -> SettingsBootstrapOut:
 
 
 @router.put("", response_model=SettingsOut)
-def update_settings(body: SettingsUpdateIn, request: Request) -> SettingsOut:
+def update_settings(body: SettingsUpdateIn, request: Request, response: Response) -> SettingsOut:
     require_local_settings_write(request)
     current = read_local_settings(config.local_settings_path())
     if body.provider is not None:
         current["provider"] = body.provider
     if body.model is not None:
         current["model"] = body.model
+    secrets = read_local_settings(config.secrets_path())
     for key in ("anthropic_api_key", "ollama_base_url"):
         value = body.credentials.get(key)
         if value:
-            current[key] = value
+            secrets[key] = value
     write_local_settings(config.local_settings_path(), current)
+    if body.credentials:
+        write_local_settings(config.secrets_path(), secrets)
+    response.headers["Cache-Control"] = "no-store"
     return SettingsOut.model_validate(_settings_payload())
 
 
 @router.delete("", response_model=SettingsOut)
-def clear_settings(body: SettingsClearIn, request: Request) -> SettingsOut:
+def clear_settings(body: SettingsClearIn, request: Request, response: Response) -> SettingsOut:
     require_local_settings_write(request)
     expected = f"clear {body.provider} credential"
     if body.confirmation != expected:
         raise HTTPException(status_code=409, detail=f"confirmation must be {expected!r}")
-    current = read_local_settings(config.local_settings_path())
+    secrets = read_local_settings(config.secrets_path())
     if body.provider == "anthropic":
-        current.pop("anthropic_api_key", None)
+        secrets.pop("anthropic_api_key", None)
     if body.provider == "ollama":
-        current.pop("ollama_base_url", None)
-    write_local_settings(config.local_settings_path(), current)
+        secrets.pop("ollama_base_url", None)
+    write_local_settings(config.secrets_path(), secrets)
+    response.headers["Cache-Control"] = "no-store"
     return SettingsOut.model_validate(_settings_payload())
 
 
 def _settings_payload() -> dict[str, Any]:
-    local = read_local_settings(config.local_settings_path())
     anthropic_present = bool(config.anthropic_api_key())
     ollama_present = bool(config.ollama_base_url())
     credentials: dict[str, str] = {}

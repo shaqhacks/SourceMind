@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import tomllib
+
+from app.config import data_dir
+
 
 def _csrf_headers(client) -> dict[str, str]:
     token = client.get("/api/settings/bootstrap").json()["csrf_token"]
@@ -33,6 +37,11 @@ def test_settings_round_trips_provider_model_and_redacted_credentials(client):
     assert body["credentials"]["anthropic_api_key"] == "[redacted]"
     assert "sk-ant-test-secret" not in get_resp.text
 
+    local_settings = tomllib.loads((data_dir() / "local_settings.toml").read_text())
+    secrets = tomllib.loads((data_dir() / "secrets.toml").read_text())
+    assert local_settings == {"model": "claude-3-5-sonnet-latest", "provider": "anthropic"}
+    assert secrets["anthropic_api_key"] == "sk-ant-test-secret"
+
 
 def test_settings_clear_removes_only_selected_provider_credential(client):
     headers = _csrf_headers(client)
@@ -64,6 +73,10 @@ def test_settings_clear_removes_only_selected_provider_credential(client):
     assert body["provider"] == "ollama"
     assert body["model"] == "llama3.2"
 
+    secrets = tomllib.loads((data_dir() / "secrets.toml").read_text())
+    assert "anthropic_api_key" not in secrets
+    assert secrets["ollama_base_url"] == "http://127.0.0.1:11434"
+
 
 def test_settings_check_flow_reports_ready_after_local_ollama_selection(client, stub_provider):
     headers = _csrf_headers(client)
@@ -83,6 +96,7 @@ def test_settings_check_flow_reports_ready_after_local_ollama_selection(client, 
     assert check_resp.status_code == 200
     body = check_resp.json()
     assert body["provider"] == "ollama"
-    assert body["model"] == "stub-model"
-    assert body["available"] is True
-    assert stub_provider.call_count == 1
+    assert body["model"] == "llama3.2"
+    assert body["available"] is False
+    assert body["failure_category"] == "configured_unverified"
+    assert stub_provider.call_count == 0

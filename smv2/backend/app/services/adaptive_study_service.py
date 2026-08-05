@@ -30,6 +30,7 @@ from app.db.models import (
     utcnow,
 )
 from app.services.jobs_service import create_job_in_session
+from app.services import llm_readiness_service
 
 
 @dataclass(frozen=True)
@@ -440,6 +441,7 @@ def start_replenishment(course_id: str, concept_id: str) -> Job:
             payload = job.payload or {}
             if payload.get("course_id") == course_id and payload.get("concept_id") == concept_id:
                 return job
+        llm_readiness_service.assert_ready_for_generation()
         job = create_job_in_session(
             session,
             "concept_practice_generation",
