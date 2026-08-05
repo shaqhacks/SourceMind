@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { describeError } from "@/lib/api/errors";
 import {
@@ -115,9 +116,10 @@ export default function GenerateTestCard({
         Not attempted yet — generate a {QUESTION_COUNT}-question test from this chapter.
       </p>
       {jobFailed && (
-        <ErrorBanner
+        <RecoveryBanner
           message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
           onRetry={() => void handleGenerate()}
+          jobId={watchedJobId}
         />
       )}
       {isGenerating ? (

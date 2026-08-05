@@ -114,5 +114,6 @@ describe("GenerateAllLessons", () => {
     await user.click(screen.getByRole("button", { name: /generate all lessons/i }));
 
     expect(await screen.findByText(/starting generation failed/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /view job details/i })).toHaveAttribute("href", "/jobs");
   });
 });

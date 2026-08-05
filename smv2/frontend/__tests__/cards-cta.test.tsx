@@ -166,6 +166,7 @@ describe("CardsCTA", () => {
 
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent(/generation failed: anthropic_api_key is not configured/i);
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
 
     await user.click(screen.getByRole("button", { name: /retry/i }));
     expect(mockedGenerateCards).toHaveBeenCalledTimes(2);

@@ -1,5 +1,6 @@
 import createClient from "openapi-fetch";
 
+import { getCachedCsrfToken, setCsrfToken } from "@/lib/security/csrf";
 import type { components, paths } from "./schema";
 
 /**
@@ -13,7 +14,7 @@ export const API_BASE = process.env.NEXT_PUBLIC_SMV2_API_URL ?? "http://localhos
 
 export const client = createClient<paths>({ baseUrl: API_BASE });
 
-export type JobOut = components["schemas"]["JobOut"];
+export type JobOut = components["schemas"]["JobOut"] & { retryable?: boolean };
 export type JobCreate = components["schemas"]["JobCreate"];
 export type CourseOut = components["schemas"]["CourseOut"];
 export type CourseCreate = components["schemas"]["CourseCreate"];
@@ -27,6 +28,29 @@ export type GenerateLessonOut = components["schemas"]["GenerateLessonOut"];
 export type LessonEstimateOut = components["schemas"]["LessonEstimateOut"];
 export type GenerateAllLessonsOut = components["schemas"]["GenerateAllLessonsOut"];
 export type LlmUsageOut = components["schemas"]["LlmUsageOut"];
+export interface LlmStatusOut {
+  provider: string;
+  model: string;
+  configured: boolean;
+  available: boolean;
+  capabilities: { completion: boolean; embeddings: boolean };
+  last_checked_at: string | null;
+  failure_category: string | null;
+  remediation: string | null;
+}
+export interface SettingsOut {
+  provider: string;
+  model: string;
+  credentials_present: Record<string, boolean>;
+  credentials: Record<string, string>;
+  rollout: { local_settings_enabled: boolean };
+  readiness: LlmStatusOut;
+}
+export interface SettingsUpdateIn {
+  provider?: "anthropic" | "ollama" | null;
+  model?: string | null;
+  credentials?: Record<string, string>;
+}
 export type CardOut = components["schemas"]["CardOut"];
 export type UpdateCardIn = components["schemas"]["UpdateCardIn"];
 export type GenerateCardsOut = components["schemas"]["GenerateCardsOut"];
@@ -120,6 +144,36 @@ async function request<T>(
   }
 }
 
+async function requestFetch<T>(url: string, init: RequestInit): Promise<ApiResult<T>> {
+  try {
+    const response = await fetch(url, {
+      ...init,
+      headers: {
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+    const data = response.status === 204 ? undefined : ((await response.json()) as T);
+    return { data, status: response.status, ok: response.ok };
+  } catch (err) {
+    return { error: err, ok: false };
+  }
+}
+
+async function csrfHeaders(): Promise<Record<string, string>> {
+  const cached = getCachedCsrfToken();
+  if (cached) return { "X-CSRF-Token": cached };
+
+  const response = await fetch(`${API_BASE}/api/settings/bootstrap`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  const data = (await response.json()) as { csrf_token?: unknown };
+  const token = typeof data.csrf_token === "string" ? data.csrf_token : "";
+  setCsrfToken(token);
+  return { "X-CSRF-Token": token };
+}
+
 export function getHealth() {
   return request(client.GET("/health"));
 }
@@ -136,6 +190,47 @@ export function getJob(jobId: string) {
   return request(
     client.GET("/api/jobs/{job_id}", { params: { path: { job_id: jobId } } }),
   );
+}
+
+export async function retryJob(jobId: string): Promise<ApiResult<JobOut>> {
+  return requestFetch<JobOut>(`${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+  });
+}
+
+export function getLlmStatus(): Promise<ApiResult<LlmStatusOut>> {
+  return requestFetch<LlmStatusOut>(`${API_BASE}/api/llm/status`, { method: "GET" });
+}
+
+export function checkLlmStatus(): Promise<ApiResult<LlmStatusOut>> {
+  return requestFetch<LlmStatusOut>(`${API_BASE}/api/llm/status/check`, { method: "POST" });
+}
+
+export function getSettings(): Promise<ApiResult<SettingsOut>> {
+  return requestFetch<SettingsOut>(`${API_BASE}/api/settings`, { method: "GET" });
+}
+
+export async function saveSettings(body: SettingsUpdateIn): Promise<ApiResult<SettingsOut>> {
+  return requestFetch<SettingsOut>(`${API_BASE}/api/settings`, {
+    method: "PUT",
+    headers: await csrfHeaders(),
+    body: JSON.stringify({
+      provider: body.provider ?? null,
+      model: body.model ?? null,
+      credentials: body.credentials ?? {},
+    }),
+  });
+}
+
+export async function clearProviderSecret(
+  provider: "anthropic" | "ollama",
+  confirmation: string,
+): Promise<ApiResult<SettingsOut>> {
+  return requestFetch<SettingsOut>(`${API_BASE}/api/settings`, {
+    method: "DELETE",
+    headers: await csrfHeaders(),
+    body: JSON.stringify({ provider, confirmation }),
+  });
 }
 
 export function listCourses() {

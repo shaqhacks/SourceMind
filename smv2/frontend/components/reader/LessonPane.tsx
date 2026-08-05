@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
@@ -216,9 +217,10 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   if (effectiveStatus === "failed") {
     return (
       <div className="flex flex-col gap-2">
-        <ErrorBanner
+        <RecoveryBanner
           message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
           onRetry={() => handleGenerate(true)}
+          jobId={watchedJobId}
         />
         {actionError && <p className="text-xs text-status-serious">{actionError}</p>}
       </div>

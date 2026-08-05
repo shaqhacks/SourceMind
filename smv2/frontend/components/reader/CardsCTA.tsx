@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   findActiveCardsJob,
@@ -124,9 +125,10 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
 
   if (jobFailed) {
     return (
-      <ErrorBanner
+      <RecoveryBanner
         message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
         onRetry={() => void handleGenerate()}
+        jobId={watchedJobId}
       />
     );
   }

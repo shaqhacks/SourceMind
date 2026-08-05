@@ -287,6 +287,7 @@ describe("TestsPage", () => {
     });
 
     expect(await screen.findByText(/generation failed: llm unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /view job details/i })).toHaveAttribute("href", "/jobs?job=job-1");
   });
 
   it("renders the score history bar chart and a real-data diagnosis card", async () => {

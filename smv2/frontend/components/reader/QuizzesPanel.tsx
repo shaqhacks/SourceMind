@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import { generateTest, listTests, type TestSummaryOut } from "@/lib/api/client";
@@ -113,9 +114,10 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
           </Button>
           {jobFailed && (
             <div className="mb-3">
-              <ErrorBanner
+              <RecoveryBanner
                 message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
                 onRetry={() => void handleGenerate()}
+                jobId={jobId}
               />
             </div>
           )}

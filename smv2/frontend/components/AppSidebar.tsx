@@ -21,6 +21,8 @@ const NAV_ITEMS: { href: string; label: string }[] = [
   { href: "/", label: "Home" },
   { href: "/flashcards", label: "Flashcards" },
   { href: "/tests", label: "Tests" },
+  { href: "/jobs", label: "Jobs" },
+  { href: "/settings", label: "Settings" },
 ];
 
 function isPdf(file: File): boolean {
