@@ -4,7 +4,7 @@ import json
 from datetime import timedelta
 
 from app.db.engine import get_session
-from app.db.models import Card, LlmCall, ReviewState, Test, TestAttempt, ensure_utc, utcnow
+from app.db.models import Card, Job, LlmCall, ReviewState, Test, TestAttempt, ensure_utc, utcnow
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from app.pipeline.quiz_generation import _build_scoped_text
@@ -42,7 +42,6 @@ def test_generate_test_happy_path(client, ingest_course, stub_provider):
     job = client.get(f"/api/jobs/{job_id}").json()
     assert job["status"] == "succeeded"
     assert job["result"]["question_count"] == 8
-
     attempt_id = job["result"]["attempt_id"]
     detail = client.get(f"/api/tests/{attempt_id}").json()
     assert detail["score"] is None
@@ -51,6 +50,24 @@ def test_generate_test_happy_path(client, ingest_course, stub_provider):
     assert all("correct_index" not in q or q.get("correct_index") is None for q in detail["questions"])
     assert all("explanation" not in q or q.get("explanation") is None for q in detail["questions"])
 
+
+def test_generate_test_unconfigured_provider_fails_before_job_creation(client, ingest_course):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    resp = client.post(f"/api/courses/{course_id}/tests")
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["failure_category"] == "missing_credentials"
+    assert "ANTHROPIC_API_KEY" in body["detail"]["remediation"]
+
+    session = get_session()
+    try:
+        assert session.query(Job).filter(Job.type == "generate_test").count() == 0
+        assert session.query(Test).count() == 0
+        assert session.query(TestAttempt).count() == 0
+    finally:
+        session.close()
 
 def test_generate_test_records_prompt_version_and_model_on_the_test_deck(client, ingest_course, stub_provider):
     """ADR-022: prompt_version/model live on Test (the deck), not the

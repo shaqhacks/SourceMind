@@ -28,6 +28,7 @@ from app.llm.ledger import ensure_spend_cap
 from app.llm.prompts import load_prompt
 from app.llm.provider import ProviderTimeoutError, get_provider
 from app.llm.retry import is_timeout
+from app.services import llm_readiness_service
 from app.pipeline.retrieval import rank_chunks
 from app.services import chapters_service, jobs_service
 from app.services.learner_context import LEGACY_LOCAL_LEARNER_ID
@@ -295,6 +296,7 @@ def send_chat(
                 )
             selection_block = _build_selection_block(sel_section, selection["exact"])
 
+        llm_readiness_service.assert_ready_for_generation()
         provider = get_provider()
         _maybe_trigger_embed_course(session, course_id, provider)
 

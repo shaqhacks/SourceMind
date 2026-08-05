@@ -31,6 +31,23 @@ def test_send_chat_happy_path_with_citations(client, ingest_course, stub_provide
         assert "source_ref" in c
 
 
+def test_send_chat_unconfigured_provider_fails_before_persisting_turns(client, ingest_course):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+
+    resp = client.post(f"/api/courses/{course_id}/chat", json={"message": "What is X?"})
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["failure_category"] == "missing_credentials"
+    assert "ANTHROPIC_API_KEY" in body["detail"]["remediation"]
+
+    session = get_session()
+    try:
+        assert session.query(ChatTurn).count() == 0
+    finally:
+        session.close()
+
+
 def test_send_chat_ignores_out_of_range_citations(client, ingest_course, stub_provider):
     course_id, *_ = ingest_course("with_bookmarks.pdf")
 
@@ -287,7 +304,7 @@ def test_send_chat_provider_not_configured_maps_to_503(client, ingest_course, st
 
     resp = client.post(f"/api/courses/{course_id}/chat", json={"message": "hi"})
     assert resp.status_code == 503
-    assert resp.json()["detail"] == PROVIDER_NOT_CONFIGURED_MESSAGE
+    assert resp.json()["detail"]["message"] == "LLM provider is not ready"
 
 
 def test_send_chat_triggers_embed_course_job_when_no_embeddings_yet(client, ingest_course, stub_provider):

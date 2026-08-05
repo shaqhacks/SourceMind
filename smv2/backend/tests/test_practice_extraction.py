@@ -67,6 +67,35 @@ def _seed_practice_run(session, *, with_answers: bool = True):
     return course, practice, answers, run, job
 
 
+def _seed_practice_section(session):
+    course = Course(title="Practice Extraction Course")
+    session.add(course)
+    session.flush()
+    practice = Section(
+        id=f"practice-{uuid.uuid4()}",
+        course_id=course.id,
+        order_index=1,
+        title="0.2 Practice - Fractions",
+        body_md="1. Simplify 42/12.",
+        content_hash="practice-hash",
+        kind="practice",
+        chapter_label="Chapter 0 : Pre-Algebra",
+    )
+    answers = Section(
+        id=f"answers-{uuid.uuid4()}",
+        course_id=course.id,
+        order_index=2,
+        title="0.2 Answers - Fractions",
+        body_md="1. 7/2.",
+        content_hash="answers-hash",
+        kind="answers",
+        chapter_label=practice.chapter_label,
+    )
+    session.add_all([practice, answers])
+    session.commit()
+    return course, practice
+
+
 def _valid_question_payload():
     return {
         "problem_number": "1",
@@ -97,6 +126,30 @@ def test_parse_practice_questions_drops_unmapped_answer():
     assert questions[0]["problem_number"] == "1"
     assert questions[0]["choices"][questions[0]["correct_index"]] == "$7/2$"
     assert "textbook_answer_md" not in questions[0]
+
+
+def test_start_practice_assessment_unconfigured_provider_fails_before_job_creation(client):
+    session = get_session()
+    try:
+        course, practice = _seed_practice_section(session)
+        course_id = course.id
+        practice_id = practice.id
+    finally:
+        session.close()
+
+    resp = client.post(f"/api/courses/{course_id}/sections/{practice_id}/practice-assessment")
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["failure_category"] == "missing_credentials"
+    assert "ANTHROPIC_API_KEY" in body["detail"]["remediation"]
+
+    session = get_session()
+    try:
+        assert session.query(Job).filter(Job.type == "generate_practice_assessment").count() == 0
+        assert session.query(PracticeExtractionRun).count() == 0
+    finally:
+        session.close()
 
 
 @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])

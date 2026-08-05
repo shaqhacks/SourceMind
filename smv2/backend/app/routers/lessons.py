@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas import GenerateAllLessonsOut, GenerateLessonOut, LessonEstimateOut
-from app.services import courses_service, lessons_service
+from app.services import courses_service, lessons_service, llm_readiness_service
 
 router = APIRouter(tags=["lessons"])
 
@@ -17,6 +17,8 @@ router = APIRouter(tags=["lessons"])
 def generate_lesson(section_id: str, force: bool = Query(default=False)) -> GenerateLessonOut:
     try:
         job_id = lessons_service.start_lesson_generation(section_id, force=force)
+    except llm_readiness_service.LlmReadinessUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.detail) from exc
     except lessons_service.SectionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except lessons_service.LessonAlreadyInProgressError as exc:

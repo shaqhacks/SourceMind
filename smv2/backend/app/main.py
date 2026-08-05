@@ -33,6 +33,7 @@ from app.routers import (
     review,
     retention_studies,
     sections,
+    settings,
     skills,
     study,
     tests,
@@ -97,6 +98,7 @@ def create_app() -> FastAPI:
     app.include_router(export.router)
     app.include_router(lessons.router)
     app.include_router(llm_usage.router)
+    app.include_router(settings.router)
     app.include_router(cards.router)
     app.include_router(review.router)
     app.include_router(retention_studies.router)

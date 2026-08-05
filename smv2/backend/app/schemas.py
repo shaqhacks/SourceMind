@@ -343,6 +343,51 @@ class LlmUsageOut(BaseModel):
     est_cost_usd: float
 
 
+class LlmCapabilitiesOut(BaseModel):
+    completion: bool
+    embeddings: bool
+
+
+class LlmStatusOut(BaseModel):
+    provider: str
+    model: str
+    configured: bool
+    available: bool
+    capabilities: LlmCapabilitiesOut
+    last_checked_at: str | None
+    failure_category: str | None
+    remediation: str | None
+
+
+class LocalSettingsRolloutOut(BaseModel):
+    local_settings_enabled: bool
+
+
+class SettingsBootstrapOut(BaseModel):
+    csrf_token: str
+    rollout: LocalSettingsRolloutOut
+
+
+class SettingsUpdateIn(BaseModel):
+    provider: Literal["anthropic", "ollama"] | None = None
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    credentials: dict[str, str] = Field(default_factory=dict)
+
+
+class SettingsClearIn(BaseModel):
+    provider: Literal["anthropic", "ollama"]
+    confirmation: str
+
+
+class SettingsOut(BaseModel):
+    provider: str
+    model: str
+    credentials_present: dict[str, bool]
+    credentials: dict[str, str]
+    rollout: LocalSettingsRolloutOut
+    readiness: LlmStatusOut
+
+
 # --- Cards -------------------------------------------------------------
 
 
