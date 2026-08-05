@@ -139,10 +139,9 @@ def test_create_note_missing_course_is_404(client):
     assert resp.status_code == 404
 
 
-def test_reingest_wipes_notes(client, ingest_course):
-    from conftest import _first_section_id
-
+def test_reingest_preserves_notes_on_surviving_sections(client, ingest_course):
     from app.jobs.worker import run_due_jobs_once
+    from conftest import _first_section_id
 
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     section_id = _first_section_id(client, course_id)
@@ -154,10 +153,9 @@ def test_reingest_wipes_notes(client, ingest_course):
     assert create.status_code == 201
     assert len(client.get(f"/api/courses/{course_id}/notes").json()) == 1
 
-    # Identical re-ingest KEEPS every section row (same content-addressed ids),
-    # so FK cascade never fires — only the explicit REPLACED-bucket delete in
-    # _run_ingest wipes notes. That explicit delete is what this asserts.
+    # Identical re-ingest keeps every section row by content-addressed id, so
+    # notes anchored to those surviving sections remain intact.
     ingest_resp = client.post(f"/api/courses/{course_id}/ingest")
     assert ingest_resp.status_code == 202
     assert run_due_jobs_once() is True
-    assert client.get(f"/api/courses/{course_id}/notes").json() == []
+    assert len(client.get(f"/api/courses/{course_id}/notes").json()) == 1

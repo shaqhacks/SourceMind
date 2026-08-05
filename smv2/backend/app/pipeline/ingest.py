@@ -356,14 +356,12 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     new_ids = {s["id"] for s in new_sections}
     removed_section_ids = set(existing_sections) - new_ids
 
-    # Course-scoped, non-diffable derived history does not survive re-ingest
-    # (per the derived-tables registry). Review state / progress survive
-    # naturally: they hang off card_id/section_id, which only disappear if
-    # their own row is actually deleted below — no explicit "remap" step
-    # needed beyond doing the section diff correctly.
+    # Course-scoped, non-diffable generated history does not survive re-ingest
+    # (per the derived-tables registry). Section-scoped learner state survives
+    # naturally: notes/highlights/cards/review/progress hang off section_id or
+    # card_id, which only disappear if their own section row is actually
+    # deleted below.
     session.query(ChatTurn).filter(ChatTurn.course_id == course_id).delete()
-    session.query(Highlight).filter(Highlight.course_id == course_id).delete()
-    session.query(Note).filter(Note.course_id == course_id).delete()
     search_index.delete_course_documents(session, course_id, sync_fts=False)
     # TestAttempt before Test: TestAttempt.test_id -> Test.id is ON DELETE
     # CASCADE, so deleting Test first would already remove these via the
@@ -465,6 +463,11 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
             )
         search_index.upsert_section_document(session, section_row, sync_fts=False)
         search_index.upsert_lesson_document(session, section_row, sync_fts=False)
+
+    for note in session.query(Note).filter(Note.course_id == course_id).all():
+        search_index.upsert_note_document(session, note, sync_fts=False)
+    for highlight in session.query(Highlight).filter(Highlight.course_id == course_id).all():
+        search_index.upsert_highlight_document(session, highlight, sync_fts=False)
 
     any_extracted_ok = any(a.status == "extracted" for a in assets)
     course.status = "ready" if any_extracted_ok else "ingest_failed"
