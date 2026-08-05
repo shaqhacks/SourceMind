@@ -201,43 +201,48 @@ git commit -m "feat(smv2): support simple document import adapters"
 **Files:**
 - Modify: `backend/app/pipeline/ingest.py`
 - Modify: `backend/app/services/export_service.py`
-- Modify: `backend/app/services/highlights_service.py`
-- Modify: `backend/app/services/lessons_service.py`
-- Modify: `backend/app/services/notes_service.py`
-- Modify: `backend/app/services/assets_service.py`
+- Modify: `backend/app/services/search_index.py`
 - Modify: `backend/tests/test_reingest_idempotency.py`
 - Modify: `backend/tests/test_html_conversion.py`
 - Modify: `backend/tests/test_asset_upload.py`
+- Modify: `backend/tests/test_highlights.py`
+- Modify: `backend/tests/test_notes_api.py`
+- Modify: `backend/tests/test_search_api.py`
 - Create: `backend/tests/test_import_reingest.py`
 
 **Interfaces:**
-- Reingest replaces only the derived records that belong to the changed source, not unrelated course data.
+- Reingest uses the existing full-course, content-addressed section diff as the change boundary: annotations and learner state on surviving section IDs remain intact, while rows owned by removed section IDs are invalidated through their established FK/service paths.
+- Course-global generated artifacts without a safe section remap path may still reset, but section-scoped notes, highlights, cards, review state, and progress must not be wiped course-wide.
+- Search documents are rebuilt from the post-diff durable rows in the same transaction, including surviving notes and highlights.
 - Export preserves original assets, extracted Markdown, source provenance, and structured locators.
 - A failed file still marks only that asset failed while the course continues with the rest.
 - Reingest remains idempotent and content-addressed for sections that did not change.
+- A locator is provenance, not section identity: unchanged sections keep byte-stable locator payloads, while changed content gets a new section ID and the locator produced by its adapter.
 
 - [ ] **Step 1: Write the failing reingest and export tests**
 
 Create `backend/tests/test_import_reingest.py` with cases for:
 - section locators surviving a reingest that does not change the source text;
-- changed source text getting a new locator while unrelated sections remain stable;
-- export including the original asset plus the structured locator metadata;
+- changed source text getting a new content-addressed section ID and adapter-produced locator while unrelated section IDs and locators remain stable;
+- an unchanged section's note and highlight surviving reingest and remaining searchable/exported;
+- annotations tied to a removed section disappearing without deleting annotations on surviving sections;
+- export including byte-identical original assets, exact section Markdown, and the stored structured locator/provenance metadata;
 - one malformed file failing without blocking another file in the same course;
-- lessons, highlights, and notes invalidating and rebuilding cleanly after source changes.
+- surviving review state/progress/cards remaining attached to unchanged sections while course-global generated artifacts follow their existing documented reset semantics.
 
 Update `backend/tests/test_reingest_idempotency.py`, `backend/tests/test_html_conversion.py`, and `backend/tests/test_asset_upload.py` to cover the new derived-data expectations.
 
 Run:
 ```bash
-cd backend && uv run pytest -q tests/test_import_reingest.py tests/test_reingest_idempotency.py tests/test_html_conversion.py tests/test_asset_upload.py -p no:cacheprovider
+cd backend && uv run pytest -q tests/test_import_reingest.py tests/test_reingest_idempotency.py tests/test_html_conversion.py tests/test_asset_upload.py tests/test_highlights.py tests/test_notes_api.py tests/test_search_api.py -p no:cacheprovider
 ```
 Expected: fail until the invalidation hooks and export changes are in place.
 
 - [ ] **Step 2: Repair the invalidation hooks**
 
-Update `backend/app/pipeline/ingest.py` so any section or asset replacement invalidates only the affected derived rows and then rebuilds the necessary search/export inputs in the same transactional flow.
+Update `backend/app/pipeline/ingest.py` so the already-computed `existing_sections` versus `new_ids` diff controls section-scoped invalidation. Remove the course-wide note/highlight wipe; stale-mark retained provenance before deleting removed sections; let existing FK/service behavior remove rows owned by deleted sections; update surviving sections in place; rebuild search inputs from the post-diff rows before the single final commit.
 
-Update `backend/app/services/lessons_service.py`, `backend/app/services/notes_service.py`, `backend/app/services/highlights_service.py`, and `backend/app/services/export_service.py` so they all read the new locator/provenance fields instead of reconstructing them ad hoc.
+Update `backend/app/services/search_index.py` and `backend/app/services/export_service.py` only where tests demonstrate a concrete gap. Do not refactor notes, highlights, lessons, or assets services merely because they were listed in the original draft; they already own CRUD/state behavior rather than locator reconstruction.
 
 Keep the existing REPLACED-on-reingest semantics for unrelated data and do not reset learner state that is tied to unchanged content.
 
@@ -245,13 +250,13 @@ Keep the existing REPLACED-on-reingest semantics for unrelated data and do not r
 
 Run:
 ```bash
-cd backend && uv run pytest -q tests/test_import_reingest.py tests/test_reingest_idempotency.py tests/test_html_conversion.py tests/test_asset_upload.py tests/test_simple_import_adapters.py tests/test_import_adapter_pdf.py -p no:cacheprovider
+cd backend && uv run pytest -q tests/test_import_reingest.py tests/test_reingest_idempotency.py tests/test_html_conversion.py tests/test_asset_upload.py tests/test_highlights.py tests/test_notes_api.py tests/test_search_api.py tests/test_simple_import_adapters.py tests/test_import_adapter_pdf.py -p no:cacheprovider
 ```
 Expected: PASS.
 
 Commit the derived-data stage as its own reviewable unit:
 ```bash
-git add backend/app/pipeline/ingest.py backend/app/services/assets_service.py backend/app/services/export_service.py backend/app/services/highlights_service.py backend/app/services/lessons_service.py backend/app/services/notes_service.py backend/tests/test_import_reingest.py backend/tests/test_reingest_idempotency.py backend/tests/test_html_conversion.py backend/tests/test_asset_upload.py
+git add backend/app/pipeline/ingest.py backend/app/services/export_service.py backend/app/services/search_index.py backend/tests/test_import_reingest.py backend/tests/test_reingest_idempotency.py backend/tests/test_html_conversion.py backend/tests/test_asset_upload.py backend/tests/test_highlights.py backend/tests/test_notes_api.py backend/tests/test_search_api.py
 git commit -m "feat(smv2): keep import derived data consistent"
 ```
 
