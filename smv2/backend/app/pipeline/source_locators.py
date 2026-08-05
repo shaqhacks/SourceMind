@@ -95,7 +95,41 @@ class ChapterFragmentLocator:
         return self.chapter_label
 
 
-LocatorValue = PdfPageLocator | HeadingLocator | SlideRangeLocator | ChapterFragmentLocator
+@dataclass(frozen=True)
+class CompositeLocator:
+    asset_id: str
+    locators: tuple[LocatorValue, ...]
+    type: Literal["composite"] = "composite"
+
+    @classmethod
+    def from_locators(cls, locators: list[LocatorValue]) -> CompositeLocator:
+        flattened: list[LocatorValue] = []
+        for locator in locators:
+            if isinstance(locator, CompositeLocator):
+                flattened.extend(locator.locators)
+            else:
+                flattened.append(locator)
+        if not flattened:
+            raise ValueError("composite locator requires at least one locator")
+
+        asset_ids = {locator.asset_id for locator in flattened}
+        if None in asset_ids or len(asset_ids) != 1:
+            raise ValueError("composite locator requires locators from one non-null asset")
+
+        return cls(asset_id=str(next(iter(asset_ids))), locators=tuple(flattened))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "type": self.type,
+            "asset_id": self.asset_id,
+            "locators": [locator.to_dict() for locator in self.locators],
+        }
+
+    def export_label(self) -> str:
+        return " + ".join(locator.export_label() for locator in self.locators)
+
+
+LocatorValue = PdfPageLocator | HeadingLocator | SlideRangeLocator | ChapterFragmentLocator | CompositeLocator
 
 
 def locator_from_dict(payload: dict[str, Any] | None) -> LocatorValue | None:
@@ -125,6 +159,17 @@ def locator_from_dict(payload: dict[str, Any] | None) -> LocatorValue | None:
             chapter_label=str(payload["chapter_label"]),
             fragment_id=payload.get("fragment_id"),
         )
+    if locator_type == "composite":
+        child_locators: list[LocatorValue] = []
+        for child in payload.get("locators", []):
+            child_locator = locator_from_dict(child)
+            if child_locator is None:
+                raise ValueError("composite locator child cannot be null")
+            child_locators.append(child_locator)
+        locator = CompositeLocator.from_locators(child_locators)
+        if payload.get("asset_id") is not None and payload.get("asset_id") != locator.asset_id:
+            raise ValueError("composite locator asset_id does not match child locators")
+        return locator
     raise ValueError(f"unknown source locator type: {locator_type!r}")
 
 

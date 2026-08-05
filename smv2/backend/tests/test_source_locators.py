@@ -43,6 +43,31 @@ def test_heading_and_chapter_locators_round_trip_without_pdf_pages():
     assert chapter.export_label() == "Chapter 2"
 
 
+def test_composite_locator_flattens_round_trips_and_renders_for_export():
+    """Catches representing a non-PDF merge as one source heading."""
+    from app.pipeline.source_locators import (
+        CompositeLocator,
+        HeadingLocator,
+        locator_from_dict,
+    )
+
+    alpha = HeadingLocator(asset_id="asset-123", heading_path=["Alpha"])
+    beta = HeadingLocator(asset_id="asset-123", heading_path=["Beta"])
+    nested = CompositeLocator.from_locators([alpha, CompositeLocator.from_locators([beta])])
+
+    payload = nested.to_dict()
+    assert payload == {
+        "type": "composite",
+        "asset_id": "asset-123",
+        "locators": [
+            {"type": "heading", "asset_id": "asset-123", "heading_path": ["Alpha"]},
+            {"type": "heading", "asset_id": "asset-123", "heading_path": ["Beta"]},
+        ],
+    }
+    assert nested.export_label() == "Alpha + Beta"
+    assert locator_from_dict(payload) == nested
+
+
 def test_export_manifest_preserves_structured_pdf_locators(client, ingest_course):
     """Catches exports that keep markdown/assets but drop provenance needed
     to reconstruct where a section came from in the original source.

@@ -15,6 +15,11 @@ from sqlalchemy.orm import Session
 
 from app.db.identity import content_hash_for, normalize_text, section_id_for
 from app.db.models import Chunk, Section
+from app.pipeline.source_locators import (
+    CompositeLocator,
+    PdfPageLocator,
+    locator_from_dict,
+)
 
 
 class OutlineOperationError(ValueError):
@@ -50,7 +55,9 @@ def _rederive_chunks(session: Session, section: Section) -> None:
     is attributed to its own page_start — still accurate to "which page
     range this citation falls in," which is all source_ref promises.
     """
-    from app.pipeline.chunking import chunk_pages  # deferred: avoid import cost on simple ops
+    from app.pipeline.chunking import (
+        chunk_pages,  # deferred: avoid import cost on simple ops
+    )
 
     session.query(Chunk).filter(Chunk.section_id == section.id).delete()
     page = section.page_start if section.page_start is not None else 0
@@ -65,6 +72,66 @@ def _rederive_chunks(session: Session, section: Section) -> None:
                 source_ref=f"{section.id}:p.{tc.page + 1}",
             )
         )
+
+
+def _pdf_locator_for_section(section: Section) -> PdfPageLocator:
+    if section.source_format != "pdf" or section.asset_id is None:
+        raise OutlineOperationError("section requires PDF source provenance")
+    if section.page_start is None or section.page_end is None:
+        raise OutlineOperationError("section has no page range")
+
+    try:
+        locator = locator_from_dict(section.source_locator)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise OutlineOperationError("section has invalid PDF source locator") from exc
+
+    if not isinstance(locator, PdfPageLocator):
+        raise OutlineOperationError("section source locator is not a PDF page locator")
+    if (
+        locator.asset_id != section.asset_id
+        or locator.page_start != section.page_start
+        or locator.page_end != section.page_end
+    ):
+        raise OutlineOperationError("section source locator does not match its page range")
+    return locator
+
+
+def _merge_source_locator(sections: list[Section], page_start: int | None, page_end: int | None) -> dict[str, Any]:
+    asset_ids = {section.asset_id for section in sections}
+    if None in asset_ids or len(asset_ids) != 1:
+        raise OutlineOperationError("merge requires sections from one source asset")
+
+    source_formats = {section.source_format for section in sections}
+    if None in source_formats or len(source_formats) != 1:
+        raise OutlineOperationError("merge requires sections with one source format")
+
+    extractor_versions = {section.extractor_version for section in sections}
+    if len(extractor_versions) != 1:
+        raise OutlineOperationError("merge requires sections with matching extractor provenance")
+
+    asset_id = str(next(iter(asset_ids)))
+    source_format = next(iter(source_formats))
+    if source_format == "pdf":
+        for section in sections:
+            _pdf_locator_for_section(section)
+        if page_start is None or page_end is None:
+            raise OutlineOperationError("merge requires PDF sections with page ranges")
+        return PdfPageLocator(asset_id=asset_id, page_start=page_start, page_end=page_end).to_dict()
+
+    locators = []
+    for section in sections:
+        try:
+            locator = locator_from_dict(section.source_locator)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OutlineOperationError("merge requires valid source locators") from exc
+        if locator is None:
+            raise OutlineOperationError("merge requires valid source locators")
+        locators.append(locator)
+
+    try:
+        return CompositeLocator.from_locators(locators).to_dict()
+    except ValueError as exc:
+        raise OutlineOperationError(str(exc)) from exc
 
 
 def _apply_rename(session: Session, course_id: str, op: dict[str, Any]) -> None:
@@ -117,6 +184,7 @@ def _apply_merge(session: Session, course_id: str, op: dict[str, Any]) -> str:
 
     page_start = min((s.page_start for s in sections if s.page_start is not None), default=None)
     page_end = max((s.page_end for s in sections if s.page_end is not None), default=None)
+    source_locator = _merge_source_locator(sections, page_start, page_end)
     title = " + ".join(s.title for s in sections)
     order_index = sections[0].order_index
 
@@ -129,10 +197,15 @@ def _apply_merge(session: Session, course_id: str, op: dict[str, Any]) -> str:
         title=title,
         page_start=page_start,
         page_end=page_end,
+        asset_id=sections[0].asset_id,
+        source_format=sections[0].source_format,
+        source_locator=source_locator,
         body_md=merged_body,
         content_hash=content_hash_for(merged_body),
         lesson_status="none",
         extractor_version=sections[0].extractor_version,
+        kind=sections[0].kind,
+        chapter_label=sections[0].chapter_label,
     )
     for s in sections:
         session.delete(s)
@@ -146,6 +219,7 @@ def _apply_split(session: Session, course_id: str, op: dict[str, Any]) -> list[s
     at_page = op["at_page"]
     if section.page_start is None or section.page_end is None:
         raise OutlineOperationError("section has no page range to split")
+    _pdf_locator_for_section(section)
     if not (section.page_start < at_page <= section.page_end):
         raise OutlineOperationError(f"at_page must fall within ({section.page_start}, {section.page_end}]")
 
@@ -188,24 +262,42 @@ def _apply_split(session: Session, course_id: str, op: dict[str, Any]) -> list[s
         course_id=course_id,
         order_index=section.order_index,
         title=f"{section.title} (1)",
+        asset_id=section.asset_id,
         page_start=section.page_start,
         page_end=at_page - 1,
+        source_format=section.source_format,
+        source_locator=PdfPageLocator(
+            asset_id=str(section.asset_id),
+            page_start=section.page_start,
+            page_end=at_page - 1,
+        ).to_dict(),
         body_md=first_body,
         content_hash=content_hash_for(first_body),
         lesson_status="none",
         extractor_version=section.extractor_version,
+        kind=section.kind,
+        chapter_label=section.chapter_label,
     )
     second_section = Section(
         id=second_id,
         course_id=course_id,
         order_index=section.order_index + 1,
         title=f"{section.title} (2)",
+        asset_id=section.asset_id,
         page_start=at_page,
         page_end=section.page_end,
+        source_format=section.source_format,
+        source_locator=PdfPageLocator(
+            asset_id=str(section.asset_id),
+            page_start=at_page,
+            page_end=section.page_end,
+        ).to_dict(),
         body_md=second_body,
         content_hash=content_hash_for(second_body),
         lesson_status="none",
         extractor_version=section.extractor_version,
+        kind=section.kind,
+        chapter_label=section.chapter_label,
     )
 
     session.delete(section)
