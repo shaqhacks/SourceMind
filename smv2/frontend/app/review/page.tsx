@@ -118,11 +118,11 @@ type SessionState =
   | { kind: "done" };
 
 function courseOverdueCount(course: ReviewSummaryOut["courses"][number]): number {
-  return course.overdue_count ?? 0;
+  return course.overdue_count;
 }
 
 function courseAvailableCount(course: ReviewSummaryOut["courses"][number]): number {
-  return course.available_count ?? course.total_count ?? courseOverdueCount(course) + course.new_count;
+  return course.available_count;
 }
 
 function summaryOverdueCount(summary: ReviewSummaryOut): number {
@@ -263,7 +263,12 @@ function ReviewPageInner() {
     Promise.all([getReviewQueue(id, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(id, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
-        setChooserState({ kind: "ready", due: review.data.due, new: review.data.new, total: review.data.total + questionCount });
+        setChooserState({
+          kind: "ready",
+          due: review.data.overdue_count,
+          new: review.data.new_count,
+          total: review.data.available_count + questionCount,
+        });
       } else {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
       }
@@ -277,7 +282,12 @@ function ReviewPageInner() {
       if (!active) return;
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
-        setChooserState({ kind: "ready", due: review.data.due, new: review.data.new, total: review.data.total + questionCount });
+        setChooserState({
+          kind: "ready",
+          due: review.data.overdue_count,
+          new: review.data.new_count,
+          total: review.data.available_count + questionCount,
+        });
       } else {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
       }
@@ -345,19 +355,26 @@ function ReviewPageInner() {
     if (phase !== "bootstrapping-due" || !courseId) return;
     clearStoredSession();
     let active = true;
-    getReviewQueue(courseId, MAX_QUEUE_FETCH).then(({ data, status }) => {
+    Promise.all([getReviewQueue(courseId, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
       if (!active) return;
-      if (!data) {
-        setChooserState({ kind: "error", error: describeError(status, "Loading review queue") });
+      if (!review.data) {
+        setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
         setPhase("chooser");
         return;
       }
-      if (data.due === 0) {
-        setChooserState({ kind: "ready", due: data.due, new: data.new, total: data.total });
+      const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
+      const availableTotal = review.data.available_count + questionCount;
+      if (review.data.overdue_count === 0) {
+        setChooserState({
+          kind: "ready",
+          due: review.data.overdue_count,
+          new: review.data.new_count,
+          total: availableTotal,
+        });
         setPhase("chooser");
         return;
       }
-      startSession(data.due);
+      startSession(review.data.overdue_count);
     });
     return () => {
       active = false;

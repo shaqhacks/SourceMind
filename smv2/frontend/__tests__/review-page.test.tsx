@@ -63,7 +63,20 @@ function makeSummary(overrides: Partial<ReviewSummaryOut> = {}): ReviewSummaryOu
 }
 
 function makeQueue(overrides: Partial<ReviewQueueOut> = {}): ReviewQueueOut {
-  return { cards: [], due: 5, new: 2, total: 7, ...overrides };
+  const total = overrides.total ?? 7;
+  const due = overrides.due ?? Math.min(5, total);
+  const newCount = overrides.new ?? Math.max(total - due, 0);
+  return {
+    cards: [],
+    due,
+    new: newCount,
+    total,
+    overdue_count: due,
+    new_count: newCount,
+    available_count: due + newCount,
+    total_count: total,
+    ...overrides,
+  };
 }
 
 function makeQueueCard(overrides: Partial<ReviewQueueCardOut> = {}): ReviewQueueCardOut {
@@ -206,11 +219,35 @@ describe("ReviewPage", () => {
 
   it("chooser: shows the empty state when the course has nothing due", async () => {
     mockSearchParams = new URLSearchParams({ course: "course-1" });
-    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 0 })));
+    mockedGetReviewQueue.mockResolvedValue(
+      ok(makeQueue({ due: 0, new: 0, total: 0, overdue_count: 0, new_count: 0, available_count: 0, total_count: 0 })),
+    );
 
     render(<ReviewPage />);
 
     expect(await screen.findByText("All caught up")).toBeInTheDocument();
+  });
+
+  it("chooser: treats future-scheduled cards as caught up instead of starting an empty session", async () => {
+    mockSearchParams = new URLSearchParams({ course: "course-1" });
+    mockedGetReviewQueue.mockResolvedValue(
+      ok(
+        makeQueue({
+          due: 0,
+          new: 0,
+          total: 5,
+          overdue_count: 0,
+          new_count: 0,
+          available_count: 0,
+          total_count: 5,
+        }),
+      ),
+    );
+
+    render(<ReviewPage />);
+
+    expect(await screen.findByText("All caught up")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /review all/i })).not.toBeInTheDocument();
   });
 
   it("session: space reveals the back, grading keys 1-4 advance and capture elapsed_ms, and the summary tallies by grade", async () => {
@@ -474,7 +511,9 @@ describe("ReviewPage", () => {
       // Two calls, not one: the bootstrap effect's own due-count lookup,
       // then the chooser phase's own effect refetching once phase flips —
       // a small, harmless redundancy in this uncommon fallback path.
-      mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ due: 0, new: 2, total: 2 })));
+      mockedGetReviewQueue.mockResolvedValue(
+        ok(makeQueue({ due: 0, new: 2, total: 2, overdue_count: 0, new_count: 2, available_count: 2, total_count: 2 })),
+      );
 
       render(<ReviewPage />);
 
@@ -487,11 +526,35 @@ describe("ReviewPage", () => {
 
     it("falls back to the chooser's empty state when there is truly nothing due or new", async () => {
       mockSearchParams = new URLSearchParams({ course: "course-1", start: "due" });
-      mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ due: 0, new: 0, total: 0 })));
+      mockedGetReviewQueue.mockResolvedValue(
+        ok(makeQueue({ due: 0, new: 0, total: 0, overdue_count: 0, new_count: 0, available_count: 0, total_count: 0 })),
+      );
 
       render(<ReviewPage />);
 
       expect(await screen.findByText("All caught up")).toBeInTheDocument();
+    });
+
+    it("falls back to caught up when only future-scheduled cards exist", async () => {
+      mockSearchParams = new URLSearchParams({ course: "course-1", start: "due" });
+      mockedGetReviewQueue.mockResolvedValue(
+        ok(
+          makeQueue({
+            due: 0,
+            new: 0,
+            total: 5,
+            overdue_count: 0,
+            new_count: 0,
+            available_count: 0,
+            total_count: 5,
+          }),
+        ),
+      );
+
+      render(<ReviewPage />);
+
+      expect(await screen.findByText("All caught up")).toBeInTheDocument();
+      expect(mockedGetReviewQueue).not.toHaveBeenCalledWith("course-1", 5);
     });
   });
 });

@@ -43,7 +43,7 @@ const DATE_FORMAT: Intl.DateTimeFormatOptions = {
 const MINUTES_PER_CARD = 0.5;
 
 function courseOverdueCount(course: ReviewSummaryOut["courses"][number] | undefined): number {
-  return course?.overdue_count ?? 0;
+  return course ? course.overdue_count : 0;
 }
 
 function totalOverdueCount(summary: ReviewSummaryOut | null): number {

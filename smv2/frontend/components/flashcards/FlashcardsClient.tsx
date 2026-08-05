@@ -254,8 +254,10 @@ export default function FlashcardsClient() {
     courseDataEntry && courseDataEntry.courseId === selectedCourse.id
       ? courseDataEntry.state
       : { kind: "loading" };
-  const courseDue =
-    reviewSummary?.courses.find((c) => c.course_id === selectedCourse.id)?.overdue_count ?? null;
+  const selectedCourseReviewSummary = reviewSummary?.courses.find(
+    (c) => c.course_id === selectedCourse.id,
+  );
+  const courseDue = selectedCourseReviewSummary ? selectedCourseReviewSummary.overdue_count : null;
   const totalCards =
     courseData.kind === "ready"
       ? Object.values(courseData.cardsBySection).reduce((sum, list) => sum + list.length, 0)

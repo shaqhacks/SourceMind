@@ -93,6 +93,21 @@ def test_review_queue_includes_past_due_and_excludes_future_due(client, ingest_c
     assert card1_out["reps"] == 1
 
 
+def test_review_queue_and_summary_contract_require_canonical_counts(client):
+    from app.main import app
+
+    components = app.openapi()["components"]["schemas"]
+
+    for schema_name in ("ReviewQueueOut", "CourseReviewSummaryOut"):
+        required = set(components[schema_name]["required"])
+        assert {
+            "overdue_count",
+            "new_count",
+            "available_count",
+            "total_count",
+        }.issubset(required)
+
+
 def test_review_queue_respects_limit(client, ingest_course, stub_provider):
     course_id, card1, card2 = _generate_two_cards(client, ingest_course, stub_provider)
 

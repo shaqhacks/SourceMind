@@ -1412,7 +1412,7 @@ export interface components {
         /** CourseReviewSummaryOut */
         CourseReviewSummaryOut: {
             /** Available Count */
-            available_count?: number | null;
+            available_count: number;
             /** Course Id */
             course_id: string;
             /** Due Count */
@@ -1420,11 +1420,11 @@ export interface components {
             /** New Count */
             new_count: number;
             /** Overdue Count */
-            overdue_count?: number | null;
+            overdue_count: number;
             /** Title */
             title: string;
             /** Total Count */
-            total_count?: number | null;
+            total_count: number;
         };
         /** CurriculumClaimEditIn */
         CurriculumClaimEditIn: {
@@ -2314,7 +2314,7 @@ export interface components {
         /** ReviewQueueOut */
         ReviewQueueOut: {
             /** Available Count */
-            available_count?: number | null;
+            available_count: number;
             /** Cards */
             cards: components["schemas"]["ReviewQueueCardOut"][];
             /** Due */
@@ -2322,13 +2322,13 @@ export interface components {
             /** New */
             new: number;
             /** New Count */
-            new_count?: number | null;
+            new_count: number;
             /** Overdue Count */
-            overdue_count?: number | null;
+            overdue_count: number;
             /** Total */
             total: number;
             /** Total Count */
-            total_count?: number | null;
+            total_count: number;
         };
         /** ReviewSummaryOut */
         ReviewSummaryOut: {

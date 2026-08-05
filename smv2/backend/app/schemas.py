@@ -471,10 +471,10 @@ class ReviewQueueOut(BaseModel):
     due: int
     new: int
     total: int
-    overdue_count: int | None = None
-    new_count: int | None = None
-    available_count: int | None = None
-    total_count: int | None = None
+    overdue_count: int
+    new_count: int
+    available_count: int
+    total_count: int
 
 
 class AdaptiveStudyActivityOut(BaseModel):
@@ -512,10 +512,10 @@ class CourseReviewSummaryOut(BaseModel):
     course_id: str
     title: str
     due_count: int
-    overdue_count: int | None = None
+    overdue_count: int
     new_count: int
-    available_count: int | None = None
-    total_count: int | None = None
+    available_count: int
+    total_count: int
 
 
 class ReviewSummaryOut(BaseModel):

@@ -114,10 +114,10 @@ export default function AppSidebar() {
   if (collapsed) return null;
 
   const overdueByCourse = new Map(
-    (summary?.courses ?? []).map((c) => [c.course_id, c.overdue_count ?? 0]),
+    (summary?.courses ?? []).map((c) => [c.course_id, c.overdue_count]),
   );
   const overdueTotal =
-    summary?.courses.reduce((total, course) => total + (course.overdue_count ?? 0), 0) ?? 0;
+    summary?.courses.reduce((total, course) => total + course.overdue_count, 0) ?? 0;
 
   return (
     <nav

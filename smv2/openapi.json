@@ -564,15 +564,8 @@
       "CourseReviewSummaryOut": {
         "properties": {
           "available_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Available Count"
+            "title": "Available Count",
+            "type": "integer"
           },
           "course_id": {
             "title": "Course Id",
@@ -587,37 +580,26 @@
             "type": "integer"
           },
           "overdue_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Overdue Count"
+            "title": "Overdue Count",
+            "type": "integer"
           },
           "title": {
             "title": "Title",
             "type": "string"
           },
           "total_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Count"
+            "title": "Total Count",
+            "type": "integer"
           }
         },
         "required": [
           "course_id",
           "title",
           "due_count",
-          "new_count"
+          "overdue_count",
+          "new_count",
+          "available_count",
+          "total_count"
         ],
         "title": "CourseReviewSummaryOut",
         "type": "object"
@@ -3145,15 +3127,8 @@
       "ReviewQueueOut": {
         "properties": {
           "available_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Available Count"
+            "title": "Available Count",
+            "type": "integer"
           },
           "cards": {
             "items": {
@@ -3171,48 +3146,31 @@
             "type": "integer"
           },
           "new_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "New Count"
+            "title": "New Count",
+            "type": "integer"
           },
           "overdue_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Overdue Count"
+            "title": "Overdue Count",
+            "type": "integer"
           },
           "total": {
             "title": "Total",
             "type": "integer"
           },
           "total_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Count"
+            "title": "Total Count",
+            "type": "integer"
           }
         },
         "required": [
           "cards",
           "due",
           "new",
-          "total"
+          "total",
+          "overdue_count",
+          "new_count",
+          "available_count",
+          "total_count"
         ],
         "title": "ReviewQueueOut",
         "type": "object"

@@ -9,7 +9,7 @@ import type { ReviewSummaryOut } from "@/lib/api/client";
 import { subscribeReviewSettled } from "@/lib/review/reviewBus";
 
 function totalOverdue(summary: ReviewSummaryOut): number {
-  return summary.courses.reduce((total, course) => total + (course.overdue_count ?? 0), 0);
+  return summary.courses.reduce((total, course) => total + course.overdue_count, 0);
 }
 
 /**
