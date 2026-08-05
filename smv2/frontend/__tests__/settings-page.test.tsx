@@ -124,8 +124,9 @@ describe("settings CSRF helpers", () => {
   });
 
   it("fetches the bootstrap token with no-store, keeps it out of browser storage, and sends it only on mutations", async () => {
+    vi.resetModules();
     const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
+      const url = input instanceof Request ? input.url : String(input);
       if (url.endsWith("/api/settings/bootstrap")) {
         return new Response(JSON.stringify({ csrf_token: "token-123", rollout: { local_settings_enabled: true } }), {
           status: 200,
@@ -145,16 +146,19 @@ describe("settings CSRF helpers", () => {
     await api.saveSettings({ provider: "anthropic", model: "claude", credentials: {} });
     await api.clearProviderSecret("anthropic", "clear anthropic credential");
 
-    expect(fetchSpy).toHaveBeenNthCalledWith(1, "http://localhost:8000/api/settings", expect.objectContaining({ method: "GET" }));
+    const requests = fetchSpy.mock.calls.map(([input, init]) => ({
+      url: input instanceof Request ? input.url : String(input),
+      method: input instanceof Request ? input.method : init?.method,
+      cache: input instanceof Request ? input.cache : init?.cache,
+      csrfToken: input instanceof Request
+        ? input.headers.get("X-CSRF-Token")
+        : new Headers(init?.headers).get("X-CSRF-Token"),
+    }));
+
+    expect(requests[0]).toMatchObject({ url: "http://localhost:8000/api/settings", method: "GET" });
     expect(fetchSpy).toHaveBeenNthCalledWith(2, "http://localhost:8000/api/settings/bootstrap", expect.objectContaining({ cache: "no-store" }));
-    expect(fetchSpy).toHaveBeenNthCalledWith(3, "http://localhost:8000/api/settings", expect.objectContaining({
-      method: "PUT",
-      headers: expect.objectContaining({ "X-CSRF-Token": "token-123" }),
-    }));
-    expect(fetchSpy).toHaveBeenNthCalledWith(4, "http://localhost:8000/api/settings", expect.objectContaining({
-      method: "DELETE",
-      headers: expect.objectContaining({ "X-CSRF-Token": "token-123" }),
-    }));
+    expect(requests[2]).toMatchObject({ url: "http://localhost:8000/api/settings", method: "PUT", csrfToken: "token-123" });
+    expect(requests[3]).toMatchObject({ url: "http://localhost:8000/api/settings", method: "DELETE", csrfToken: "token-123" });
     expect(localStorage.getItem("csrf_token")).toBeNull();
     expect(sessionStorage.getItem("csrf_token")).toBeNull();
     expect(JSON.stringify(fetchSpy.mock.calls)).not.toContain("localStorage");

@@ -7,6 +7,7 @@ import pytest
 
 from app.db.engine import get_session
 from app.db.models import Concept, Course, Job, PracticeExtractionRun, PracticeQuestion, Section
+from app.jobs.error_envelope import decode_job_error
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from app.pipeline.practice_extraction import parse_practice_questions
@@ -282,7 +283,12 @@ def test_practice_extraction_without_answer_sections_reports_failed_on_poll(clie
         stored_run = session.get(PracticeExtractionRun, run.id)
         assert stored_job is not None
         assert stored_job.status == "failed"
-        assert stored_job.error == "no answer key sections found for practice section"
+        error, error_detail = decode_job_error(stored_job.error)
+        assert error == "no answer key sections found for practice section"
+        assert error_detail == {
+            "code": "job_failed",
+            "message": "no answer key sections found for practice section",
+        }
         assert stored_run is not None
         assert stored_run.status == "queued"
     finally:

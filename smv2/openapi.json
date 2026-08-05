@@ -2039,6 +2039,18 @@
             ],
             "title": "Error"
           },
+          "error_detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -2079,6 +2091,11 @@
             ],
             "title": "Result"
           },
+          "retryable": {
+            "readOnly": true,
+            "title": "Retryable",
+            "type": "boolean"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -2101,9 +2118,11 @@
           "result",
           "progress",
           "error",
+          "error_detail",
           "attempts",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "retryable"
         ],
         "title": "JobOut",
         "type": "object"
@@ -2138,6 +2157,92 @@
         "title": "LessonEstimateOut",
         "type": "object"
       },
+      "LlmCapabilitiesOut": {
+        "properties": {
+          "completion": {
+            "title": "Completion",
+            "type": "boolean"
+          },
+          "embeddings": {
+            "title": "Embeddings",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "completion",
+          "embeddings"
+        ],
+        "title": "LlmCapabilitiesOut",
+        "type": "object"
+      },
+      "LlmStatusOut": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/LlmCapabilitiesOut"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "failure_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Category"
+          },
+          "last_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "remediation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remediation"
+          }
+        },
+        "required": [
+          "provider",
+          "model",
+          "configured",
+          "available",
+          "capabilities",
+          "last_checked_at",
+          "failure_category",
+          "remediation"
+        ],
+        "title": "LlmStatusOut",
+        "type": "object"
+      },
       "LlmUsageOut": {
         "properties": {
           "calls": {
@@ -2164,6 +2269,19 @@
           "est_cost_usd"
         ],
         "title": "LlmUsageOut",
+        "type": "object"
+      },
+      "LocalSettingsRolloutOut": {
+        "properties": {
+          "local_settings_enabled": {
+            "title": "Local Settings Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "local_settings_enabled"
+        ],
+        "title": "LocalSettingsRolloutOut",
         "type": "object"
       },
       "MergeOp": {
@@ -3310,6 +3428,128 @@
           "chapter_label"
         ],
         "title": "SectionOut",
+        "type": "object"
+      },
+      "SettingsBootstrapOut": {
+        "properties": {
+          "csrf_token": {
+            "title": "Csrf Token",
+            "type": "string"
+          },
+          "rollout": {
+            "$ref": "#/components/schemas/LocalSettingsRolloutOut"
+          }
+        },
+        "required": [
+          "csrf_token",
+          "rollout"
+        ],
+        "title": "SettingsBootstrapOut",
+        "type": "object"
+      },
+      "SettingsClearIn": {
+        "properties": {
+          "confirmation": {
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "anthropic",
+              "ollama"
+            ],
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "confirmation"
+        ],
+        "title": "SettingsClearIn",
+        "type": "object"
+      },
+      "SettingsOut": {
+        "properties": {
+          "credentials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "credentials_present": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Credentials Present",
+            "type": "object"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/LlmStatusOut"
+          },
+          "rollout": {
+            "$ref": "#/components/schemas/LocalSettingsRolloutOut"
+          }
+        },
+        "required": [
+          "provider",
+          "model",
+          "credentials_present",
+          "credentials",
+          "rollout",
+          "readiness"
+        ],
+        "title": "SettingsOut",
+        "type": "object"
+      },
+      "SettingsUpdateIn": {
+        "properties": {
+          "credentials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "enum": [
+                  "anthropic",
+                  "ollama"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          }
+        },
+        "title": "SettingsUpdateIn",
         "type": "object"
       },
       "SkillDetailOut": {
@@ -7489,6 +7729,90 @@
         ]
       }
     },
+    "/api/jobs/{job_id}/retry": {
+      "post": {
+        "operationId": "retry_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/llm/status": {
+      "get": {
+        "operationId": "llm_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Llm Status",
+        "tags": [
+          "llm"
+        ]
+      }
+    },
+    "/api/llm/status/check": {
+      "post": {
+        "operationId": "llm_status_check",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Llm Status Check",
+        "tags": [
+          "llm"
+        ]
+      }
+    },
     "/api/llm/usage": {
       "get": {
         "operationId": "llm_usage",
@@ -7863,6 +8187,126 @@
         "summary": "Lesson Estimate",
         "tags": [
           "lessons"
+        ]
+      }
+    },
+    "/api/settings": {
+      "delete": {
+        "operationId": "clear_settings_api_settings_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsClearIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "get": {
+        "operationId": "get_settings_api_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "update_settings_api_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/bootstrap": {
+      "get": {
+        "operationId": "bootstrap_api_settings_bootstrap_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsBootstrapOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Bootstrap",
+        "tags": [
+          "settings"
         ]
       }
     },

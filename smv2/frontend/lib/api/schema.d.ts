@@ -922,6 +922,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Job */
+        post: operations["retry_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Llm Status */
+        get: operations["llm_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm/status/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Llm Status Check */
+        post: operations["llm_status_check"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/llm/usage": {
         parameters: {
             query?: never;
@@ -1035,6 +1086,42 @@ export interface paths {
         };
         /** Lesson Estimate */
         get: operations["lesson_estimate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Settings */
+        get: operations["get_settings_api_settings_get"];
+        /** Update Settings */
+        put: operations["update_settings_api_settings_put"];
+        post?: never;
+        /** Clear Settings */
+        delete: operations["clear_settings_api_settings_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/bootstrap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bootstrap */
+        get: operations["bootstrap_api_settings_bootstrap_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1816,6 +1903,10 @@ export interface components {
             created_at: string;
             /** Error */
             error: string | null;
+            /** Error Detail */
+            error_detail: {
+                [key: string]: unknown;
+            } | null;
             /** Id */
             id: string;
             /** Payload */
@@ -1830,6 +1921,8 @@ export interface components {
             result: {
                 [key: string]: unknown;
             } | null;
+            /** Retryable */
+            readonly retryable: boolean;
             /** Status */
             status: string;
             /** Type */
@@ -1849,6 +1942,31 @@ export interface components {
             /** Est Seconds */
             est_seconds: number;
         };
+        /** LlmCapabilitiesOut */
+        LlmCapabilitiesOut: {
+            /** Completion */
+            completion: boolean;
+            /** Embeddings */
+            embeddings: boolean;
+        };
+        /** LlmStatusOut */
+        LlmStatusOut: {
+            /** Available */
+            available: boolean;
+            capabilities: components["schemas"]["LlmCapabilitiesOut"];
+            /** Configured */
+            configured: boolean;
+            /** Failure Category */
+            failure_category: string | null;
+            /** Last Checked At */
+            last_checked_at: string | null;
+            /** Model */
+            model: string;
+            /** Provider */
+            provider: string;
+            /** Remediation */
+            remediation: string | null;
+        };
         /** LlmUsageOut */
         LlmUsageOut: {
             /** Calls */
@@ -1859,6 +1977,11 @@ export interface components {
             input_tokens: number;
             /** Output Tokens */
             output_tokens: number;
+        };
+        /** LocalSettingsRolloutOut */
+        LocalSettingsRolloutOut: {
+            /** Local Settings Enabled */
+            local_settings_enabled: boolean;
         };
         /** MergeOp */
         MergeOp: {
@@ -2294,6 +2417,50 @@ export interface components {
             title: string;
             /** Word Count */
             word_count: number;
+        };
+        /** SettingsBootstrapOut */
+        SettingsBootstrapOut: {
+            /** Csrf Token */
+            csrf_token: string;
+            rollout: components["schemas"]["LocalSettingsRolloutOut"];
+        };
+        /** SettingsClearIn */
+        SettingsClearIn: {
+            /** Confirmation */
+            confirmation: string;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "anthropic" | "ollama";
+        };
+        /** SettingsOut */
+        SettingsOut: {
+            /** Credentials */
+            credentials: {
+                [key: string]: string;
+            };
+            /** Credentials Present */
+            credentials_present: {
+                [key: string]: boolean;
+            };
+            /** Model */
+            model: string;
+            /** Provider */
+            provider: string;
+            readiness: components["schemas"]["LlmStatusOut"];
+            rollout: components["schemas"]["LocalSettingsRolloutOut"];
+        };
+        /** SettingsUpdateIn */
+        SettingsUpdateIn: {
+            /** Credentials */
+            credentials?: {
+                [key: string]: string;
+            };
+            /** Model */
+            model?: string | null;
+            /** Provider */
+            provider?: ("anthropic" | "ollama") | null;
         };
         /** SkillDetailOut */
         SkillDetailOut: {
@@ -4774,6 +4941,77 @@ export interface operations {
             };
         };
     };
+    retry_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    llm_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmStatusOut"];
+                };
+            };
+        };
+    };
+    llm_status_check: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmStatusOut"];
+                };
+            };
+        };
+    };
     llm_usage: {
         parameters: {
             query?: {
@@ -5042,6 +5280,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_settings_api_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+        };
+    };
+    update_settings_api_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_settings_api_settings_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsClearIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bootstrap_api_settings_bootstrap_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsBootstrapOut"];
                 };
             };
         };
