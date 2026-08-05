@@ -11,6 +11,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     status: "ready",
     section_count: 4,
     failed_asset_count: 0,
+    is_sample: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     progress: null,
@@ -25,7 +26,7 @@ describe("buildTaskCards", () => {
         continueCourse: null,
         continueChapter: null,
         showReviewCard: false,
-        reviewCardDueCount: 0,
+        reviewCardOverdueCount: 0,
         reviewCardHref: "/review",
         studyNext: [],
       }),
@@ -40,7 +41,7 @@ describe("buildTaskCards", () => {
       continueCourse: course,
       continueChapter: chapter,
       showReviewCard: false,
-      reviewCardDueCount: 0,
+      reviewCardOverdueCount: 0,
       reviewCardHref: "/review",
       studyNext: [],
     });
@@ -65,7 +66,7 @@ describe("buildTaskCards", () => {
       continueCourse: course,
       continueChapter: null,
       showReviewCard: false,
-      reviewCardDueCount: 0,
+      reviewCardOverdueCount: 0,
       reviewCardHref: "/review",
       studyNext: [],
     });
@@ -80,7 +81,7 @@ describe("buildTaskCards", () => {
       continueCourse: null,
       continueChapter: null,
       showReviewCard: true,
-      reviewCardDueCount: 1,
+      reviewCardOverdueCount: 1,
       reviewCardHref: "/review?course=a&start=due",
       studyNext: [],
     });
@@ -100,7 +101,11 @@ describe("buildTaskCards", () => {
   it("adds a retake-test card from the primary course's first low_test_score suggestion", () => {
     const course = makeCourse({ id: "a" });
     const studyNext: StudyNextItemOut[] = [
-      { chapter_label: "Chapter 2", reason: "due_cards", detail: { due_count: 3 } },
+      {
+        chapter_label: "Chapter 2",
+        reason: "due_cards",
+        detail: { overdue_count: 3, new_count: 0, available_count: 3 },
+      },
       { chapter_label: "Chapter 1", reason: "low_test_score", detail: { best_score: 0.4 } },
     ];
 
@@ -108,7 +113,7 @@ describe("buildTaskCards", () => {
       continueCourse: course,
       continueChapter: null,
       showReviewCard: false,
-      reviewCardDueCount: 0,
+      reviewCardOverdueCount: 0,
       reviewCardHref: "/review",
       studyNext,
     });
@@ -134,7 +139,7 @@ describe("buildTaskCards", () => {
       continueCourse: course,
       continueChapter: null,
       showReviewCard: false,
-      reviewCardDueCount: 0,
+      reviewCardOverdueCount: 0,
       reviewCardHref: "/review",
       studyNext,
     });
@@ -153,7 +158,7 @@ describe("buildTaskCards", () => {
       continueCourse: course,
       continueChapter: chapter,
       showReviewCard: true,
-      reviewCardDueCount: 4,
+      reviewCardOverdueCount: 4,
       reviewCardHref: "/review",
       studyNext,
     });
@@ -166,7 +171,7 @@ describe("buildTaskCards", () => {
       continueCourse: null,
       continueChapter: null,
       showReviewCard: false,
-      reviewCardDueCount: 0,
+      reviewCardOverdueCount: 0,
       reviewCardHref: "/review",
       studyNext: [{ chapter_label: "Chapter 1", reason: "low_test_score", detail: { best_score: 0.1 } }],
     });

@@ -18,6 +18,8 @@ function reasonTone(reason: StudyNextItemOut["reason"]): BadgeTone {
       return "warning";
     case "due_cards":
       return "accent";
+    case "new_cards":
+      return "good";
     default:
       return "neutral";
   }
@@ -28,7 +30,7 @@ function reasonTone(reason: StudyNextItemOut["reason"]): BadgeTone {
 const MAX_SUGGESTIONS = 3;
 
 // Human-readable chip text per reason, using the numbers already in
-// `detail` (best_score/due_count/days_since) rather than a bare label —
+// `detail` (best_score/overdue_count/new_count/days_since) rather than a bare label —
 // see study_service.py's own docstring for what each reason/detail pair
 // means.
 function reasonLabel(item: StudyNextItemOut): string {
@@ -40,8 +42,20 @@ function reasonLabel(item: StudyNextItemOut): string {
         : "low test score";
     }
     case "due_cards": {
-      const dueCount = item.detail.due_count;
-      return typeof dueCount === "number" ? `${dueCount} cards piling up` : "cards piling up";
+      const overdueCount = item.detail.overdue_count;
+      const newCount = item.detail.new_count;
+      if (typeof overdueCount === "number" && typeof newCount === "number" && newCount > 0) {
+        return `${overdueCount} overdue · ${newCount} new`;
+      }
+      return typeof overdueCount === "number"
+        ? `${overdueCount} overdue card${overdueCount === 1 ? "" : "s"}`
+        : "overdue cards";
+    }
+    case "new_cards": {
+      const newCount = item.detail.new_count;
+      return typeof newCount === "number"
+        ? `${newCount} new card${newCount === 1 ? "" : "s"}`
+        : "new cards";
     }
     case "unread":
       return "unread";

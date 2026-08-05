@@ -20,12 +20,28 @@ vi.mock("@/lib/api/client", () => ({
 const mockedGetReviewSummary = vi.mocked(getReviewSummary);
 
 function makeSummary(overrides: Partial<ReviewSummaryOut> = {}): ReviewSummaryOut {
+  const dueTotal = overrides.due_total ?? 0;
+  const courses =
+    overrides.courses ??
+    (dueTotal > 0
+      ? [
+          {
+            course_id: "course-1",
+            title: "Course One",
+            due_count: dueTotal,
+            overdue_count: dueTotal,
+            new_count: 0,
+            available_count: dueTotal,
+            total_count: dueTotal,
+          },
+        ]
+      : []);
   return {
-    courses: [],
-    due_total: 0,
+    due_total: dueTotal,
     daily_throughput: 0,
     backlog_warning: false,
     ...overrides,
+    courses,
   };
 }
 

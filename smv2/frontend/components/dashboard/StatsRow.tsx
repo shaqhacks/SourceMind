@@ -2,7 +2,7 @@ import Badge from "@/components/ui/Badge";
 import StatTile from "@/components/ui/StatTile";
 
 export interface StatsRowProps {
-  cardsDue: number;
+  overdueCards: number;
   quizzesToTake: number;
   progressPercent: number | null;
   progressCourseTitle: string | null;
@@ -10,7 +10,7 @@ export interface StatsRowProps {
 }
 
 export default function StatsRow({
-  cardsDue,
+  overdueCards,
   quizzesToTake,
   progressPercent,
   progressCourseTitle,
@@ -19,8 +19,8 @@ export default function StatsRow({
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <StatTile
-        value={cardsDue}
-        label={cardsDue === 1 ? "card due" : "cards due"}
+        value={overdueCards}
+        label={overdueCards === 1 ? "card due" : "cards due"}
         href="/review"
         hint={backlogWarning ? <Badge tone="warning">Backlog building up</Badge> : undefined}
       />

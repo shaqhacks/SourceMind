@@ -19,6 +19,7 @@ import {
 } from "@/lib/api/client";
 import { useContinueChapter } from "@/lib/dashboard/useContinueChapter";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { useSampleHintDismissed } from "@/lib/hooks/useSampleHint";
 import { formatJobProgress } from "@/lib/jobs/format";
 
 export interface CourseCardProps {
@@ -43,6 +44,7 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
   const [retrying, setRetrying] = useState(false);
   const [readyFailuresExpanded, setReadyFailuresExpanded] = useState(false);
   const [readyFailedAssets, setReadyFailedAssets] = useState<AssetOut[] | null>(null);
+  const { dismissed: sampleHintDismissed, dismiss: dismissSampleHint } = useSampleHintDismissed();
 
   // A local retry always wins over the (possibly stale) `course.status`
   // prop — startIngest's own response already tells us a new job exists,
@@ -157,6 +159,23 @@ export default function CourseCard({ course, onDeleted, onNeedsRefresh }: Course
         {course.status === "ready" && <Badge tone="good">Ready</Badge>}
         {course.status === "draft" && <Badge tone="neutral">Draft</Badge>}
       </div>
+
+      {course.is_sample && !sampleHintDismissed && (
+        <div
+          role="note"
+          className="flex items-center justify-between gap-3 rounded-md border border-border bg-accent/5 px-3 py-2 text-xs"
+        >
+          <span>This is a sample course — drop any PDF to create your own.</span>
+          <button
+            type="button"
+            onClick={dismissSampleHint}
+            aria-label="Dismiss hint"
+            className="shrink-0 rounded-md border border-border px-2 py-1 font-medium"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {isIngesting && (
         <div role="status" className="text-xs text-muted-foreground">

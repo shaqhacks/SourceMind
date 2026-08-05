@@ -117,6 +117,22 @@ type SessionState =
   | { kind: "active" }
   | { kind: "done" };
 
+function courseOverdueCount(course: ReviewSummaryOut["courses"][number]): number {
+  return course.overdue_count ?? 0;
+}
+
+function courseAvailableCount(course: ReviewSummaryOut["courses"][number]): number {
+  return course.available_count ?? course.total_count ?? courseOverdueCount(course) + course.new_count;
+}
+
+function summaryOverdueCount(summary: ReviewSummaryOut): number {
+  return summary.courses.reduce((total, course) => total + courseOverdueCount(course), 0);
+}
+
+function summaryAvailableCount(summary: ReviewSummaryOut): number {
+  return summary.courses.reduce((total, course) => total + courseAvailableCount(course), 0);
+}
+
 function ReviewPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -464,7 +480,7 @@ function ReviewPageInner() {
           />
         </div>
       );
-    } else if (hubState.summary.due_total === 0) {
+    } else if (summaryAvailableCount(hubState.summary) === 0) {
       mainContent = (
         <div className="flex flex-1 items-center justify-center p-8">
           <EmptyState
@@ -484,7 +500,7 @@ function ReviewPageInner() {
               role="alert"
               className="rounded-md border border-accent/40 bg-accent-soft px-4 py-3 text-sm text-accent-800"
             >
-              {summary.due_total} due — more than 2 days at your pace.
+              {summaryOverdueCount(summary)} overdue — more than 2 days at your pace.
             </div>
           )}
           <ul className="flex flex-col gap-2">
@@ -498,7 +514,7 @@ function ReviewPageInner() {
                   >
                     <span className="font-medium">{course.title}</span>
                     <span className="text-muted-foreground">
-                      {course.due_count} due · {course.new_count} new
+                      {courseOverdueCount(course)} overdue · {course.new_count} new
                     </span>
                   </button>
                 </Card>

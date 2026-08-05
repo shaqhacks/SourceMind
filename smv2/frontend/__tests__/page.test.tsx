@@ -67,6 +67,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     status: "ready",
     section_count: 4,
     failed_asset_count: 0,
+    is_sample: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     progress: null,
@@ -224,7 +225,17 @@ describe("Home page", () => {
       );
       mockedGetReviewSummary.mockResolvedValue(
         ok({
-          courses: [{ course_id: "a", title: "Distributed Systems", due_count: 7, new_count: 2 }],
+          courses: [
+            {
+              course_id: "a",
+              title: "Distributed Systems",
+              due_count: 7,
+              overdue_count: 7,
+              new_count: 2,
+              available_count: 9,
+              total_count: 9,
+            },
+          ],
           due_total: 7,
           daily_throughput: 3,
           backlog_warning: false,
@@ -347,7 +358,17 @@ describe("Home page", () => {
     mockedListSections.mockResolvedValue(ok(CONTENT_SECTIONS));
     mockedGetReviewSummary.mockResolvedValue(
       ok({
-        courses: [{ course_id: "a", title: "Distributed Systems", due_count: 5, new_count: 1 }],
+        courses: [
+          {
+            course_id: "a",
+            title: "Distributed Systems",
+            due_count: 5,
+            overdue_count: 5,
+            new_count: 1,
+            available_count: 6,
+            total_count: 6,
+          },
+        ],
         due_total: 5,
         daily_throughput: 2.6,
         backlog_warning: false,
@@ -412,9 +433,26 @@ describe("Home page", () => {
   });
 
   describe("sample course hint", () => {
-    it("shows the hint when exactly one course exists and it's ready", async () => {
+    it("does not show the sample hint for a sole user-created ready course", async () => {
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "ready", is_sample: false })]));
+
+      render(<Home />);
+      await screen.findByText("Distributed Systems");
+
+      expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+    });
+
+    it("shows the hint when a seeded sample course exists alongside user courses", async () => {
       mockedListCourses.mockResolvedValue(
-        ok([makeCourse({ id: "a", title: "Welcome to SourceMind", status: "ready" })]),
+        ok([
+          makeCourse({
+            id: "sample",
+            title: "Welcome to SourceMind",
+            status: "ready",
+            is_sample: true,
+          }),
+          makeCourse({ id: "user-course", title: "Distributed Systems", status: "ready" }),
+        ]),
       );
 
       render(<Home />);
@@ -422,25 +460,6 @@ describe("Home page", () => {
       expect(
         await screen.findByText(/this is a sample course — drop any pdf to create your own/i),
       ).toBeInTheDocument();
-    });
-
-    it("shows the hint while the single course is still ingesting", async () => {
-      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "ingesting" })]));
-
-      render(<Home />);
-
-      expect(await screen.findByText(/this is a sample course/i)).toBeInTheDocument();
-    });
-
-    it("does not show the hint when more than one course exists", async () => {
-      mockedListCourses.mockResolvedValue(
-        ok([makeCourse({ id: "a" }), makeCourse({ id: "b", title: "Second course" })]),
-      );
-
-      render(<Home />);
-      await screen.findByText("Second course");
-
-      expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
     });
 
     it("does not show the hint for a draft or failed single course", async () => {
@@ -453,7 +472,7 @@ describe("Home page", () => {
     });
 
     it("dismissing hides it and persists the choice across remounts", async () => {
-      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "ready" })]));
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "ready", is_sample: true })]));
       const user = userEvent.setup();
 
       const { unmount } = render(<Home />);

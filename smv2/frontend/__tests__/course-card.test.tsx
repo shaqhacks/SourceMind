@@ -59,6 +59,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     status: "ready",
     section_count: 4,
     failed_asset_count: 0,
+    is_sample: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     progress: null,
@@ -271,5 +272,45 @@ describe("CourseCard", () => {
     );
 
     expect(screen.queryByText(/failed extraction/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the sample-course hint on the sample course card and persists dismissal", async () => {
+    const user = userEvent.setup();
+
+    const { unmount } = render(
+      <CourseCard
+        course={makeCourse({ is_sample: true })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/this is a sample course — drop any pdf to create your own/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /dismiss hint/i }));
+    expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <CourseCard
+        course={makeCourse({ is_sample: true })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+  });
+
+  it("does not show the sample-course hint for a user-created course", () => {
+    render(
+      <CourseCard
+        course={makeCourse({ is_sample: false })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
   });
 });

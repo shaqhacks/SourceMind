@@ -44,7 +44,17 @@ const mockedSubmitPracticeAnswer = vi.mocked(submitPracticeAnswer);
 
 function makeSummary(overrides: Partial<ReviewSummaryOut> = {}): ReviewSummaryOut {
   return {
-    courses: [{ course_id: "course-1", title: "Intro to Testing", due_count: 5, new_count: 2 }],
+    courses: [
+      {
+        course_id: "course-1",
+        title: "Intro to Testing",
+        due_count: 5,
+        overdue_count: 5,
+        new_count: 2,
+        available_count: 7,
+        total_count: 7,
+      },
+    ],
     due_total: 7,
     daily_throughput: 3,
     backlog_warning: false,
@@ -121,13 +131,31 @@ describe("ReviewPage", () => {
   });
 
   it("hub: shows the backlog warning and course list from review_summary", async () => {
-    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary({ backlog_warning: true, due_total: 40 })));
+    mockedGetReviewSummary.mockResolvedValue(
+      ok(
+        makeSummary({
+          backlog_warning: true,
+          courses: [
+            {
+              course_id: "course-1",
+              title: "Intro to Testing",
+              due_count: 40,
+              overdue_count: 40,
+              new_count: 2,
+              available_count: 42,
+              total_count: 42,
+            },
+          ],
+          due_total: 42,
+        }),
+      ),
+    );
 
     render(<ReviewPage />);
 
-    expect(await screen.findByText(/40 due — more than 2 days at your pace/i)).toBeInTheDocument();
+    expect(await screen.findByText(/40 overdue — more than 2 days at your pace/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /intro to testing/i })).toHaveTextContent(
-      /5 due · 2 new/i,
+      /40 overdue · 2 new/i,
     );
   });
 

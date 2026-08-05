@@ -53,6 +53,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     status: "ready",
     section_count: 3,
     failed_asset_count: 0,
+    is_sample: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     progress: null,
@@ -178,7 +179,21 @@ function setUpHappyPathMocks() {
     }),
   );
   mockedGetReviewSummary.mockResolvedValue(
-    ok(makeSummary({ courses: [{ course_id: "course-1", title: "Course One", due_count: 1, new_count: 1 }] })),
+    ok(
+      makeSummary({
+        courses: [
+          {
+            course_id: "course-1",
+            title: "Course One",
+            due_count: 1,
+            overdue_count: 1,
+            new_count: 1,
+            available_count: 2,
+            total_count: 2,
+          },
+        ],
+      }),
+    ),
   );
   mockedFindActiveCardsJob.mockResolvedValue(null);
 }

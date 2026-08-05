@@ -33,6 +33,7 @@ const COURSE: CourseOut = {
   status: "ready",
   section_count: 4,
   failed_asset_count: 0,
+  is_sample: false,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
   progress: { section_id: "sec-2", scroll_pos: 0.4, updated_at: "2026-01-05T00:00:00Z" },
