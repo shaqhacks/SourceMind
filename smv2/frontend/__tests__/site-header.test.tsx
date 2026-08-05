@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -62,5 +62,69 @@ describe("SiteHeader", () => {
     expect(window.localStorage.getItem(WORKSPACE_MODE_DISCLOSURE_STORAGE_KEY)).toBe("true");
     expect(screen.queryByRole("dialog", { name: "Instructor mode" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /workspace mode: instructor/i })).toBeInTheDocument();
+  });
+
+  it("closes the workspace mode menu on Escape and returns focus to the trigger", async () => {
+    const user = userEvent.setup();
+    render(<SiteHeader />);
+
+    const trigger = screen.getByRole("button", { name: /workspace mode: learner/i });
+    await user.click(trigger);
+    expect(screen.getByRole("menu", { name: "Workspace mode" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("menu", { name: "Workspace mode" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("closes the workspace mode menu on an outside pointer click", async () => {
+    const user = userEvent.setup();
+    render(<SiteHeader />);
+
+    const trigger = screen.getByRole("button", { name: /workspace mode: learner/i });
+    await user.click(trigger);
+    expect(screen.getByRole("menu", { name: "Workspace mode" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole("menu", { name: "Workspace mode" })).not.toBeInTheDocument();
+  });
+
+  it("cancels the instructor disclosure on Escape without switching modes and restores focus", async () => {
+    const user = userEvent.setup();
+    render(<SiteHeader />);
+
+    const trigger = screen.getByRole("button", { name: /workspace mode: learner/i });
+    await user.click(trigger);
+    await user.click(screen.getByRole("menuitemradio", { name: "Instructor" }));
+
+    expect(screen.getByRole("button", { name: "Stay in learner mode" })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog", { name: "Instructor mode" })).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY)).toBeNull();
+    expect(screen.getByRole("button", { name: /workspace mode: learner/i })).toHaveFocus();
+  });
+
+  it("restores focus to the instructor mode control after disclosure cancel and confirm", async () => {
+    const user = userEvent.setup();
+    render(<SiteHeader />);
+
+    const trigger = screen.getByRole("button", { name: /workspace mode: learner/i });
+    await user.click(trigger);
+    await user.click(screen.getByRole("menuitemradio", { name: "Instructor" }));
+    await user.click(screen.getByRole("button", { name: "Stay in learner mode" }));
+
+    expect(screen.queryByRole("dialog", { name: "Instructor mode" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /workspace mode: learner/i })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: /workspace mode: learner/i }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Instructor" }));
+    await user.click(screen.getByRole("button", { name: "Continue to instructor mode" }));
+
+    expect(window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY)).toBe("instructor");
+    expect(screen.getByRole("button", { name: /workspace mode: instructor/i })).toHaveFocus();
   });
 });
