@@ -45,10 +45,12 @@ function ok<T>(data: T): ApiResult<T> {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((innerResolve) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
     resolve = innerResolve;
+    reject = innerReject;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function result(overrides = {}) {
@@ -259,5 +261,63 @@ describe("CourseSearchClient", () => {
     });
     expect(await screen.findByRole("article", { name: "Page two" })).toBeInTheDocument();
     expect(screen.queryByRole("article", { name: "Page one duplicate" })).not.toBeInTheDocument();
+  });
+
+  it("invalidates in-flight search work when the course changes", async () => {
+    const user = userEvent.setup();
+    const staleSuccess = deferred<ApiResult<SearchResultsOut>>();
+    const staleError = deferred<ApiResult<SearchResultsOut>>();
+    mockedSearchCourse
+      .mockReturnValueOnce(staleSuccess.promise)
+      .mockReturnValueOnce(staleError.promise)
+      .mockResolvedValueOnce(
+        ok(
+          searchPayload({
+            items: [
+              result({
+                course_id: "course-2",
+                title: "History result",
+                cursor_token: "history",
+              }),
+            ],
+          }),
+        ),
+      );
+    render(<CourseSearchClient />);
+
+    await user.type(await screen.findByRole("searchbox", { name: "Search course text" }), "biology");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Course" }), "course-2");
+
+    staleSuccess.resolve(
+      ok(searchPayload({ items: [result({ title: "Stale biology", cursor_token: "stale" })] })),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole("article", { name: "Stale biology" })).not.toBeInTheDocument();
+      expect(screen.queryByText("Searching course text...")).not.toBeInTheDocument();
+      expect(screen.getByText(/search one course at a time/i)).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByRole("searchbox", { name: "Search course text" }), "history");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Course" }), "course-1");
+    staleError.reject(new Error("old course failed"));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.queryByText("Searching course text...")).not.toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Course" }), "course-2");
+    await user.clear(screen.getByRole("searchbox", { name: "Search course text" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search course text" }), "history");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(await screen.findByRole("article", { name: "History result" })).toBeInTheDocument();
+    expect(mockedSearchCourse).toHaveBeenLastCalledWith("course-2", "history", {
+      documentTypes: [],
+      limit: 10,
+    });
   });
 });

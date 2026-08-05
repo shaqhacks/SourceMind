@@ -70,6 +70,17 @@ export default function CourseSearchClient() {
     [courses, selectedCourseId],
   );
 
+  function invalidateSearchWork() {
+    latestRequestId.current += 1;
+    setSearchLoading(false);
+    setSearchError(null);
+    setResults([]);
+    setNextCursor(null);
+    setHasSearched(false);
+    setSubmittedQuery("");
+    setSubmittedSearch(null);
+  }
+
   async function runSearch(cursor?: string | null) {
     const isNextPage = Boolean(cursor);
     const params = isNextPage
@@ -88,14 +99,23 @@ export default function CourseSearchClient() {
     setSubmittedQuery(params.query);
     setSubmittedSearch(params);
 
-    const { data, ok } = await searchCourse(params.courseId, params.query, {
-      documentTypes: params.documentTypes,
-      cursor: cursor ?? undefined,
-      limit: PAGE_SIZE,
-    });
+    let result;
+    try {
+      result = await searchCourse(params.courseId, params.query, {
+        documentTypes: params.documentTypes,
+        cursor: cursor ?? undefined,
+        limit: PAGE_SIZE,
+      });
+    } catch {
+      if (latestRequestId.current !== requestId) return;
+      setSearchError("Search failed. Try again.");
+      setSearchLoading(false);
+      return;
+    }
 
     if (latestRequestId.current !== requestId) return;
 
+    const { data, ok } = result;
     if (!ok || !data) {
       setSearchError("Search failed. Try again.");
       setSearchLoading(false);
@@ -145,10 +165,7 @@ export default function CourseSearchClient() {
         loading={searchLoading}
         onCourseChange={(courseId) => {
           setSelectedCourseId(courseId);
-          setResults([]);
-          setNextCursor(null);
-          setHasSearched(false);
-          setSubmittedSearch(null);
+          invalidateSearchWork();
         }}
         onQueryChange={setQuery}
         onDocumentTypesChange={setDocumentTypes}
