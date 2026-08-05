@@ -5,6 +5,7 @@ import { Menu } from "lucide-react";
 
 import DueBadge from "@/components/DueBadge";
 import ThemeToggle from "@/components/ThemeToggle";
+import CommandPalette from "@/components/search/CommandPalette";
 import WorkspaceModeMenu from "@/components/workspace/WorkspaceModeMenu";
 import { useSidebarCollapsed } from "@/lib/hooks/useSidebarCollapsed";
 
@@ -33,6 +34,7 @@ export default function SiteHeader() {
         <Link href="/">SourceMind</Link>
       </p>
       <div className="ml-auto flex items-center gap-3">
+        <CommandPalette />
         <DueBadge />
         <ThemeToggle />
         <WorkspaceModeMenu />

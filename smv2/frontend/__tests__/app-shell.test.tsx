@@ -111,6 +111,18 @@ describe("AppShell", () => {
     expect(screen.getByRole("navigation", { name: "App" })).toBeInTheDocument();
   });
 
+  it("keeps Search as a sidebar route on top-level surfaces", () => {
+    mockPathname = "/search";
+    render(
+      <AppShell header={<div>h</div>}>
+        <p>c</p>
+      </AppShell>,
+    );
+
+    expect(screen.getByRole("link", { name: "Search" })).toHaveAttribute("href", "/search");
+    expect(screen.getByRole("link", { name: "Search" })).toHaveAttribute("aria-current", "page");
+  });
+
   it.each(["/course/abc123", "/course/abc123/test/at-1", "/review"])(
     "skips the app sidebar on %s — those routes manage their own panels",
     (pathname) => {

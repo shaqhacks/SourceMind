@@ -1,0 +1,156 @@
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import CourseSearchClient from "@/components/search/CourseSearchClient";
+import { listCourses, searchCourse } from "@/lib/api/client";
+
+vi.mock("@/lib/api/client", () => ({
+  listCourses: vi.fn(),
+  searchCourse: vi.fn(),
+}));
+
+const mockedListCourses = vi.mocked(listCourses);
+const mockedSearchCourse = vi.mocked(searchCourse);
+
+const courses = [
+  {
+    id: "course-1",
+    title: "Biology 101",
+    status: "ready",
+    section_count: 2,
+    failed_asset_count: 0,
+    is_sample: false,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    progress: null,
+  },
+  {
+    id: "course-2",
+    title: "History 202",
+    status: "ready",
+    section_count: 1,
+    failed_asset_count: 0,
+    is_sample: false,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    progress: null,
+  },
+];
+
+function ok<T>(data: T) {
+  return { status: 200, ok: true, data };
+}
+
+function searchPayload(overrides = {}) {
+  return {
+    backend: "fts5" as const,
+    next_cursor: null,
+    sanitized_excerpts: true,
+    items: [
+      {
+        doc_type: "section" as const,
+        course_id: "course-1",
+        section_id: "sec-1",
+        asset_id: "asset-1",
+        title: "Cell membranes",
+        excerpt_md: "Membranes keep &lt;script&gt; out of cells.",
+        source_locator: { page: 12, heading: "Transport Proteins", chapter: "Chapter 2", slide: null },
+        score: 9.7,
+        cursor_token: "cursor-1",
+      },
+    ],
+    ...overrides,
+  };
+}
+
+describe("CourseSearchClient", () => {
+  beforeEach(() => {
+    mockedListCourses.mockResolvedValue(ok(courses));
+    mockedSearchCourse.mockResolvedValue(ok(searchPayload()));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("shows the empty state before a query", async () => {
+    render(<CourseSearchClient />);
+
+    expect(await screen.findByRole("combobox", { name: "Course" })).toHaveValue("course-1");
+    expect(screen.getByText(/search one course at a time/i)).toBeInTheDocument();
+    expect(mockedSearchCourse).not.toHaveBeenCalled();
+  });
+
+  it("renders results with locator text and section navigation", async () => {
+    const user = userEvent.setup();
+    render(<CourseSearchClient />);
+
+    await user.type(await screen.findByRole("searchbox", { name: "Search course text" }), "membrane");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    const result = await screen.findByRole("article", { name: "Cell membranes" });
+    expect(within(result).getByText("Chapter 2 · Transport Proteins · p. 12")).toBeInTheDocument();
+    expect(within(result).getByText("Membranes keep &lt;script&gt; out of cells.")).toBeInTheDocument();
+    expect(result.innerHTML).not.toContain("<script>");
+    expect(within(result).getByRole("link", { name: "Open section" })).toHaveAttribute(
+      "href",
+      "/course/course-1?section=sec-1#transport-proteins",
+    );
+  });
+
+  it("preserves course selection across a rerender", async () => {
+    const { rerender } = render(<CourseSearchClient />);
+    const user = userEvent.setup();
+
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Course" }), "course-2");
+    rerender(<CourseSearchClient />);
+
+    expect(screen.getByRole("combobox", { name: "Course" })).toHaveValue("course-2");
+  });
+
+  it("submits the search form from the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<CourseSearchClient />);
+
+    await user.type(await screen.findByRole("searchbox", { name: "Search course text" }), "osmosis{Enter}");
+
+    await waitFor(() => {
+      expect(mockedSearchCourse).toHaveBeenCalledWith("course-1", "osmosis", {
+        documentTypes: [],
+        limit: 10,
+      });
+    });
+  });
+
+  it("shows empty-results copy", async () => {
+    const user = userEvent.setup();
+    mockedSearchCourse.mockResolvedValue(ok(searchPayload({ items: [], next_cursor: null })));
+    render(<CourseSearchClient />);
+
+    await user.type(await screen.findByRole("searchbox", { name: "Search course text" }), "photosynthesis");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(await screen.findByText(/no matches in Biology 101/i)).toBeInTheDocument();
+  });
+
+  it("loads the next page with the returned cursor and selected filters", async () => {
+    const user = userEvent.setup();
+    mockedSearchCourse
+      .mockResolvedValueOnce(ok(searchPayload({ next_cursor: "cursor-2" })))
+      .mockResolvedValueOnce(ok(searchPayload({ next_cursor: null })));
+    render(<CourseSearchClient />);
+
+    await user.click(await screen.findByRole("checkbox", { name: "Lessons" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search course text" }), "transport");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(await screen.findByRole("button", { name: "Load more results" }));
+
+    expect(mockedSearchCourse).toHaveBeenLastCalledWith("course-1", "transport", {
+      documentTypes: ["lesson"],
+      cursor: "cursor-2",
+      limit: 10,
+    });
+  });
+});

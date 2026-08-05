@@ -12,10 +12,12 @@ let mockPathname = "/";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mockPathname,
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 vi.mock("@/lib/api/client", () => ({
   getReviewSummary: vi.fn().mockResolvedValue({ status: 200, ok: true, data: undefined }),
+  searchCourse: vi.fn().mockResolvedValue({ status: 200, ok: true, data: { items: [] } }),
 }));
 
 describe("SiteHeader", () => {
@@ -44,6 +46,12 @@ describe("SiteHeader", () => {
     expect(screen.queryByText("S")).not.toBeInTheDocument();
     expect(screen.getByText("Workspace mode")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /workspace mode: learner/i })).toBeInTheDocument();
+  });
+
+  it("surfaces the command palette search affordance in the header", () => {
+    render(<SiteHeader />);
+
+    expect(screen.getByRole("button", { name: "Open command palette" })).toBeInTheDocument();
   });
 
   it("shows the instructor explanation once before switching modes", async () => {

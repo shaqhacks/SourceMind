@@ -22,6 +22,7 @@ const NAV_ITEMS: { href: string; label: string }[] = [
   { href: "/", label: "Home" },
   { href: "/flashcards", label: "Flashcards" },
   { href: "/tests", label: "Tests" },
+  { href: "/search", label: "Search" },
   { href: "/jobs", label: "Jobs" },
   { href: "/settings", label: "Settings" },
 ];

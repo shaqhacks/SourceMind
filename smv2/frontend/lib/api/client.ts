@@ -49,6 +49,8 @@ export type GradeCardIn = components["schemas"]["GradeCardIn"];
 export type GradeCardOut = components["schemas"]["GradeCardOut"];
 export type ReviewSummaryOut = components["schemas"]["ReviewSummaryOut"];
 export type CourseReviewSummaryOut = components["schemas"]["CourseReviewSummaryOut"];
+export type SearchResultOut = components["schemas"]["SearchResultOut"];
+export type SearchResultsOut = components["schemas"]["SearchResultsOut"];
 export type GenerateTestOut = components["schemas"]["GenerateTestOut"];
 export type GenerateTestIn = components["schemas"]["GenerateTestIn"];
 export type ChapterOut = components["schemas"]["ChapterOut"];
@@ -376,6 +378,27 @@ export function listSections(courseId: string) {
   return request(
     client.GET("/api/courses/{course_id}/sections", {
       params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function searchCourse(
+  courseId: string,
+  query: string,
+  filters: { documentTypes?: string[]; cursor?: string | null; limit?: number } = {},
+) {
+  const documentTypes = filters.documentTypes?.filter(Boolean);
+  return request(
+    client.GET("/api/courses/{course_id}/search", {
+      params: {
+        path: { course_id: courseId },
+        query: {
+          query,
+          document_type: documentTypes && documentTypes.length > 0 ? documentTypes : undefined,
+          cursor: filters.cursor ?? undefined,
+          limit: filters.limit,
+        },
+      },
     }),
   );
 }

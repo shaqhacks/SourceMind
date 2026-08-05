@@ -28,14 +28,17 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function normalizeKey(event: KeyboardEvent): string {
-  return event.key.toLowerCase();
+  const key = event.key.toLowerCase();
+  if ((event.metaKey || event.ctrlKey) && key.length === 1) return `mod+${key}`;
+  return key;
 }
 
 function handleGlobalKeyDown(event: KeyboardEvent): void {
-  if (isEditableTarget(event.target)) return;
+  const key = normalizeKey(event);
+  if (isEditableTarget(event.target) && key !== "escape") return;
   const topScope = scopes[scopes.length - 1];
   if (!topScope) return;
-  const handler = topScope.map[normalizeKey(event)];
+  const handler = topScope.map[key];
   if (handler) {
     handler(event);
   }
