@@ -65,6 +65,33 @@ def _add_due_cards(session, section_id: str, course_id: str, count: int) -> None
     session.commit()
 
 
+def _add_reviewed_due_cards(session, section_id: str, course_id: str, count: int) -> None:
+    profile_id = _course_profile_id(session, course_id)
+    now = utcnow()
+    for i in range(count):
+        card_id = f"reviewed-card-{section_id}-{i}"
+        session.add(
+            Card(
+                id=card_id, course_id=course_id, section_id=section_id,
+                front_md="f", back_md="b", position=100 + i,
+            )
+        )
+        session.flush()
+        session.add(
+            ReviewState(
+                course_learning_profile_id=profile_id,
+                card_id=card_id,
+                course_id=course_id,
+                due_at=now - timedelta(hours=1),
+                interval_days=1.0,
+                ease=2.5,
+                reps=1,
+                lapses=0,
+            )
+        )
+    session.commit()
+
+
 def test_study_next_tier_a_low_score_worst_first(client):
     session = get_session()
     try:
@@ -91,21 +118,70 @@ def test_study_next_ignores_scores_at_or_above_threshold(client):
         session.close()
 
 
-def test_study_next_tier_b_due_cards_threshold(client):
+def test_study_next_tier_b_new_cards_threshold(client):
     session = get_session()
     try:
         course_id, labels = _make_course(session, 2)
         section_ids = [
             s.id for s in session.query(Section).filter(Section.course_id == course_id).order_by(Section.order_index)
         ]
-        _add_due_cards(session, section_ids[0], course_id, count=6)  # over the min-5 threshold
+        _add_due_cards(session, section_ids[0], course_id, count=6)  # new-card availability over threshold
         _add_due_cards(session, section_ids[1], course_id, count=2)  # under threshold
 
         result = study_next(course_id, limit=3)
-        due_reasons = {s["chapter_label"]: s for s in result if s["reason"] == "due_cards"}
-        assert labels[0] in due_reasons
-        assert due_reasons[labels[0]]["detail"]["due_count"] == 6
-        assert labels[1] not in due_reasons
+        new_reasons = {s["chapter_label"]: s for s in result if s["reason"] == "new_cards"}
+        assert labels[0] in new_reasons
+        assert new_reasons[labels[0]]["detail"]["new_count"] == 6
+        assert new_reasons[labels[0]]["detail"]["overdue_count"] == 0
+        assert labels[1] not in new_reasons
+    finally:
+        session.close()
+
+
+def test_study_next_tier_b_due_cards_uses_overdue_backlog(client):
+    session = get_session()
+    try:
+        course_id, labels = _make_course(session, 1)
+        section_id = (
+            session.query(Section.id)
+            .filter(Section.course_id == course_id)
+            .order_by(Section.order_index)
+            .scalar()
+        )
+        _add_reviewed_due_cards(session, section_id, course_id, count=6)
+
+        result = study_next(course_id, limit=3)
+
+        due = next(s for s in result if s["chapter_label"] == labels[0])
+        assert due["reason"] == "due_cards"
+        assert due["detail"]["due_count"] == 6
+        assert due["detail"]["overdue_count"] == 6
+        assert due["detail"]["new_count"] == 0
+    finally:
+        session.close()
+
+
+def test_study_next_mixed_due_and_new_cards_reports_both_without_calling_new_due(client):
+    session = get_session()
+    try:
+        course_id, labels = _make_course(session, 1)
+        section_id = (
+            session.query(Section.id)
+            .filter(Section.course_id == course_id)
+            .order_by(Section.order_index)
+            .scalar()
+        )
+        _add_reviewed_due_cards(session, section_id, course_id, count=3)
+        _add_due_cards(session, section_id, course_id, count=4)
+
+        result = study_next(course_id, limit=3)
+
+        due = next(s for s in result if s["chapter_label"] == labels[0])
+        assert due["reason"] == "due_cards"
+        assert due["detail"]["overdue_count"] == 3
+        assert due["detail"]["new_count"] == 4
+        assert due["detail"]["available_count"] == 7
+        assert due["detail"]["due_count"] == 3
     finally:
         session.close()
 

@@ -33,6 +33,7 @@ from sqlalchemy import and_, func
 from app.db.engine import get_session
 from app.db.models import Card, Course, ReviewLog, ReviewState, utcnow
 from app.services import evidence_items_service, evidence_service, learner_context
+from app.services.review_availability_service import get_review_availability
 
 AGAIN, HARD, GOOD, EASY = 1, 2, 3, 4
 _VALID_GRADES = {AGAIN, HARD, GOOD, EASY}
@@ -116,34 +117,6 @@ def schedule_next(grade: int, *, interval_days: float, ease: float, reps: int) -
     )
 
 
-def _due_counts(
-    session, course_id: str, course_learning_profile_id: str, now: datetime
-) -> dict[str, int]:
-    due_count = (
-        session.query(ReviewState)
-        .filter(
-            ReviewState.course_id == course_id,
-            ReviewState.course_learning_profile_id == course_learning_profile_id,
-            ReviewState.due_at <= now,
-        )
-        .count()
-    )
-    new_count = (
-        session.query(Card)
-        .outerjoin(
-            ReviewState,
-            and_(
-                ReviewState.card_id == Card.id,
-                ReviewState.course_learning_profile_id == course_learning_profile_id,
-            ),
-        )
-        .filter(Card.course_id == course_id, ReviewState.card_id.is_(None))
-        .count()
-    )
-    total_count = session.query(Card).filter(Card.course_id == course_id).count()
-    return {"due": due_count, "new": new_count, "total": total_count}
-
-
 def get_review_queue(
     course_id: str,
     limit: int = 20,
@@ -201,8 +174,17 @@ def get_review_queue(
             for card, review_state in rows
         ]
 
-        counts = _due_counts(session, course_id, course_profile.id, now)
-        return {"cards": cards, **counts}
+        counts = get_review_availability(session, course_id, learner_id, now=now)
+        return {
+            "cards": cards,
+            "due": counts.overdue_count,
+            "new": counts.new_count,
+            "total": counts.total_count,
+            "overdue_count": counts.overdue_count,
+            "new_count": counts.new_count,
+            "available_count": counts.available_count,
+            "total_count": counts.total_count,
+        }
     finally:
         session.close()
 
@@ -293,8 +275,8 @@ def grade_card(
         )
         session.commit()
 
-        counts = _due_counts(session, card.course_id, course_profile.id, utcnow())
-        return {"next_due_at": result.due_at, "remaining_due": counts["due"] + counts["new"]}
+        counts = get_review_availability(session, card.course_id, learner_id, now=utcnow())
+        return {"next_due_at": result.due_at, "remaining_due": counts.available_count}
     finally:
         session.close()
 
@@ -315,11 +297,19 @@ def get_review_summary(
                 session, learner_id, course.id
             )
             course_profile_ids.append(course_profile.id)
-            counts = _due_counts(session, course.id, course_profile.id, now)
+            counts = get_review_availability(session, course.id, learner_id, now=now)
             per_course.append(
-                {"course_id": course.id, "title": course.title, "due_count": counts["due"], "new_count": counts["new"]}
+                {
+                    "course_id": course.id,
+                    "title": course.title,
+                    "due_count": counts.overdue_count,
+                    "overdue_count": counts.overdue_count,
+                    "new_count": counts.new_count,
+                    "available_count": counts.available_count,
+                    "total_count": counts.total_count,
+                }
             )
-            due_total += counts["due"]
+            due_total += counts.overdue_count
 
         seven_days_ago = now - timedelta(days=7)
         grades_last_7d = (

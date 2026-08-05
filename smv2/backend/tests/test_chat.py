@@ -5,7 +5,11 @@ import uuid
 from fastapi.testclient import TestClient
 
 from app.db.engine import get_session
-from app.db.models import ChatTurn, Chunk, Section, Test, TestAttempt
+from datetime import timedelta
+
+from conftest import _course_profile_id, _set_learner_cookie
+
+from app.db.models import Card, ChatTurn, Chunk, ReviewState, Section, Test, TestAttempt, utcnow
 from app.llm.limiter import LLMBusyError
 from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, CompletionResult, ProviderNotConfiguredError
 from app.main import create_app
@@ -136,6 +140,95 @@ def test_send_chat_injects_study_suggestions_for_an_unopened_course(client, inge
     sent_content = stub_provider.received_messages[-1][-1]["content"]
     assert "<study_suggestions>" in sent_content
     assert "not started yet" in sent_content
+
+
+def test_send_chat_study_suggestions_describe_new_cards_as_new(client, ingest_course, stub_provider):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    session = get_session()
+    try:
+        section = (
+            session.query(Section)
+            .filter(Section.course_id == course_id, Section.chapter_label.isnot(None))
+            .order_by(Section.order_index)
+            .first()
+        )
+        assert section is not None
+        for i in range(6):
+            session.add(
+                Card(
+                    id=f"new-chat-card-{i}",
+                    course_id=course_id,
+                    section_id=section.id,
+                    front_md="f",
+                    back_md="b",
+                    position=i,
+                )
+            )
+        session.commit()
+    finally:
+        session.close()
+    stub_provider.responses = [
+        CompletionResult(text="Reply [1].", input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+
+    client.post(f"/api/courses/{course_id}/chat", json={"message": "hello"})
+
+    sent_content = stub_provider.received_messages[-1][-1]["content"]
+    assert "6 new flashcards available" in sent_content
+    assert "6 flashcards overdue" not in sent_content
+
+
+def test_send_chat_study_suggestions_describe_overdue_backlog_as_overdue(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    learner_id = _set_learner_cookie(client)
+    session = get_session()
+    try:
+        section = (
+            session.query(Section)
+            .filter(Section.course_id == course_id, Section.chapter_label.isnot(None))
+            .order_by(Section.order_index)
+            .first()
+        )
+        assert section is not None
+        profile_id = _course_profile_id(session, course_id, learner_id)
+        now = utcnow()
+        for i in range(6):
+            card = Card(
+                id=f"overdue-chat-card-{i}",
+                course_id=course_id,
+                section_id=section.id,
+                front_md="f",
+                back_md="b",
+                position=i,
+            )
+            session.add(card)
+            session.flush()
+            session.add(
+                ReviewState(
+                    course_learning_profile_id=profile_id,
+                    card_id=card.id,
+                    course_id=course_id,
+                    due_at=now - timedelta(hours=1),
+                    interval_days=1.0,
+                    ease=2.5,
+                    reps=1,
+                    lapses=0,
+                )
+            )
+        session.commit()
+    finally:
+        session.close()
+    stub_provider.responses = [
+        CompletionResult(text="Reply [1].", input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+
+    client.post(f"/api/courses/{course_id}/chat", json={"message": "hello"})
+
+    sent_content = stub_provider.received_messages[-1][-1]["content"]
+    assert "6 flashcards overdue for review" in sent_content
+    assert "6 new flashcards" not in sent_content
 
 
 def test_send_chat_injects_only_requesting_learners_test_state(

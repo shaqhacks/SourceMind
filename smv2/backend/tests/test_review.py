@@ -77,7 +77,11 @@ def test_review_queue_includes_past_due_and_excludes_future_due(client, ingest_c
     resp = client.get(f"/api/courses/{course_id}/review/queue")
     body = resp.json()
     assert body["due"] == 1
+    assert body["overdue_count"] == 1
     assert body["new"] == 0
+    assert body["new_count"] == 0
+    assert body["available_count"] == 1
+    assert body["total_count"] == 2
     ids_in_queue = {c["id"] for c in body["cards"]}
     assert card1 in ids_in_queue
     assert card2 not in ids_in_queue
@@ -169,7 +173,11 @@ def test_review_summary_aggregates_across_courses(client, ingest_course, stub_pr
     assert isinstance(body["backlog_warning"], bool)
     matching = [c for c in body["courses"] if c["course_id"] == course_id]
     assert len(matching) == 1
+    assert matching[0]["due_count"] == 0
+    assert matching[0]["overdue_count"] == 0
     assert matching[0]["new_count"] == 2
+    assert matching[0]["available_count"] == 2
+    assert matching[0]["total_count"] == 2
 
 
 def test_review_summary_backlog_warning_flags_large_backlog(client, ingest_course, stub_provider):

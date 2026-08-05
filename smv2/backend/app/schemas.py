@@ -470,6 +470,10 @@ class ReviewQueueOut(BaseModel):
     due: int
     new: int
     total: int
+    overdue_count: int | None = None
+    new_count: int | None = None
+    available_count: int | None = None
+    total_count: int | None = None
 
 
 class AdaptiveStudyActivityOut(BaseModel):
@@ -507,7 +511,10 @@ class CourseReviewSummaryOut(BaseModel):
     course_id: str
     title: str
     due_count: int
+    overdue_count: int | None = None
     new_count: int
+    available_count: int | None = None
+    total_count: int | None = None
 
 
 class ReviewSummaryOut(BaseModel):
@@ -671,12 +678,12 @@ class ChapterOut(BaseModel):
 class StudyNextItemOut(BaseModel):
     """One deterministic study suggestion (ADR-022, app.services.study_service).
     `detail` holds whatever raw numbers back `reason` — {"best_score":
-    ...} for low_test_score, {"due_count": ...} for due_cards, {} for
-    unread, {"days_since": ...} for stale.
+    ...} for low_test_score, canonical review availability counts for
+    due_cards/new_cards, {} for unread, {"days_since": ...} for stale.
     """
 
     chapter_label: str | None
-    reason: Literal["low_test_score", "due_cards", "unread", "stale"]
+    reason: Literal["low_test_score", "due_cards", "new_cards", "unread", "stale"]
     detail: dict[str, Any]
 
 
