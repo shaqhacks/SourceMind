@@ -101,6 +101,10 @@ function textFile(name: string): File {
   return new File(["plain text"], name, { type: "text/plain" });
 }
 
+function markdownFile(name: string): File {
+  return new File(["# Chapter"], name, { type: "text/markdown" });
+}
+
 function makeAsset(filename: string): AssetOut {
   return {
     id: `asset-${filename}`,
@@ -202,6 +206,23 @@ describe("UploadFlow", () => {
     await waitFor(() => expect(screen.getByText(/uploaded.*10 pages/i)).toBeInTheDocument());
   });
 
+  it("uses singular and plural page-count wording only for PDFs", async () => {
+    const user = userEvent.setup();
+    mockedUploadAsset.mockImplementation((_courseId, file: File) => {
+      const pageCount = file.name === "one-page.pdf" ? 1 : 2;
+      return Promise.resolve(ok({ ...makeAsset(file.name), page_count: pageCount }, 201));
+    });
+
+    render(
+      <UploadFlow files={[pdfFile("one-page.pdf"), pdfFile("two-pages.pdf")]} onClose={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+
+    await waitFor(() => expect(screen.getByText(/uploaded.*1 page$/i)).toBeInTheDocument());
+    expect(screen.getByText(/uploaded.*2 pages/i)).toBeInTheDocument();
+    expect(screen.queryByText(/1 pages/i)).not.toBeInTheDocument();
+  });
+
   it("keeps uploaded status format-neutral when a non-PDF has no page count", async () => {
     const user = userEvent.setup();
     mockedUploadAsset.mockResolvedValue(
@@ -213,6 +234,28 @@ describe("UploadFlow", () => {
 
     await waitFor(() => expect(screen.getByText("Uploaded")).toBeInTheDocument());
     expect(screen.queryByText(/uploaded.*pages/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps uploaded status format-neutral when a non-PDF response includes a page count", async () => {
+    const user = userEvent.setup();
+    mockedUploadAsset.mockResolvedValue(
+      ok(
+        {
+          ...makeAsset("notes.md"),
+          page_count: 1,
+          source_format: "markdown",
+          media_type: "text/markdown",
+        },
+        201,
+      ),
+    );
+
+    render(<UploadFlow files={[markdownFile("notes.md")]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+
+    await waitFor(() => expect(screen.getByText("Uploaded")).toBeInTheDocument());
+    expect(screen.queryByText(/uploaded.*1 page/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/1 pages/i)).not.toBeInTheDocument();
   });
 
   it("maps unsupported_source_format upload detail to actionable student copy", async () => {

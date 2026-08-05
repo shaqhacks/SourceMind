@@ -36,6 +36,7 @@ interface UploadItem {
   status: "pending" | "success" | "error";
   error?: string;
   pageCount?: number | null;
+  sourceFormat?: string | null;
 }
 
 type Step =
@@ -51,6 +52,14 @@ type Step =
   | { kind: "fatal"; message: string };
 
 const STEPS = ["Upload", "Confirm outline", "Start reading"] as const;
+
+function uploadedStatusText(item: UploadItem): string {
+  if (item.sourceFormat !== "pdf" || item.pageCount == null) {
+    return "Uploaded";
+  }
+
+  return `Uploaded · ${item.pageCount} ${item.pageCount === 1 ? "page" : "pages"}`;
+}
 
 /**
  * Maps the state machine above onto the 3-step "Upload -> Confirm outline
@@ -124,7 +133,12 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
         files.map(async (file, index) => {
           const { data, status, error } = await uploadAsset(courseId, file);
           const result: UploadItem = data
-            ? { file, status: "success", pageCount: data.page_count }
+            ? {
+                file,
+                status: "success",
+                pageCount: data.page_count,
+                sourceFormat: data.source_format,
+              }
             : { file, status: "error", error: describeError(status, "Upload", error).message };
           setStep((prev) =>
             prev.kind === "uploading"
@@ -252,9 +266,7 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
               <span className="shrink-0 text-xs text-muted-foreground">Uploading…</span>
             )}
             {item.status === "success" && (
-              <Badge tone="good">
-                Uploaded{item.pageCount != null ? ` · ${item.pageCount} pages` : ""}
-              </Badge>
+              <Badge tone="good">{uploadedStatusText(item)}</Badge>
             )}
             {item.status === "error" && (
               <Badge tone="serious">Failed{item.error ? `: ${item.error}` : ""}</Badge>
