@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * Get Asset File
-         * @description Serves the original uploaded PDF as-is, for the reader's
+         * @description Serves the original uploaded source as-is, for the reader's
          *     original-source page view. Inline disposition keeps browser-viewable
          *     sources embedded where supported instead of forcing a download.
          */
