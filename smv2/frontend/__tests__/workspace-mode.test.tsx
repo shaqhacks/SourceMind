@@ -1,12 +1,26 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import CurriculumReviewPage from "@/app/course/[courseId]/curriculum/page";
+import DiagnosticValidationPage from "@/app/course/[courseId]/diagnostics/validate/page";
 import {
   WORKSPACE_MODE_DISCLOSURE_STORAGE_KEY,
   WORKSPACE_MODE_STORAGE_KEY,
   useWorkspaceMode,
 } from "@/lib/hooks/useWorkspaceMode";
+
+vi.mock("@/components/curriculum/CurriculumReview", () => ({
+  default: ({ courseId }: { courseId: string }) => (
+    <section>Curriculum review content for {courseId}</section>
+  ),
+}));
+
+vi.mock("@/components/diagnostics/DiagnosticValidation", () => ({
+  default: ({ courseId }: { courseId: string }) => (
+    <section>Diagnostic validation content for {courseId}</section>
+  ),
+}));
 
 function WorkspaceHarness({ label = "primary" }: { label?: string }) {
   const { mode, setMode, toggle, disclosureSeen, markDisclosureSeen } = useWorkspaceMode();
@@ -105,5 +119,96 @@ describe("useWorkspaceMode", () => {
     expect(
       screen.queryByRole("button", { name: "Dismiss instructor explanation" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("WorkspaceModeGate", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("explains learner mode on direct curriculum navigation without rendering instructor content", async () => {
+    const element = await CurriculumReviewPage({
+      params: Promise.resolve({ courseId: "course-1" }),
+    });
+
+    render(element);
+
+    expect(
+      screen.getByRole("region", { name: "Instructor workspace is hidden" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Instructor workspace is hidden" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/learner mode keeps curriculum review and diagnostics out of the main study flow/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/local display preference/i)).toBeInTheDocument();
+    expect(screen.getByText(/not a security boundary/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to course" })).toHaveAttribute(
+      "href",
+      "/course/course-1",
+    );
+    expect(
+      screen.queryByText("Curriculum review content for course-1"),
+    ).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY)).toBeNull();
+  });
+
+  it("explains learner mode on direct diagnostic validation navigation", async () => {
+    const element = await DiagnosticValidationPage({
+      params: Promise.resolve({ courseId: "course-2" }),
+    });
+
+    render(element);
+
+    expect(
+      screen.getByRole("heading", { name: "Instructor workspace is hidden" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to course" })).toHaveAttribute(
+      "href",
+      "/course/course-2",
+    );
+    expect(
+      screen.queryByText("Diagnostic validation content for course-2"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("switches to instructor mode in place and reveals the requested curriculum route", async () => {
+    const user = userEvent.setup();
+    const element = await CurriculumReviewPage({
+      params: Promise.resolve({ courseId: "course-1" }),
+    });
+
+    render(element);
+
+    await user.click(screen.getByRole("button", { name: "Switch to Instructor mode" }));
+
+    expect(window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY)).toBe("instructor");
+    expect(
+      screen.queryByRole("heading", { name: "Instructor workspace is hidden" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Curriculum review content for course-1")).toBeInTheDocument();
+  });
+
+  it("switches to instructor mode in place and reveals the requested validation route", async () => {
+    const user = userEvent.setup();
+    const element = await DiagnosticValidationPage({
+      params: Promise.resolve({ courseId: "course-2" }),
+    });
+
+    render(element);
+
+    await user.click(screen.getByRole("button", { name: "Switch to Instructor mode" }));
+
+    expect(window.localStorage.getItem(WORKSPACE_MODE_STORAGE_KEY)).toBe("instructor");
+    expect(
+      screen.queryByRole("heading", { name: "Instructor workspace is hidden" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Diagnostic validation content for course-2")).toBeInTheDocument();
   });
 });
