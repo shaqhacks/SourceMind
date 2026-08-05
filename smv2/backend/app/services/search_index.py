@@ -116,24 +116,34 @@ def rebuild_fts_if_present(session: Session) -> None:
         _rebuild_fts(session)
 
 
+def _document_fts_row(session: Session, doc_key: str) -> dict[str, Any] | None:
+    row = session.execute(
+        text("SELECT rowid, title, body FROM search_documents WHERE doc_key = :doc_key"),
+        {"doc_key": doc_key},
+    ).mappings().first()
+    return dict(row) if row is not None else None
+
+
 def _sync_fts_row(session: Session, doc_key: str) -> None:
     if _has_fts(session):
-        row = session.execute(
-            text("SELECT rowid FROM search_documents WHERE doc_key = :doc_key"),
-            {"doc_key": doc_key},
-        ).first()
+        row = _document_fts_row(session, doc_key)
         if row is not None:
             session.execute(
                 text("INSERT INTO search_documents_fts(rowid, title, body) SELECT rowid, title, body FROM search_documents WHERE rowid = :rowid"),
-                {"rowid": row[0]},
+                {"rowid": row["rowid"]},
             )
 
 
-def _delete_fts_row(session: Session, rowid: int | None) -> None:
-    if _has_fts(session) and rowid is not None:
+def _delete_fts_row(session: Session, row: dict[str, Any] | None) -> None:
+    if _has_fts(session) and row is not None:
         session.execute(
-            text("INSERT INTO search_documents_fts(search_documents_fts, rowid) VALUES('delete', :rowid)"),
-            {"rowid": rowid},
+            text(
+                """
+                INSERT INTO search_documents_fts(search_documents_fts, rowid, title, body)
+                VALUES('delete', :rowid, :title, :body)
+                """
+            ),
+            {"rowid": row["rowid"], "title": row["title"], "body": row["body"]},
         )
 
 
@@ -167,6 +177,8 @@ def _upsert_document(
     if not body_text.strip():
         _delete_document(session, doc_key)
         return
+    old_fts_row = _document_fts_row(session, doc_key) if sync_fts and _has_fts(session) else None
+    _delete_fts_row(session, old_fts_row)
     session.execute(
         text(
             """
@@ -213,13 +225,8 @@ def _upsert_document(
 
 def _delete_document(session: Session, doc_key: str, *, sync_fts: bool = True) -> None:
     ensure_core_table(session)
-    row = session.execute(
-        text("SELECT rowid FROM search_documents WHERE doc_key = :doc_key"),
-        {"doc_key": doc_key},
-    ).first()
-    rowid = int(row[0]) if row is not None else None
     if sync_fts:
-        _delete_fts_row(session, rowid)
+        _delete_fts_row(session, _document_fts_row(session, doc_key))
     session.execute(text("DELETE FROM search_documents WHERE doc_key = :doc_key"), {"doc_key": doc_key})
 
 

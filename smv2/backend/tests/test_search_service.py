@@ -349,6 +349,101 @@ def test_single_note_mutation_syncs_fts_without_full_rebuild(client, monkeypatch
         assert search_index.matching_fts_doc_keys(session, course_id, "updatedsinglenote") == {
             "note:single-sync-note"
         }
+        assert search_index.matching_fts_doc_keys(session, course_id, "singlenoteword") == set()
+    finally:
+        session.close()
+
+    assert rebuild_calls == 0
+
+
+def test_lesson_regeneration_removes_old_fts_terms_without_full_rebuild(client, monkeypatch):
+    from app.services import search_index
+
+    course_id = _seed_course(
+        "course-lesson-sync",
+        section_bodies=[("lesson-sync-section", "Lesson Sync", "source")],
+    )
+    session = get_session()
+    rebuild_calls = 0
+
+    def _count_rebuild(inner_session):
+        nonlocal rebuild_calls
+        rebuild_calls += 1
+        original_rebuild(inner_session)
+
+    original_rebuild = search_index._rebuild_fts
+    monkeypatch.setattr(search_index, "_rebuild_fts", _count_rebuild)
+    try:
+        section = session.get(Section, "lesson-sync-section")
+        assert section is not None
+        section.lesson_md = "oldlessonterm"
+        search_index.upsert_lesson_document(session, section)
+        session.commit()
+        assert search_index.matching_fts_doc_keys(session, course_id, "oldlessonterm") == {
+            "lesson:lesson-sync-section"
+        }
+
+        section.lesson_md = "newlessonterm"
+        search_index.upsert_lesson_document(session, section)
+        session.commit()
+
+        assert search_index.matching_fts_doc_keys(session, course_id, "newlessonterm") == {
+            "lesson:lesson-sync-section"
+        }
+        assert search_index.matching_fts_doc_keys(session, course_id, "oldlessonterm") == set()
+    finally:
+        session.close()
+
+    assert rebuild_calls == 0
+
+
+def test_highlight_update_removes_old_fts_terms_without_full_rebuild(client, monkeypatch):
+    from app.services import search_index
+
+    course_id = _seed_course(
+        "course-highlight-sync",
+        section_bodies=[("highlight-sync-section", "Highlight Sync", "source")],
+    )
+    session = get_session()
+    rebuild_calls = 0
+
+    def _count_rebuild(inner_session):
+        nonlocal rebuild_calls
+        rebuild_calls += 1
+        original_rebuild(inner_session)
+
+    original_rebuild = search_index._rebuild_fts
+    monkeypatch.setattr(search_index, "_rebuild_fts", _count_rebuild)
+    try:
+        highlight = Highlight(
+            id="highlight-sync",
+            course_id=course_id,
+            section_id="highlight-sync-section",
+            exact="quoted text",
+            prefix="",
+            suffix="",
+            occurrence=0,
+            page=0,
+            color="yellow",
+            surface="source",
+            note_md="oldhighlightterm",
+        )
+        session.add(highlight)
+        session.flush()
+        search_index.upsert_highlight_document(session, highlight)
+        session.commit()
+        assert search_index.matching_fts_doc_keys(session, course_id, "oldhighlightterm") == {
+            "highlight:highlight-sync"
+        }
+
+        highlight.note_md = "newhighlightterm"
+        search_index.upsert_highlight_document(session, highlight)
+        session.commit()
+
+        assert search_index.matching_fts_doc_keys(session, course_id, "newhighlightterm") == {
+            "highlight:highlight-sync"
+        }
+        assert search_index.matching_fts_doc_keys(session, course_id, "oldhighlightterm") == set()
     finally:
         session.close()
 
