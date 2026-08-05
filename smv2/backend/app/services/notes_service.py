@@ -10,6 +10,7 @@ from typing import Any
 
 from app.db.engine import get_session
 from app.db.models import Note, Section, utcnow
+from app.services import search_index
 from app.services.sections_service import to_display_page
 
 
@@ -71,6 +72,8 @@ def create_note(
             note_md=note_md,
         )
         session.add(n)
+        session.flush()
+        search_index.upsert_note_document(session, n)
         session.commit()
         return _to_dict(n)
     finally:
@@ -93,6 +96,7 @@ def update_note(note_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
         if "note_md" in fields and fields["note_md"] is not None:
             n.note_md = fields["note_md"]
         n.updated_at = utcnow()
+        search_index.upsert_note_document(session, n)
         session.commit()
         return _to_dict(n)
     finally:
@@ -105,6 +109,7 @@ def delete_note(note_id: str) -> bool:
         n = session.get(Note, note_id)
         if n is None:
             return False
+        search_index.delete_note_document(session, note_id)
         session.delete(n)
         session.commit()
         return True

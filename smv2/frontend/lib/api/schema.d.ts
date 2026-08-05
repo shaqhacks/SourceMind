@@ -544,6 +544,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Course */
+        get: operations["search_course"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/sections": {
         parameters: {
             query?: never;
@@ -2341,6 +2358,43 @@ export interface components {
             /** Due Total */
             due_total: number;
         };
+        /** SearchResultOut */
+        SearchResultOut: {
+            /** Asset Id */
+            asset_id: string | null;
+            /** Course Id */
+            course_id: string;
+            /** Cursor Token */
+            cursor_token: string;
+            /**
+             * Doc Type
+             * @enum {string}
+             */
+            doc_type: "section" | "lesson" | "note" | "highlight";
+            /** Excerpt Md */
+            excerpt_md: string;
+            /** Score */
+            score: number;
+            /** Section Id */
+            section_id: string | null;
+            source_locator: components["schemas"]["SourceLocatorOut"];
+            /** Title */
+            title: string;
+        };
+        /** SearchResultsOut */
+        SearchResultsOut: {
+            /**
+             * Backend
+             * @enum {string}
+             */
+            backend: "fts5" | "like";
+            /** Items */
+            items: components["schemas"]["SearchResultOut"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Sanitized Excerpts */
+            sanitized_excerpts: boolean;
+        };
         /**
          * SectionDetailOut
          * @description page_start/page_end convention: see SectionOut's docstring above —
@@ -2628,6 +2682,17 @@ export interface components {
             section_id: string;
             /** Title */
             title: string;
+        };
+        /** SourceLocatorOut */
+        SourceLocatorOut: {
+            /** Chapter */
+            chapter?: string | null;
+            /** Heading */
+            heading?: string | null;
+            /** Page */
+            page?: number | null;
+            /** Slide */
+            slide?: string | null;
         };
         /** SplitOp */
         SplitOp: {
@@ -4084,6 +4149,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewQueueOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_course: {
+        parameters: {
+            query: {
+                query: string;
+                document_type?: string[] | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResultsOut"];
                 };
             };
             /** @description Validation Error */

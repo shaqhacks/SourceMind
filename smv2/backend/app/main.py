@@ -32,6 +32,7 @@ from app.routers import (
     practice,
     review,
     retention_studies,
+    search,
     sections,
     settings,
     skills,
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(ingest.router)
     app.include_router(sections.router)
     app.include_router(sections.section_router)
+    app.include_router(search.router)
     app.include_router(highlights.router)
     app.include_router(highlights.highlight_router)
     app.include_router(notes.router)

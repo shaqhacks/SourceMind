@@ -763,6 +763,35 @@ class NoteOut(BaseModel):
     updated_at: datetime
 
 
+# --- Search ----------------------------------------------------------
+
+
+class SourceLocatorOut(BaseModel):
+    page: int | None = None
+    heading: str | None = None
+    chapter: str | None = None
+    slide: str | None = None
+
+
+class SearchResultOut(BaseModel):
+    doc_type: Literal["section", "lesson", "note", "highlight"]
+    course_id: str
+    section_id: str | None
+    asset_id: str | None
+    title: str
+    excerpt_md: str
+    source_locator: SourceLocatorOut
+    score: float
+    cursor_token: str
+
+
+class SearchResultsOut(BaseModel):
+    items: list[SearchResultOut]
+    next_cursor: str | None
+    backend: Literal["fts5", "like"]
+    sanitized_excerpts: bool
+
+
 # --- Chat ------------------------------------------------------------
 
 

@@ -75,6 +75,7 @@ from app.pipeline.outline_detect import (
     front_matter_bookmark_titles,
     toc_shaped_chapter_cover_mask,
 )
+from app.services import search_index
 
 _EXTRACTOR_ALGO_VERSION = "algo-7"
 _LOW_TEXT_YIELD_CHARS_PER_PAGE = 20
@@ -410,6 +411,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     session.query(ChatTurn).filter(ChatTurn.course_id == course_id).delete()
     session.query(Highlight).filter(Highlight.course_id == course_id).delete()
     session.query(Note).filter(Note.course_id == course_id).delete()
+    search_index.delete_course_documents(session, course_id)
     # TestAttempt before Test: TestAttempt.test_id -> Test.id is ON DELETE
     # CASCADE, so deleting Test first would already remove these via the
     # DB itself, but every REPLACED table gets its own explicit delete here
@@ -504,6 +506,8 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                     source_ref=f"{section_row.id}:p.{tc.page + 1}",
                 )
             )
+        search_index.upsert_section_document(session, section_row)
+        search_index.upsert_lesson_document(session, section_row)
 
     any_extracted_ok = any(a.status == "extracted" for a in assets)
     course.status = "ready" if any_extracted_ok else "ingest_failed"

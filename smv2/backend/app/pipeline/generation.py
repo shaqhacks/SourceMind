@@ -26,6 +26,7 @@ from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
 from app.pipeline._common import report_progress_in_session as _report_progress_in_session
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
+from app.services import search_index
 
 _MAX_TOKENS = 4096
 
@@ -154,6 +155,7 @@ def _generate(session: Session, job: Job, section_id: str) -> dict[str, Any]:
     section.lesson_status = "ready"
     section.lesson_model = result.model
     section.lesson_prompt_version = prompt_version
+    search_index.upsert_lesson_document(session, section)
     # In-session (not report_progress): the section fields above are already
     # pending on this session — see report_progress_in_session's docstring.
     _report_progress_in_session(job, stage="done", pct=100, message="lesson ready")

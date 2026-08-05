@@ -3206,6 +3206,120 @@
         "title": "ReviewSummaryOut",
         "type": "object"
       },
+      "SearchResultOut": {
+        "properties": {
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
+          "course_id": {
+            "title": "Course Id",
+            "type": "string"
+          },
+          "cursor_token": {
+            "title": "Cursor Token",
+            "type": "string"
+          },
+          "doc_type": {
+            "enum": [
+              "section",
+              "lesson",
+              "note",
+              "highlight"
+            ],
+            "title": "Doc Type",
+            "type": "string"
+          },
+          "excerpt_md": {
+            "title": "Excerpt Md",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "source_locator": {
+            "$ref": "#/components/schemas/SourceLocatorOut"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc_type",
+          "course_id",
+          "section_id",
+          "asset_id",
+          "title",
+          "excerpt_md",
+          "source_locator",
+          "score",
+          "cursor_token"
+        ],
+        "title": "SearchResultOut",
+        "type": "object"
+      },
+      "SearchResultsOut": {
+        "properties": {
+          "backend": {
+            "enum": [
+              "fts5",
+              "like"
+            ],
+            "title": "Backend",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResultOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "sanitized_excerpts": {
+            "title": "Sanitized Excerpts",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor",
+          "backend",
+          "sanitized_excerpts"
+        ],
+        "title": "SearchResultsOut",
+        "type": "object"
+      },
       "SectionDetailOut": {
         "description": "page_start/page_end convention: see SectionOut's docstring above \u2014\nalready 1-based page numbers, ready to hand to a PDF viewer as-is.",
         "properties": {
@@ -4074,6 +4188,56 @@
           "relevance_md"
         ],
         "title": "SkillTaughtInOut",
+        "type": "object"
+      },
+      "SourceLocatorOut": {
+        "properties": {
+          "chapter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "slide": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slide"
+          }
+        },
+        "title": "SourceLocatorOut",
         "type": "object"
       },
       "SplitOp": {
@@ -6481,6 +6645,105 @@
         "summary": "Review Queue",
         "tags": [
           "review"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/search": {
+      "get": {
+        "operationId": "search_course",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Document Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResultsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Course",
+        "tags": [
+          "search"
         ]
       }
     },
