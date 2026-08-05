@@ -7,6 +7,8 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+from conftest import _course_profile_id
+
 from app.config import data_dir
 from app.db.engine import get_session
 from app.db.models import (
@@ -19,7 +21,6 @@ from app.db.models import (
     Section,
 )
 from app.jobs.worker import run_due_jobs_once
-from conftest import _course_profile_id
 
 
 def _create_course(client, title: str = "Import Reingest Course") -> str:

@@ -159,9 +159,10 @@ def test_export_includes_lesson_file_and_manifest_entry_when_ready(client, inges
     export silently held the reader's content hostage to the app, contrary
     to the brief's law that a user can always get their own content out.
     """
+    from conftest import _first_section_id
+
     from app.jobs.worker import run_due_jobs_once
     from app.llm.provider import CompletionResult
-    from conftest import _first_section_id
 
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     section_id = _first_section_id(client, course_id)
