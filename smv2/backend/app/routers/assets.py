@@ -106,7 +106,7 @@ def list_assets(course_id: str) -> list[AssetOut]:
 
 @asset_router.get("/{asset_id}/file", operation_id="get_asset_file")
 def get_asset_file(asset_id: str) -> FileResponse:
-    """Serves the original uploaded PDF as-is, for the reader's
+    """Serves the original uploaded source as-is, for the reader's
     original-source page view. Inline disposition keeps browser-viewable
     sources embedded where supported instead of forcing a download.
     """
