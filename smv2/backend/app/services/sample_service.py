@@ -141,10 +141,10 @@ async def seed_sample_course_if_first_run() -> None:
     onboarding aid, never something that should block the app from
     starting.
     """
-    if not sample_course_enabled():
-        return
     if _marker_path().exists():
         reconcile_sample_course_marker()
+        return
+    if not sample_course_enabled():
         return
     if _any_course_exists():
         return

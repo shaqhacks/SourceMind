@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import asyncio
 
+from fastapi.testclient import TestClient
+
 from app.config import data_dir
-from app.db.engine import get_session
+from app.db.engine import dispose_engine, get_session
+from app.db.init import init_db
 from app.db.models import Course
-from app.services import sample_service
+from app.main import create_app
+from app.services import courses_service, sample_service
 
 
 def _run_seed() -> None:
@@ -106,3 +110,27 @@ def test_reconcile_does_not_infer_sample_from_only_course(client):
         assert course.is_sample is False
     finally:
         session.close()
+
+
+def test_startup_reconciles_existing_marker_even_when_new_sample_seeding_disabled(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "existing-marker.db"
+    monkeypatch.setenv("SMV2_DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("SMV2_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SMV2_WORKER_ENABLED", "0")
+    monkeypatch.setenv("SMV2_BACKUPS_ENABLED", "0")
+    monkeypatch.setenv("SMV2_SAMPLE_COURSE_ENABLED", "0")
+    dispose_engine()
+    init_db()
+
+    course = courses_service.create_course("Previously seeded sample")
+    marker = data_dir() / "sample_seeded"
+    marker.write_text(f"seeded course_id={course.id} at 2026-08-05T12:00:00\n")
+
+    with TestClient(create_app()) as test_client:
+        row = next(course for course in test_client.get("/api/courses").json())
+        assert row["id"] == course.id
+        assert row["is_sample"] is True
+
+    dispose_engine()
