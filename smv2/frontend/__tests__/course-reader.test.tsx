@@ -352,6 +352,37 @@ describe("CourseReader", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("lets the transient outline own reader shortcuts until Escape closes it", async () => {
+    setViewport(768);
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    await user.click(screen.getByRole("button", { name: /show outline/i }));
+    const drawer = screen.getByRole("dialog", { name: "Chapter outline" });
+
+    await user.keyboard("{ArrowRight}jksco?");
+
+    expect(screen.getByRole("button", { name: /source/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(drawer).getByRole("button", { name: /chapter one/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.queryByRole("dialog", { name: "Course chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /edit outline/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /keyboard shortcuts/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog", { name: "Chapter outline" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Course chat" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show outline/i })).toHaveFocus();
+  });
+
   it("keeps the reader outline persistent at 1024px", async () => {
     setViewport(1024);
     render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);

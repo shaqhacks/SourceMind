@@ -60,7 +60,8 @@ function setViewport(width: number): void {
   window.dispatchEvent(new Event("resize"));
 }
 
-function renderShell(width: number) {
+function renderShell(width: number, pathname = "/search") {
+  mockPathname = pathname;
   setViewport(width);
   return render(
     <AppShell header={<SiteHeader />}>
@@ -112,6 +113,30 @@ describe("responsive shell", () => {
       "tablet",
     );
   });
+
+  it.each([
+    [320, "/course/abc", "mobile"],
+    [768, "/review", "tablet"],
+  ] as const)(
+    "opens transient app navigation at %ipx on panel-owning route %s",
+    async (width, pathname, layout) => {
+      const user = userEvent.setup();
+      renderShell(width, pathname);
+
+      expect(screen.queryByRole("navigation", { name: "App" })).not.toBeInTheDocument();
+      const trigger = screen.getByRole("button", { name: "Open navigation" });
+
+      await user.click(trigger);
+
+      const drawer = screen.getByRole("dialog", { name: "App navigation" });
+      expect(drawer).toHaveAttribute("data-layout", layout);
+      expect(within(drawer).getByRole("navigation", { name: "App" })).toBeInTheDocument();
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(screen.queryByRole("dialog", { name: "App navigation" })).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    },
+  );
 
   it("renders 1024px as the desktop persistent sidebar", () => {
     renderShell(1024);

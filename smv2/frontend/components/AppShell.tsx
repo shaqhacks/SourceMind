@@ -40,7 +40,7 @@ export default function AppShell({ header, children }: AppShellProps) {
   const layout = useShellLayout();
   const transientNavigation = layout !== "desktop";
   const { open, closeNavigation } = useShellNavigation();
-  const drawerOpen = withSidebar && transientNavigation && open;
+  const drawerOpen = transientNavigation && open;
   const drawerRef = useDialogFocus<HTMLDivElement>(drawerOpen);
   const drawerShellRef = useRef<HTMLDivElement>(null);
 

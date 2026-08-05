@@ -101,8 +101,9 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const shellLayout = useShellLayout();
   const transientReaderChrome = shellLayout !== "desktop";
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const outlineModalOpen = outlineOpen && transientReaderChrome;
   const outlineShellRef = useRef<HTMLDivElement>(null);
-  const outlineDialogRef = useDialogFocus<HTMLDivElement>(outlineOpen && transientReaderChrome);
+  const outlineDialogRef = useDialogFocus<HTMLDivElement>(outlineModalOpen);
   const { open: chatOpen, setOpen: setChatOpen, toggle: toggleChatOpen } = useChatOpenPref(
     course.id,
   );
@@ -291,19 +292,23 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const goPrevious = useCallback(() => goToOffset(-1), [goToOffset]);
   const toggleOutline = useCallback(() => {
     if (transientReaderChrome) {
-      setOutlineOpen((open) => !open);
+      if (outlineOpen) {
+        setOutlineOpen(false);
+      } else {
+        setChatOpen(false);
+        setNotesOpen(false);
+        setShortcutsOpen(false);
+        setOutlineEditorOpen(false);
+        setOutlineOpen(true);
+      }
       return;
     }
     toggleSidebar();
-  }, [transientReaderChrome, toggleSidebar]);
+  }, [outlineOpen, setChatOpen, transientReaderChrome, toggleSidebar]);
   const closeOutline = useCallback(() => setOutlineOpen(false), []);
 
   useEffect(() => {
-    if (!outlineOpen || !transientReaderChrome) return undefined;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") closeOutline();
-    }
+    if (!outlineModalOpen) return undefined;
 
     function handlePointerDown(event: PointerEvent) {
       if (
@@ -314,13 +319,11 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
       }
     }
 
-    document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("pointerdown", handlePointerDown);
     return () => {
-      document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [outlineOpen, transientReaderChrome, closeOutline]);
+  }, [outlineModalOpen, closeOutline]);
 
   // Direct id-based navigation (as opposed to goToOffset's relative
   // stepping) — the same id->index resolution `activeIndex`'s own useState
@@ -446,7 +449,8 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     c: toggleChat,
     o: openOutlineEditor,
     "?": openShortcuts,
-  });
+  }, !outlineModalOpen);
+  useKeyboardShortcuts({ escape: closeOutline }, outlineModalOpen);
 
   // Focus the chapter heading itself, not a state setter — a DOM
   // side-effect synchronizing with the (uncontrolled) focus system, which
@@ -502,7 +506,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
             chapterStats={chapterStats}
           />
         )}
-        {transientReaderChrome && outlineOpen && (
+        {outlineModalOpen && (
           <div className="fixed inset-0 z-40 bg-foreground/25">
             <div
               ref={outlineShellRef}
