@@ -1,0 +1,11 @@
+<!doctype html>
+<html>
+  <head><script>alert("head")</script></head>
+  <body onload="steal()">
+    <h1 onclick="steal()">安全な見出し</h1>
+    <p>Keep this text <a href="javascript:alert(1)" onmouseover="steal()">bad link</a>.</p>
+    <script>window.evil = true</script>
+    <img src=x onerror="steal()">
+    <p>Otro párrafo legible.</p>
+  </body>
+</html>

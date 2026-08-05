@@ -63,9 +63,12 @@ from app.pipeline.chunking import chunk_pages
 from app.pipeline.extract import PdfExtractionError, open_pdf
 from app.pipeline.html_conversion import html_dir
 from app.pipeline.import_adapters import (
+    PDF_FORMAT_NAME,
     PdfDocumentAdapter,
     UnsupportedSourceFormatError,
     choose_document_adapter,
+    sniff_pdf_path,
+    supported_adapters,
 )
 from app.pipeline.ingest_paths import images_dir_for_course
 from app.services import search_index
@@ -99,7 +102,10 @@ def _asset_page_count(asset: Asset) -> int:
     re-attempts opening them and marks them extract_failed on its own, so
     nothing here needs to duplicate that handling.
     """
-    doc = open_pdf(Path(asset.stored_path))
+    path = Path(asset.stored_path)
+    if not sniff_pdf_path(path):
+        return 1
+    doc = open_pdf(path)
     try:
         return doc.page_count
     finally:
@@ -107,15 +113,22 @@ def _asset_page_count(asset: Asset) -> int:
 
 
 def _document_adapter_for_asset(asset: Asset, *, on_batch=None):
+    configured_pdf = PdfDocumentAdapter(
+        window=pages_per_window(),
+        skip_front_matter=_skip_front_matter_enabled(),
+        on_batch=on_batch,
+    )
+    adapters = [
+        configured_pdf,
+        *[
+            adapter
+            for adapter in supported_adapters()
+            if getattr(adapter, "format_name", None) != PDF_FORMAT_NAME
+        ],
+    ]
     return choose_document_adapter(
         asset,
-        adapters=[
-            PdfDocumentAdapter(
-                window=pages_per_window(),
-                skip_front_matter=_skip_front_matter_enabled(),
-                on_batch=on_batch,
-            )
-        ],
+        adapters=adapters,
     )
 
 

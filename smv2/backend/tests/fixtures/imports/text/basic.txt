@@ -1,0 +1,5 @@
+First paragraph introduces the lesson.
+
+Second paragraph includes español, 中文, and العربية.
+
+Third paragraph closes the lesson.

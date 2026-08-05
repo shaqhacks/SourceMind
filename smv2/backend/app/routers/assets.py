@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from app.config import max_upload_bytes
+from app.pipeline.import_adapters import UNSUPPORTED_SOURCE_FORMAT_CODE
 from app.schemas import AssetOut
 from app.services import assets_service, courses_service, html_pages_service
 from app.services.assets_service import (
@@ -37,6 +38,8 @@ def _extension_for_source(source_format: str | None, media_type: str | None) -> 
     normalized_media = (media_type or "").lower()
     if normalized_format == "markdown" or normalized_media in {"text/markdown", "text/x-markdown"}:
         return ".md"
+    if normalized_format == "html" or normalized_media == "text/html":
+        return ".html"
     if normalized_format in {"text", "plain_text"} or normalized_media == "text/plain":
         return ".txt"
     if normalized_format == "pdf" or normalized_media == "application/pdf":
@@ -90,7 +93,12 @@ async def upload_asset(course_id: str, request: Request, file: UploadFile) -> As
             file,
         )
     except UnsupportedFileTypeError as exc:
-        raise HTTPException(status_code=415, detail=str(exc)) from exc
+        detail: str | dict[str, str]
+        if str(exc) == UNSUPPORTED_SOURCE_FORMAT_CODE:
+            detail = {"code": UNSUPPORTED_SOURCE_FORMAT_CODE}
+        else:
+            detail = str(exc)
+        raise HTTPException(status_code=415, detail=detail) from exc
     except FileTooLargeError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
 

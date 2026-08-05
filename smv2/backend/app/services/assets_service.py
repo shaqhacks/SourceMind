@@ -1,4 +1,4 @@
-"""Asset upload: content-sniffed PDF validation, on-disk storage, Asset row.
+"""Asset upload: content-sniffed validation, on-disk storage, Asset row.
 
 Framework-free-ish — `file` only needs to expose an async `read(n) -> bytes`
 method (FastAPI's UploadFile satisfies this duck type). Validation is by
@@ -18,14 +18,11 @@ from typing import Protocol
 from app.config import data_dir, max_upload_bytes
 from app.db.engine import get_session
 from app.db.models import Asset
+from app.pipeline.import_adapters import (
+    UnsupportedSourceFormatError,
+    enabled_upload_format,
+)
 
-_PDF_MAGIC = b"%PDF-"
-_PDF_SOURCE_FORMAT = "pdf"
-_PDF_MEDIA_TYPE = "application/pdf"
-# fitz itself tolerates the %PDF- marker appearing anywhere in roughly the
-# first 1KB (some PDFs are preceded by junk bytes/comments) rather than
-# strictly at offset 0 — match that same tolerance here.
-_MAGIC_SNIFF_WINDOW = 1024
 _CHUNK_SIZE = 1024 * 1024  # 1MB
 
 
@@ -47,12 +44,10 @@ async def save_upload(course_id: str, filename: str, content_type: str, file: _A
     asset_id = str(uuid.uuid4())
     assets_dir = data_dir() / "assets" / course_id
     assets_dir.mkdir(parents=True, exist_ok=True)
-    stored_path = assets_dir / f"{asset_id}.pdf"
+    stored_path = assets_dir / f"{asset_id}.upload"
 
     sha256_hash = hashlib.sha256()
     total_bytes = 0
-    sniff_buffer = b""
-    magic_confirmed = False
 
     with stored_path.open("wb") as out:
         while True:
@@ -65,23 +60,17 @@ async def save_upload(course_id: str, filename: str, content_type: str, file: _A
                 stored_path.unlink(missing_ok=True)
                 raise FileTooLargeError(f"file exceeds max upload size of {max_bytes} bytes")
 
-            if not magic_confirmed:
-                sniff_buffer += chunk
-                if len(sniff_buffer) >= _MAGIC_SNIFF_WINDOW:
-                    if _PDF_MAGIC not in sniff_buffer[:_MAGIC_SNIFF_WINDOW]:
-                        stored_path.unlink(missing_ok=True)
-                        raise UnsupportedFileTypeError(
-                            "file is not a PDF (no %PDF- marker in first 1KB)"
-                        )
-                    magic_confirmed = True
-
             sha256_hash.update(chunk)
             out.write(chunk)
 
-    if not magic_confirmed and _PDF_MAGIC not in sniff_buffer:
-        # File was smaller than the sniff window in total.
+    try:
+        detected = enabled_upload_format(stored_path)
+    except UnsupportedSourceFormatError as exc:
         stored_path.unlink(missing_ok=True)
-        raise UnsupportedFileTypeError("file is not a PDF (no %PDF- marker in first 1KB)")
+        raise UnsupportedFileTypeError(str(exc)) from exc
+
+    final_path = stored_path.with_suffix(detected.extension)
+    stored_path.rename(final_path)
 
     session = get_session()
     try:
@@ -90,11 +79,11 @@ async def save_upload(course_id: str, filename: str, content_type: str, file: _A
             course_id=course_id,
             filename=filename,
             content_type=content_type,
-            source_format=_PDF_SOURCE_FORMAT,
-            media_type=_PDF_MEDIA_TYPE,
+            source_format=detected.source_format,
+            media_type=detected.media_type,
             size_bytes=total_bytes,
             sha256=sha256_hash.hexdigest(),
-            stored_path=str(stored_path),
+            stored_path=str(final_path),
             status="stored",
         )
         session.add(asset)

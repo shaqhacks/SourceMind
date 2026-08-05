@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,10 +31,19 @@ PDF_FORMAT_NAME = "pdf"
 PDF_MEDIA_TYPE = "application/pdf"
 PDF_MAGIC = b"%PDF-"
 MAGIC_SNIFF_WINDOW = 1024
+TEXT_SNIFF_WINDOW = 64 * 1024
+UNSUPPORTED_SOURCE_FORMAT_CODE = "unsupported_source_format"
 
 
 class UnsupportedSourceFormatError(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class DetectedSourceFormat:
+    source_format: str
+    media_type: str
+    extension: str
 
 
 class DocumentAdapter(Protocol):
@@ -79,6 +89,11 @@ def sniff_pdf_path(path: Path) -> bool:
             return PDF_MAGIC in fh.read(MAGIC_SNIFF_WINDOW)
     except OSError:
         return False
+
+
+def _flag_enabled(name: str) -> bool:
+    raw = os.environ.get(name, "0")
+    return raw.strip().lower() not in {"", "0", "false", "no", "off"}
 
 
 class PdfDocumentAdapter:
@@ -189,7 +204,73 @@ class PdfDocumentAdapter:
 
 
 def supported_adapters() -> list[DocumentAdapter]:
-    return [PdfDocumentAdapter()]
+    adapters: list[DocumentAdapter] = [PdfDocumentAdapter()]
+    if _flag_enabled("SMV2_IMPORT_HTML_EXPERIMENTAL"):
+        from app.pipeline.html_adapter import HtmlDocumentAdapter
+
+        adapters.append(HtmlDocumentAdapter())
+    if _flag_enabled("SMV2_IMPORT_MARKDOWN_EXPERIMENTAL"):
+        from app.pipeline.markdown_adapter import MarkdownDocumentAdapter
+
+        adapters.append(MarkdownDocumentAdapter())
+    if _flag_enabled("SMV2_IMPORT_TEXT_EXPERIMENTAL"):
+        from app.pipeline.text_adapter import TextDocumentAdapter
+
+        adapters.append(TextDocumentAdapter())
+    return adapters
+
+
+def candidate_upload_formats(path: Path) -> list[DetectedSourceFormat]:
+    if sniff_pdf_path(path):
+        return [DetectedSourceFormat(PDF_FORMAT_NAME, PDF_MEDIA_TYPE, ".pdf")]
+
+    try:
+        with path.open("rb") as fh:
+            sample = fh.read(TEXT_SNIFF_WINDOW)
+        text = sample.decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    from app.pipeline.html_adapter import (
+        HTML_FORMAT_NAME,
+        HTML_MEDIA_TYPE,
+        looks_like_html_text,
+    )
+    from app.pipeline.markdown_adapter import (
+        MARKDOWN_FORMAT_NAME,
+        MARKDOWN_MEDIA_TYPE,
+        looks_like_markdown_text,
+    )
+    from app.pipeline.text_adapter import (
+        TEXT_FORMAT_NAME,
+        TEXT_MEDIA_TYPE,
+        looks_like_text_bytes,
+    )
+
+    if looks_like_html_text(text):
+        return [DetectedSourceFormat(HTML_FORMAT_NAME, HTML_MEDIA_TYPE, ".html")]
+    if looks_like_markdown_text(text):
+        return [DetectedSourceFormat(MARKDOWN_FORMAT_NAME, MARKDOWN_MEDIA_TYPE, ".md")]
+    if looks_like_text_bytes(sample[:4096]):
+        return [DetectedSourceFormat(TEXT_FORMAT_NAME, TEXT_MEDIA_TYPE, ".txt")]
+    return []
+
+
+def enabled_upload_format(path: Path) -> DetectedSourceFormat:
+    candidates = candidate_upload_formats(path)
+    if not candidates:
+        raise UnsupportedSourceFormatError(UNSUPPORTED_SOURCE_FORMAT_CODE)
+
+    candidate = candidates[0]
+    required_flags = {
+        "html": "SMV2_IMPORT_HTML_EXPERIMENTAL",
+        "markdown": "SMV2_IMPORT_MARKDOWN_EXPERIMENTAL",
+        "text": "SMV2_IMPORT_TEXT_EXPERIMENTAL",
+    }
+    flag = required_flags.get(candidate.source_format)
+    if flag is not None and not _flag_enabled(flag):
+        raise UnsupportedSourceFormatError(UNSUPPORTED_SOURCE_FORMAT_CODE)
+    return candidate
 
 
 def choose_document_adapter(
@@ -198,4 +279,4 @@ def choose_document_adapter(
     for adapter in adapters if adapters is not None else supported_adapters():
         if adapter.sniff(asset):
             return adapter
-    raise UnsupportedSourceFormatError(f"unsupported source format for asset {asset.id!r}")
+    raise UnsupportedSourceFormatError(UNSUPPORTED_SOURCE_FORMAT_CODE)
