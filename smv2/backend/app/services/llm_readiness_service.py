@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app import config
+from app.llm.probe import probe_provider
 
 _SECRET_RE = re.compile(r"(sk-[A-Za-z0-9_-]+|[A-Za-z0-9_-]{20,})")
 _last_check: dict[str, Any] | None = None
@@ -54,15 +55,29 @@ def check_payload() -> dict[str, Any]:
         }
         return dict(_last_check)
 
+    probe = probe_provider(provider_name)
+    if not probe.available:
+        _last_check = {
+            "provider": provider_name,
+            "model": model,
+            "configured": True,
+            "available": False,
+            "capabilities": _capabilities(provider_name, False),
+            "last_checked_at": checked_at,
+            "failure_category": "provider_error",
+            "remediation": _redact(probe.failure or "") or _remediation(provider_name),
+        }
+        return dict(_last_check)
+
     _last_check = {
         "provider": provider_name,
         "model": model,
         "configured": True,
-        "available": False,
-        "capabilities": _capabilities(provider_name, False),
+        "available": True,
+        "capabilities": _capabilities(provider_name, True),
         "last_checked_at": checked_at,
-        "failure_category": "configured_unverified",
-        "remediation": "Configuration is present; generation will verify connectivity without a metered preflight call.",
+        "failure_category": None,
+        "remediation": None,
     }
     return dict(_last_check)
 

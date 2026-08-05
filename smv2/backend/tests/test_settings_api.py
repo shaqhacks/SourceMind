@@ -78,7 +78,15 @@ def test_settings_clear_removes_only_selected_provider_credential(client):
     assert secrets["ollama_base_url"] == "http://127.0.0.1:11434"
 
 
-def test_settings_check_flow_reports_ready_after_local_ollama_selection(client, stub_provider):
+def test_settings_check_flow_reports_ready_after_local_ollama_selection(client, monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(
+        "app.llm.probe.httpx.get",
+        lambda url, *, timeout: FakeResponse(),
+    )
     headers = _csrf_headers(client)
     put_resp = client.put(
         "/api/settings",
@@ -97,6 +105,5 @@ def test_settings_check_flow_reports_ready_after_local_ollama_selection(client, 
     body = check_resp.json()
     assert body["provider"] == "ollama"
     assert body["model"] == "llama3.2"
-    assert body["available"] is False
-    assert body["failure_category"] == "configured_unverified"
-    assert stub_provider.call_count == 0
+    assert body["available"] is True
+    assert body["failure_category"] is None
