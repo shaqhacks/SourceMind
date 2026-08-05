@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from hashlib import sha256
 from typing import Any
 
 from app import config
@@ -20,6 +21,9 @@ class LlmReadinessUnavailableError(Exception):
 def status_payload() -> dict[str, Any]:
     provider = config.llm_provider()
     model = config.llm_model()
+    identity = _config_identity(provider, model)
+    if _last_check is not None and _last_check.get("identity") == identity:
+        return _public_payload(_last_check)
     configured, category, remediation = _configured_state(provider)
     available = configured
     capabilities = _capabilities(provider, available)
@@ -40,6 +44,7 @@ def check_payload() -> dict[str, Any]:
     global _last_check
     provider_name = config.llm_provider()
     model = config.llm_model()
+    identity = _config_identity(provider_name, model)
     configured, category, remediation = _configured_state(provider_name)
     checked_at = datetime.now(timezone.utc).isoformat()
     if not configured:
@@ -52,8 +57,9 @@ def check_payload() -> dict[str, Any]:
             "last_checked_at": checked_at,
             "failure_category": category,
             "remediation": remediation,
+            "identity": identity,
         }
-        return dict(_last_check)
+        return _public_payload(_last_check)
 
     probe = probe_provider(provider_name)
     if not probe.available:
@@ -64,10 +70,11 @@ def check_payload() -> dict[str, Any]:
             "available": False,
             "capabilities": _capabilities(provider_name, False),
             "last_checked_at": checked_at,
-            "failure_category": "provider_error",
+            "failure_category": "unreachable",
             "remediation": _redact(probe.failure or "") or _remediation(provider_name),
+            "identity": identity,
         }
-        return dict(_last_check)
+        return _public_payload(_last_check)
 
     _last_check = {
         "provider": provider_name,
@@ -78,8 +85,9 @@ def check_payload() -> dict[str, Any]:
         "last_checked_at": checked_at,
         "failure_category": None,
         "remediation": None,
+        "identity": identity,
     }
-    return dict(_last_check)
+    return _public_payload(_last_check)
 
 
 def assert_ready_for_generation() -> None:
@@ -109,6 +117,25 @@ def settings_summary() -> dict[str, Any]:
         "failure_category": payload["failure_category"],
         "remediation": payload["remediation"],
     }
+
+
+def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key != "identity"}
+
+
+def _config_identity(provider: str, model: str) -> str:
+    if provider == "anthropic":
+        credential = config.anthropic_api_key() or ""
+        material = f"{provider}\0{model}\0{_digest(credential)}"
+    elif provider == "ollama":
+        material = f"{provider}\0{model}\0{config.ollama_base_url()}"
+    else:
+        material = f"{provider}\0{model}"
+    return sha256(material.encode("utf-8")).hexdigest()
+
+
+def _digest(value: str) -> str:
+    return sha256(value.encode("utf-8")).hexdigest()
 
 
 def _configured_state(provider: str) -> tuple[bool, str | None, str | None]:
