@@ -557,7 +557,10 @@ def test_due_card_recommendations_ignore_another_learners_schedule(client):
     assert response_a.status_code == 200
     assert response_b.status_code == 200
     assert any(
-        item["reason"] == "due_cards" and item["detail"]["due_count"] == 5
+        item["reason"] == "new_cards"
+        and item["detail"]["new_count"] == 5
+        and item["detail"]["overdue_count"] == 0
         for item in response_a.json()
     )
     assert all(item["reason"] != "due_cards" for item in response_b.json())
+    assert all(item["reason"] != "new_cards" for item in response_b.json())
