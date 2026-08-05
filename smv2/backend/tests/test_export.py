@@ -111,6 +111,44 @@ def test_export_assets_use_sanitized_original_filenames_with_deterministic_colli
     ]
 
 
+def test_export_asset_filenames_normalize_reserved_trailing_and_collision_cases(client):
+    """Catches ZIP entries that are unsafe on Windows or after extraction."""
+    course_resp = client.post("/api/courses", json={"title": "Export Reserved Names"})
+    assert course_resp.status_code == 201
+    course_id = course_resp.json()["id"]
+    uploads: list[tuple[str, bytes, str]] = [
+        ("CON.pdf", b"%PDF-1.7\nreserved con\n", "assets/CON-source.pdf"),
+        ("aux.PDF", b"%PDF-1.7\nreserved aux\n", "assets/aux-source.pdf"),
+        ("COM1.pdf", b"%PDF-1.7\nreserved com\n", "assets/COM1-source.pdf"),
+        ("Lpt9.pdf", b"%PDF-1.7\nreserved lpt\n", "assets/Lpt9-source.pdf"),
+        ("Chapter One. .pdf", b"%PDF-1.7\ntrailing punctuation\n", "assets/Chapter-One.pdf"),
+        ("../Chapter One?.pdf", b"%PDF-1.7\ncollision after normalization\n", "assets/Chapter-One-2.pdf"),
+    ]
+    uploaded = []
+
+    for filename, content, _expected_name in uploads:
+        response = client.post(
+            f"/api/courses/{course_id}/assets",
+            files={"file": (filename, content, "application/pdf")},
+        )
+        assert response.status_code == 201
+        uploaded.append(response.json())
+
+    resp = client.get(f"/api/courses/{course_id}/export")
+    assert resp.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        asset_names = [asset["file"] for asset in manifest["assets"]]
+        assert asset_names == [expected_name for *_rest, expected_name in uploads]
+        assert len(asset_names) == len({name.lower() for name in asset_names})
+        assert all(".." not in name and not name.rstrip("/").endswith((".", " ")) for name in asset_names)
+        for (_filename, content, expected_name), body in zip(uploads, uploaded):
+            assert zf.read(expected_name) == content
+            manifest_asset = next(asset for asset in manifest["assets"] if asset["id"] == body["id"])
+            assert manifest_asset["file"] == expected_name
+
+
 def test_export_404_for_missing_course(client):
     resp = client.get("/api/courses/does-not-exist/export")
     assert resp.status_code == 404

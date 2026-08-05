@@ -27,6 +27,14 @@ from app.services import highlights_service, notes_service
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_WINDOWS_RESERVED_BASENAMES = {
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    *(f"com{index}" for index in range(1, 10)),
+    *(f"lpt{index}" for index in range(1, 10)),
+}
 # Exports over this size spill from memory to a temp file automatically.
 _SPOOL_MAX_BYTES = 10 * 1024 * 1024
 
@@ -60,13 +68,15 @@ def _extension_for_source(source_format: str | None, media_type: str | None) -> 
 
 def _sanitize_asset_filename(asset: Asset) -> str:
     original_name = Path(asset.filename or "asset").name
-    cleaned = _UNSAFE_FILENAME_CHARS_RE.sub("-", original_name).strip("-") or "asset"
+    cleaned = _UNSAFE_FILENAME_CHARS_RE.sub("-", original_name)
     if "." in cleaned:
         stem, current_ext = cleaned.rsplit(".", 1)
-        stem = stem or "asset"
-        current_ext = f".{current_ext.lower()}"
+        current_ext = f".{current_ext.lower()}" if current_ext.strip(" .-") else ""
     else:
         stem, current_ext = cleaned, ""
+    stem = stem.strip(" .-") or "asset"
+    if stem.lower() in _WINDOWS_RESERVED_BASENAMES:
+        stem = f"{stem}-source"
     expected_ext = _extension_for_source(asset.source_format, asset.media_type)
     return f"{stem}{current_ext if current_ext == expected_ext else expected_ext}"
 
@@ -76,13 +86,13 @@ def _asset_export_names(assets: list[Asset]) -> dict[str, str]:
     export_names: dict[str, str] = {}
     for asset in assets:
         sanitized = _sanitize_asset_filename(asset)
-        stem, ext = Path(sanitized).stem, Path(sanitized).suffix
+        stem, ext = Path(sanitized).stem.rstrip(" .-") or "asset", Path(sanitized).suffix
         candidate = sanitized
         suffix = 2
-        while candidate in used:
+        while candidate.lower() in used:
             candidate = f"{stem}-{suffix}{ext}"
             suffix += 1
-        used.add(candidate)
+        used.add(candidate.lower())
         export_names[asset.id] = f"assets/{candidate}"
     return export_names
 
