@@ -362,8 +362,13 @@ git commit -m "feat(smv2): add archive import adapters after review"
 
 **Files:**
 - Modify: `backend/app/pipeline/import_adapters.py`
+- Modify: `backend/app/pipeline/source_locators.py`
+- Modify: `backend/app/pipeline/outline.py`
+- Modify: `backend/app/services/outline_service.py`
 - Modify: `backend/app/services/export_service.py`
 - Modify: `backend/tests/test_simple_import_adapters.py`
+- Modify: `backend/tests/test_outline_edit.py`
+- Modify: `backend/tests/test_source_locators.py`
 - Modify if the archive gate opened: `backend/tests/test_archive_import_adapters.py`
 - Create: `frontend/lib/importFormats.ts`
 - Modify: `frontend/app/page.tsx`
@@ -386,6 +391,7 @@ git commit -m "feat(smv2): add archive import adapters after review"
 - Dashboard and sidebar picker/drop entry points use one shared supported-format policy; supported files never silently disappear, and blocked archive formats get a visible “not supported yet” explanation.
 - Upload/outline status and empty-state copy are format-neutral; PDF/bookmark wording appears only when it is true.
 - Pages mode is available only for sections with PDF page provenance, not merely any `asset_id`; non-PDF courses never open into a dead Pages pane, including persisted view preferences and keyboard cycling.
+- Outline-edit responses preserve source metadata. PDF split/merge operations rebuild truthful page locators; same-source non-PDF merges use an ordered composite locator; cross-asset/cross-format/conflicting-extractor merges are rejected atomically rather than fabricating provenance.
 - Split-at-page is unavailable when a section has no page range.
 - The stable backend `unsupported_source_format` code maps to actionable student-facing copy.
 - Export keeps byte-identical source assets and exposes discoverable original filenames without permitting traversal or silent filename collisions.
@@ -421,6 +427,8 @@ Expected: PASS end to end.
 Before removing the simple-format flags, add RED regressions proving representative DOCX, PPTX, EPUB, and generic ZIP magic receive the stable 415 response even when text import is enabled. Reject archive/container magic before the permissive plain-text fallback; do not inspect or parse the archive while ADR-029 is closed.
 
 Enable Markdown, text, and HTML by default, rerun the focused backend suite, then remove their temporary flags and keep the four implemented adapters unconditional. Update export naming/provenance only as needed to preserve byte-identical assets under discoverable sanitized original names with deterministic collision handling.
+
+Repair outline-edit provenance before the reader consumes the stricter Pages predicate: rename/reorder responses must include the stored source fields; PDF split/merge must preserve asset/format/extractor data and rebuild page locators; same-source non-PDF merges must retain all ordered source locators through a composite locator; incompatible merges must fail atomically.
 
 - [ ] **Step 3: Complete the student-facing import journey**
 
