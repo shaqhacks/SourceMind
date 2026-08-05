@@ -4,7 +4,7 @@ import hashlib
 import io
 import json
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import data_dir
@@ -117,7 +117,7 @@ def test_reingest_changes_only_changed_section_and_preserves_surviving_state(cli
                 course_learning_profile_id=profile_id,
                 card_id=card.id,
                 course_id=course_id,
-                due_at=datetime.now(timezone.utc),
+                due_at=datetime.now(UTC),
                 interval_days=4.0,
                 ease=2.7,
                 reps=3,
