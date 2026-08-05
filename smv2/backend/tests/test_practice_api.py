@@ -107,7 +107,7 @@ def test_get_practice_assessment_reports_not_started_without_side_effect(client)
         session.close()
 
 
-def test_start_practice_assessment_starts_lazy_generation(client):
+def test_start_practice_assessment_starts_lazy_generation(client, stub_provider):
     session = get_session()
     try:
         course, practice, _answers, _content = _seed_practice_chapter(session)
@@ -145,7 +145,7 @@ def test_start_practice_assessment_starts_lazy_generation(client):
         session.close()
 
 
-def test_start_practice_assessment_reuses_existing_run(client):
+def test_start_practice_assessment_reuses_existing_run(client, stub_provider):
     session = get_session()
     try:
         course, practice, _answers, _content = _seed_practice_chapter(session)
@@ -297,7 +297,7 @@ def test_get_practice_assessment_reports_failed_linked_job_without_mutating_run(
         session.close()
 
 
-def test_start_practice_assessment_retries_failed_linked_job_with_new_job(client):
+def test_start_practice_assessment_retries_failed_linked_job_with_new_job(client, stub_provider):
     session = get_session()
     try:
         course, practice, _answers, _content = _seed_practice_chapter(session)
@@ -348,7 +348,7 @@ def test_start_practice_assessment_retries_failed_linked_job_with_new_job(client
         session.close()
 
 
-def test_start_practice_assessment_retries_failed_run_with_new_job(client):
+def test_start_practice_assessment_retries_failed_run_with_new_job(client, stub_provider):
     session = get_session()
     try:
         course, practice, _answers, _content = _seed_practice_chapter(session)
