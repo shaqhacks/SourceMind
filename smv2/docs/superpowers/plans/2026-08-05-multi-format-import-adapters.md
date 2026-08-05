@@ -361,19 +361,34 @@ git commit -m "feat(smv2): add archive import adapters after review"
 ### Task 5: Final verification and rollout cleanup
 
 **Files:**
-- Modify: `backend/app/config.py`
-- Modify: `backend/app/main.py`
-- Modify: `backend/app/routers/assets.py`
 - Modify: `backend/app/pipeline/import_adapters.py`
-- Modify: `backend/app/services/assets_service.py`
 - Modify: `backend/app/services/export_service.py`
-- Modify: `backend/tests/test_asset_upload.py`
 - Modify: `backend/tests/test_simple_import_adapters.py`
 - Modify if the archive gate opened: `backend/tests/test_archive_import_adapters.py`
+- Create: `frontend/lib/importFormats.ts`
+- Modify: `frontend/app/page.tsx`
+- Modify: `frontend/components/AppSidebar.tsx`
+- Modify: `frontend/components/dashboard/CourseCard.tsx`
+- Modify: `frontend/components/upload/UploadFlow.tsx`
+- Modify: `frontend/components/upload/OutlineConfirmation.tsx`
+- Modify: `frontend/components/reader/CourseReader.tsx`
+- Modify: `frontend/lib/reader/types.ts`
+- Modify: `frontend/lib/api/errors.ts`
+- Modify: `frontend/__tests__/page.test.tsx`
+- Modify: `frontend/__tests__/app-sidebar.test.tsx`
+- Modify: `frontend/__tests__/upload-flow.test.tsx`
+- Modify: `frontend/__tests__/outline-confirmation.test.tsx`
+- Modify: `frontend/__tests__/course-reader.test.tsx`
 
 **Interfaces:**
 - PDF, Markdown, text, and HTML are the stable default set once the simple-format stage is complete; with ADR-029's gate closed, DOCX, PPTX, and EPUB remain stable 415 unsupported inputs.
 - The rollout keeps the per-adapter flags in place only long enough to prove the new formats under targeted, full, and manual end-to-end verification, then removes them.
+- Dashboard and sidebar picker/drop entry points use one shared supported-format policy; supported files never silently disappear, and blocked archive formats get a visible “not supported yet” explanation.
+- Upload/outline status and empty-state copy are format-neutral; PDF/bookmark wording appears only when it is true.
+- Pages mode is available only for sections with PDF page provenance, not merely any `asset_id`; non-PDF courses never open into a dead Pages pane, including persisted view preferences and keyboard cycling.
+- Split-at-page is unavailable when a section has no page range.
+- The stable backend `unsupported_source_format` code maps to actionable student-facing copy.
+- Export keeps byte-identical source assets and exposes discoverable original filenames without permitting traversal or silent filename collisions.
 
 - [ ] **Step 1: Run the exact verification chain**
 
@@ -401,18 +416,36 @@ Run:
 ```
 Expected: PASS end to end.
 
-- [ ] **Step 2: Enable every implemented non-PDF adapter by default and perform the complete manual local smoke**
+- [ ] **Step 2: Close backend rollout and archive-sniffing gaps**
 
-After changing every implemented non-PDF adapter flag to enabled-by-default, rerun the focused import suite, OpenAPI/client generation, frontend suite, and `./build.sh` from Step 1. Then run `./dev.sh` in a dedicated terminal session. Import one PDF, Markdown, text, and HTML asset from the deterministic fixture corpus. For each implemented format, verify readable ordered sections, the correct locator type, source navigation, export provenance, and unaffected processing of a second valid file when the first file is malformed. Repeat hostile HTML and confirm safe rejection without partial course corruption. Verify representative DOCX, PPTX, and EPUB bytes still receive the stable 415 response without parser execution while ADR-029 remains closed. Stop the dedicated dev session before any later build or release command.
+Before removing the simple-format flags, add RED regressions proving representative DOCX, PPTX, EPUB, and generic ZIP magic receive the stable 415 response even when text import is enabled. Reject archive/container magic before the permissive plain-text fallback; do not inspect or parse the archive while ADR-029 is closed.
 
-Expected: every enabled-by-default adapter completes its student journey without a rollback-triggering defect; PDF extraction snapshots remain unchanged.
+Enable Markdown, text, and HTML by default, rerun the focused backend suite, then remove their temporary flags and keep the four implemented adapters unconditional. Update export naming/provenance only as needed to preserve byte-identical assets under discoverable sanitized original names with deterministic collision handling.
 
-- [ ] **Step 3: Remove the temporary rollout flags**
+- [ ] **Step 3: Complete the student-facing import journey**
 
-Once the targeted/full gates and enabled-by-default manual smoke are green, remove the three implemented simple-format rollout guards and keep PDF/Markdown/text/HTML enabled unconditionally. Do not add archive rollout guards while the archive gate is closed.
+Add one shared frontend import-format helper and use it in the dashboard and sidebar picker/drop paths. The helper must accept PDF/Markdown/text/HTML by supported extension and MIME hints for picker ergonomics while leaving authoritative content detection to the backend. Rejected/blocked files must remain visible with actionable feedback rather than being silently filtered away.
 
-Commit the cleanup as the final branch commit:
+Make UploadFlow status and outline copy format-neutral; use returned asset format metadata where useful. Hide Split for sections without page ranges. Preserve `source_format`/`source_locator` in reader section state and make Pages availability require PDF page provenance. Add tests for picker/drop coverage, blocked archives, upload error detail mapping, non-PDF persisted-pages fallback/keyboard cycling, and null-page outline actions.
+
+- [ ] **Step 4: Perform the complete manual local smoke**
+
+After the backend and frontend rollout changes, rerun the focused import suites, OpenAPI/client generation, frontend suite, and `./build.sh` from Step 1. Then run `./dev.sh` in a dedicated terminal session. Import one PDF, Markdown, text, and HTML asset from the deterministic fixture corpus through the real HTTP/UI path where available. For each implemented format, verify readable ordered sections, the correct locator type, source navigation, export provenance, and unaffected processing of a second valid file when the first file is malformed. Repeat hostile HTML and confirm safe rejection without partial course corruption. Verify representative DOCX, PPTX, and EPUB bytes receive the stable 415 response and actionable UI copy without parser execution while ADR-029 remains closed. Stop the dedicated dev session before any later build or release command.
+
+Expected: every implemented adapter completes its student journey without a rollback-triggering defect; PDF extraction snapshots remain unchanged.
+
+- [ ] **Step 5: Commit the final rollout in independently reviewable lanes**
+
+Keep backend adapter/archive/export changes separate from frontend journey changes so each can be reviewed and reverted independently. Do not add archive rollout guards while the archive gate is closed.
+
+Commit the backend cleanup:
 ```bash
-git add backend/app/config.py backend/app/main.py backend/app/routers/assets.py backend/app/pipeline/import_adapters.py backend/app/services/assets_service.py backend/app/services/export_service.py backend/tests/test_asset_upload.py backend/tests/test_simple_import_adapters.py openapi.json frontend/lib/api/schema.d.ts
-git commit -m "chore(smv2): finalize multi-format import rollout"
+git add backend/app/pipeline/import_adapters.py backend/app/services/export_service.py backend/tests/test_simple_import_adapters.py
+git commit -m "chore(smv2): finalize import adapter rollout"
+```
+
+Commit the frontend journey separately:
+```bash
+git add frontend/lib/importFormats.ts frontend/app/page.tsx frontend/components/AppSidebar.tsx frontend/components/dashboard/CourseCard.tsx frontend/components/upload/UploadFlow.tsx frontend/components/upload/OutlineConfirmation.tsx frontend/components/reader/CourseReader.tsx frontend/lib/reader/types.ts frontend/lib/api/errors.ts frontend/__tests__/page.test.tsx frontend/__tests__/app-sidebar.test.tsx frontend/__tests__/upload-flow.test.tsx frontend/__tests__/outline-confirmation.test.tsx frontend/__tests__/course-reader.test.tsx
+git commit -m "feat(smv2): expose multi-format import to students"
 ```
