@@ -2451,6 +2451,70 @@
         "title": "NoteUpdateIn",
         "type": "object"
       },
+      "OllamaModelsDiscoverIn": {
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "configured_model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured Model"
+          }
+        },
+        "title": "OllamaModelsDiscoverIn",
+        "type": "object"
+      },
+      "OllamaModelsDiscoverOut": {
+        "properties": {
+          "configured_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured Model"
+          },
+          "configured_model_available": {
+            "title": "Configured Model Available",
+            "type": "boolean"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models",
+          "configured_model",
+          "configured_model_available"
+        ],
+        "title": "OllamaModelsDiscoverOut",
+        "type": "object"
+      },
       "OutlineEditRequest": {
         "properties": {
           "operations": {
@@ -8665,6 +8729,47 @@
           }
         },
         "summary": "Bootstrap",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/ollama/models": {
+      "post": {
+        "operationId": "discover_models_api_settings_ollama_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OllamaModelsDiscoverIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OllamaModelsDiscoverOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discover Models",
         "tags": [
           "settings"
         ]

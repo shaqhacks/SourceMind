@@ -38,6 +38,8 @@ export type LlmStatusOut = components["schemas"]["LlmStatusOut"];
 export type SettingsOut = components["schemas"]["SettingsOut"];
 export type SettingsUpdateIn = components["schemas"]["SettingsUpdateIn"];
 export type SettingsClearIn = components["schemas"]["SettingsClearIn"];
+export type OllamaModelsDiscoverIn = components["schemas"]["OllamaModelsDiscoverIn"];
+export type OllamaModelsDiscoverOut = components["schemas"]["OllamaModelsDiscoverOut"];
 export type CardOut = components["schemas"]["CardOut"];
 export type UpdateCardIn = components["schemas"]["UpdateCardIn"];
 export type GenerateCardsOut = components["schemas"]["GenerateCardsOut"];
@@ -201,6 +203,15 @@ export async function clearProviderSecret(
   return request(client.DELETE("/api/settings", {
     headers: await csrfHeaders(),
     body: { provider, confirmation },
+  }));
+}
+
+export async function discoverOllamaModels(
+  body: OllamaModelsDiscoverIn,
+): Promise<ApiResult<OllamaModelsDiscoverOut>> {
+  return request(client.POST("/api/settings/ollama/models", {
+    headers: await csrfHeaders(),
+    body,
   }));
 }
 

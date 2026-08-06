@@ -160,20 +160,41 @@ describe("settings CSRF helpers", () => {
     await api.getSettings();
     await api.saveSettings({ provider: "anthropic", model: "claude", credentials: {} });
     await api.clearProviderSecret("anthropic", "clear anthropic credential");
+    await api.discoverOllamaModels({
+      base_url: "http://localhost:11434",
+      configured_model: "llama3.2:latest",
+    });
 
-    const requests = fetchSpy.mock.calls.map(([input, init]) => ({
+    const requestBody = async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input instanceof Request) {
+        return input.body ? input.clone().json() : undefined;
+      }
+      if (typeof init?.body === "string") return JSON.parse(init.body);
+      return init?.body;
+    };
+    const requests = await Promise.all(fetchSpy.mock.calls.map(async ([input, init]) => ({
       url: input instanceof Request ? input.url : String(input),
       method: input instanceof Request ? input.method : init?.method,
       cache: input instanceof Request ? input.cache : init?.cache,
       csrfToken: input instanceof Request
         ? input.headers.get("X-CSRF-Token")
         : new Headers(init?.headers).get("X-CSRF-Token"),
-    }));
+      body: await requestBody(input, init),
+    })));
 
     expect(requests[0]).toMatchObject({ url: "http://localhost:8000/api/settings", method: "GET" });
     expect(fetchSpy).toHaveBeenNthCalledWith(2, "http://localhost:8000/api/settings/bootstrap", expect.objectContaining({ cache: "no-store" }));
     expect(requests[2]).toMatchObject({ url: "http://localhost:8000/api/settings", method: "PUT", csrfToken: "token-123" });
     expect(requests[3]).toMatchObject({ url: "http://localhost:8000/api/settings", method: "DELETE", csrfToken: "token-123" });
+    expect(requests[4]).toMatchObject({
+      url: "http://localhost:8000/api/settings/ollama/models",
+      method: "POST",
+      csrfToken: "token-123",
+      body: {
+        base_url: "http://localhost:11434",
+        configured_model: "llama3.2:latest",
+      },
+    });
     expect(localStorage.getItem("csrf_token")).toBeNull();
     expect(sessionStorage.getItem("csrf_token")).toBeNull();
     expect(JSON.stringify(fetchSpy.mock.calls)).not.toContain("localStorage");

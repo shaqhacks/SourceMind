@@ -1147,6 +1147,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/ollama/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discover Models */
+        post: operations["discover_models_api_settings_ollama_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tests/{attempt_id}": {
         parameters: {
             query?: never;
@@ -2083,6 +2100,22 @@ export interface components {
         NoteUpdateIn: {
             /** Note Md */
             note_md?: string | null;
+        };
+        /** OllamaModelsDiscoverIn */
+        OllamaModelsDiscoverIn: {
+            /** Base Url */
+            base_url?: string | null;
+            /** Configured Model */
+            configured_model?: string | null;
+        };
+        /** OllamaModelsDiscoverOut */
+        OllamaModelsDiscoverOut: {
+            /** Configured Model */
+            configured_model: string | null;
+            /** Configured Model Available */
+            configured_model_available: boolean;
+            /** Models */
+            models: string[];
         };
         /** OutlineEditRequest */
         OutlineEditRequest: {
@@ -5525,6 +5558,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsBootstrapOut"];
+                };
+            };
+        };
+    };
+    discover_models_api_settings_ollama_models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OllamaModelsDiscoverIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OllamaModelsDiscoverOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
