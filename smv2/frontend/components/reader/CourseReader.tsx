@@ -171,10 +171,14 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const activeSection = sections[safeActiveIndex];
 
   // "pages" (the original PDF via pdf.js) needs PDF page provenance on
-  // the active section. A stored "pages" preference for a text/HTML/Markdown
-  // course degrades to Source instead of opening an empty PDF pane.
+  // the active section. With no persisted preference yet, PDF-backed
+  // sections open in Pages, while text/HTML/Markdown starts in Source.
+  // The derived first-open default is runtime-only; persistence still
+  // happens only through explicit user changes.
   const pagesAvailable = hasPdfPageProvenance(activeSection);
-  const mode: ViewMode = storedMode === "pages" && !pagesAvailable ? "source" : storedMode;
+  const preferredMode: ViewMode = storedMode ?? (pagesAvailable ? "pages" : "source");
+  const mode: ViewMode =
+    preferredMode === "pages" && !pagesAvailable ? "source" : preferredMode;
 
   useProgressSync(course.id, activeSection.id, columnRef);
 

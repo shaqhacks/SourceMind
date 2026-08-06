@@ -13,8 +13,6 @@ import type { ViewMode } from "@/lib/reader/types";
  * compare by value already), so this is simpler.
  */
 const VALID_MODES = new Set<string>(["source", "pages", "lesson"]);
-const DEFAULT_MODE: ViewMode = "source";
-
 function storageKey(courseId: string): string {
   return `smv2.readerView.${courseId}`;
 }
@@ -23,19 +21,19 @@ function isViewMode(value: string | null): value is ViewMode {
   return value !== null && VALID_MODES.has(value);
 }
 
-function readStoredMode(courseId: string): ViewMode {
-  if (typeof window === "undefined") return DEFAULT_MODE;
+function readStoredMode(courseId: string): ViewMode | null {
+  if (typeof window === "undefined") return null;
   let raw: string | null;
   try {
     raw = window.localStorage.getItem(storageKey(courseId));
   } catch {
     raw = null;
   }
-  return isViewMode(raw) ? raw : DEFAULT_MODE;
+  return isViewMode(raw) ? raw : null;
 }
 
-function getServerSnapshot(): ViewMode {
-  return DEFAULT_MODE;
+function getServerSnapshot(): ViewMode | null {
+  return null;
 }
 
 // Module-level pub/sub, same idiom as useTheme.ts/reviewBus.ts: any
@@ -62,8 +60,8 @@ function persist(courseId: string, mode: ViewMode): void {
 }
 
 export interface UseReaderViewResult {
-  /** The last view mode persisted for this course, or "source" if none yet. */
-  storedMode: ViewMode;
+  /** The last view mode persisted for this course, or null if none yet. */
+  storedMode: ViewMode | null;
   setStoredMode: (mode: ViewMode) => void;
 }
 
