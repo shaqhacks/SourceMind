@@ -295,6 +295,9 @@ def test_normalize_ollama_base_url_accepts_only_canonical_loopback(raw, expected
         "http://[fe80::1]:11434",
         "http://192.168.1.10:11434",
         "http://8.8.8.8:11434",
+        "http://localhost:0",
+        "http://localhost:000",
+        "http://localhost:",
         "http://localhost:notaport",
     ],
 )

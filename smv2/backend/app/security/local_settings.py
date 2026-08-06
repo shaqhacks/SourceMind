@@ -29,10 +29,16 @@ def normalize_ollama_base_url(value: str) -> str:
     ):
         raise ValueError("Ollama base URL must be an HTTP loopback origin")
 
+    if parsed.netloc.endswith(":"):
+        raise ValueError("Ollama base URL must use a valid port")
     try:
-        port = parsed.port or 11434
+        port = parsed.port
     except ValueError as exc:
         raise ValueError("Ollama base URL must use a valid port") from exc
+    if port is None:
+        port = 11434
+    if not 1 <= port <= 65535:
+        raise ValueError("Ollama base URL must use a valid port")
 
     hostname = parsed.hostname.lower()
     if hostname == "localhost" or hostname == "127.0.0.1":
