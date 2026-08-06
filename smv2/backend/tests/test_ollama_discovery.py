@@ -7,8 +7,8 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 
-from app.services import ollama_discovery_service
-from app.services.ollama_discovery_service import (
+from app.llm import ollama_discovery_service
+from app.llm.ollama_discovery_service import (
     OllamaDiscoveryError,
     discover_ollama_models,
 )
@@ -88,6 +88,33 @@ async def test_service_preserves_exact_model_identifier_when_deduplicating_case_
     )
 
     assert models == ["alpha:latest", "Beta:Latest"]
+
+
+async def test_service_limits_concurrent_model_metadata_requests_to_four():
+    in_flight = 0
+    max_in_flight = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal in_flight, max_in_flight
+        if request.url.path == "/api/tags":
+            return _json_response(
+                {"models": [{"name": f"model-{index}"} for index in range(9)]}
+            )
+        if request.url.path == "/api/show":
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            return _json_response({"capabilities": ["completion"]})
+        raise AssertionError(f"unexpected request path {request.url.path}")
+
+    models = await discover_ollama_models(
+        "http://127.0.0.1:11434",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert len(models) == 9
+    assert max_in_flight == 4
 
 
 async def test_service_enforces_response_cap_while_streaming_before_full_body_buffer():

@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from app.config import data_dir
 from app.routers import settings as settings_router
-from app.services.ollama_discovery_service import OllamaDiscoveryError
+from app.llm.ollama_discovery_service import OllamaDiscoveryError
 
 
 def _csrf_headers(client) -> dict[str, str]:

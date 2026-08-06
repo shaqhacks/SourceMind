@@ -20,7 +20,7 @@ from app.security.local_settings import (
 )
 from app.services import llm_readiness_service
 from app.services import local_settings_service
-from app.services.ollama_discovery_service import (
+from app.llm.ollama_discovery_service import (
     OllamaDiscoveryError,
     discover_ollama_models,
 )

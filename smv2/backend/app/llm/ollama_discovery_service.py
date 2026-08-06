@@ -8,6 +8,7 @@ import httpx
 
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _MAX_TAGS = 100
+_MAX_CONCURRENT_SHOW_REQUESTS = 4
 _TOTAL_DISCOVERY_TIMEOUT = 5.0
 _HTTP_TIMEOUT = httpx.Timeout(5.0, connect=1.0, read=5.0)
 
@@ -32,13 +33,11 @@ async def discover_ollama_models(
             ) as client:
                 tags = await _request_json(client, "GET", "/api/tags")
                 tag_names = _parse_tag_names(tags)
-                semaphore = asyncio.Semaphore(4)
 
                 async def is_completion_model(name: str) -> bool:
-                    async with semaphore:
-                        show = await _request_json(
-                            client, "POST", "/api/show", json={"name": name}
-                        )
+                    show = await _request_json(
+                        client, "POST", "/api/show", json={"name": name}
+                    )
                     capabilities = (
                         show.get("capabilities") if isinstance(show, dict) else None
                     )
@@ -52,9 +51,18 @@ async def discover_ollama_models(
                         )
                     return "completion" in {item.lower() for item in capabilities}
 
-                checks = await asyncio.gather(
-                    *(is_completion_model(name) for name in tag_names)
-                )
+                checks: list[bool] = []
+                for batch_start in range(
+                    0, len(tag_names), _MAX_CONCURRENT_SHOW_REQUESTS
+                ):
+                    batch_names = tag_names[
+                        batch_start : batch_start + _MAX_CONCURRENT_SHOW_REQUESTS
+                    ]
+                    checks.extend(
+                        await asyncio.gather(
+                            *(is_completion_model(name) for name in batch_names)
+                        )
+                    )
     except TimeoutError:
         raise OllamaDiscoveryError(
             "ollama_timeout",
