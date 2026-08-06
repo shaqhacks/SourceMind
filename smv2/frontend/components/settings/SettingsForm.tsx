@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import Button from "@/components/ui/Button";
 import {
   checkLlmStatus,
   clearProviderSecret,
+  discoverOllamaModels,
   saveSettings,
   type LlmStatusOut,
+  type OllamaModelsDiscoverIn,
   type SettingsOut,
 } from "@/lib/api/client";
 import { describeError } from "@/lib/api/errors";
@@ -18,13 +20,41 @@ export interface SettingsFormProps {
 }
 
 function editingEnabled(settings: SettingsOut): boolean {
-  return settings.rollout.local_settings_enabled && process.env.NEXT_PUBLIC_SMV2_AI_READINESS_UI === "1";
+  return settings.rollout.local_settings_enabled;
 }
 
 function readinessLabel(readiness: LlmStatusOut): string {
   if (readiness.available) return "Ready";
   if (!readiness.configured) return "Not configured";
   return "Unavailable";
+}
+
+type OllamaDiscoveryState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "loaded"; models: string[]; configuredModelAvailable: boolean }
+  | { kind: "error"; category: string | null; message: string };
+
+const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
+const MISSING_CONFIGURED_MODEL_MESSAGE =
+  "The saved Ollama model is not installed locally. Select an installed model before saving.";
+
+function ollamaErrorCategory(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const detail = "detail" in error ? (error as { detail?: unknown }).detail : error;
+  if (!detail || typeof detail !== "object") return null;
+  const category = "failure_category" in detail ? (detail as { failure_category?: unknown }).failure_category : null;
+  return typeof category === "string" ? category : null;
+}
+
+function ollamaErrorMessage(category: string | null): string {
+  if (category === "ollama_invalid_url") return "Ollama base URL must be an HTTP loopback origin.";
+  if (category === "ollama_timeout") return "Ollama did not respond before the request timed out.";
+  if (category === "ollama_unreachable") return "Ollama could not be reached.";
+  if (category === "ollama_no_models" || category === "ollama_no_completion_models") {
+    return "Ollama did not report any completion-capable models.";
+  }
+  return "Ollama returned an invalid discovery response.";
 }
 
 export default function SettingsForm({ settings, onSettings }: SettingsFormProps) {
@@ -35,15 +65,62 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
   const [model, setModel] = useState(settings.model);
   const [anthropicKey, setAnthropicKey] = useState("");
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState("");
+  const [ollamaDiscovery, setOllamaDiscovery] = useState<OllamaDiscoveryState>({ kind: "idle" });
   const [confirmation, setConfirmation] = useState("");
   const [status, setStatus] = useState<LlmStatusOut>(settings.readiness);
   const [message, setMessage] = useState<string | null>(null);
+  const inFlightDiscovery = useRef<Promise<void> | null>(null);
+  const discoveryRequestId = useRef(0);
+  const didInitialOllamaDiscovery = useRef(false);
   const clearPhrase = `clear ${provider} credential`;
+  const ollamaModels = ollamaDiscovery.kind === "loaded" ? ollamaDiscovery.models : [];
+  const canSave =
+    canEdit &&
+    (provider === "anthropic" ||
+      (ollamaDiscovery.kind === "loaded" && ollamaModels.includes(model)));
+
+  const refreshOllamaModels = useCallback((body?: OllamaModelsDiscoverIn) => {
+    if (inFlightDiscovery.current) return inFlightDiscovery.current;
+
+    const requestId = discoveryRequestId.current + 1;
+    discoveryRequestId.current = requestId;
+    setOllamaDiscovery((current) => (current.kind === "loaded" ? current : { kind: "loading" }));
+
+    const baseUrl = body && "base_url" in body ? body.base_url : (ollamaBaseUrl.trim() || null);
+    const configuredModel = body && "configured_model" in body ? body.configured_model : (model || null);
+    const discovery = discoverOllamaModels({
+      base_url: baseUrl,
+      configured_model: configuredModel,
+    }).then((result) => {
+      if (discoveryRequestId.current !== requestId) return;
+      if (result.data) {
+        const models = result.data.models;
+        const configuredModelAvailable = result.data.configured_model_available;
+        setOllamaDiscovery({ kind: "loaded", models, configuredModelAvailable });
+        setModel((currentModel) => (models.includes(currentModel) ? currentModel : ""));
+        return;
+      }
+      const category = ollamaErrorCategory(result.error);
+      setOllamaDiscovery({ kind: "error", category, message: ollamaErrorMessage(category) });
+      setModel("");
+    }).finally(() => {
+      if (inFlightDiscovery.current === discovery) inFlightDiscovery.current = null;
+    });
+
+    inFlightDiscovery.current = discovery;
+    return discovery;
+  }, [model, ollamaBaseUrl]);
+
+  useEffect(() => {
+    if (provider !== "ollama" || didInitialOllamaDiscovery.current) return;
+    didInitialOllamaDiscovery.current = true;
+    void refreshOllamaModels({ base_url: null, configured_model: settings.model || null });
+  }, [provider, refreshOllamaModels, settings.model]);
 
   async function handleSave() {
     const credentials: Record<string, string> = {};
     if (anthropicKey) credentials.anthropic_api_key = anthropicKey;
-    if (ollamaBaseUrl) credentials.ollama_base_url = ollamaBaseUrl;
+    if (provider === "ollama" && ollamaBaseUrl) credentials.ollama_base_url = ollamaBaseUrl;
     const result = await saveSettings({ provider, model, credentials });
     if (result.data) {
       onSettings(result.data);
@@ -51,6 +128,7 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
       setMessage("Settings saved.");
       setAnthropicKey("");
       setOllamaBaseUrl("");
+      setOllamaDiscovery(provider === "ollama" ? ollamaDiscovery : { kind: "idle" });
       return;
     }
     setMessage(describeError(result.status, "Saving settings").message);
@@ -78,6 +156,35 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
     setMessage(describeError(result.status, "Clearing credential").message);
   }
 
+  function handleProviderChange(nextProvider: "anthropic" | "ollama") {
+    setProvider(nextProvider);
+    setMessage(null);
+    if (nextProvider === "ollama") {
+      const baseUrl = ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL;
+      didInitialOllamaDiscovery.current = true;
+      setModel("");
+      setOllamaBaseUrl(baseUrl);
+      void refreshOllamaModels({ base_url: baseUrl, configured_model: null });
+      return;
+    }
+    setOllamaDiscovery({ kind: "idle" });
+    setModel(settings.provider === "anthropic" ? settings.model : "");
+  }
+
+  function handleOllamaBaseUrlChange(value: string) {
+    discoveryRequestId.current += 1;
+    inFlightDiscovery.current = null;
+    setOllamaBaseUrl(value);
+    setModel("");
+    setOllamaDiscovery({ kind: "idle" });
+  }
+
+  const showMissingConfiguredModel =
+    provider === "ollama" &&
+    ollamaDiscovery.kind === "loaded" &&
+    !ollamaDiscovery.configuredModelAvailable &&
+    !model;
+
   return (
     <div className="flex flex-col gap-5">
       <section className="rounded-md border border-divider bg-surface-raised p-4">
@@ -87,7 +194,7 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
             Provider
             <select
               value={provider}
-              onChange={(event) => setProvider(event.target.value as "anthropic" | "ollama")}
+              onChange={(event) => handleProviderChange(event.target.value as "anthropic" | "ollama")}
               disabled={!canEdit}
               className="rounded-md border border-border bg-background p-2"
             >
@@ -97,18 +204,45 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium">
             Model
-            <input
-              value={model}
-              onChange={(event) => setModel(event.target.value)}
-              disabled={!canEdit}
-              className="rounded-md border border-border bg-background p-2"
-            />
+            {provider === "ollama" ? (
+              <select
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                onPointerDown={() => void refreshOllamaModels({ configured_model: model || null })}
+                disabled={!canEdit}
+                className="rounded-md border border-border bg-background p-2"
+              >
+                <option value="">Select an installed model</option>
+                {ollamaModels.map((ollamaModel) => (
+                  <option key={ollamaModel} value={ollamaModel}>{ollamaModel}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                disabled={!canEdit}
+                className="rounded-md border border-border bg-background p-2"
+              />
+            )}
           </label>
         </div>
         <p className="mt-3 text-sm">
           Readiness: <strong>{readinessLabel(status)}</strong>
         </p>
         {status.remediation && <p className="mt-1 text-sm text-muted-foreground">{status.remediation}</p>}
+        {provider === "ollama" && ollamaDiscovery.kind === "loading" && (
+          <p className="mt-1 text-sm text-muted-foreground">Loading installed Ollama models...</p>
+        )}
+        {provider === "ollama" && ollamaDiscovery.kind === "loaded" && ollamaModels.length === 0 && (
+          <p className="mt-1 text-sm text-muted-foreground">{ollamaErrorMessage("ollama_no_completion_models")}</p>
+        )}
+        {showMissingConfiguredModel && (
+          <p className="mt-1 text-sm text-muted-foreground">{MISSING_CONFIGURED_MODEL_MESSAGE}</p>
+        )}
+        {provider === "ollama" && ollamaDiscovery.kind === "error" && (
+          <p className="mt-1 text-sm text-muted-foreground">{ollamaDiscovery.message}</p>
+        )}
       </section>
 
       <section className="rounded-md border border-divider bg-surface-raised p-4">
@@ -132,7 +266,7 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
             Ollama base URL
             <input
               value={ollamaBaseUrl}
-              onChange={(event) => setOllamaBaseUrl(event.target.value)}
+              onChange={(event) => handleOllamaBaseUrlChange(event.target.value)}
               disabled={!canEdit}
               className="rounded-md border border-border bg-background p-2"
             />
@@ -149,7 +283,7 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
           />
         </label>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button variant="primary" onClick={() => void handleSave()} disabled={!canEdit}>
+          <Button variant="primary" onClick={() => void handleSave()} disabled={!canSave}>
             Save settings
           </Button>
           <Button onClick={() => void handleCheck()}>Test connection</Button>

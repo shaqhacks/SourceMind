@@ -6,6 +6,7 @@ import SettingsPage from "@/app/settings/page";
 import {
   checkLlmStatus,
   clearProviderSecret,
+  discoverOllamaModels,
   getSettings,
   saveSettings,
   type SettingsOut,
@@ -19,6 +20,7 @@ vi.mock("@/lib/api/client", async (importOriginal) => {
     checkLlmStatus: vi.fn(),
     saveSettings: vi.fn(),
     clearProviderSecret: vi.fn(),
+    discoverOllamaModels: vi.fn(),
   };
 });
 
@@ -26,6 +28,9 @@ const mockedGetSettings = vi.mocked(getSettings);
 const mockedCheckLlmStatus = vi.mocked(checkLlmStatus);
 const mockedSaveSettings = vi.mocked(saveSettings);
 const mockedClearProviderSecret = vi.mocked(clearProviderSecret);
+const mockedDiscoverOllamaModels = vi.mocked(discoverOllamaModels);
+
+const missingConfiguredModelMessage = "The saved Ollama model is not installed locally. Select an installed model before saving.";
 
 function makeSettings(overrides: Partial<SettingsOut> = {}): SettingsOut {
   return {
@@ -61,6 +66,15 @@ describe("SettingsPage", () => {
         credentials_present: { anthropic: false, ollama: false },
         credentials: {},
       }),
+    });
+    mockedDiscoverOllamaModels.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: {
+        models: ["gemma3:4b", "llama3.2:latest"],
+        configured_model: "llama3.2:latest",
+        configured_model_available: true,
+      },
     });
   });
 
@@ -105,13 +119,16 @@ describe("SettingsPage", () => {
     expect(mockedClearProviderSecret).toHaveBeenCalledWith("anthropic", "clear anthropic credential");
   });
 
-  it("keeps credential inputs disabled when the rollout flag is off", async () => {
-    process.env.NEXT_PUBLIC_SMV2_AI_READINESS_UI = "0";
+  it("enables settings controls from the backend rollout without the build-time UI flag", async () => {
+    delete process.env.NEXT_PUBLIC_SMV2_AI_READINESS_UI;
 
     render(<SettingsPage />);
 
-    expect(await screen.findByLabelText(/anthropic api key/i)).toBeDisabled();
-    expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
+    expect(await screen.findByLabelText(/provider/i)).toBeEnabled();
+    expect(screen.getByLabelText(/model/i)).toBeEnabled();
+    expect(screen.getByLabelText(/anthropic api key/i)).toBeEnabled();
+    expect(screen.getByLabelText(/ollama base url/i)).toBeEnabled();
+    expect(screen.getByRole("button", { name: /save settings/i })).toBeEnabled();
   });
 
   it("clears all credential-like inputs after a successful save", async () => {
@@ -127,6 +144,153 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(mockedSaveSettings).toHaveBeenCalledTimes(1));
     expect(anthropicInput).toHaveValue("");
     expect(ollamaInput).toHaveValue("");
+  });
+
+  it("discovers Ollama models with the default first-time URL when switching providers", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+
+    await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(1));
+    expect(mockedDiscoverOllamaModels).toHaveBeenCalledWith({
+      base_url: "http://localhost:11434",
+      configured_model: null,
+    });
+  });
+
+  it("refreshes Ollama discovery on dropdown pointer interaction after the initial request", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+    await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(1));
+
+    await user.pointer({ keys: "[MouseLeft>]", target: screen.getByLabelText(/model/i) });
+
+    await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(2));
+  });
+
+  it("coalesces concurrent Ollama discovery triggers while a request is in flight", async () => {
+    const user = userEvent.setup();
+    let resolveDiscovery: typeof mockedDiscoverOllamaModels extends { mockResolvedValue: (value: infer T) => unknown } ? (value: T) => void : never;
+    const pendingDiscovery = new Promise<Awaited<ReturnType<typeof discoverOllamaModels>>>((resolve) => {
+      resolveDiscovery = resolve;
+    });
+    mockedDiscoverOllamaModels.mockReturnValue(pendingDiscovery);
+    render(<SettingsPage />);
+
+    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+    await user.pointer({ keys: "[MouseLeft>]", target: screen.getByLabelText(/model/i) });
+
+    expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(1);
+    resolveDiscovery!({
+      status: 200,
+      ok: true,
+      data: {
+        models: ["gemma3:4b"],
+        configured_model: null,
+        configured_model_available: true,
+      },
+    });
+  });
+
+  it("leaves a missing configured Ollama model absent, blank, and unsavable", async () => {
+    mockedGetSettings.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: makeSettings({
+        provider: "ollama",
+        model: "missing:latest",
+        credentials_present: { anthropic: true, ollama: true },
+        credentials: { anthropic_api_key: "[redacted]", ollama_base_url: "[redacted]" },
+      }),
+    });
+    mockedDiscoverOllamaModels.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: {
+        models: ["gemma3:4b", "llama3.2:latest"],
+        configured_model: "missing:latest",
+        configured_model_available: false,
+      },
+    });
+
+    render(<SettingsPage />);
+
+    expect(await screen.findByText(missingConfiguredModelMessage)).toBeInTheDocument();
+    const modelSelect = screen.getByLabelText(/model/i);
+    expect(modelSelect).toHaveValue("");
+    expect(screen.queryByRole("option", { name: "missing:latest" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
+  });
+
+  it.each([
+    ["ollama_no_models", "Ollama did not report any completion-capable models."],
+    ["ollama_no_completion_models", "Ollama did not report any completion-capable models."],
+    ["ollama_invalid_url", "Ollama base URL must be an HTTP loopback origin."],
+    ["ollama_timeout", "Ollama did not respond before the request timed out."],
+    ["ollama_unreachable", "Ollama could not be reached."],
+    ["ollama_invalid_response", "Ollama returned an invalid discovery response."],
+  ])("shows safe Ollama discovery copy for %s without raw upstream details", async (category, message) => {
+    const user = userEvent.setup();
+    mockedDiscoverOllamaModels.mockResolvedValue({
+      status: category === "ollama_invalid_response" ? 502 : 503,
+      ok: false,
+      error: {
+        detail: {
+          failure_category: category,
+          message: `RAW UPSTREAM BODY: ${message}`,
+        },
+      },
+    });
+    render(<SettingsPage />);
+
+    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(/raw upstream body/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
+  });
+
+  it("clears Ollama model discovery when the base URL changes and rediscovers the edited URL", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+    await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(1));
+    await user.selectOptions(screen.getByLabelText(/model/i), "gemma3:4b");
+    await user.clear(screen.getByLabelText(/ollama base url/i));
+    await user.type(screen.getByLabelText(/ollama base url/i), "http://127.0.0.1:11434");
+
+    expect(screen.getByLabelText(/model/i)).toHaveValue("");
+    expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
+
+    await user.pointer({ keys: "[MouseLeft>]", target: screen.getByLabelText(/model/i) });
+
+    await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenLastCalledWith({
+      base_url: "http://127.0.0.1:11434",
+      configured_model: null,
+    }));
+  });
+
+  it("saves Ollama settings only after selecting a currently discovered model", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+    await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
+
+    await user.selectOptions(screen.getByLabelText(/model/i), "llama3.2:latest");
+    await user.click(screen.getByRole("button", { name: /save settings/i }));
+
+    await waitFor(() => expect(mockedSaveSettings).toHaveBeenCalledTimes(1));
+    expect(mockedSaveSettings).toHaveBeenCalledWith({
+      provider: "ollama",
+      model: "llama3.2:latest",
+      credentials: { ollama_base_url: "http://localhost:11434" },
+    });
   });
 });
 
