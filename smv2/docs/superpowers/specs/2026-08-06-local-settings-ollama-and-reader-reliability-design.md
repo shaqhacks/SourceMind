@@ -1,7 +1,7 @@
 # Local Settings, Ollama Discovery, and Reader Reliability Design
 
-**Date:** 2026-08-06  
-**Status:** Approved for implementation  
+**Date:** 2026-08-06
+**Status:** Approved for implementation
 **Scope:** Close the user-facing failures found in the every-page audit, add safe Ollama model discovery, and make PDF Pages the correct first-open reader experience.
 
 ## Outcome
@@ -228,4 +228,3 @@ Frontend copy may evolve, but routing depends on category. Provider-configuratio
 - Immediate provider failures show the remediation and Settings route instead of only `HTTP 503`.
 - A first-open PDF-backed course uses Pages; saved reader choices remain unchanged.
 - Targeted and full verification gates pass without relying on retries or increased global timeouts.
-
