@@ -419,6 +419,17 @@ class SettingsClearIn(BaseModel):
     confirmation: str
 
 
+class OllamaModelsDiscoverIn(BaseModel):
+    base_url: str | None = Field(default=None, max_length=2048)
+    configured_model: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class OllamaModelsDiscoverOut(BaseModel):
+    models: list[str]
+    configured_model: str | None
+    configured_model_available: bool
+
+
 class SettingsOut(BaseModel):
     provider: str
     model: str
