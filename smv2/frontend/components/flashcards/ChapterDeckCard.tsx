@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
-import { describeError } from "@/lib/api/errors";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   findActiveCardsJob,
   generateCards,
@@ -63,7 +64,7 @@ export default function ChapterDeckCard({
   const hasStartedRef = useRef(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [discoveredJobId, setDiscoveredJobId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<FetchError | null>(null);
 
   const hasCards = cards.length > 0;
   const firstSectionId = sectionIds[0] ?? null;
@@ -109,7 +110,7 @@ export default function ChapterDeckCard({
       for (const id of sectionIds) notifyCardsSettled(id);
       return;
     }
-    generateCards(next).then(({ data, status }) => {
+    generateCards(next).then(({ data, status, error }) => {
       if (data) {
         setActiveJobId(data.job_id);
         setDiscoveredJobId(null);
@@ -119,7 +120,7 @@ export default function ChapterDeckCard({
         findActiveCardsJob(next).then((found) => setDiscoveredJobId(found?.id ?? null));
         return;
       }
-      setActionError(describeError(status, "Starting flashcard generation").message);
+      setActionError(describeError(status, "Starting flashcard generation", error));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [done, job?.status]);
@@ -130,7 +131,7 @@ export default function ChapterDeckCard({
     const [first, ...rest] = sectionIds;
     remainingSectionsRef.current = rest;
     hasStartedRef.current = true;
-    const { data, status } = await generateCards(first);
+    const { data, status, error } = await generateCards(first);
     if (data) {
       setActiveJobId(data.job_id);
       return;
@@ -140,7 +141,7 @@ export default function ChapterDeckCard({
       setDiscoveredJobId(found?.id ?? null);
       return;
     }
-    setActionError(describeError(status, "Starting flashcard generation").message);
+    setActionError(describeError(status, "Starting flashcard generation", error));
   }
 
   if (hasCards) {
@@ -224,7 +225,13 @@ export default function ChapterDeckCard({
           </Button>
         </>
       )}
-      {actionError && <span className="text-xs text-red-600 dark:text-red-400">{actionError}</span>}
+      {actionError && (
+        <RecoveryBanner
+          message={actionError.message}
+          onRetry={() => void handleGenerate()}
+          errorDetail={actionError.detail}
+        />
+      )}
     </div>
   );
 }

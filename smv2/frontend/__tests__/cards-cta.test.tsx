@@ -8,7 +8,9 @@ import {
   generateCards,
   getJob,
   listCards,
+  type ApiResult,
   type CardOut,
+  type GenerateCardsOut,
   type JobOut,
 } from "@/lib/api/client";
 
@@ -141,6 +143,34 @@ describe("CardsCTA", () => {
 
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
     expect(screen.queryByText(/failed/i)).not.toBeInTheDocument();
+  });
+
+  it("routes immediate structured provider readiness failures to Settings without starting a job stream", async () => {
+    mockedListCards.mockResolvedValue(ok([]));
+    mockedGenerateCards.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: {
+        detail: {
+          code: "llm_readiness_unavailable",
+          failure_category: "missing_credentials",
+          message: "LLM provider is not ready",
+          remediation: "Configure an available model in Settings.",
+        },
+      },
+    } satisfies ApiResult<GenerateCardsOut>);
+
+    const user = userEvent.setup();
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate flashcards/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("LLM provider is not ready");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(mockedGetJob).not.toHaveBeenCalled();
   });
 
   it("routes structured provider readiness failures to Settings and hides retry", async () => {
