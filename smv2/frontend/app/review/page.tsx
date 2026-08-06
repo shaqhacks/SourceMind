@@ -117,6 +117,22 @@ type SessionState =
   | { kind: "active" }
   | { kind: "done" };
 
+function courseOverdueCount(course: ReviewSummaryOut["courses"][number]): number {
+  return course.overdue_count;
+}
+
+function courseAvailableCount(course: ReviewSummaryOut["courses"][number]): number {
+  return course.available_count;
+}
+
+function summaryOverdueCount(summary: ReviewSummaryOut): number {
+  return summary.courses.reduce((total, course) => total + courseOverdueCount(course), 0);
+}
+
+function summaryAvailableCount(summary: ReviewSummaryOut): number {
+  return summary.courses.reduce((total, course) => total + courseAvailableCount(course), 0);
+}
+
 function ReviewPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -247,7 +263,12 @@ function ReviewPageInner() {
     Promise.all([getReviewQueue(id, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(id, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
-        setChooserState({ kind: "ready", due: review.data.due, new: review.data.new, total: review.data.total + questionCount });
+        setChooserState({
+          kind: "ready",
+          due: review.data.overdue_count,
+          new: review.data.new_count,
+          total: review.data.available_count + questionCount,
+        });
       } else {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
       }
@@ -261,7 +282,12 @@ function ReviewPageInner() {
       if (!active) return;
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
-        setChooserState({ kind: "ready", due: review.data.due, new: review.data.new, total: review.data.total + questionCount });
+        setChooserState({
+          kind: "ready",
+          due: review.data.overdue_count,
+          new: review.data.new_count,
+          total: review.data.available_count + questionCount,
+        });
       } else {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
       }
@@ -329,19 +355,26 @@ function ReviewPageInner() {
     if (phase !== "bootstrapping-due" || !courseId) return;
     clearStoredSession();
     let active = true;
-    getReviewQueue(courseId, MAX_QUEUE_FETCH).then(({ data, status }) => {
+    Promise.all([getReviewQueue(courseId, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
       if (!active) return;
-      if (!data) {
-        setChooserState({ kind: "error", error: describeError(status, "Loading review queue") });
+      if (!review.data) {
+        setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
         setPhase("chooser");
         return;
       }
-      if (data.due === 0) {
-        setChooserState({ kind: "ready", due: data.due, new: data.new, total: data.total });
+      const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
+      const availableTotal = review.data.available_count + questionCount;
+      if (review.data.overdue_count === 0) {
+        setChooserState({
+          kind: "ready",
+          due: review.data.overdue_count,
+          new: review.data.new_count,
+          total: availableTotal,
+        });
         setPhase("chooser");
         return;
       }
-      startSession(data.due);
+      startSession(review.data.overdue_count);
     });
     return () => {
       active = false;
@@ -464,7 +497,7 @@ function ReviewPageInner() {
           />
         </div>
       );
-    } else if (hubState.summary.due_total === 0) {
+    } else if (summaryAvailableCount(hubState.summary) === 0) {
       mainContent = (
         <div className="flex flex-1 items-center justify-center p-8">
           <EmptyState
@@ -484,7 +517,7 @@ function ReviewPageInner() {
               role="alert"
               className="rounded-md border border-accent/40 bg-accent-soft px-4 py-3 text-sm text-accent-800"
             >
-              {summary.due_total} due — more than 2 days at your pace.
+              {summaryOverdueCount(summary)} overdue — more than 2 days at your pace.
             </div>
           )}
           <ul className="flex flex-col gap-2">
@@ -498,7 +531,7 @@ function ReviewPageInner() {
                   >
                     <span className="font-medium">{course.title}</span>
                     <span className="text-muted-foreground">
-                      {course.due_count} due · {course.new_count} new
+                      {courseOverdueCount(course)} overdue · {course.new_count} new
                     </span>
                   </button>
                 </Card>

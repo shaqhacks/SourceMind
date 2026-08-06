@@ -50,7 +50,7 @@ function cardsForChapter(
   return chapter.section_ids.flatMap((id) => cardsBySection[id] ?? []);
 }
 
-/** "Due" here matches CourseReviewSummaryOut.due_count's own definition
+/** "Due" here matches CourseReviewSummaryOut.overdue_count's own definition
  * (ReviewState.due_at <= now) — new/never-reviewed cards are excluded, same
  * as how the review hub already reports "X due · Y new" as two separate
  * numbers rather than one combined count. */
@@ -254,8 +254,10 @@ export default function FlashcardsClient() {
     courseDataEntry && courseDataEntry.courseId === selectedCourse.id
       ? courseDataEntry.state
       : { kind: "loading" };
-  const courseDue =
-    reviewSummary?.courses.find((c) => c.course_id === selectedCourse.id)?.due_count ?? null;
+  const selectedCourseReviewSummary = reviewSummary?.courses.find(
+    (c) => c.course_id === selectedCourse.id,
+  );
+  const courseDue = selectedCourseReviewSummary ? selectedCourseReviewSummary.overdue_count : null;
   const totalCards =
     courseData.kind === "ready"
       ? Object.values(courseData.cardsBySection).reduce((sum, list) => sum + list.length, 0)

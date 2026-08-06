@@ -13,9 +13,9 @@ export interface paths {
         };
         /**
          * Get Asset File
-         * @description Serves the original uploaded PDF as-is, for the reader's
-         *     original-PDF page view. Inline disposition (not attachment) so a
-         *     browser embeds/views it (e.g. via pdf.js) instead of downloading it.
+         * @description Serves the original uploaded source as-is, for the reader's
+         *     original-source page view. Inline disposition keeps browser-viewable
+         *     sources embedded where supported instead of forcing a download.
          */
         get: operations["get_asset_file"];
         put?: never;
@@ -544,6 +544,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Course */
+        get: operations["search_course"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/sections": {
         parameters: {
             query?: never;
@@ -922,6 +939,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Job */
+        post: operations["retry_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Llm Status */
+        get: operations["llm_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/llm/status/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Llm Status Check */
+        post: operations["llm_status_check"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/llm/usage": {
         parameters: {
             query?: never;
@@ -1035,6 +1103,42 @@ export interface paths {
         };
         /** Lesson Estimate */
         get: operations["lesson_estimate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Settings */
+        get: operations["get_settings_api_settings_get"];
+        /** Update Settings */
+        put: operations["update_settings_api_settings_put"];
+        post?: never;
+        /** Clear Settings */
+        delete: operations["clear_settings_api_settings_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/bootstrap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bootstrap */
+        get: operations["bootstrap_api_settings_bootstrap_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1169,12 +1273,22 @@ export interface components {
             html_status: "none" | "converting" | "ready" | "failed";
             /** Id */
             id: string;
+            /**
+             * Media Type
+             * @default application/pdf
+             */
+            media_type: string;
             /** Page Count */
             page_count: number | null;
             /** Sha256 */
             sha256: string;
             /** Size Bytes */
             size_bytes: number;
+            /**
+             * Source Format
+             * @default pdf
+             */
+            source_format: string;
             /** Status */
             status: string;
             /**
@@ -1304,6 +1418,8 @@ export interface components {
             failed_asset_count: number;
             /** Id */
             id: string;
+            /** Is Sample */
+            is_sample: boolean;
             progress?: components["schemas"]["ProgressSummary"] | null;
             /**
              * Section Count
@@ -1322,14 +1438,20 @@ export interface components {
         };
         /** CourseReviewSummaryOut */
         CourseReviewSummaryOut: {
+            /** Available Count */
+            available_count: number;
             /** Course Id */
             course_id: string;
             /** Due Count */
             due_count: number;
             /** New Count */
             new_count: number;
+            /** Overdue Count */
+            overdue_count: number;
             /** Title */
             title: string;
+            /** Total Count */
+            total_count: number;
         };
         /** CurriculumClaimEditIn */
         CurriculumClaimEditIn: {
@@ -1816,6 +1938,10 @@ export interface components {
             created_at: string;
             /** Error */
             error: string | null;
+            /** Error Detail */
+            error_detail: {
+                [key: string]: unknown;
+            } | null;
             /** Id */
             id: string;
             /** Payload */
@@ -1830,6 +1956,8 @@ export interface components {
             result: {
                 [key: string]: unknown;
             } | null;
+            /** Retryable */
+            readonly retryable: boolean;
             /** Status */
             status: string;
             /** Type */
@@ -1849,6 +1977,31 @@ export interface components {
             /** Est Seconds */
             est_seconds: number;
         };
+        /** LlmCapabilitiesOut */
+        LlmCapabilitiesOut: {
+            /** Completion */
+            completion: boolean;
+            /** Embeddings */
+            embeddings: boolean;
+        };
+        /** LlmStatusOut */
+        LlmStatusOut: {
+            /** Available */
+            available: boolean;
+            capabilities: components["schemas"]["LlmCapabilitiesOut"];
+            /** Configured */
+            configured: boolean;
+            /** Failure Category */
+            failure_category: string | null;
+            /** Last Checked At */
+            last_checked_at: string | null;
+            /** Model */
+            model: string;
+            /** Provider */
+            provider: string;
+            /** Remediation */
+            remediation: string | null;
+        };
         /** LlmUsageOut */
         LlmUsageOut: {
             /** Calls */
@@ -1859,6 +2012,11 @@ export interface components {
             input_tokens: number;
             /** Output Tokens */
             output_tokens: number;
+        };
+        /** LocalSettingsRolloutOut */
+        LocalSettingsRolloutOut: {
+            /** Local Settings Enabled */
+            local_settings_enabled: boolean;
         };
         /** MergeOp */
         MergeOp: {
@@ -2182,14 +2340,22 @@ export interface components {
         };
         /** ReviewQueueOut */
         ReviewQueueOut: {
+            /** Available Count */
+            available_count: number;
             /** Cards */
             cards: components["schemas"]["ReviewQueueCardOut"][];
             /** Due */
             due: number;
             /** New */
             new: number;
+            /** New Count */
+            new_count: number;
+            /** Overdue Count */
+            overdue_count: number;
             /** Total */
             total: number;
+            /** Total Count */
+            total_count: number;
         };
         /** ReviewSummaryOut */
         ReviewSummaryOut: {
@@ -2201,6 +2367,43 @@ export interface components {
             daily_throughput: number;
             /** Due Total */
             due_total: number;
+        };
+        /** SearchResultOut */
+        SearchResultOut: {
+            /** Asset Id */
+            asset_id: string | null;
+            /** Course Id */
+            course_id: string;
+            /** Cursor Token */
+            cursor_token: string;
+            /**
+             * Doc Type
+             * @enum {string}
+             */
+            doc_type: "section" | "lesson" | "note" | "highlight";
+            /** Excerpt Md */
+            excerpt_md: string;
+            /** Score */
+            score: number;
+            /** Section Id */
+            section_id: string | null;
+            source_locator: components["schemas"]["SourceLocatorOut"];
+            /** Title */
+            title: string;
+        };
+        /** SearchResultsOut */
+        SearchResultsOut: {
+            /**
+             * Backend
+             * @enum {string}
+             */
+            backend: "fts5" | "like";
+            /** Items */
+            items: components["schemas"]["SearchResultOut"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Sanitized Excerpts */
+            sanitized_excerpts: boolean;
         };
         /**
          * SectionDetailOut
@@ -2248,6 +2451,12 @@ export interface components {
             page_end: number | null;
             /** Page Start */
             page_start: number | null;
+            /** Source Format */
+            source_format?: string | null;
+            /** Source Locator */
+            source_locator?: {
+                [key: string]: unknown;
+            } | null;
             /** Title */
             title: string;
             /**
@@ -2290,10 +2499,60 @@ export interface components {
             page_end: number | null;
             /** Page Start */
             page_start: number | null;
+            /** Source Format */
+            source_format?: string | null;
+            /** Source Locator */
+            source_locator?: {
+                [key: string]: unknown;
+            } | null;
             /** Title */
             title: string;
             /** Word Count */
             word_count: number;
+        };
+        /** SettingsBootstrapOut */
+        SettingsBootstrapOut: {
+            /** Csrf Token */
+            csrf_token: string;
+            rollout: components["schemas"]["LocalSettingsRolloutOut"];
+        };
+        /** SettingsClearIn */
+        SettingsClearIn: {
+            /** Confirmation */
+            confirmation: string;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "anthropic" | "ollama";
+        };
+        /** SettingsOut */
+        SettingsOut: {
+            /** Credentials */
+            credentials: {
+                [key: string]: string;
+            };
+            /** Credentials Present */
+            credentials_present: {
+                [key: string]: boolean;
+            };
+            /** Model */
+            model: string;
+            /** Provider */
+            provider: string;
+            readiness: components["schemas"]["LlmStatusOut"];
+            rollout: components["schemas"]["LocalSettingsRolloutOut"];
+        };
+        /** SettingsUpdateIn */
+        SettingsUpdateIn: {
+            /** Credentials */
+            credentials?: {
+                [key: string]: string;
+            };
+            /** Model */
+            model?: string | null;
+            /** Provider */
+            provider?: ("anthropic" | "ollama") | null;
         };
         /** SkillDetailOut */
         SkillDetailOut: {
@@ -2446,6 +2705,17 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** SourceLocatorOut */
+        SourceLocatorOut: {
+            /** Chapter */
+            chapter?: string | null;
+            /** Heading */
+            heading?: string | null;
+            /** Page */
+            page?: number | null;
+            /** Slide */
+            slide?: string | null;
+        };
         /** SplitOp */
         SplitOp: {
             /** At Page */
@@ -2473,8 +2743,8 @@ export interface components {
          * StudyNextItemOut
          * @description One deterministic study suggestion (ADR-022, app.services.study_service).
          *     `detail` holds whatever raw numbers back `reason` — {"best_score":
-         *     ...} for low_test_score, {"due_count": ...} for due_cards, {} for
-         *     unread, {"days_since": ...} for stale.
+         *     ...} for low_test_score, canonical review availability counts for
+         *     due_cards/new_cards, {} for unread, {"days_since": ...} for stale.
          */
         StudyNextItemOut: {
             /** Chapter Label */
@@ -2487,7 +2757,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "low_test_score" | "due_cards" | "unread" | "stale";
+            reason: "low_test_score" | "due_cards" | "new_cards" | "unread" | "stale";
         };
         /** SubmitPracticeAnswerIn */
         SubmitPracticeAnswerIn: {
@@ -3914,6 +4184,42 @@ export interface operations {
             };
         };
     };
+    search_course: {
+        parameters: {
+            query: {
+                query: string;
+                document_type?: string[] | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResultsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_sections: {
         parameters: {
             query?: never;
@@ -4774,6 +5080,77 @@ export interface operations {
             };
         };
     };
+    retry_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    llm_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmStatusOut"];
+                };
+            };
+        };
+    };
+    llm_status_check: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmStatusOut"];
+                };
+            };
+        };
+    };
     llm_usage: {
         parameters: {
             query?: {
@@ -5042,6 +5419,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_settings_api_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+        };
+    };
+    update_settings_api_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_settings_api_settings_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsClearIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bootstrap_api_settings_bootstrap_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsBootstrapOut"];
                 };
             };
         };

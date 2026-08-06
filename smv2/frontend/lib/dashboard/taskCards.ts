@@ -38,7 +38,7 @@ export interface BuildTaskCardsInput {
   continueCourse: CourseOut | null;
   continueChapter: ChapterInfo | null;
   showReviewCard: boolean;
-  reviewCardDueCount: number;
+  reviewCardOverdueCount: number;
   reviewCardHref: string;
   studyNext: StudyNextItemOut[];
 }
@@ -49,7 +49,7 @@ export function buildTaskCards({
   continueCourse,
   continueChapter,
   showReviewCard,
-  reviewCardDueCount,
+  reviewCardOverdueCount,
   reviewCardHref,
   studyNext,
 }: BuildTaskCardsInput): TaskCard[] {
@@ -72,7 +72,7 @@ export function buildTaskCards({
   }
 
   if (showReviewCard) {
-    const n = reviewCardDueCount;
+    const n = reviewCardOverdueCount;
     cards.push({
       id: "review",
       title: `Review ${n} due flashcard${n === 1 ? "" : "s"}`,

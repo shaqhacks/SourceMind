@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from app.db.engine import get_session
-from app.db.models import Card, LlmCall, ReviewState
+from app.db.models import Card, Job, LlmCall, ReviewState
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, CompletionResult, ProviderNotConfiguredError
 from conftest import _first_section_id
@@ -37,6 +37,24 @@ def test_generate_cards_happy_path(client, ingest_course, stub_provider):
     cards = client.get(f"/api/sections/{section_id}/cards").json()
     assert len(cards) == 2
     assert {c["front_md"] for c in cards} == {"What is X?", "What is Z?"}
+
+
+def test_generate_cards_unconfigured_provider_fails_before_job_creation(client, ingest_course):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    resp = client.post(f"/api/sections/{section_id}/cards")
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["failure_category"] == "missing_credentials"
+    assert "ANTHROPIC_API_KEY" in body["detail"]["remediation"]
+
+    session = get_session()
+    try:
+        assert session.query(Job).filter(Job.type == "generate_cards").count() == 0
+    finally:
+        session.close()
 
 
 def test_generate_cards_records_prompt_version_on_each_card(client, ingest_course, stub_provider):
@@ -83,7 +101,7 @@ def test_generate_cards_scoped_to_this_section_only(client, ingest_course, stub_
     assert other["title"] not in sent
 
 
-def test_generate_cards_409_when_active_job_exists(client, ingest_course):
+def test_generate_cards_409_when_active_job_exists(client, ingest_course, stub_provider):
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     section_id = _first_section_id(client, course_id)
 

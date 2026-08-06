@@ -23,6 +23,43 @@ vi.mock("@/lib/api/client", () => ({
 
 const mockedGetChatHistory = vi.mocked(getChatHistory);
 const mockedSendChat = vi.mocked(sendChat);
+const realInnerWidth = window.innerWidth;
+const realMatchMedia = window.matchMedia;
+
+function setViewport(width: number): void {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+  window.matchMedia = ((query: string) => {
+    const min = /\(min-width:\s*(\d+)px\)/.exec(query)?.[1];
+    const max = /\(max-width:\s*(\d+)px\)/.exec(query)?.[1];
+    const matches =
+      (min ? width >= Number(min) : true) && (max ? width <= Number(max) : true);
+    return {
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => true,
+    } as MediaQueryList;
+  }) as typeof window.matchMedia;
+  window.dispatchEvent(new Event("resize"));
+}
+
+function restoreViewport(): void {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: realInnerWidth,
+  });
+  window.matchMedia = realMatchMedia;
+  window.dispatchEvent(new Event("resize"));
+}
 
 // Mimics exactly how CourseReader wires the drawer: its own "c" shortcut
 // toggling a local `open` state, passed down as a prop. CourseChatDrawer
@@ -64,6 +101,7 @@ describe("CourseChatDrawer", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    restoreViewport();
     document.body.innerHTML = "";
   });
 
@@ -120,14 +158,7 @@ describe("CourseChatDrawer", () => {
   });
 
   it("a citation chip closes the panel on narrow viewports (overlay fallback)", async () => {
-    const originalMatchMedia = window.matchMedia;
-    window.matchMedia = ((query: string) =>
-      ({
-        matches: true,
-        media: query,
-        addEventListener: () => {},
-        removeEventListener: () => {},
-      }) as unknown as MediaQueryList) as typeof window.matchMedia;
+    setViewport(768);
 
     mockedGetChatHistory.mockResolvedValue(ok([]));
     mockedSendChat.mockResolvedValue(
@@ -138,6 +169,7 @@ describe("CourseChatDrawer", () => {
 
     render(<CourseChatDrawer courseId="course-1" open onClose={onClose} />);
     await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
+    expect(screen.getByRole("dialog", { name: /course chat/i })).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/message/i), "What is the answer?");
     await user.click(screen.getByRole("button", { name: /send/i }));
@@ -147,8 +179,6 @@ describe("CourseChatDrawer", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/course/course-1?section=sec-xyz");
     expect(onClose).toHaveBeenCalled();
-
-    window.matchMedia = originalMatchMedia;
   });
 
   it("'c' toggles the drawer open and closed, as wired by the reader shell", async () => {

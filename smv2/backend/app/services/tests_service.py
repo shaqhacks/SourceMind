@@ -36,7 +36,13 @@ from app.db.models import (
     ensure_utc,
     utcnow,
 )
-from app.services import evidence_items_service, evidence_service, jobs_service, learner_context
+from app.services import (
+    evidence_items_service,
+    evidence_service,
+    jobs_service,
+    learner_context,
+    llm_readiness_service,
+)
 from app.services.srs_service import DEFAULT_EASE, GOOD, schedule_next
 
 
@@ -86,6 +92,7 @@ def start_test_generation(
                 raise ChapterNotFoundError(
                     f"no practice/content sections found for chapter {chapter_label!r}"
                 )
+        llm_readiness_service.assert_ready_for_generation()
         course_profile = learner_context.ensure_course_learning_profile(
             session, learner_id, course_id
         )

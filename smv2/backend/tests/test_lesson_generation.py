@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.db.engine import get_session
-from app.db.models import LlmCall, Section
+from app.db.models import Job, LlmCall, Section
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from conftest import _first_section_id
@@ -95,7 +95,7 @@ def test_generate_lesson_sends_instructions_in_system_and_wraps_body_in_source_t
     assert section_detail["body_md"] not in before_tag
 
 
-def test_generate_lesson_409_when_already_in_progress(client, ingest_course):
+def test_generate_lesson_409_when_already_in_progress(client, ingest_course, stub_provider):
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     section_id = _first_section_id(client, course_id)
 
@@ -106,7 +106,7 @@ def test_generate_lesson_409_when_already_in_progress(client, ingest_course):
     assert second.status_code == 409
 
 
-def test_generate_lesson_force_bypasses_409(client, ingest_course):
+def test_generate_lesson_force_bypasses_409(client, ingest_course, stub_provider):
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     section_id = _first_section_id(client, course_id)
 
@@ -117,7 +117,9 @@ def test_generate_lesson_force_bypasses_409(client, ingest_course):
     assert forced.status_code == 202
 
 
-def test_claim_race_second_call_gets_conflict_without_a_job_run_between(client, ingest_course):
+def test_claim_race_second_call_gets_conflict_without_a_job_run_between(
+    client, ingest_course, stub_provider
+):
     """Regression: the 409 check used to be read-then-write (get status,
     then separately set it), which two concurrent submissions could both
     pass. The claim is now a single atomic UPDATE...RETURNING, so calling
@@ -136,7 +138,7 @@ def test_claim_race_second_call_gets_conflict_without_a_job_run_between(client, 
         lessons_service.start_lesson_generation(section_id)
 
 
-def test_claim_race_force_bypasses_the_conflict(client, ingest_course):
+def test_claim_race_force_bypasses_the_conflict(client, ingest_course, stub_provider):
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     section_id = _first_section_id(client, course_id)
 
@@ -152,8 +154,28 @@ def test_generate_lesson_404_for_missing_section(client):
     assert resp.status_code == 404
 
 
+def test_generate_lesson_unconfigured_provider_fails_before_job_creation(client, ingest_course):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    resp = client.post(f"/api/sections/{section_id}/lesson")
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["failure_category"] == "missing_credentials"
+    assert "ANTHROPIC_API_KEY" in body["detail"]["remediation"]
+
+    session = get_session()
+    try:
+        assert session.query(Job).filter(Job.type == "generate_lesson").count() == 0
+        section = session.get(Section, section_id)
+        assert section.lesson_status == "none"
+    finally:
+        session.close()
+
+
 def test_start_lesson_generation_rolls_back_status_if_job_creation_fails(
-    client, ingest_course, monkeypatch
+    client, ingest_course, monkeypatch, stub_provider
 ):
     """The claim (lesson_status -> 'queued') and the job creation must land
     in ONE commit — previously they were two separate commits, so a crash
@@ -182,7 +204,7 @@ def test_start_lesson_generation_rolls_back_status_if_job_creation_fails(
 
 
 def test_start_all_lesson_generations_rolls_back_all_statuses_if_any_job_creation_fails(
-    client, ingest_course, monkeypatch
+    client, ingest_course, monkeypatch, stub_provider
 ):
     """Same atomicity for the batch path: if job-creation fails partway
     through the list, NONE of the batch's lesson_status updates may
@@ -372,6 +394,24 @@ def test_generate_all_lessons_enqueues_none_and_failed_only(client, ingest_cours
 
     refreshed = client.get(f"/api/courses/{course_id}/sections").json()
     assert all(s["lesson_status"] == "ready" for s in refreshed)
+
+
+def test_generate_all_lessons_maps_readiness_unavailable_to_503_and_creates_no_jobs(
+    client, ingest_course
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    before_jobs = client.get("/api/jobs").json()
+    before_sections = client.get(f"/api/courses/{course_id}/sections").json()
+
+    resp = client.post(f"/api/courses/{course_id}/lessons")
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["failure_category"] == "missing_credentials"
+    assert "ANTHROPIC_API_KEY" in body["detail"]["remediation"]
+    assert client.get("/api/jobs").json() == before_jobs
+    assert all(job["type"] != "generate_lesson" for job in before_jobs)
+    assert client.get(f"/api/courses/{course_id}/sections").json() == before_sections
 
 
 def test_generate_all_lessons_404_for_missing_course(client):

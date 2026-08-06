@@ -1041,3 +1041,58 @@ Instructor review is part of the validity argument, not ground truth. Curriculum
 The first release uses one persistent local learner identity with a distinct `CourseLearningProfile` per course. This repairs cross-surface isolation without implying remote authentication or classroom authorization. Any remote or multi-tenant deployment requires a separate authorization project before instructor and learner data are exposed.
 
 Research basis and validation limits are recorded in `sources/research_student_learning_diagnostic_system_2026-08-02.md`; the operational pilot and model-promotion gates are in `docs/validation/student-learning-model-pilot.md`.
+
+## ADR-029 — Archive import dependency gate stays closed (2026-08-05)
+
+DOCX, PPTX, and EPUB import stay blocked for this release. This decision
+adds no dependency, no archive adapter, and no rollback flag change. The
+supported multi-format work may continue for PDF and simple non-archive text
+formats, but archive-backed formats keep returning the existing stable 415
+unsupported-format response until a later ADR explicitly opens each gate.
+
+The next archive-format attempt must start with one shared, in-house ZIP
+preflight layer before any format parser sees bytes. DOCX, PPTX, and EPUB
+are all ZIP containers, but they need separate format parsers after the
+shared preflight because their package layouts, XML schemas, media handling,
+and locator models differ. Parser approval is format-by-format, not a
+blanket approval for every ZIP-based input.
+
+The preflight is mandatory and must reject hostile or ambiguous archives
+before parsing: path traversal, absolute paths, symlinks or link-like external
+attributes, encrypted members, duplicate member names after canonicalization,
+unsupported compression methods, too many members, excessive total compressed
+size, excessive total expanded size, excessive per-entry compressed or
+expanded size, and excessive expansion ratio. Adapter code must never call
+`extractall`; it should inspect central-directory metadata, enforce limits,
+and stream only approved entries into parser-owned buffers. XML parsing must
+be hardened for untrusted input: no DTDs, no entity expansion, no external
+resolution, bounded input size, and bounded parse work.
+
+Future dependency candidates remain recommendations, not approvals. DOCX may
+compare `python-docx` and `docx2python` against fixtures and security
+requirements; `python-docx` is established for Word 2007+ `.docx` documents,
+while `docx2python` advertises extraction of headers, footers, text,
+footnotes, endnotes, properties, comments, and images. PPTX may evaluate
+`python-pptx`, whose project documents reading and updating Open XML `.pptx`
+presentations. EPUB has no approved dependency: EbookLib is the obvious
+Python candidate, but its own project metadata identifies an AGPL license,
+and the remaining alternatives reviewed for this gate were not mature enough
+to approve for this release.
+
+Before any archive gate can open, the implementation must carry a
+deterministic hostile fixture corpus that covers at least valid minimal
+files, malformed ZIPs, traversal names, symlinks, encrypted members,
+duplicate names, unsupported compression, oversized file counts, oversized
+compressed and expanded archives, oversized single entries, high expansion
+ratios, non-English text, image-heavy packages, malformed XML, and parser
+ordering determinism. Blocked formats must keep returning stable 415
+responses while the gate is closed.
+
+References: Python `zipfile` warning and `ZipInfo` metadata
+(`https://docs.python.org/3/library/zipfile.html`), Python XML security
+guidance (`https://docs.python.org/3/library/xml.html`), `python-docx`
+documentation (`https://python-docx.readthedocs.io/en/latest/`),
+`docx2python` package documentation (`https://pypi.org/project/docx2python/`),
+`python-pptx` documentation (`https://python-pptx.readthedocs.io/en/stable/`),
+and EbookLib package/license metadata (`https://pypi.org/project/EbookLib/`,
+`https://github.com/aerkalov/ebooklib`).

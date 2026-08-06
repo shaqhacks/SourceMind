@@ -12,7 +12,7 @@ from sqlalchemy import update as sa_update
 from app.db.engine import get_session
 from app.db.identity import card_id_for
 from app.db.models import Card, Job, ReviewLog, ReviewState, Section
-from app.services import jobs_service
+from app.services import jobs_service, llm_readiness_service
 
 _ACTIVE_JOB_STATUSES = ("queued", "running")
 
@@ -57,6 +57,7 @@ def start_card_generation(section_id: str) -> str:
             raise CardGenerationAlreadyInProgressError(
                 f"card generation already in progress for section {section_id}"
             )
+        llm_readiness_service.assert_ready_for_generation()
     finally:
         session.close()
 

@@ -10,9 +10,11 @@ service layer is responsible for the +1/-1 conversion at this boundary.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, computed_field, Field, StrictInt
+from pydantic import BaseModel, Field, StrictInt, computed_field, model_validator
+
+from app.jobs.error_envelope import decode_job_error
 
 
 class JobCreate(BaseModel):
@@ -28,11 +30,42 @@ class JobOut(BaseModel):
     result: dict[str, Any] | None
     progress: dict[str, Any] | None
     error: str | None
+    error_detail: dict[str, Any] | None
     attempts: int
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _decode_error_envelope(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            decoded_error, detail = decode_job_error(value.get("error"))
+            return {**value, "error": decoded_error, "error_detail": detail}
+        if hasattr(value, "error"):
+            decoded_error, detail = decode_job_error(value.error)
+            return {
+                "id": value.id,
+                "type": value.type,
+                "status": value.status,
+                "payload": value.payload,
+                "result": value.result,
+                "progress": value.progress,
+                "error": decoded_error,
+                "error_detail": detail,
+                "attempts": value.attempts,
+                "created_at": value.created_at,
+                "updated_at": value.updated_at,
+            }
+        return value
+
+    @computed_field
+    @property
+    def retryable(self) -> bool:
+        from app.jobs.registry import RETRYABLE_JOB_TYPES
+
+        return self.type in RETRYABLE_JOB_TYPES
 
 
 class CourseCreate(BaseModel):
@@ -49,6 +82,7 @@ class CourseOut(BaseModel):
     id: str
     title: str
     status: str
+    is_sample: bool
     created_at: datetime
     updated_at: datetime
     section_count: int = 0
@@ -206,6 +240,8 @@ class AssetOut(BaseModel):
     course_id: str
     filename: str
     content_type: str
+    source_format: str = "pdf"
+    media_type: str = "application/pdf"
     size_bytes: int
     sha256: str
     page_count: int | None
@@ -240,6 +276,8 @@ class SectionOut(BaseModel):
     asset_id: str | None
     page_start: int | None
     page_end: int | None
+    source_format: str | None = None
+    source_locator: dict[str, Any] | None = None
     lesson_status: str
     has_content: bool
     word_count: int
@@ -258,6 +296,8 @@ class SectionDetailOut(BaseModel):
     asset_id: str | None
     page_start: int | None
     page_end: int | None
+    source_format: str | None = None
+    source_locator: dict[str, Any] | None = None
     body_md: str
     content_hash: str
     lesson_md: str | None
@@ -312,7 +352,7 @@ class SplitOp(BaseModel):
 
 
 OutlineOp = Annotated[
-    Union[RenameOp, ReorderOp, DeleteOp, MergeOp, SplitOp],
+    RenameOp | ReorderOp | DeleteOp | MergeOp | SplitOp,
     Field(discriminator="type"),
 ]
 
@@ -341,6 +381,51 @@ class LlmUsageOut(BaseModel):
     input_tokens: int
     output_tokens: int
     est_cost_usd: float
+
+
+class LlmCapabilitiesOut(BaseModel):
+    completion: bool
+    embeddings: bool
+
+
+class LlmStatusOut(BaseModel):
+    provider: str
+    model: str
+    configured: bool
+    available: bool
+    capabilities: LlmCapabilitiesOut
+    last_checked_at: str | None
+    failure_category: str | None
+    remediation: str | None
+
+
+class LocalSettingsRolloutOut(BaseModel):
+    local_settings_enabled: bool
+
+
+class SettingsBootstrapOut(BaseModel):
+    csrf_token: str
+    rollout: LocalSettingsRolloutOut
+
+
+class SettingsUpdateIn(BaseModel):
+    provider: Literal["anthropic", "ollama"] | None = None
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    credentials: dict[str, str] = Field(default_factory=dict)
+
+
+class SettingsClearIn(BaseModel):
+    provider: Literal["anthropic", "ollama"]
+    confirmation: str
+
+
+class SettingsOut(BaseModel):
+    provider: str
+    model: str
+    credentials_present: dict[str, bool]
+    credentials: dict[str, str]
+    rollout: LocalSettingsRolloutOut
+    readiness: LlmStatusOut
 
 
 # --- Cards -------------------------------------------------------------
@@ -392,6 +477,10 @@ class ReviewQueueOut(BaseModel):
     due: int
     new: int
     total: int
+    overdue_count: int
+    new_count: int
+    available_count: int
+    total_count: int
 
 
 class AdaptiveStudyActivityOut(BaseModel):
@@ -429,7 +518,10 @@ class CourseReviewSummaryOut(BaseModel):
     course_id: str
     title: str
     due_count: int
+    overdue_count: int
     new_count: int
+    available_count: int
+    total_count: int
 
 
 class ReviewSummaryOut(BaseModel):
@@ -593,12 +685,12 @@ class ChapterOut(BaseModel):
 class StudyNextItemOut(BaseModel):
     """One deterministic study suggestion (ADR-022, app.services.study_service).
     `detail` holds whatever raw numbers back `reason` — {"best_score":
-    ...} for low_test_score, {"due_count": ...} for due_cards, {} for
-    unread, {"days_since": ...} for stale.
+    ...} for low_test_score, canonical review availability counts for
+    due_cards/new_cards, {} for unread, {"days_since": ...} for stale.
     """
 
     chapter_label: str | None
-    reason: Literal["low_test_score", "due_cards", "unread", "stale"]
+    reason: Literal["low_test_score", "due_cards", "new_cards", "unread", "stale"]
     detail: dict[str, Any]
 
 
@@ -675,6 +767,35 @@ class NoteOut(BaseModel):
     note_md: str
     created_at: datetime
     updated_at: datetime
+
+
+# --- Search ----------------------------------------------------------
+
+
+class SourceLocatorOut(BaseModel):
+    page: int | None = None
+    heading: str | None = None
+    chapter: str | None = None
+    slide: str | None = None
+
+
+class SearchResultOut(BaseModel):
+    doc_type: Literal["section", "lesson", "note", "highlight"]
+    course_id: str
+    section_id: str | None
+    asset_id: str | None
+    title: str
+    excerpt_md: str
+    source_locator: SourceLocatorOut
+    score: float
+    cursor_token: str
+
+
+class SearchResultsOut(BaseModel):
+    items: list[SearchResultOut]
+    next_cursor: str | None
+    backend: Literal["fts5", "like"]
+    sanitized_excerpts: bool
 
 
 # --- Chat ------------------------------------------------------------

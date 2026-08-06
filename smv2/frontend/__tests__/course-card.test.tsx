@@ -40,6 +40,8 @@ function makeAsset(overrides: Partial<AssetOut> = {}): AssetOut {
     course_id: "course-1",
     filename: "book.pdf",
     content_type: "application/pdf",
+    source_format: "pdf",
+    media_type: "application/pdf",
     size_bytes: 1024,
     sha256: "abc",
     html_status: "none",
@@ -59,6 +61,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     status: "ready",
     section_count: 4,
     failed_asset_count: 0,
+    is_sample: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     progress: null,
@@ -75,6 +78,8 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     result: null,
     progress: null,
     error: null,
+    error_detail: null,
+    retryable: true,
     attempts: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -100,6 +105,7 @@ describe("CourseCard", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    localStorage.clear();
     globalThis.EventSource = originalEventSource;
   });
 
@@ -269,5 +275,74 @@ describe("CourseCard", () => {
     );
 
     expect(screen.queryByText(/failed extraction/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the sample-course hint on the sample course card and persists dismissal", async () => {
+    const user = userEvent.setup();
+
+    const { unmount } = render(
+      <CourseCard
+        course={makeCourse({ is_sample: true })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/this is a sample course — drop your own file to create a course/i),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /dismiss hint/i }));
+    expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <CourseCard
+        course={makeCourse({ is_sample: true })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+  });
+
+  it("dismissing one sample course hint does not hide a different sample course", async () => {
+    const user = userEvent.setup();
+
+    const { unmount } = render(
+      <CourseCard
+        course={makeCourse({ id: "sample-a", is_sample: true })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/this is a sample course/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /dismiss hint/i }));
+    expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <CourseCard
+        course={makeCourse({ id: "sample-b", is_sample: true })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/this is a sample course/i)).toBeInTheDocument();
+  });
+
+  it("does not show the sample-course hint for a user-created course", () => {
+    render(
+      <CourseCard
+        course={makeCourse({ is_sample: false })}
+        onDeleted={vi.fn()}
+        onNeedsRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
   });
 });

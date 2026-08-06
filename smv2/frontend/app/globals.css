@@ -332,6 +332,54 @@ body {
   font-family: var(--font-figtree), ui-sans-serif, system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.55;
+  min-width: 320px;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+@media (max-width: 767px) {
+  html {
+    --shell-layout-band: mobile;
+  }
+
+  [data-layout="mobile"] {
+    max-width: 100vw;
+  }
+
+  [data-layout="mobile"] button,
+  [data-layout="mobile"] a {
+    min-height: 44px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  html {
+    --shell-layout-band: tablet;
+  }
+
+  [data-layout="tablet"] {
+    max-width: 100vw;
+  }
+}
+
+@media (min-width: 1024px) {
+  html {
+    --shell-layout-band: desktop;
+  }
+}
+
+@media (min-width: 1440px) {
+  html {
+    --shell-layout-wide: 1440;
+  }
 }
 
 /* Organic system: display headings in Caprasimo (single weight, 400).

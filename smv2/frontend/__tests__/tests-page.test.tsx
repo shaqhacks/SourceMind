@@ -65,6 +65,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     status: "ready",
     section_count: 6,
     failed_asset_count: 0,
+    is_sample: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     progress: null,
@@ -129,6 +130,8 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     result: null,
     progress: null,
     error: null,
+    error_detail: null,
+    retryable: true,
     attempts: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -287,6 +290,7 @@ describe("TestsPage", () => {
     });
 
     expect(await screen.findByText(/generation failed: llm unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /view job details/i })).toHaveAttribute("href", "/jobs?job=job-1");
   });
 
   it("renders the score history bar chart and a real-data diagnosis card", async () => {

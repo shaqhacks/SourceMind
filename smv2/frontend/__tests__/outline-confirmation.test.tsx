@@ -222,6 +222,26 @@ describe("OutlineConfirmation", () => {
     expect(onAccept).toHaveBeenCalledWith([{ type: "split", section_id: "sec-3", at_page: 13 }]);
   });
 
+  it("hides Split for sections without a page range", () => {
+    render(
+      <OutlineConfirmation
+        sections={[
+          makeSection({
+            id: "sec-text",
+            title: "Text chapter",
+            page_start: null,
+            page_end: null,
+          }),
+        ]}
+        onAccept={vi.fn()}
+      />,
+    );
+
+    const row = screen.getByText("Text chapter").closest("li")!;
+    expect(within(row).queryByRole("button", { name: /^split$/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/p\./i)).not.toBeInTheDocument();
+  });
+
   it("undoing a staged split restores the row to its normal editable state", async () => {
     const user = userEvent.setup();
     render(<OutlineConfirmation sections={SECTIONS} onAccept={vi.fn()} />);

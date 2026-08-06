@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { getDocument } from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -141,6 +141,32 @@ const BODIES: Record<string, string> = {
 };
 
 const NO_PROGRESS: ReaderProgress = { section_id: null, scroll_pos: 0 };
+const realMatchMedia = window.matchMedia;
+
+function setViewport(width: number): void {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+  window.matchMedia = ((query: string) => {
+    const min = /\(min-width:\s*(\d+)px\)/.exec(query)?.[1];
+    const max = /\(max-width:\s*(\d+)px\)/.exec(query)?.[1];
+    const matches =
+      (min ? width >= Number(min) : true) && (max ? width <= Number(max) : true);
+    return {
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => true,
+    } as MediaQueryList;
+  }) as typeof window.matchMedia;
+  window.dispatchEvent(new Event("resize"));
+}
 
 function selectPhrase(root: HTMLElement, phrase: string): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -220,6 +246,7 @@ describe("CourseReader", () => {
     cleanup();
     vi.clearAllMocks();
     vi.useRealTimers();
+    window.matchMedia = realMatchMedia;
     window.location.hash = "";
     // useReaderView (view-mode persistence) and useTypographyPrefs both
     // write to real localStorage (see vitest.setup.ts's polyfill, which
@@ -301,6 +328,68 @@ describe("CourseReader", () => {
     await user.click(screen.getByRole("button", { name: /chapter three/i }));
 
     expect(screen.getByRole("heading", { level: 2, name: /chapter three/i })).toHaveFocus();
+  });
+
+  it("uses a modal outline drawer at 768px and restores focus to the outline trigger", async () => {
+    setViewport(768);
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    expect(screen.queryByRole("navigation", { name: "Chapter outline" })).not.toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: /show outline/i });
+    await user.click(trigger);
+
+    const drawer = screen.getByRole("dialog", { name: "Chapter outline" });
+    expect(drawer).toHaveAttribute("aria-modal", "true");
+    expect(within(drawer).getByRole("button", { name: /chapter one/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Chapter outline" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("lets the transient outline own reader shortcuts until Escape closes it", async () => {
+    setViewport(768);
+    const user = userEvent.setup();
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    await user.click(screen.getByRole("button", { name: /show outline/i }));
+    const drawer = screen.getByRole("dialog", { name: "Chapter outline" });
+
+    await user.keyboard("{ArrowRight}jksco?");
+
+    expect(screen.getByRole("button", { name: /source/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(drawer).getByRole("button", { name: /chapter one/i })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.queryByRole("dialog", { name: "Course chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /edit outline/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /keyboard shortcuts/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog", { name: "Chapter outline" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Course chat" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show outline/i })).toHaveFocus();
+  });
+
+  it("keeps the reader outline persistent at 1024px", async () => {
+    setViewport(1024);
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    await screen.findByText(/first body/i);
+
+    expect(screen.getByRole("navigation", { name: "Chapter outline" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Chapter outline" })).not.toBeInTheDocument();
   });
 
   it("disposes section-local annotation UI when navigating to another chapter", async () => {
@@ -424,7 +513,7 @@ describe("CourseReader", () => {
       await screen.findByText(/second body/i);
 
       // scrollable = 1000 - 500 = 500; 60% of that = 300.
-      expect(column.scrollTop).toBe(300);
+      await waitFor(() => expect(column.scrollTop).toBe(300));
     });
   });
 
@@ -604,6 +693,163 @@ describe("CourseReader", () => {
       expect(
         await within(sidebar).findByRole("button", { name: /renamed chapter/i }),
       ).toBeInTheDocument();
+    });
+
+    it("keeps Pages enabled after a PDF outline edit response preserves provenance", async () => {
+      const pdfSections: ReaderCourse["sections"] = [
+        {
+          id: "pdf-sec-1",
+          title: "First PDF Chapter",
+          order_index: 0,
+          page_start: 1,
+          page_end: 2,
+          lesson_status: "none",
+          has_content: true,
+          word_count: 100,
+          kind: "content",
+          chapter_label: "Chapter 1",
+          asset_id: "asset-pdf",
+          source_format: "pdf",
+          source_locator: { type: "pdf_pages", page_start: 1, page_end: 2 },
+        },
+        {
+          id: "pdf-sec-2",
+          title: "Second PDF Chapter",
+          order_index: 1,
+          page_start: 3,
+          page_end: 4,
+          lesson_status: "none",
+          has_content: true,
+          word_count: 120,
+          kind: "content",
+          chapter_label: "Chapter 2",
+          asset_id: "asset-pdf",
+          source_format: "pdf",
+          source_locator: { type: "pdf_pages", page_start: 3, page_end: 4 },
+        },
+      ];
+      const pdfCourse: ReaderCourse = { id: "course-pdf", title: "PDF Course", sections: pdfSections };
+      const updatedSections = [
+        { ...pdfSections[1], order_index: 0 },
+        { ...pdfSections[0], title: "Renamed PDF Chapter", order_index: 1 },
+      ];
+      mockedGetSection.mockImplementation((id: string) => {
+        const section = [...pdfSections, ...updatedSections].find((candidate) => candidate.id === id);
+        if (!section) return Promise.resolve(err(404));
+        return Promise.resolve(
+          ok({
+            ...section,
+            course_id: pdfCourse.id,
+            body_md: `# ${section.title}\n\nPDF source body.`,
+            content_hash: "hash",
+            lesson_md: null,
+            lesson_stale: false,
+            lesson_model: null,
+            lesson_prompt_version: null,
+            extractor_version: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          }),
+        );
+      });
+      mockedListSections.mockResolvedValue(ok(pdfSections));
+      mockedEditOutline.mockResolvedValue(ok(updatedSections));
+      mockedGetDocument.mockReturnValue({
+        promise: Promise.resolve(makeFakeDocument({ 3: makeFakePage(), 4: makeFakePage() })),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      const user = userEvent.setup();
+      render(<CourseReader course={pdfCourse} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/pdf source body/i);
+
+      await user.click(screen.getByRole("button", { name: /edit outline/i }));
+      const dialog = await screen.findByRole("dialog", { name: /edit outline/i });
+      await user.click(await within(dialog).findByRole("button", { name: "First PDF Chapter" }));
+      const input = within(dialog).getByRole("textbox", { name: /rename first pdf chapter/i });
+      await user.clear(input);
+      await user.type(input, "Renamed PDF Chapter{Enter}");
+      await user.click(within(dialog).getByRole("button", { name: /move second pdf chapter up/i }));
+      await user.click(within(dialog).getByRole("button", { name: /save changes/i }));
+
+      expect(mockedEditOutline).toHaveBeenCalledWith("course-pdf", [
+        { type: "rename", section_id: "pdf-sec-1", title: "Renamed PDF Chapter" },
+        { type: "reorder", order: ["pdf-sec-2", "pdf-sec-1"] },
+      ]);
+      const sidebar = screen.getByRole("navigation", { name: /chapter outline/i });
+      await user.click(within(sidebar).getByRole("button", { name: /^chapter 1$/i }));
+      expect(
+        await within(sidebar).findByRole("button", { name: /renamed pdf chapter/i }),
+      ).toBeInTheDocument();
+      const pagesButton = screen.getByRole("button", { name: "Pages" });
+      expect(pagesButton).toBeEnabled();
+
+      await user.click(pagesButton);
+
+      expect(await screen.findByLabelText("Page 3")).toBeInTheDocument();
+      expect(mockedGetDocument).toHaveBeenCalledWith({
+        url: "https://mock/api/assets/asset-pdf/file",
+      });
+    });
+
+    it("keeps Pages disabled after a non-PDF outline edit response carries an asset without PDF provenance", async () => {
+      const originalSection: ReaderCourse["sections"][number] = {
+        id: "text-sec-1",
+        title: "Text Chapter",
+        order_index: 0,
+        page_start: null,
+        page_end: null,
+        lesson_status: "none",
+        has_content: true,
+        word_count: 80,
+        kind: "content",
+        chapter_label: "Chapter 1",
+        asset_id: "asset-text",
+        source_format: "text",
+        source_locator: { type: "heading", ordinal: 1 },
+      };
+      const updatedSection = { ...originalSection, title: "Renamed Text Chapter" };
+      const textCourse: ReaderCourse = {
+        id: "course-text-outline",
+        title: "Text Course",
+        sections: [originalSection],
+      };
+      mockedGetSection.mockResolvedValue(
+        ok({
+          ...updatedSection,
+          course_id: textCourse.id,
+          body_md: "# Text Chapter\n\nText source body.",
+          content_hash: "hash",
+          lesson_md: null,
+          lesson_stale: false,
+          lesson_model: null,
+          lesson_prompt_version: null,
+          extractor_version: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        }),
+      );
+      mockedListSections.mockResolvedValue(ok([originalSection]));
+      mockedEditOutline.mockResolvedValue(ok([updatedSection]));
+
+      const user = userEvent.setup();
+      render(<CourseReader course={textCourse} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/text source body/i);
+
+      await user.click(screen.getByRole("button", { name: /edit outline/i }));
+      const dialog = await screen.findByRole("dialog", { name: /edit outline/i });
+      await user.click(await within(dialog).findByRole("button", { name: "Text Chapter" }));
+      const input = within(dialog).getByRole("textbox", { name: /rename text chapter/i });
+      await user.clear(input);
+      await user.type(input, "Renamed Text Chapter{Enter}");
+      await user.click(within(dialog).getByRole("button", { name: /save changes/i }));
+
+      expect(mockedEditOutline).toHaveBeenCalledWith("course-text-outline", [
+        { type: "rename", section_id: "text-sec-1", title: "Renamed Text Chapter" },
+      ]);
+      const pagesButton = screen.getByRole("button", { name: "Pages" });
+      expect(pagesButton).toBeDisabled();
+      expect(pagesButton).toHaveAttribute("title", "Original pages are available for PDF sections only");
+      expect(mockedGetDocument).not.toHaveBeenCalled();
     });
   });
 
@@ -805,6 +1051,8 @@ describe("CourseReader", () => {
           kind: "content",
           chapter_label: "Chapter 1",
           asset_id: "asset-1",
+          source_format: "pdf",
+          source_locator: { type: "page", page_start: 1, page_end: 2 },
         },
       ],
     };
@@ -853,6 +1101,8 @@ describe("CourseReader", () => {
             kind: "content" as const,
             chapter_label: "Chapter 1",
             asset_id: "asset-1",
+            source_format: "pdf",
+            source_locator: { type: "page", page_start: 1, page_end: 2 },
             body_md: "# Chapter One\n\nSource body.",
             content_hash: "hash",
             lesson_md: null,
@@ -868,13 +1118,68 @@ describe("CourseReader", () => {
       });
     });
 
-    it("disables the Pages option (with a tooltip) when the active section has no asset_id", async () => {
+    it("disables the Pages option (with a tooltip) when the active section has no PDF page provenance", async () => {
       render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
       await screen.findByText(/first body/i);
 
       const pagesButton = screen.getByRole("button", { name: "Pages" });
       expect(pagesButton).toBeDisabled();
-      expect(pagesButton).toHaveAttribute("title", "Re-ingest this course to enable original pages");
+      expect(pagesButton).toHaveAttribute("title", "Original pages are available for PDF sections only");
+    });
+
+    it("does not offer Pages for a non-PDF section even when it has an asset_id", async () => {
+      const textSection = {
+        id: "sec-text",
+        title: "Text Chapter",
+        order_index: 0,
+        page_start: null,
+        page_end: null,
+        lesson_status: "none",
+        has_content: true,
+        word_count: 100,
+        kind: "content" as const,
+        chapter_label: "Chapter 1",
+        asset_id: "asset-text",
+        source_format: "text",
+        source_locator: { type: "heading", ordinal: 1 },
+      };
+      const textCourse = {
+        id: "course-text",
+        title: "Text Course",
+        sections: [textSection],
+      } as ReaderCourse;
+      mockedGetSection.mockResolvedValue(
+        ok({
+          ...textSection,
+          course_id: "course-text",
+          body_md: "# Text Chapter\n\nSource body.",
+          content_hash: "hash",
+          lesson_md: null,
+          lesson_stale: false,
+          lesson_model: null,
+          lesson_prompt_version: null,
+          extractor_version: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        }),
+      );
+
+      const user = userEvent.setup();
+      window.localStorage.setItem("smv2.readerView.course-text", "pages");
+      render(<CourseReader course={textCourse} initialProgress={NO_PROGRESS} />);
+      await screen.findByText(/source body/i);
+
+      const pagesButton = screen.getByRole("button", { name: "Pages" });
+      expect(pagesButton).toBeDisabled();
+      expect(screen.getByRole("button", { name: /source/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+
+      await user.keyboard("s");
+
+      expect(await screen.findByRole("button", { name: /generate lesson/i })).toBeInTheDocument();
+      expect(mockedGetDocument).not.toHaveBeenCalled();
     });
 
     it("cycling with 's' skips the disabled Pages option, going straight from source to lesson", async () => {
@@ -1114,7 +1419,14 @@ describe("CourseReader", () => {
         ...COURSE,
         sections: COURSE.sections.map((section) =>
           section.id === "sec-2"
-            ? { ...section, asset_id: "asset-2", page_start: 1, page_end: 2 }
+            ? {
+                ...section,
+                asset_id: "asset-2",
+                page_start: 1,
+                page_end: 2,
+                source_format: "pdf",
+                source_locator: { type: "page", page_start: 1, page_end: 2 },
+              }
             : section,
         ),
       };

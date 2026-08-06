@@ -23,19 +23,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import and_
-
 from app.db.engine import get_session
 from app.db.models import (
-    Card,
-    CourseLearningProfile,
     ProgressState,
-    ReviewState,
     ensure_utc,
     utcnow,
 )
 from app.services.chapters_service import get_chapters
 from app.services.learner_context import LEGACY_LOCAL_LEARNER_ID
+from app.services.review_availability_service import get_review_availability
 
 # A chapter's best graded score below this reads as "not mastered yet" —
 # a C-/D-range cutoff, not a passing/failing line the owner specified.
@@ -57,28 +53,6 @@ _STALE_PRIORITY_WEIGHT = 1.0
 _NEUTRAL_SCORE_NORM = 0.5
 
 
-def _due_card_count(
-    session, section_ids: list[str], course_profile_id: str | None, now
-) -> int:
-    if not section_ids:
-        return 0
-    if course_profile_id is None:
-        return session.query(Card).filter(Card.section_id.in_(section_ids)).count()
-    return (
-        session.query(Card)
-        .outerjoin(
-            ReviewState,
-            and_(
-                ReviewState.card_id == Card.id,
-                ReviewState.course_learning_profile_id == course_profile_id,
-            ),
-        )
-        .filter(Card.section_id.in_(section_ids))
-        .filter((ReviewState.due_at.is_(None)) | (ReviewState.due_at <= now))
-        .count()
-    )
-
-
 def study_next(
     course_id: str,
     limit: int = 3,
@@ -87,11 +61,6 @@ def study_next(
     session = get_session()
     try:
         now = utcnow()
-        course_profile_id = (
-            session.query(CourseLearningProfile.id)
-            .filter_by(learner_id=learner_id, course_id=course_id)
-            .scalar()
-        )
         # Real chapters only — the None-labeled "front matter" group
         # (chapters_service's own client-side "Front matter" bucket) isn't
         # a chapter a learner can be meaningfully pointed at to study.
@@ -132,13 +101,24 @@ def study_next(
             if c["chapter_label"] in suggested:
                 continue
             section_ids = c["section_ids"] + c["practice_section_ids"]
-            due_count = _due_card_count(session, section_ids, course_profile_id, now)
-            if due_count >= _MIN_DUE_CARDS_FOR_SUGGESTION:
-                due_candidates.append((c, due_count))
-        due_candidates.sort(key=lambda pair: -pair[1])
-        for c, due_count in due_candidates:
+            availability = get_review_availability(
+                session, course_id, learner_id, now=now, section_ids=section_ids
+            )
+            if availability.available_count >= _MIN_DUE_CARDS_FOR_SUGGESTION:
+                due_candidates.append((c, availability))
+        due_candidates.sort(key=lambda pair: -pair[1].available_count)
+        for c, availability in due_candidates:
+            reason = "due_cards" if availability.overdue_count else "new_cards"
+            detail = {
+                "overdue_count": availability.overdue_count,
+                "new_count": availability.new_count,
+                "available_count": availability.available_count,
+                "total_count": availability.total_count,
+            }
+            if availability.overdue_count:
+                detail["due_count"] = availability.overdue_count
             ordered.append(
-                {"chapter_label": c["chapter_label"], "reason": "due_cards", "detail": {"due_count": due_count}}
+                {"chapter_label": c["chapter_label"], "reason": reason, "detail": detail}
             )
             suggested.add(c["chapter_label"])
 

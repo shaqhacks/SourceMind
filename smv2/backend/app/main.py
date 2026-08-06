@@ -32,7 +32,9 @@ from app.routers import (
     practice,
     review,
     retention_studies,
+    search,
     sections,
+    settings,
     skills,
     study,
     tests,
@@ -88,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(ingest.router)
     app.include_router(sections.router)
     app.include_router(sections.section_router)
+    app.include_router(search.router)
     app.include_router(highlights.router)
     app.include_router(highlights.highlight_router)
     app.include_router(notes.router)
@@ -97,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(export.router)
     app.include_router(lessons.router)
     app.include_router(llm_usage.router)
+    app.include_router(settings.router)
     app.include_router(cards.router)
     app.include_router(review.router)
     app.include_router(retention_studies.router)

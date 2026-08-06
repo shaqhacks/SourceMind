@@ -40,7 +40,7 @@ def test_export_zip_structure_and_content(client, ingest_course, tmp_path):
         assert all("content_hash" in s for s in manifest["sections"])
         assert all("extractor_version" in s for s in manifest["sections"])
 
-        first_section_file = sorted(section_files)[0]
+        first_section_file = min(section_files)
         section_content = zf.read(first_section_file).decode("utf-8")
         assert "Chapter 1: Foundations" in section_content
 
@@ -55,6 +55,100 @@ def test_export_zip_is_a_valid_zip_readable_via_bytesio(client, ingest_course):
         assert bad_file is None
 
 
+def test_export_assets_use_sanitized_original_filenames_with_deterministic_collisions(
+    client,
+):
+    """Catches exporting opaque stored names or unsafe original filenames."""
+    course_resp = client.post("/api/courses", json={"title": "Export Asset Names"})
+    assert course_resp.status_code == 201
+    course_id = course_resp.json()["id"]
+    first = b"%PDF-1.7\nfirst original bytes\n"
+    second = b"%PDF-1.7\nsecond original bytes\n"
+
+    first_upload = client.post(
+        f"/api/courses/{course_id}/assets",
+        files={"file": ("Lecture Notes.pdf", first, "application/pdf")},
+    )
+    second_upload = client.post(
+        f"/api/courses/{course_id}/assets",
+        files={"file": ("../Lecture Notes.pdf", second, "application/pdf")},
+    )
+    assert first_upload.status_code == 201
+    assert second_upload.status_code == 201
+
+    resp = client.get(f"/api/courses/{course_id}/export")
+    assert resp.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        names = zf.namelist()
+        assert "assets/Lecture-Notes.pdf" in names
+        assert "assets/Lecture-Notes-2.pdf" in names
+        assert all(name.startswith("assets/") or "/" not in name for name in names)
+        assert ".." not in "\n".join(names)
+        assert zf.read("assets/Lecture-Notes.pdf") == first
+        assert zf.read("assets/Lecture-Notes-2.pdf") == second
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+
+    assert manifest["assets"] == [
+        {
+            "id": first_upload.json()["id"],
+            "filename": "Lecture Notes.pdf",
+            "file": "assets/Lecture-Notes.pdf",
+            "source_format": "pdf",
+            "media_type": "application/pdf",
+            "size_bytes": len(first),
+            "sha256": first_upload.json()["sha256"],
+        },
+        {
+            "id": second_upload.json()["id"],
+            "filename": "../Lecture Notes.pdf",
+            "file": "assets/Lecture-Notes-2.pdf",
+            "source_format": "pdf",
+            "media_type": "application/pdf",
+            "size_bytes": len(second),
+            "sha256": second_upload.json()["sha256"],
+        },
+    ]
+
+
+def test_export_asset_filenames_normalize_reserved_trailing_and_collision_cases(client):
+    """Catches ZIP entries that are unsafe on Windows or after extraction."""
+    course_resp = client.post("/api/courses", json={"title": "Export Reserved Names"})
+    assert course_resp.status_code == 201
+    course_id = course_resp.json()["id"]
+    uploads: list[tuple[str, bytes, str]] = [
+        ("CON.pdf", b"%PDF-1.7\nreserved con\n", "assets/CON-source.pdf"),
+        ("aux.PDF", b"%PDF-1.7\nreserved aux\n", "assets/aux-source.pdf"),
+        ("COM1.pdf", b"%PDF-1.7\nreserved com\n", "assets/COM1-source.pdf"),
+        ("Lpt9.pdf", b"%PDF-1.7\nreserved lpt\n", "assets/Lpt9-source.pdf"),
+        ("Chapter One. .pdf", b"%PDF-1.7\ntrailing punctuation\n", "assets/Chapter-One.pdf"),
+        ("../Chapter One?.pdf", b"%PDF-1.7\ncollision after normalization\n", "assets/Chapter-One-2.pdf"),
+    ]
+    uploaded = []
+
+    for filename, content, _expected_name in uploads:
+        response = client.post(
+            f"/api/courses/{course_id}/assets",
+            files={"file": (filename, content, "application/pdf")},
+        )
+        assert response.status_code == 201
+        uploaded.append(response.json())
+
+    resp = client.get(f"/api/courses/{course_id}/export")
+    assert resp.status_code == 200
+
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        asset_names = [asset["file"] for asset in manifest["assets"]]
+        assert asset_names == [expected_name for *_rest, expected_name in uploads]
+        assert len(asset_names) == len({name.lower() for name in asset_names})
+        assert all(".." not in name and not name.rstrip("/").endswith((".", " ")) for name in asset_names)
+        for (_filename, content, expected_name), body in zip(uploads, uploaded):
+            assert zf.read(expected_name) == content
+            manifest_asset = next(asset for asset in manifest["assets"] if asset["id"] == body["id"])
+            assert manifest_asset["file"] == expected_name
+
+
 def test_export_404_for_missing_course(client):
     resp = client.get("/api/courses/does-not-exist/export")
     assert resp.status_code == 404
@@ -65,9 +159,10 @@ def test_export_includes_lesson_file_and_manifest_entry_when_ready(client, inges
     export silently held the reader's content hostage to the app, contrary
     to the brief's law that a user can always get their own content out.
     """
+    from conftest import _first_section_id
+
     from app.jobs.worker import run_due_jobs_once
     from app.llm.provider import CompletionResult
-    from conftest import _first_section_id
 
     course_id, *_ = ingest_course("with_bookmarks.pdf")
     section_id = _first_section_id(client, course_id)

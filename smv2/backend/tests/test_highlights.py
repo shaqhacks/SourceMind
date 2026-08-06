@@ -59,21 +59,19 @@ def test_highlight_persists_and_cascades_with_course(ingest_course):
     assert _highlight_count(course_id) == 0
 
 
-def test_reingest_wipes_highlights(client, ingest_course):
+def test_reingest_preserves_highlights_on_surviving_sections(client, ingest_course):
     from app.jobs.worker import run_due_jobs_once
 
     course_id, _, _, _ = ingest_course("with_bookmarks.pdf")
     _make_highlight(course_id, _first_section_id(course_id))
     assert _highlight_count(course_id) == 1
 
-    # Identical re-ingest: the section diff KEEPS every section row (same
-    # content-addressed ids), so FK cascade never fires — only the explicit
-    # REPLACED-bucket delete in _run_ingest can wipe these rows. That
-    # explicit delete is exactly what this asserts.
+    # Identical re-ingest keeps every section row by content-addressed id, so
+    # highlights anchored to those surviving sections remain intact.
     ingest_resp = client.post(f"/api/courses/{course_id}/ingest")
     assert ingest_resp.status_code == 202
     assert run_due_jobs_once() is True
-    assert _highlight_count(course_id) == 0
+    assert _highlight_count(course_id) == 1
 
 
 def test_highlights_crud_roundtrip(client, ingest_course):

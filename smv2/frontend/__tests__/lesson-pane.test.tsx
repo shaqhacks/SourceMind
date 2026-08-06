@@ -66,6 +66,8 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     result: null,
     progress: null,
     error: null,
+    error_detail: null,
+    retryable: true,
     attempts: 1,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -282,7 +284,16 @@ describe("LessonPane", () => {
     );
     mockedGenerateLesson.mockResolvedValue(ok({ job_id: "job-9" }, 202));
     mockedGetJob.mockResolvedValue(
-      ok(makeJob({ id: "job-9", error: "ANTHROPIC_API_KEY is not configured" })),
+      ok(makeJob({
+        id: "job-9",
+        error: "ANTHROPIC_API_KEY is not configured",
+        error_detail: {
+          code: "llm_readiness_unavailable",
+          failure_category: "missing_credentials",
+          message: "LLM provider is not ready",
+          remediation: "Add an Anthropic key.",
+        },
+      })),
     );
 
     const user = userEvent.setup();
@@ -301,6 +312,7 @@ describe("LessonPane", () => {
 
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent(/generation failed: anthropic_api_key is not configured/i);
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
   });
 
   it("bubbles the effective status up via onStatusChange", async () => {

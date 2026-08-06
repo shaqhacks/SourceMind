@@ -13,10 +13,12 @@ import {
   type SectionOut,
 } from "@/lib/api/client";
 import { useChatOpenPref } from "@/lib/hooks/useChatOpenPref";
+import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 import { useProgressSync } from "@/lib/hooks/useProgressSync";
 import { useReaderView } from "@/lib/hooks/useReaderView";
 import { useSidebarCollapsed } from "@/lib/hooks/useSidebarCollapsed";
+import { useShellLayout } from "@/lib/hooks/useShellLayout";
 import { useTypographyPrefs } from "@/lib/hooks/useTypographyPrefs";
 import { findNextContentIndex } from "@/lib/reader/chapterNav";
 import { chapterGroupKey } from "@/lib/reader/chapterGroups";
@@ -77,6 +79,16 @@ function scrollElementIntoView(el: HTMLElement): void {
   el.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
 }
 
+function hasPdfPageProvenance(section: SectionOut | ReaderCourse["sections"][number]): boolean {
+  if (section.source_format?.toLowerCase() !== "pdf") return false;
+  if (!section.asset_id) return false;
+  const pageStart = section.page_start;
+  const pageEnd = section.page_end;
+  if (typeof pageStart !== "number" || typeof pageEnd !== "number") return false;
+  if (!Number.isInteger(pageStart) || !Number.isInteger(pageEnd)) return false;
+  return pageStart > 0 && pageEnd >= pageStart;
+}
+
 export default function CourseReader({ course, initialProgress }: CourseReaderProps) {
   // Patched wholesale after an outline edit applies (rename/reorder/
   // delete/merge/split) — editOutline's response is the fresh source of
@@ -96,6 +108,12 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   });
   const { storedMode, setStoredMode } = useReaderView(course.id);
   const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebarCollapsed();
+  const shellLayout = useShellLayout();
+  const transientReaderChrome = shellLayout !== "desktop";
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const outlineModalOpen = outlineOpen && transientReaderChrome;
+  const outlineShellRef = useRef<HTMLDivElement>(null);
+  const outlineDialogRef = useDialogFocus<HTMLDivElement>(outlineModalOpen);
   const { open: chatOpen, setOpen: setChatOpen, toggle: toggleChatOpen } = useChatOpenPref(
     course.id,
   );
@@ -152,11 +170,10 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const safeActiveIndex = Math.min(activeIndex, Math.max(sections.length - 1, 0));
   const activeSection = sections[safeActiveIndex];
 
-  // "pages" (the original PDF via pdf.js) needs an asset_id on the active
-  // section — a stored preference of "pages" from a different section (or
-  // a course whose asset backfill hasn't landed) degrades to "source"
-  // rather than rendering a disabled view.
-  const pagesAvailable = activeSection.asset_id != null;
+  // "pages" (the original PDF via pdf.js) needs PDF page provenance on
+  // the active section. A stored "pages" preference for a text/HTML/Markdown
+  // course degrades to Source instead of opening an empty PDF pane.
+  const pagesAvailable = hasPdfPageProvenance(activeSection);
   const mode: ViewMode = storedMode === "pages" && !pagesAvailable ? "source" : storedMode;
 
   useProgressSync(course.id, activeSection.id, columnRef);
@@ -282,6 +299,40 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
 
   const goNext = useCallback(() => goToOffset(1), [goToOffset]);
   const goPrevious = useCallback(() => goToOffset(-1), [goToOffset]);
+  const toggleOutline = useCallback(() => {
+    if (transientReaderChrome) {
+      if (outlineOpen) {
+        setOutlineOpen(false);
+      } else {
+        setChatOpen(false);
+        setNotesOpen(false);
+        setShortcutsOpen(false);
+        setOutlineEditorOpen(false);
+        setOutlineOpen(true);
+      }
+      return;
+    }
+    toggleSidebar();
+  }, [outlineOpen, setChatOpen, transientReaderChrome, toggleSidebar]);
+  const closeOutline = useCallback(() => setOutlineOpen(false), []);
+
+  useEffect(() => {
+    if (!outlineModalOpen) return undefined;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        outlineShellRef.current &&
+        !outlineShellRef.current.contains(event.target as Node)
+      ) {
+        closeOutline();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [outlineModalOpen, closeOutline]);
 
   // Direct id-based navigation (as opposed to goToOffset's relative
   // stepping) — the same id->index resolution `activeIndex`'s own useState
@@ -349,10 +400,11 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
   const handleNotesNavigate = useCallback(
     (sectionId: string, surface: HighlightOut["surface"]) => {
       goToSection(sectionId);
-      if (surface === "pdf") setStoredMode("pages");
+      const target = sections.find((section) => section.id === sectionId);
+      if (surface === "pdf" && target && hasPdfPageProvenance(target)) setStoredMode("pages");
       closeNotes();
     },
-    [goToSection, setStoredMode, closeNotes],
+    [goToSection, sections, setStoredMode, closeNotes],
   );
   const openOutlineEditor = useCallback(() => setOutlineEditorOpen(true), []);
   const closeOutlineEditor = useCallback(() => setOutlineEditorOpen(false), []);
@@ -407,7 +459,8 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
     c: toggleChat,
     o: openOutlineEditor,
     "?": openShortcuts,
-  });
+  }, !outlineModalOpen);
+  useKeyboardShortcuts({ escape: closeOutline }, outlineModalOpen);
 
   // Focus the chapter heading itself, not a state setter — a DOM
   // side-effect synchronizing with the (uncontrolled) focus system, which
@@ -439,8 +492,8 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
         courseTitle={course.title}
         chapterLabel={activeSection.chapter_label}
         sectionTitle={activeSection.title}
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={toggleSidebar}
+        sidebarCollapsed={transientReaderChrome ? !outlineOpen : sidebarCollapsed}
+        onToggleSidebar={toggleOutline}
         onLessonSectionSettled={patchLessonStatus}
         chatOpen={chatOpen}
         onToggleChat={toggleChat}
@@ -453,7 +506,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
         onChangeViewMode={setStoredMode}
       />
       <div className="flex min-h-0 flex-1">
-        {!sidebarCollapsed && (
+        {!transientReaderChrome && !sidebarCollapsed && (
           <Sidebar
             courseId={course.id}
             sections={sections}
@@ -462,6 +515,45 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
             lessonStatusOverrides={lessonStatusOverrides}
             chapterStats={chapterStats}
           />
+        )}
+        {outlineModalOpen && (
+          <div className="fixed inset-0 z-40 bg-foreground/25">
+            <div
+              ref={outlineShellRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Chapter outline"
+              data-layout={shellLayout}
+              className="h-full w-[min(22rem,88vw)] border-r border-divider bg-background shadow-lg"
+            >
+              <div ref={outlineDialogRef} tabIndex={-1} className="flex h-full flex-col">
+                <div className="flex items-center justify-between gap-3 border-b border-divider px-4 py-3">
+                  <p className="text-sm font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                    Outline
+                  </p>
+                  <button
+                    type="button"
+                    onClick={closeOutline}
+                    aria-label="Close outline"
+                    className="min-h-11 rounded-md border border-border bg-surface-raised px-3 py-2 text-sm font-medium transition-colors hover:bg-foreground/[0.07]"
+                  >
+                    Close
+                  </button>
+                </div>
+                <Sidebar
+                  courseId={course.id}
+                  sections={sections}
+                  activeSectionId={activeSection.id}
+                  onSelect={(index) => {
+                    setActiveIndex(index);
+                    closeOutline();
+                  }}
+                  lessonStatusOverrides={lessonStatusOverrides}
+                  chapterStats={chapterStats}
+                />
+              </div>
+            </div>
+          </div>
         )}
         <ReadingColumn
           key={activeSection.id}

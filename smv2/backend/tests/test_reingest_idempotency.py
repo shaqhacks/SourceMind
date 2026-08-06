@@ -6,9 +6,6 @@ from pathlib import Path
 
 import fitz
 import pytest
-
-from conftest import _course_profile_id
-
 from app.db.engine import get_session
 from app.db.models import (
     Asset,
@@ -25,6 +22,7 @@ from app.db.models import (
 )
 from app.jobs.worker import run_due_jobs_once
 from app.services import curriculum_service
+from conftest import _course_profile_id
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "pdfs"
 
@@ -127,6 +125,12 @@ def test_reingest_replaces_not_duplicates(client, tmp_path):
 
     second_ids = {s.id for s in _sections_by_title(course_id).values()}
     assert second_ids == first_ids
+    sections_after_reingest = client.get(f"/api/courses/{course_id}/sections").json()
+    assert [s["source_locator"]["type"] for s in sections_after_reingest] == [
+        "pdf_pages",
+        "pdf_pages",
+        "pdf_pages",
+    ]
 
     session = get_session()
     try:

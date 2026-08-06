@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
-    JSON,
     DateTime,
     Float,
     ForeignKey,
@@ -74,6 +74,9 @@ class Course(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_new_id)
     title: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="created")
+    is_sample: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utcnow, onupdate=utcnow
@@ -123,6 +126,8 @@ class Asset(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String, nullable=False)
     stored_path: Mapped[str] = mapped_column(String, nullable=False)
+    source_format: Mapped[str] = mapped_column(String, nullable=False, default="pdf")
+    media_type: Mapped[str] = mapped_column(String, nullable=False, default="application/pdf")
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="stored")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -165,6 +170,8 @@ class Section(Base):
     )
     page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_format: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_locator: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     body_md: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String, nullable=False)
     lesson_md: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -327,8 +334,9 @@ class Highlight(Base):
     char offset — the same selection must be locatable in more than one
     rendering of the text (markdown DOM, pdf.js text layer). The anchor is
     opaque to the backend; the frontend matcher owns its semantics.
-    Wiped on re-ingest (REPLACED bucket, ADR-024): re-uploading a course's
-    PDF deletes its highlights — the upload UI must warn.
+    Re-ingest preserves highlights when their content-addressed owning
+    section ID survives; highlights are deleted only when that section is
+    removed and the section_id FK cascades.
     page is 0-based per-asset storage, converted at the service boundary
     like Section.page_start.
     """
@@ -364,7 +372,9 @@ class Note(Base):
     Highlight, for annotating a spot with no highlightable passage. anchor_y
     is a 0..1 top-origin fraction of the page height, so it survives the page
     re-rendering at any width. page is 0-based in the DB / 1-based at the API,
-    the same single-conversion rule as Highlight. Wiped on re-ingest (ADR-024).
+    the same single-conversion rule as Highlight. Re-ingest preserves notes
+    when their content-addressed owning section ID survives; notes are deleted
+    only when that section is removed and the section_id FK cascades.
     """
 
     __tablename__ = "notes"

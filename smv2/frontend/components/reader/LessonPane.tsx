@@ -4,9 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
+  type ApiErrorDetail,
   findActiveLessonJob,
   generateLesson,
   getJob,
@@ -73,7 +75,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   // Tagged with the jobId it was fetched for (same idiom as useJobEvents'
   // own internal state) so staleness is a render-time comparison rather
   // than something an effect has to reset.
-  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
+  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null; detail: ApiErrorDetail | null } | null>(
     null,
   );
 
@@ -87,6 +89,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   const watchedJobId = localJobId ?? discoveredJobId;
   const { job, done, stalled } = useJobEvents(watchedJobId);
   const failureMessage = failureInfo?.jobId === watchedJobId ? failureInfo.message : null;
+  const failureDetail = failureInfo?.jobId === watchedJobId ? failureInfo.detail : null;
 
   // `!done` folds the watched job's own completion into this derivation —
   // once useJobEvents reports done, isInFlight drops on its own (no manual
@@ -155,7 +158,10 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
     if (!done || job?.status !== "failed" || !watchedJobId) return;
     let active = true;
     getJob(watchedJobId).then(({ data }) => {
-      if (active) setFailureInfo({ jobId: watchedJobId, message: data?.error ?? null });
+      if (active) {
+        const detail = (data as { error_detail?: ApiErrorDetail | null } | undefined)?.error_detail ?? null;
+        setFailureInfo({ jobId: watchedJobId, message: data?.error ?? null, detail });
+      }
     });
     return () => {
       active = false;
@@ -216,9 +222,11 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   if (effectiveStatus === "failed") {
     return (
       <div className="flex flex-col gap-2">
-        <ErrorBanner
+        <RecoveryBanner
           message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
           onRetry={() => handleGenerate(true)}
+          jobId={watchedJobId}
+          errorDetail={failureDetail}
         />
         {actionError && <p className="text-xs text-status-serious">{actionError}</p>}
       </div>

@@ -28,9 +28,11 @@ from app.llm.ledger import ensure_spend_cap
 from app.llm.prompts import load_prompt
 from app.llm.provider import ProviderTimeoutError, get_provider
 from app.llm.retry import is_timeout
+from app.services import llm_readiness_service
 from app.pipeline.retrieval import rank_chunks
 from app.services import chapters_service, jobs_service
 from app.services.learner_context import LEGACY_LOCAL_LEARNER_ID
+from app.services.review_availability_service import get_review_availability
 from app.services.study_service import study_next
 
 _CITATION_RE = re.compile(r"\[(\d+)\]")
@@ -138,25 +140,14 @@ def _distinct_chapter_labels_hit(session, ranked) -> list[str]:
     return labels
 
 
-def _due_and_lapsed_card_counts(
-    session, section_ids: list[str], course_profile_id: str | None, now
-) -> tuple[int, int]:
+def _lapsed_card_count(
+    session, section_ids: list[str], course_profile_id: str | None
+) -> int:
     if not section_ids:
-        return 0, 0
+        return 0
     if course_profile_id is None:
-        return session.query(Card).filter(Card.section_id.in_(section_ids)).count(), 0
-    due_count = (
-        session.query(Card)
-        .outerjoin(
-            ReviewState,
-            (ReviewState.card_id == Card.id)
-            & (ReviewState.course_learning_profile_id == course_profile_id),
-        )
-        .filter(Card.section_id.in_(section_ids))
-        .filter((ReviewState.due_at.is_(None)) | (ReviewState.due_at <= now))
-        .count()
-    )
-    lapsed_count = (
+        return 0
+    return (
         session.query(Card)
         .join(
             ReviewState,
@@ -166,7 +157,6 @@ def _due_and_lapsed_card_counts(
         .filter(Card.section_id.in_(section_ids), ReviewState.lapses > 0)
         .count()
     )
-    return due_count, lapsed_count
 
 
 def _build_learner_state_block(
@@ -211,9 +201,10 @@ def _build_learner_state_block(
 
         content_section_ids = chapter["section_ids"]
         all_section_ids = content_section_ids + chapter["practice_section_ids"]
-        due_count, lapsed_count = _due_and_lapsed_card_counts(
-            session, all_section_ids, course_profile_id, now
+        availability = get_review_availability(
+            session, course_id, learner_id, now=now, section_ids=all_section_ids
         )
+        lapsed_count = _lapsed_card_count(session, all_section_ids, course_profile_id)
 
         lesson_ready = False
         if content_section_ids:
@@ -225,7 +216,10 @@ def _build_learner_state_block(
             )
         lesson_part = "lesson generated" if lesson_ready else "no lesson generated yet"
 
-        lines.append(f"{label} — {score_part}, cards due {due_count}, cards lapsed {lapsed_count}, {lesson_part}")
+        lines.append(
+            f"{label} — {score_part}, cards overdue {availability.overdue_count}, "
+            f"new cards {availability.new_count}, cards lapsed {lapsed_count}, {lesson_part}"
+        )
     return "\n".join(lines)
 
 
@@ -246,7 +240,16 @@ def _build_study_suggestions_block(course_id: str, learner_id: str) -> str:
         if reason == "low_test_score":
             lines.append(f"- {label}: best test score {detail['best_score'] * 100:.0f}% — could use review")
         elif reason == "due_cards":
-            lines.append(f"- {label}: {detail['due_count']} flashcards due for review")
+            overdue_count = detail.get("overdue_count", detail.get("due_count", 0))
+            new_count = detail.get("new_count", 0)
+            if new_count:
+                lines.append(
+                    f"- {label}: {overdue_count} overdue and {new_count} new flashcards available"
+                )
+            else:
+                lines.append(f"- {label}: {overdue_count} flashcards overdue for review")
+        elif reason == "new_cards":
+            lines.append(f"- {label}: {detail['new_count']} new flashcards available")
         elif reason == "unread":
             lines.append(f"- {label}: not started yet")
         else:  # stale
@@ -295,6 +298,7 @@ def send_chat(
                 )
             selection_block = _build_selection_block(sel_section, selection["exact"])
 
+        llm_readiness_service.assert_ready_for_generation()
         provider = get_provider()
         _maybe_trigger_embed_course(session, course_id, provider)
 

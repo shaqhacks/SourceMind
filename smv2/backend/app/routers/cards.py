@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.schemas import CardOut, GenerateCardsOut, UpdateCardIn
-from app.services import cards_service
+from app.services import cards_service, llm_readiness_service
 
 router = APIRouter(tags=["cards"])
 
@@ -17,6 +17,8 @@ router = APIRouter(tags=["cards"])
 def generate_cards(section_id: str) -> GenerateCardsOut:
     try:
         job_id = cards_service.start_card_generation(section_id)
+    except llm_readiness_service.LlmReadinessUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.detail) from exc
     except cards_service.SectionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except cards_service.CardGenerationAlreadyInProgressError as exc:

@@ -36,6 +36,7 @@ interface UploadItem {
   status: "pending" | "success" | "error";
   error?: string;
   pageCount?: number | null;
+  sourceFormat?: string | null;
 }
 
 type Step =
@@ -52,12 +53,20 @@ type Step =
 
 const STEPS = ["Upload", "Confirm outline", "Start reading"] as const;
 
+function uploadedStatusText(item: UploadItem): string {
+  if (item.sourceFormat !== "pdf" || item.pageCount == null) {
+    return "Uploaded";
+  }
+
+  return `Uploaded · ${item.pageCount} ${item.pageCount === 1 ? "page" : "pages"}`;
+}
+
 /**
  * Maps the state machine above onto the 3-step "Upload -> Confirm outline
  * -> Start reading" indicator (redesign handoff section 9). Everything from
  * naming the course through a finished ingest is still "Upload" — course
  * creation, per-file upload, and the ingest job are all part of turning the
- * dropped PDFs into a readable outline, not steps a user perceives
+ * dropped files into a readable outline, not steps a user perceives
  * separately. "Start reading" never lights up as the *current* step: it
  * completes the instant accept navigates away.
  */
@@ -122,10 +131,15 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
 
       const settled = await Promise.all(
         files.map(async (file, index) => {
-          const { data, status } = await uploadAsset(courseId, file);
+          const { data, status, error } = await uploadAsset(courseId, file);
           const result: UploadItem = data
-            ? { file, status: "success", pageCount: data.page_count }
-            : { file, status: "error", error: describeError(status, "Upload").message };
+            ? {
+                file,
+                status: "success",
+                pageCount: data.page_count,
+                sourceFormat: data.source_format,
+              }
+            : { file, status: "error", error: describeError(status, "Upload", error).message };
           setStep((prev) =>
             prev.kind === "uploading"
               ? { ...prev, items: prev.items.map((item, i) => (i === index ? result : item)) }
@@ -252,9 +266,7 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
               <span className="shrink-0 text-xs text-muted-foreground">Uploading…</span>
             )}
             {item.status === "success" && (
-              <Badge tone="good">
-                Uploaded{item.pageCount != null ? ` · ${item.pageCount} pages` : ""}
-              </Badge>
+              <Badge tone="good">{uploadedStatusText(item)}</Badge>
             )}
             {item.status === "error" && (
               <Badge tone="serious">Failed{item.error ? `: ${item.error}` : ""}</Badge>
@@ -417,7 +429,7 @@ export default function UploadFlow({ files, onClose }: UploadFlowProps) {
               sections={step.sections}
               heading={`Detected outline — ${step.sections.length} chapter${
                 step.sections.length === 1 ? "" : "s"
-              } from your PDF's bookmarks`}
+              }`}
               description="No AI used · instant & free"
               submitLabel="Accept outline & start reading"
               reassuranceNote="You can fix the outline any time from the reader — merging or splitting resets review state for affected chapters only."

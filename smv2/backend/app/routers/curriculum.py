@@ -18,7 +18,7 @@ from app.schemas import (
     RelationReviewIn,
     StandardAlignmentIn,
 )
-from app.services import curriculum_service
+from app.services import curriculum_service, llm_readiness_service
 
 router = APIRouter(tags=["curriculum"])
 
@@ -37,6 +37,8 @@ def _raise_curriculum_error(exc: ValueError) -> None:
 def start_curriculum_extraction(course_id: str) -> CurriculumExtractionOut:
     try:
         job, version = curriculum_service.start_extraction(course_id)
+    except llm_readiness_service.LlmReadinessUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.detail) from exc
     except ValueError as exc:
         _raise_curriculum_error(exc)
     return CurriculumExtractionOut(job_id=job.id, curriculum_version_id=version.id)

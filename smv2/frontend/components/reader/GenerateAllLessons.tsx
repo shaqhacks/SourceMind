@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { generateAllLessons, getJob } from "@/lib/api/client";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
@@ -91,7 +92,11 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
       >
         {inProgress ? `Generating ${settledCount} of ${total}…` : "Generate all lessons"}
       </Button>
-      {error && <span className="text-xs text-status-serious">{error}</span>}
+      {error && (
+        <div className="min-w-72">
+          <RecoveryBanner message={error} onRetry={() => void handleStart()} />
+        </div>
+      )}
       {!inProgress && watchList !== null && skipped > 0 && (
         <span className="text-xs text-muted-foreground">{skipped} already generated</span>
       )}

@@ -78,3 +78,29 @@ def test_concept_practice_job_persists_grounded_deduplicated_pool(
         assert generated.stem_md == "Which ratio compares 4 to 5?"
     finally:
         session.close()
+
+
+def test_replenish_concept_practice_unconfigured_provider_fails_before_job_creation(client):
+    session = get_session()
+    try:
+        course_id, concept_id = _seed_mixed_queue(session)
+    finally:
+        session.close()
+
+    resp = client.post(f"/api/courses/{course_id}/study/concepts/{concept_id}/replenish")
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["detail"]["failure_category"] == "missing_credentials"
+    assert "ANTHROPIC_API_KEY" in body["detail"]["remediation"]
+
+    session = get_session()
+    try:
+        assert (
+            session.query(Job)
+            .filter(Job.type == "concept_practice_generation")
+            .count()
+            == 0
+        )
+    finally:
+        session.close()

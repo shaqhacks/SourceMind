@@ -143,6 +143,11 @@
             "title": "Id",
             "type": "string"
           },
+          "media_type": {
+            "default": "application/pdf",
+            "title": "Media Type",
+            "type": "string"
+          },
           "page_count": {
             "anyOf": [
               {
@@ -161,6 +166,11 @@
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
+          },
+          "source_format": {
+            "default": "pdf",
+            "title": "Source Format",
+            "type": "string"
           },
           "status": {
             "title": "Status",
@@ -517,6 +527,10 @@
             "title": "Id",
             "type": "string"
           },
+          "is_sample": {
+            "title": "Is Sample",
+            "type": "boolean"
+          },
           "progress": {
             "anyOf": [
               {
@@ -550,6 +564,7 @@
           "id",
           "title",
           "status",
+          "is_sample",
           "created_at",
           "updated_at"
         ],
@@ -558,6 +573,10 @@
       },
       "CourseReviewSummaryOut": {
         "properties": {
+          "available_count": {
+            "title": "Available Count",
+            "type": "integer"
+          },
           "course_id": {
             "title": "Course Id",
             "type": "string"
@@ -570,16 +589,27 @@
             "title": "New Count",
             "type": "integer"
           },
+          "overdue_count": {
+            "title": "Overdue Count",
+            "type": "integer"
+          },
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "total_count": {
+            "title": "Total Count",
+            "type": "integer"
           }
         },
         "required": [
           "course_id",
           "title",
           "due_count",
-          "new_count"
+          "overdue_count",
+          "new_count",
+          "available_count",
+          "total_count"
         ],
         "title": "CourseReviewSummaryOut",
         "type": "object"
@@ -2039,6 +2069,18 @@
             ],
             "title": "Error"
           },
+          "error_detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -2079,6 +2121,11 @@
             ],
             "title": "Result"
           },
+          "retryable": {
+            "readOnly": true,
+            "title": "Retryable",
+            "type": "boolean"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -2101,9 +2148,11 @@
           "result",
           "progress",
           "error",
+          "error_detail",
           "attempts",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "retryable"
         ],
         "title": "JobOut",
         "type": "object"
@@ -2138,6 +2187,92 @@
         "title": "LessonEstimateOut",
         "type": "object"
       },
+      "LlmCapabilitiesOut": {
+        "properties": {
+          "completion": {
+            "title": "Completion",
+            "type": "boolean"
+          },
+          "embeddings": {
+            "title": "Embeddings",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "completion",
+          "embeddings"
+        ],
+        "title": "LlmCapabilitiesOut",
+        "type": "object"
+      },
+      "LlmStatusOut": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/LlmCapabilitiesOut"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "failure_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Category"
+          },
+          "last_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "remediation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remediation"
+          }
+        },
+        "required": [
+          "provider",
+          "model",
+          "configured",
+          "available",
+          "capabilities",
+          "last_checked_at",
+          "failure_category",
+          "remediation"
+        ],
+        "title": "LlmStatusOut",
+        "type": "object"
+      },
       "LlmUsageOut": {
         "properties": {
           "calls": {
@@ -2164,6 +2299,19 @@
           "est_cost_usd"
         ],
         "title": "LlmUsageOut",
+        "type": "object"
+      },
+      "LocalSettingsRolloutOut": {
+        "properties": {
+          "local_settings_enabled": {
+            "title": "Local Settings Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "local_settings_enabled"
+        ],
+        "title": "LocalSettingsRolloutOut",
         "type": "object"
       },
       "MergeOp": {
@@ -2988,6 +3136,10 @@
       },
       "ReviewQueueOut": {
         "properties": {
+          "available_count": {
+            "title": "Available Count",
+            "type": "integer"
+          },
           "cards": {
             "items": {
               "$ref": "#/components/schemas/ReviewQueueCardOut"
@@ -3003,8 +3155,20 @@
             "title": "New",
             "type": "integer"
           },
+          "new_count": {
+            "title": "New Count",
+            "type": "integer"
+          },
+          "overdue_count": {
+            "title": "Overdue Count",
+            "type": "integer"
+          },
           "total": {
             "title": "Total",
+            "type": "integer"
+          },
+          "total_count": {
+            "title": "Total Count",
             "type": "integer"
           }
         },
@@ -3012,7 +3176,11 @@
           "cards",
           "due",
           "new",
-          "total"
+          "total",
+          "overdue_count",
+          "new_count",
+          "available_count",
+          "total_count"
         ],
         "title": "ReviewQueueOut",
         "type": "object"
@@ -3046,6 +3214,120 @@
           "backlog_warning"
         ],
         "title": "ReviewSummaryOut",
+        "type": "object"
+      },
+      "SearchResultOut": {
+        "properties": {
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
+          "course_id": {
+            "title": "Course Id",
+            "type": "string"
+          },
+          "cursor_token": {
+            "title": "Cursor Token",
+            "type": "string"
+          },
+          "doc_type": {
+            "enum": [
+              "section",
+              "lesson",
+              "note",
+              "highlight"
+            ],
+            "title": "Doc Type",
+            "type": "string"
+          },
+          "excerpt_md": {
+            "title": "Excerpt Md",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "source_locator": {
+            "$ref": "#/components/schemas/SourceLocatorOut"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc_type",
+          "course_id",
+          "section_id",
+          "asset_id",
+          "title",
+          "excerpt_md",
+          "source_locator",
+          "score",
+          "cursor_token"
+        ],
+        "title": "SearchResultOut",
+        "type": "object"
+      },
+      "SearchResultsOut": {
+        "properties": {
+          "backend": {
+            "enum": [
+              "fts5",
+              "like"
+            ],
+            "title": "Backend",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResultOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "sanitized_excerpts": {
+            "title": "Sanitized Excerpts",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor",
+          "backend",
+          "sanitized_excerpts"
+        ],
+        "title": "SearchResultsOut",
         "type": "object"
       },
       "SectionDetailOut": {
@@ -3181,6 +3463,29 @@
             ],
             "title": "Page Start"
           },
+          "source_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Format"
+          },
+          "source_locator": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Locator"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -3287,6 +3592,29 @@
             ],
             "title": "Page Start"
           },
+          "source_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Format"
+          },
+          "source_locator": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Locator"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -3310,6 +3638,128 @@
           "chapter_label"
         ],
         "title": "SectionOut",
+        "type": "object"
+      },
+      "SettingsBootstrapOut": {
+        "properties": {
+          "csrf_token": {
+            "title": "Csrf Token",
+            "type": "string"
+          },
+          "rollout": {
+            "$ref": "#/components/schemas/LocalSettingsRolloutOut"
+          }
+        },
+        "required": [
+          "csrf_token",
+          "rollout"
+        ],
+        "title": "SettingsBootstrapOut",
+        "type": "object"
+      },
+      "SettingsClearIn": {
+        "properties": {
+          "confirmation": {
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "provider": {
+            "enum": [
+              "anthropic",
+              "ollama"
+            ],
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "confirmation"
+        ],
+        "title": "SettingsClearIn",
+        "type": "object"
+      },
+      "SettingsOut": {
+        "properties": {
+          "credentials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "credentials_present": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Credentials Present",
+            "type": "object"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/LlmStatusOut"
+          },
+          "rollout": {
+            "$ref": "#/components/schemas/LocalSettingsRolloutOut"
+          }
+        },
+        "required": [
+          "provider",
+          "model",
+          "credentials_present",
+          "credentials",
+          "rollout",
+          "readiness"
+        ],
+        "title": "SettingsOut",
+        "type": "object"
+      },
+      "SettingsUpdateIn": {
+        "properties": {
+          "credentials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "enum": [
+                  "anthropic",
+                  "ollama"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          }
+        },
+        "title": "SettingsUpdateIn",
         "type": "object"
       },
       "SkillDetailOut": {
@@ -3796,6 +4246,56 @@
         "title": "SkillTaughtInOut",
         "type": "object"
       },
+      "SourceLocatorOut": {
+        "properties": {
+          "chapter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "slide": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slide"
+          }
+        },
+        "title": "SourceLocatorOut",
+        "type": "object"
+      },
       "SplitOp": {
         "properties": {
           "at_page": {
@@ -3866,7 +4366,7 @@
         "type": "object"
       },
       "StudyNextItemOut": {
-        "description": "One deterministic study suggestion (ADR-022, app.services.study_service).\n`detail` holds whatever raw numbers back `reason` \u2014 {\"best_score\":\n...} for low_test_score, {\"due_count\": ...} for due_cards, {} for\nunread, {\"days_since\": ...} for stale.",
+        "description": "One deterministic study suggestion (ADR-022, app.services.study_service).\n`detail` holds whatever raw numbers back `reason` \u2014 {\"best_score\":\n...} for low_test_score, canonical review availability counts for\ndue_cards/new_cards, {} for unread, {\"days_since\": ...} for stale.",
         "properties": {
           "chapter_label": {
             "anyOf": [
@@ -3888,6 +4388,7 @@
             "enum": [
               "low_test_score",
               "due_cards",
+              "new_cards",
               "unread",
               "stale"
             ],
@@ -4349,7 +4850,7 @@
   "paths": {
     "/api/assets/{asset_id}/file": {
       "get": {
-        "description": "Serves the original uploaded PDF as-is, for the reader's\noriginal-PDF page view. Inline disposition (not attachment) so a\nbrowser embeds/views it (e.g. via pdf.js) instead of downloading it.",
+        "description": "Serves the original uploaded source as-is, for the reader's\noriginal-source page view. Inline disposition keeps browser-viewable\nsources embedded where supported instead of forcing a download.",
         "operationId": "get_asset_file",
         "parameters": [
           {
@@ -6203,6 +6704,105 @@
         ]
       }
     },
+    "/api/courses/{course_id}/search": {
+      "get": {
+        "operationId": "search_course",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "document_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Document Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResultsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Course",
+        "tags": [
+          "search"
+        ]
+      }
+    },
     "/api/courses/{course_id}/sections": {
       "get": {
         "operationId": "list_sections",
@@ -7489,6 +8089,90 @@
         ]
       }
     },
+    "/api/jobs/{job_id}/retry": {
+      "post": {
+        "operationId": "retry_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/llm/status": {
+      "get": {
+        "operationId": "llm_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Llm Status",
+        "tags": [
+          "llm"
+        ]
+      }
+    },
+    "/api/llm/status/check": {
+      "post": {
+        "operationId": "llm_status_check",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Llm Status Check",
+        "tags": [
+          "llm"
+        ]
+      }
+    },
     "/api/llm/usage": {
       "get": {
         "operationId": "llm_usage",
@@ -7863,6 +8547,126 @@
         "summary": "Lesson Estimate",
         "tags": [
           "lessons"
+        ]
+      }
+    },
+    "/api/settings": {
+      "delete": {
+        "operationId": "clear_settings_api_settings_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsClearIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "get": {
+        "operationId": "get_settings_api_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "operationId": "update_settings_api_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/bootstrap": {
+      "get": {
+        "operationId": "bootstrap_api_settings_bootstrap_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsBootstrapOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Bootstrap",
+        "tags": [
+          "settings"
         ]
       }
     },

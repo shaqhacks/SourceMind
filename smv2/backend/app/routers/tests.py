@@ -11,7 +11,7 @@ from app.schemas import (
     TestAttemptOut,
     TestSummaryOut,
 )
-from app.services import courses_service, learner_context, tests_service
+from app.services import courses_service, learner_context, llm_readiness_service, tests_service
 
 router = APIRouter(tags=["tests"])
 
@@ -36,6 +36,8 @@ def generate_test(
             body.chapter_label,
             learner_id=learner_id,
         )
+    except llm_readiness_service.LlmReadinessUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.detail) from exc
     except tests_service.CourseNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except tests_service.ChapterNotFoundError as exc:

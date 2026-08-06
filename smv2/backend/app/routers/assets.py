@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from app.config import max_upload_bytes
+from app.pipeline.import_adapters import UNSUPPORTED_SOURCE_FORMAT_CODE
 from app.schemas import AssetOut
 from app.services import assets_service, courses_service, html_pages_service
 from app.services.assets_service import (
@@ -32,9 +33,37 @@ asset_router = APIRouter(prefix="/api/assets", tags=["assets"])
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
-def _sanitize_download_filename(filename: str) -> str:
+def _extension_for_source(source_format: str | None, media_type: str | None) -> str:
+    normalized_format = (source_format or "").lower()
+    normalized_media = (media_type or "").lower()
+    if normalized_format == "markdown" or normalized_media in {"text/markdown", "text/x-markdown"}:
+        return ".md"
+    if normalized_format == "html" or normalized_media == "text/html":
+        return ".html"
+    if normalized_format in {"text", "plain_text"} or normalized_media == "text/plain":
+        return ".txt"
+    if normalized_format == "pdf" or normalized_media == "application/pdf":
+        return ".pdf"
+    return ".bin"
+
+
+def _sanitize_download_filename(
+    filename: str,
+    *,
+    source_format: str | None = None,
+    media_type: str | None = None,
+) -> str:
     cleaned = _UNSAFE_FILENAME_CHARS_RE.sub("-", filename).strip("-") or "asset"
-    return cleaned if cleaned.lower().endswith(".pdf") else f"{cleaned}.pdf"
+    if "." in cleaned:
+        stem, current_ext = cleaned.rsplit(".", 1)
+        stem = stem or "asset"
+        current_ext = f".{current_ext.lower()}"
+    else:
+        stem, current_ext = cleaned, ""
+    expected_ext = _extension_for_source(source_format, media_type)
+    if current_ext == expected_ext:
+        return f"{stem}{current_ext}"
+    return f"{stem}{expected_ext}"
 
 
 @router.post(
@@ -64,7 +93,12 @@ async def upload_asset(course_id: str, request: Request, file: UploadFile) -> As
             file,
         )
     except UnsupportedFileTypeError as exc:
-        raise HTTPException(status_code=415, detail=str(exc)) from exc
+        detail: str | dict[str, str]
+        if str(exc) == UNSUPPORTED_SOURCE_FORMAT_CODE:
+            detail = {"code": UNSUPPORTED_SOURCE_FORMAT_CODE}
+        else:
+            detail = str(exc)
+        raise HTTPException(status_code=415, detail=detail) from exc
     except FileTooLargeError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
 
@@ -80,12 +114,12 @@ def list_assets(course_id: str) -> list[AssetOut]:
 
 @asset_router.get("/{asset_id}/file", operation_id="get_asset_file")
 def get_asset_file(asset_id: str) -> FileResponse:
-    """Serves the original uploaded PDF as-is, for the reader's
-    original-PDF page view. Inline disposition (not attachment) so a
-    browser embeds/views it (e.g. via pdf.js) instead of downloading it.
+    """Serves the original uploaded source as-is, for the reader's
+    original-source page view. Inline disposition keeps browser-viewable
+    sources embedded where supported instead of forcing a download.
     """
     try:
-        path, filename = assets_service.resolve_asset_file_path(asset_id)
+        path, filename, media_type, source_format = assets_service.resolve_asset_file_path(asset_id)
     except AssetNotFoundError as exc:
         raise HTTPException(status_code=404, detail="asset not found") from exc
     except AssetFileMissingError as exc:
@@ -93,8 +127,12 @@ def get_asset_file(asset_id: str) -> FileResponse:
 
     return FileResponse(
         path,
-        media_type="application/pdf",
-        filename=_sanitize_download_filename(filename),
+        media_type=media_type,
+        filename=_sanitize_download_filename(
+            filename,
+            source_format=source_format,
+            media_type=media_type,
+        ),
         content_disposition_type="inline",
     )
 

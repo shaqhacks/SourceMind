@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import asyncio
 
+from fastapi.testclient import TestClient
+
 from app.config import data_dir
-from app.services import sample_service
+from app.db.engine import dispose_engine, get_session
+from app.db.init import init_db
+from app.db.models import Course
+from app.main import create_app
+from app.services import courses_service, sample_service
 
 
 def _run_seed() -> None:
@@ -18,6 +24,7 @@ def test_seeds_via_lifespan_when_empty_and_enabled(client_with_sample_course):
     courses = client_with_sample_course.get("/api/courses").json()
     assert len(courses) == 1
     assert courses[0]["title"] == "Welcome to SourceMind"
+    assert courses[0]["is_sample"] is True
 
     jobs = client_with_sample_course.get("/api/jobs").json()
     ingest_jobs = [j for j in jobs if j["type"] == "ingest"]
@@ -72,3 +79,58 @@ def test_seed_is_idempotent_across_repeated_calls(client, monkeypatch):
 
     courses = client.get("/api/courses").json()
     assert len(courses) == 1
+
+
+def test_reconciles_marker_course_as_sample(client):
+    resp = client.post("/api/courses", json={"title": "Restored sample"})
+    assert resp.status_code == 201
+    course_id = resp.json()["id"]
+
+    marker = data_dir() / "sample_seeded"
+    marker.write_text(f"seeded course_id={course_id} at 2026-08-05T12:00:00\n")
+
+    assert sample_service.reconcile_sample_course_marker() is True
+
+    courses = client.get("/api/courses").json()
+    row = next(course for course in courses if course["id"] == course_id)
+    assert row["is_sample"] is True
+
+
+def test_reconcile_does_not_infer_sample_from_only_course(client):
+    resp = client.post("/api/courses", json={"title": "Only user course"})
+    assert resp.status_code == 201
+    course_id = resp.json()["id"]
+
+    assert sample_service.reconcile_sample_course_marker() is False
+
+    session = get_session()
+    try:
+        course = session.get(Course, course_id)
+        assert course is not None
+        assert course.is_sample is False
+    finally:
+        session.close()
+
+
+def test_startup_reconciles_existing_marker_even_when_new_sample_seeding_disabled(
+    tmp_path, monkeypatch
+):
+    db_path = tmp_path / "existing-marker.db"
+    monkeypatch.setenv("SMV2_DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("SMV2_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SMV2_WORKER_ENABLED", "0")
+    monkeypatch.setenv("SMV2_BACKUPS_ENABLED", "0")
+    monkeypatch.setenv("SMV2_SAMPLE_COURSE_ENABLED", "0")
+    dispose_engine()
+    init_db()
+
+    course = courses_service.create_course("Previously seeded sample")
+    marker = data_dir() / "sample_seeded"
+    marker.write_text(f"seeded course_id={course.id} at 2026-08-05T12:00:00\n")
+
+    with TestClient(create_app()) as test_client:
+        row = next(course for course in test_client.get("/api/courses").json())
+        assert row["id"] == course.id
+        assert row["is_sample"] is True
+
+    dispose_engine()

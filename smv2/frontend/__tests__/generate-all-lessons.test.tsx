@@ -26,6 +26,8 @@ function makeJob(id: string, sectionId: string): JobOut {
     result: null,
     progress: null,
     error: null,
+    error_detail: null,
+    retryable: true,
     attempts: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -114,5 +116,6 @@ describe("GenerateAllLessons", () => {
     await user.click(screen.getByRole("button", { name: /generate all lessons/i }));
 
     expect(await screen.findByText(/starting generation failed/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /view job details/i })).toHaveAttribute("href", "/jobs");
   });
 });

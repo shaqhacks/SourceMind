@@ -15,16 +15,25 @@ import {
 } from "@/lib/api/client";
 import { subscribeReviewSettled } from "@/lib/review/reviewBus";
 import { useSidebarCollapsed } from "@/lib/hooks/useSidebarCollapsed";
+import { useWorkspaceMode } from "@/lib/hooks/useWorkspaceMode";
+import {
+  getImportFileDecision,
+  IMPORT_ACCEPT_ATTRIBUTE,
+  IMPORT_PICKER_ARIA_LABEL,
+} from "@/lib/importFormats";
 import UploadFlow from "@/components/upload/UploadFlow";
 
 const NAV_ITEMS: { href: string; label: string }[] = [
   { href: "/", label: "Home" },
   { href: "/flashcards", label: "Flashcards" },
   { href: "/tests", label: "Tests" },
+  { href: "/search", label: "Search" },
+  { href: "/jobs", label: "Jobs" },
+  { href: "/settings", label: "Settings" },
 ];
 
-function isPdf(file: File): boolean {
-  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+export interface AppSidebarProps {
+  variant?: "persistent" | "drawer";
 }
 
 /**
@@ -38,20 +47,29 @@ function isPdf(file: File): boolean {
  * every mount of an always-visible panel. The Home task cards carry the
  * detailed progress instead.
  */
-export default function AppSidebar() {
+export default function AppSidebar({ variant = "persistent" }: AppSidebarProps) {
   const pathname = usePathname();
   const { collapsed } = useSidebarCollapsed();
+  const { mode } = useWorkspaceMode();
   const [courses, setCourses] = useState<CourseOut[]>([]);
   const [summary, setSummary] = useState<ReviewSummaryOut | null>(null);
   const [usage, setUsage] = useState<LlmUsageOut | null>(null);
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
+  const [importFeedback, setImportFeedback] = useState<string | null>(null);
   const [dropActive, setDropActive] = useState(false);
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleFilesChosen(chosen: FileList | File[]) {
-    const pdfs = Array.from(chosen).filter(isPdf);
-    if (pdfs.length > 0) setPendingFiles(pdfs);
+    const supported: File[] = [];
+    const messages: string[] = [];
+    for (const file of Array.from(chosen)) {
+      const decision = getImportFileDecision(file);
+      if (decision.status === "supported") supported.push(file);
+      else messages.push(decision.message);
+    }
+    setImportFeedback(messages.length > 0 ? messages.join(" ") : null);
+    if (supported.length > 0) setPendingFiles(supported);
   }
 
   function handleDropZoneDragEnter(event: DragEvent<HTMLDivElement>) {
@@ -109,25 +127,31 @@ export default function AppSidebar() {
     };
   }, []);
 
-  if (collapsed) return null;
+  if (variant === "persistent" && collapsed) return null;
 
-  const dueByCourse = new Map(
-    (summary?.courses ?? []).map((c) => [c.course_id, c.due_count]),
+  const overdueByCourse = new Map(
+    (summary?.courses ?? []).map((c) => [c.course_id, c.overdue_count]),
   );
+  const overdueTotal =
+    summary?.courses.reduce((total, course) => total + course.overdue_count, 0) ?? 0;
 
   return (
     <nav
       id="app-sidebar"
       aria-label="App"
-      className="flex w-[260px] flex-none flex-col gap-5 overflow-y-auto border-r border-divider p-4"
+      className={
+        variant === "drawer"
+          ? "flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4"
+          : "flex w-[260px] flex-none flex-col gap-5 overflow-y-auto border-r border-divider p-4"
+      }
     >
       <input
         ref={fileInputRef}
         type="file"
-        accept="application/pdf"
+        accept={IMPORT_ACCEPT_ATTRIBUTE}
         multiple
         className="hidden"
-        aria-label="Upload course PDF"
+        aria-label={IMPORT_PICKER_ARIA_LABEL}
         onChange={(event) => {
           if (event.target.files) handleFilesChosen(event.target.files);
           event.target.value = "";
@@ -157,9 +181,9 @@ export default function AppSidebar() {
                 }`}
               >
                 {item.label}
-                {item.href === "/flashcards" && summary && summary.due_total > 0 ? (
+                {item.href === "/flashcards" && overdueTotal > 0 ? (
                   <span className="rounded-[6px] bg-accent-soft px-2 py-0.5 text-xs font-semibold text-accent-800">
-                    {summary.due_total}
+                    {overdueTotal}
                   </span>
                 ) : null}
               </Link>
@@ -173,7 +197,8 @@ export default function AppSidebar() {
           Your courses
         </p>
         {courses.map((course) => {
-          const due = dueByCourse.get(course.id) ?? 0;
+          const due = overdueByCourse.get(course.id) ?? 0;
+          const showInstructorTools = mode === "instructor";
           return (
             <div
               key={course.id}
@@ -202,15 +227,35 @@ export default function AppSidebar() {
                 >
                   Skill map
                 </Link>
-                <span aria-hidden="true" className="text-muted-foreground">·</span>
-                <Link href={`/course/${course.id}/curriculum`} className="text-accent-700 hover:underline">
-                  Curriculum
-                </Link>
-                <span aria-hidden="true" className="text-muted-foreground">·</span>
-                <Link href={`/course/${course.id}/diagnostics/validate`} className="text-accent-700 hover:underline">
-                  Validate
-                </Link>
               </p>
+              {showInstructorTools ? (
+                <div
+                  role="group"
+                  aria-label={`Instructor tools for ${course.title}`}
+                  className="mt-2 border-t border-divider pt-2"
+                >
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    Instructor tools
+                  </p>
+                  <p className="flex gap-2 text-xs">
+                    <Link
+                      href={`/course/${course.id}/curriculum`}
+                      className="text-accent-700 hover:underline"
+                    >
+                      Curriculum
+                    </Link>
+                    <span aria-hidden="true" className="text-muted-foreground">
+                      ·
+                    </span>
+                    <Link
+                      href={`/course/${course.id}/diagnostics/validate`}
+                      className="text-accent-700 hover:underline"
+                    >
+                      Validate
+                    </Link>
+                  </p>
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -225,8 +270,13 @@ export default function AppSidebar() {
               : "border-border text-muted-foreground hover:border-accent hover:text-accent-700"
           }`}
         >
-          Drop a PDF here to add one
+          Drop files here to add one
         </div>
+        {importFeedback && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {importFeedback}
+          </p>
+        )}
       </div>
 
       {usage ? (

@@ -6,25 +6,18 @@ import { MessageSquare, PanelLeft, StickyNote } from "lucide-react";
 import TypographyControls from "@/components/TypographyControls";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
-import { useNarrowViewport } from "@/lib/hooks/useNarrowViewport";
+import { useShellLayout } from "@/lib/hooks/useShellLayout";
 import type { ViewMode } from "@/lib/reader/types";
 
 import GenerateAllLessons from "./GenerateAllLessons";
 import QuizzesPanel from "./QuizzesPanel";
 
-// Below Tailwind's `lg` breakpoint (min-width: 1024px) the three mid-bar
-// actions (Edit outline, GenerateAllLessons, QuizzesPanel) collapse into an
-// overflow menu; at/above it they sit inline. 1023 is the max-width
-// complement of that min-width boundary.
-//
-// They render in exactly ONE slot at a time (JS switch, not a `hidden
+// The three mid-bar actions render in exactly ONE slot at a time (JS switch, not a `hidden
 // lg:flex` / `lg:hidden` CSS pair): GenerateAllLessons holds per-instance
 // job-watch state (LessonJobWatcher children) and QuizzesPanel holds its own
 // job/SSE state AND emits a fixed id="quizzes-panel". Two simultaneously
 // mounted copies would duplicate that DOM id and split their state, so the
-// inline-vs-menu choice is made in JS via useNarrowViewport (SSR-safe:
-// useSyncExternalStore returns false on the server, same idiom as useTheme).
-const OVERFLOW_BREAKPOINT_PX = 1023;
+// inline-vs-menu choice is made in JS via the shared shell layout bands.
 
 // Shared secondary-control shape for this bar (design system: surface fill
 // + 24%-ink border, 13px). Not <Button> from components/ui: these sit in a
@@ -88,7 +81,8 @@ export default function TopBar({
   pagesAvailable,
   onChangeViewMode,
 }: TopBarProps) {
-  const isNarrow = useNarrowViewport(OVERFLOW_BREAKPOINT_PX);
+  const layout = useShellLayout();
+  const transientChrome = layout !== "desktop";
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   // Non-modal popover focus management (same pattern as QuizzesPanel):
@@ -160,7 +154,7 @@ export default function TopBar({
               type="button"
               aria-pressed={viewMode === mode}
               disabled={disabled}
-              title={disabled ? "Re-ingest this course to enable original pages" : undefined}
+              title={disabled ? "Original pages are available for PDF sections only" : undefined}
               onClick={() => onChangeViewMode(mode)}
               className={`rounded-[6px] px-3 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 viewMode === mode
@@ -173,7 +167,7 @@ export default function TopBar({
           );
         })}
       </div>
-      {isNarrow ? (
+      {transientChrome ? (
         <div ref={menuRef} className="relative shrink-0">
           <button
             type="button"

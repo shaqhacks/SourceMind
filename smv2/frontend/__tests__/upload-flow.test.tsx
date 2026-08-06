@@ -10,6 +10,8 @@ import {
   listSections,
   startIngest,
   uploadAsset,
+  type ApiResult,
+  type AssetOut,
   type CourseOut,
   type JobOut,
   type SectionOut,
@@ -49,6 +51,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     status: "draft",
     section_count: 0,
     failed_asset_count: 0,
+    is_sample: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -64,6 +67,8 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     result: null,
     progress: null,
     error: null,
+    error_detail: null,
+    retryable: true,
     attempts: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -92,12 +97,22 @@ function pdfFile(name: string): File {
   return new File(["%PDF-1.4 fake"], name, { type: "application/pdf" });
 }
 
-function makeAsset(filename: string) {
+function textFile(name: string): File {
+  return new File(["plain text"], name, { type: "text/plain" });
+}
+
+function markdownFile(name: string): File {
+  return new File(["# Chapter"], name, { type: "text/markdown" });
+}
+
+function makeAsset(filename: string): AssetOut {
   return {
     id: `asset-${filename}`,
     course_id: "course-1",
     filename,
     content_type: "application/pdf",
+    source_format: "pdf",
+    media_type: "application/pdf",
     size_bytes: 1024,
     sha256: "abc",
     page_count: 10,
@@ -181,7 +196,7 @@ describe("UploadFlow", () => {
     await waitFor(() => expect(mockedStartIngest).toHaveBeenCalledWith("course-1"));
   });
 
-  it("shows the uploaded page count once known", async () => {
+  it("shows the uploaded page count once known for PDFs", async () => {
     const user = userEvent.setup();
     mockedUploadAsset.mockResolvedValue(ok(makeAsset("book.pdf"), 201));
 
@@ -189,6 +204,74 @@ describe("UploadFlow", () => {
     await user.click(screen.getByRole("button", { name: /create.*upload/i }));
 
     await waitFor(() => expect(screen.getByText(/uploaded.*10 pages/i)).toBeInTheDocument());
+  });
+
+  it("uses singular and plural page-count wording only for PDFs", async () => {
+    const user = userEvent.setup();
+    mockedUploadAsset.mockImplementation((_courseId, file: File) => {
+      const pageCount = file.name === "one-page.pdf" ? 1 : 2;
+      return Promise.resolve(ok({ ...makeAsset(file.name), page_count: pageCount }, 201));
+    });
+
+    render(
+      <UploadFlow files={[pdfFile("one-page.pdf"), pdfFile("two-pages.pdf")]} onClose={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+
+    await waitFor(() => expect(screen.getByText(/uploaded.*1 page$/i)).toBeInTheDocument());
+    expect(screen.getByText(/uploaded.*2 pages/i)).toBeInTheDocument();
+    expect(screen.queryByText(/1 pages/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps uploaded status format-neutral when a non-PDF has no page count", async () => {
+    const user = userEvent.setup();
+    mockedUploadAsset.mockResolvedValue(
+      ok({ ...makeAsset("notes.txt"), page_count: null, source_format: "text", media_type: "text/plain" }, 201),
+    );
+
+    render(<UploadFlow files={[textFile("notes.txt")]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+
+    await waitFor(() => expect(screen.getByText("Uploaded")).toBeInTheDocument());
+    expect(screen.queryByText(/uploaded.*pages/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps uploaded status format-neutral when a non-PDF response includes a page count", async () => {
+    const user = userEvent.setup();
+    mockedUploadAsset.mockResolvedValue(
+      ok(
+        {
+          ...makeAsset("notes.md"),
+          page_count: 1,
+          source_format: "markdown",
+          media_type: "text/markdown",
+        },
+        201,
+      ),
+    );
+
+    render(<UploadFlow files={[markdownFile("notes.md")]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+
+    await waitFor(() => expect(screen.getByText("Uploaded")).toBeInTheDocument());
+    expect(screen.queryByText(/uploaded.*1 page/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/1 pages/i)).not.toBeInTheDocument();
+  });
+
+  it("maps unsupported_source_format upload detail to actionable student copy", async () => {
+    const user = userEvent.setup();
+    mockedUploadAsset.mockResolvedValue({
+      status: 415,
+      ok: false,
+      error: { detail: { code: "unsupported_source_format" } },
+    } as ApiResult<AssetOut>);
+
+    render(<UploadFlow files={[new File(["PK"], "deck.pptx")]} onClose={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /create.*upload/i }));
+
+    await waitFor(() => expect(screen.getByText(/deck\.pptx/i)).toBeInTheDocument());
+    expect(screen.getByText(/not supported yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/pdf, markdown, text, or html/i)).toBeInTheDocument();
   });
 
   it("shows live SSE stage/pct/message once the ingest job starts, never a bare spinner", async () => {
@@ -325,6 +408,8 @@ describe("UploadFlow", () => {
     await renderThroughIngestSuccess();
 
     expect(mockedListSections).toHaveBeenCalledWith("course-1");
+    expect(screen.getByText("Detected outline — 1 chapter")).toBeInTheDocument();
+    expect(screen.queryByText(/pdf's bookmarks/i)).not.toBeInTheDocument();
     expect(screen.getByText("Chapter One")).toBeInTheDocument();
     expect(mockPush).not.toHaveBeenCalled();
   });

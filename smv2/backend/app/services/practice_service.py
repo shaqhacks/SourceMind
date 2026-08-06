@@ -24,6 +24,7 @@ from app.db.models import (
     Section,
 )
 from app.services import evidence_items_service, evidence_service, learner_context
+from app.services import llm_readiness_service
 from app.services.jobs_service import create_job_in_session
 
 EXTRACTION_VERSION = "v3"
@@ -457,6 +458,7 @@ def start_assessment(course_id: str, section_id: str) -> tuple[int, dict[str, An
         session = get_session()
         try:
             section = _load_practice_section(session, course_id, section_id)
+            llm_readiness_service.assert_ready_for_generation()
             fingerprint = _fingerprint_for(section, _answer_sections(session, section))
 
             run = _matching_run(session, course_id, section_id, fingerprint)

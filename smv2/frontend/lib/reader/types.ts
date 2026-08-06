@@ -34,6 +34,8 @@ export interface ReaderSection {
    * (above) are per-asset 1-based page numbers, direct pdf.js page
    * numbers, whenever this is non-null. */
   asset_id: string | null;
+  source_format?: string | null;
+  source_locator?: Record<string, unknown> | null;
 }
 
 export interface ReaderCourse {
@@ -43,7 +45,7 @@ export interface ReaderCourse {
 }
 
 /** The reader's three-state view. "pages" (the original PDF, via pdf.js)
- * is only available for a section with an asset_id — see ReaderSection. */
+ * is only available for a PDF section with page provenance. */
 export type ViewMode = "source" | "pages" | "lesson";
 
 /** Where to resume: the section last read and how far down it, as a 0..1 fraction. */

@@ -13,7 +13,7 @@ from app.config import llm_model
 from app.db.engine import get_session
 from app.db.models import LlmCall, Section
 from app.llm.pricing import estimate_cost
-from app.services import jobs_service
+from app.services import jobs_service, llm_readiness_service
 
 _RECENT_CALLS_LIMIT = 20
 _DEFAULT_ESTIMATE_SECONDS = 30.0
@@ -55,13 +55,18 @@ def start_lesson_generation(section_id: str, force: bool = False) -> str:
     """
     session = get_session()
     try:
+        section = session.get(Section, section_id)
+        if section is None:
+            raise SectionNotFoundError(f"section not found: {section_id}")
+        if not force and section.lesson_status in ("queued", "generating"):
+            raise LessonAlreadyInProgressError(
+                f"lesson generation already in progress for section {section_id}"
+            )
+        llm_readiness_service.assert_ready_for_generation()
         result = session.execute(_CLAIM_LESSON_SQL, {"section_id": section_id, "force": force})
         claimed = result.first() is not None
 
         if not claimed:
-            section = session.get(Section, section_id)
-            if section is None:
-                raise SectionNotFoundError(f"section not found: {section_id}")
             raise LessonAlreadyInProgressError(
                 f"lesson generation already in progress for section {section_id}"
             )
@@ -90,6 +95,8 @@ def start_all_lesson_generations(course_id: str) -> tuple[list[str], int]:
             .all()
         )
         to_generate = [s for s in all_sections if s.lesson_status in ("none", "failed")]
+        if to_generate:
+            llm_readiness_service.assert_ready_for_generation()
         for s in to_generate:
             s.lesson_status = "queued"
         skipped = len(all_sections) - len(to_generate)

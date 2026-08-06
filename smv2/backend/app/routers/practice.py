@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.schemas import PracticeAssessmentOut, SubmitPracticeAnswerIn, SubmitPracticeAnswerOut
-from app.services import learner_context, practice_service
+from app.services import learner_context, llm_readiness_service, practice_service
 
 router = APIRouter(tags=["practice"])
 
@@ -49,6 +49,8 @@ def start_practice_assessment(
     _ensure_learner_key(request, response)
     try:
         status_code, result = practice_service.start_assessment(course_id, section_id)
+    except llm_readiness_service.LlmReadinessUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.detail) from exc
     except practice_service.SectionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except practice_service.NotPracticeSectionError as exc:

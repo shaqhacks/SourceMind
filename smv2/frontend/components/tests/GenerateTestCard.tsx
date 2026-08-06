@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { describeError } from "@/lib/api/errors";
 import {
@@ -14,7 +15,7 @@ import {
   type TestSummaryOut,
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
-import { useJobFailureMessage } from "@/lib/hooks/useJobFailureMessage";
+import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
 import { formatJobProgress } from "@/lib/jobs/format";
 
 import { findActiveChapterTestJob } from "./testsFormat";
@@ -74,7 +75,7 @@ export default function GenerateTestCard({
   const { job, done, stalled } = useJobEvents(watchedJobId);
   const isGenerating = watchedJobId !== null && !done;
   const jobFailed = done && job?.status === "failed";
-  const failureMessage = useJobFailureMessage(jobFailed, watchedJobId);
+  const failureInfo = useJobFailure(jobFailed, watchedJobId);
 
   useEffect(() => {
     if (!done || job?.status !== "succeeded" || !watchedJobId) return;
@@ -115,9 +116,11 @@ export default function GenerateTestCard({
         Not attempted yet — generate a {QUESTION_COUNT}-question test from this chapter.
       </p>
       {jobFailed && (
-        <ErrorBanner
-          message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
+        <RecoveryBanner
+          message={`Generation failed${failureInfo.message ? `: ${failureInfo.message}` : "."}`}
           onRetry={() => void handleGenerate()}
+          jobId={watchedJobId}
+          errorDetail={failureInfo.detail}
         />
       )}
       {isGenerating ? (

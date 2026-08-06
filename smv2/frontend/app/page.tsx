@@ -26,11 +26,11 @@ import { pickMostRecentCourse } from "@/lib/dashboard/continue";
 import { buildTaskCards } from "@/lib/dashboard/taskCards";
 import { useContinueChapter } from "@/lib/dashboard/useContinueChapter";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
-import { useSampleHintDismissed } from "@/lib/hooks/useSampleHint";
-
-function isPdf(file: File): boolean {
-  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-}
+import {
+  getImportFileDecision,
+  IMPORT_ACCEPT_ATTRIBUTE,
+  IMPORT_PICKER_ARIA_LABEL,
+} from "@/lib/importFormats";
 
 const DATE_FORMAT: Intl.DateTimeFormatOptions = {
   weekday: "long",
@@ -42,6 +42,14 @@ const DATE_FORMAT: Intl.DateTimeFormatOptions = {
 // so the "~N min planned" line has something to say without inventing a
 // number the way a per-day study-history figure would.
 const MINUTES_PER_CARD = 0.5;
+
+function courseOverdueCount(course: ReviewSummaryOut["courses"][number] | undefined): number {
+  return course ? course.overdue_count : 0;
+}
+
+function totalOverdueCount(summary: ReviewSummaryOut | null): number {
+  return summary?.courses.reduce((total, course) => total + courseOverdueCount(course), 0) ?? 0;
+}
 
 export default function Home() {
   const [courses, setCourses] = useState<CourseOut[]>([]);
@@ -57,11 +65,11 @@ export default function Home() {
   } | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
+  const [importFeedback, setImportFeedback] = useState<string | null>(null);
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus(headingRef);
-  const { dismissed: sampleHintDismissed, dismiss: dismissSampleHint } = useSampleHintDismissed();
 
   const loadCourses = useCallback(async () => {
     const { data, status } = await listCourses();
@@ -110,8 +118,16 @@ export default function Home() {
   }, []);
 
   function handleFilesChosen(files: FileList | File[]) {
-    const pdfs = Array.from(files).filter(isPdf);
-    if (pdfs.length > 0) setPendingFiles(pdfs);
+    const chosen = Array.from(files);
+    const supported: File[] = [];
+    const messages: string[] = [];
+    for (const file of chosen) {
+      const decision = getImportFileDecision(file);
+      if (decision.status === "supported") supported.push(file);
+      else messages.push(decision.message);
+    }
+    setImportFeedback(messages.length > 0 ? messages.join(" ") : null);
+    if (supported.length > 0) setPendingFiles(supported);
   }
 
   function handleDragEnter(event: DragEvent<HTMLDivElement>) {
@@ -167,44 +183,37 @@ export default function Home() {
       ? studyNextState.items
       : [];
 
-  // Honest about what one click actually delivers: due_total (cross-course)
+  // Honest about what one click actually delivers: overdue cards (cross-course)
   // only gates whether a review card shows at all; the count shown and the
   // session it links to are scoped to continueCourse specifically (the
   // same course the continue-reading task card is about), falling back to
   // the generic hub when there's no course to scope a direct session link to.
-  const continueCourseDueCount = continueCourse
-    ? (reviewSummary?.courses.find((c) => c.course_id === continueCourse.id)?.due_count ?? 0)
+  const continueCourseOverdueCount = continueCourse
+    ? courseOverdueCount(reviewSummary?.courses.find((c) => c.course_id === continueCourse.id))
     : 0;
-  const showReviewCard = (reviewSummary?.due_total ?? 0) > 0;
+  const overdueTotal = totalOverdueCount(reviewSummary);
+  const showReviewCard = overdueTotal > 0;
   const reviewCardHref =
-    continueCourse && continueCourseDueCount > 0
+    continueCourse && continueCourseOverdueCount > 0
       ? `/review?course=${continueCourse.id}&start=due`
       : "/review";
-  const reviewCardDueCount =
-    continueCourseDueCount > 0 ? continueCourseDueCount : (reviewSummary?.due_total ?? 0);
+  const reviewCardOverdueCount =
+    continueCourseOverdueCount > 0 ? continueCourseOverdueCount : overdueTotal;
 
   const taskCards = buildTaskCards({
     continueCourse,
     continueChapter,
     showReviewCard,
-    reviewCardDueCount,
+    reviewCardOverdueCount,
     reviewCardHref,
     studyNext,
   });
 
-  const dueTotal = reviewSummary?.due_total ?? 0;
-  const minutesPlanned = dueTotal > 0 ? Math.max(1, Math.round(dueTotal * MINUTES_PER_CARD)) : null;
+  const minutesPlanned =
+    overdueTotal > 0 ? Math.max(1, Math.round(overdueTotal * MINUTES_PER_CARD)) : null;
   const skillSnapshotCourseId = continueCourse?.id ?? courses[0]?.id ?? null;
 
   const isEmpty = loaded && !coursesError && courses.length === 0;
-  // The backend seeds a single "Welcome to SourceMind" sample course on
-  // first launch — this hint only ever applies to that exact moment (one
-  // course, already usable), not to a user's own first upload (which
-  // starts as "draft" before ingest even begins).
-  const showSampleHint =
-    !sampleHintDismissed &&
-    courses.length === 1 &&
-    (courses[0].status === "ingesting" || courses[0].status === "ready");
 
   return (
     <div
@@ -251,9 +260,9 @@ export default function Home() {
                 <p className="text-xs text-muted-foreground">course progress</p>
               </div>
               <div>
-                <p className="font-heading text-2xl">{dueTotal}</p>
+                <p className="font-heading text-2xl">{overdueTotal}</p>
                 <p className="text-xs text-muted-foreground">
-                  {dueTotal === 1 ? "card due" : "cards due"}
+                  {overdueTotal === 1 ? "card due" : "cards due"}
                 </p>
                 {reviewSummary?.backlog_warning && (
                   <Badge tone="warning">Backlog</Badge>
@@ -276,10 +285,10 @@ export default function Home() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="application/pdf"
+              accept={IMPORT_ACCEPT_ATTRIBUTE}
               multiple
               className="hidden"
-              aria-label="Start a new course"
+              aria-label={IMPORT_PICKER_ARIA_LABEL}
               onChange={(event) => {
                 if (event.target.files) handleFilesChosen(event.target.files);
                 event.target.value = "";
@@ -300,21 +309,10 @@ export default function Home() {
         />
       )}
 
-      {showSampleHint && (
-        <div
-          role="note"
-          className="flex items-center justify-between gap-3 rounded-md border border-border bg-accent/5 px-4 py-3 text-sm"
-        >
-          <span>This is a sample course — drop any PDF to create your own.</span>
-          <button
-            type="button"
-            onClick={dismissSampleHint}
-            aria-label="Dismiss hint"
-            className="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium"
-          >
-            Dismiss
-          </button>
-        </div>
+      {importFeedback && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {importFeedback}
+        </p>
       )}
 
       {!loaded ? (
@@ -326,7 +324,7 @@ export default function Home() {
       ) : isEmpty ? (
         <EmptyState
           icon="📚"
-          title="Drop a PDF anywhere to start"
+          title="Drop files anywhere to start"
           body="Or use the Start a new course button above."
         />
       ) : (

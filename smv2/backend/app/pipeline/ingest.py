@@ -27,15 +27,14 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.config import data_dir, html_conversion_enabled, pages_per_window
+from app.config import html_conversion_enabled, pages_per_window
 from app.config import skip_front_matter as _skip_front_matter_enabled
-from app.db.identity import content_hash_for, normalize_text, section_id_for
+from app.db.identity import section_id_for
 from app.db.models import (
     Asset,
     ChatTurn,
@@ -57,26 +56,23 @@ from app.db.models import (
     TestAttempt,
 )
 from app.pipeline._common import report_progress as _report_progress
-from app.pipeline._common import report_progress_in_session as _report_progress_in_session
+from app.pipeline._common import (
+    report_progress_in_session as _report_progress_in_session,
+)
 from app.pipeline.chunking import chunk_pages
-from app.pipeline.extract import (
-    PdfExtractionError,
-    extract_heading_candidates,
-    extract_markdown_pages_in_batches,
-    get_toc,
-    open_pdf,
-    rewrite_image_refs_to_api_path,
-)
+from app.pipeline.extract import PdfExtractionError, open_pdf
 from app.pipeline.html_conversion import html_dir
-from app.pipeline.outline_detect import (
-    assign_chapter_labels,
-    classify_section_kind,
-    detect_sections,
-    front_matter_bookmark_titles,
-    toc_shaped_chapter_cover_mask,
+from app.pipeline.import_adapters import (
+    PDF_FORMAT_NAME,
+    PdfDocumentAdapter,
+    UnsupportedSourceFormatError,
+    choose_document_adapter,
+    sniff_pdf_path,
+    supported_adapters,
 )
+from app.pipeline.ingest_paths import images_dir_for_course
+from app.services import search_index
 
-_EXTRACTOR_ALGO_VERSION = "algo-7"
 _LOW_TEXT_YIELD_CHARS_PER_PAGE = 20
 # Page-batch granularity for extraction-phase progress heartbeats — bounds
 # the number of report_progress DB writes per asset regardless of document
@@ -88,24 +84,14 @@ class IngestAllAssetsFailedError(Exception):
     pass
 
 
-def extractor_version() -> str:
-    try:
-        pymupdf4llm_version = _pkg_version("pymupdf4llm")
-    except PackageNotFoundError:
-        pymupdf4llm_version = "unknown"
-    return f"pymupdf4llm-{pymupdf4llm_version}+{_EXTRACTOR_ALGO_VERSION}"
-
-
 @dataclass
 class _ExtractedAsset:
     asset: Asset
-    pages: list[str]  # markdown text per page, 0-based
-    toc: list[tuple[int, str, int]]
-    heading_candidates: list[tuple[int, str, float, bool]]
+    document: Any
 
 
 def _images_dir(course_id: str) -> Path:
-    return data_dir() / "assets" / course_id / "images"
+    return images_dir_for_course(course_id)
 
 
 def _asset_page_count(asset: Asset) -> int:
@@ -116,32 +102,45 @@ def _asset_page_count(asset: Asset) -> int:
     re-attempts opening them and marks them extract_failed on its own, so
     nothing here needs to duplicate that handling.
     """
-    doc = open_pdf(Path(asset.stored_path))
+    path = Path(asset.stored_path)
+    if not sniff_pdf_path(path):
+        return 1
+    doc = open_pdf(path)
     try:
         return doc.page_count
     finally:
         doc.close()
 
 
+def _document_adapter_for_asset(asset: Asset, *, on_batch=None):
+    configured_pdf = PdfDocumentAdapter(
+        window=pages_per_window(),
+        skip_front_matter=_skip_front_matter_enabled(),
+        on_batch=on_batch,
+    )
+    adapters = [
+        configured_pdf,
+        *[
+            adapter
+            for adapter in supported_adapters()
+            if getattr(adapter, "format_name", None) != PDF_FORMAT_NAME
+        ],
+    ]
+    return choose_document_adapter(
+        asset,
+        adapters=adapters,
+    )
+
+
 def _extract_one_asset(asset: Asset, *, on_batch=None) -> _ExtractedAsset:
-    pdf_path = Path(asset.stored_path)
-    doc = open_pdf(pdf_path)
-    try:
-        toc = get_toc(doc)
-        heading_candidates = extract_heading_candidates(doc)
-        pages = extract_markdown_pages_in_batches(
-            doc,
-            batch_pages=_EXTRACT_PROGRESS_BATCH_PAGES,
-            on_batch=on_batch,
-            image_dir=_images_dir(asset.course_id),
-            image_filename=asset.id,
-        )
-        page_count = doc.page_count
-    finally:
-        doc.close()
+    adapter = _document_adapter_for_asset(asset, on_batch=on_batch)
+    document = adapter.extract(asset)
+    page_count = int(document.metadata.get("page_count") or 0)
 
     asset.page_count = page_count
-    total_chars = sum(len(p) for p in pages)
+    asset.source_format = document.source_format
+    asset.media_type = adapter.media_type
+    total_chars = int(document.metadata.get("total_chars") or 0)
     avg_chars_per_page = (total_chars / page_count) if page_count else 0
     # Sparse text is not a failure — a scanned/image-only PDF still ingests,
     # it just produces thin sections. Flag it on the asset so the UI/ops can
@@ -153,7 +152,7 @@ def _extract_one_asset(asset: Asset, *, on_batch=None) -> _ExtractedAsset:
     )
     asset.status = "extracted"
 
-    return _ExtractedAsset(asset=asset, pages=pages, toc=toc, heading_candidates=heading_candidates)
+    return _ExtractedAsset(asset=asset, document=document)
 
 
 def run_ingest(session: Session, job: Job, course_id: str) -> None:
@@ -222,10 +221,6 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     for asset in assets:
         asset.html_status = "none"
 
-    window = pages_per_window()
-    skip_fm = _skip_front_matter_enabled()
-    version_tag = extractor_version()
-
     # Sized up front so extraction progress is a real, global 0->80 measure
     # across every asset's pages, not a per-asset counter that resets (or
     # sits at 0 for the whole run when there's only one asset — the exact
@@ -236,7 +231,7 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     for asset in assets:
         try:
             total_pages_all_assets += _asset_page_count(asset)
-        except PdfExtractionError:
+        except (PdfExtractionError, UnsupportedSourceFormatError):
             pass
 
     extracted: list[_ExtractedAsset] = []
@@ -253,19 +248,25 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
             message=f"extracting {asset.filename}",
         )
 
-        def _on_batch(pages_done: int, total_pages: int) -> None:
-            global_done = pages_processed_so_far + pages_done
+        def _on_batch(
+            pages_done: int,
+            total_pages: int,
+            *,
+            pages_processed_before_asset: int = pages_processed_so_far,
+            filename: str = asset.filename,
+        ) -> None:
+            global_done = pages_processed_before_asset + pages_done
             _report_progress(
                 job.id,
                 stage="extracting",
                 pct=int(80 * global_done / max(1, total_pages_all_assets)),
-                message=f"extracting {asset.filename} — page {pages_done} of {total_pages}",
+                message=f"extracting {filename} — page {pages_done} of {total_pages}",
             )
 
         try:
             extracted.append(_extract_one_asset(asset, on_batch=_on_batch))
             pages_processed_so_far += asset.page_count
-        except PdfExtractionError as exc:
+        except (PdfExtractionError, UnsupportedSourceFormatError) as exc:
             asset.status = "extract_failed"
             asset.error = str(exc)
         # Per-asset commit is safe/desired here: these are non-destructive
@@ -308,82 +309,35 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
             pct=80,
             message=f"detecting outline for {item.asset.filename}",
         )
-        bounds_list = detect_sections(
-            item.toc,
-            len(item.pages),
-            window,
-            pages=item.pages,
-            heading_candidates=item.heading_candidates,
-            skip_front_matter=skip_fm,
-        )
-        if skip_fm:
-            dropped_titles = front_matter_bookmark_titles(item.toc)
-            if dropped_titles:
-                _report_progress(
-                    job.id,
-                    stage="outlining",
-                    pct=80,
-                    message=f"skipped front matter in {item.asset.filename}: {', '.join(dropped_titles)}",
-                )
-
-        # Kind/chapter grouping (ADR-017) is computed per-asset, over this
-        # asset's own title sequence only — chapter markers are a per-book
-        # concept, so a multi-asset course must never let one asset's
-        # chapter numbering leak into another's front sections.
-        asset_titles = [b.title for b in bounds_list]
-        asset_chapter_labels = assign_chapter_labels(asset_titles)
-
-        # Drop ToC-shaped chapter cover pages (ADR-021) — MUST happen after
-        # assign_chapter_labels above: a cover section's own title is
-        # exactly the ^chapter N marker that call anchors on, so dropping
-        # it first would silently orphan every section that chapter marker
-        # was supposed to label. bounds_list and asset_chapter_labels are
-        # filtered by the identical mask so the two stay in lockstep.
-        cover_mask = toc_shaped_chapter_cover_mask(bounds_list, item.pages, skip_front_matter=skip_fm)
-        dropped_cover_titles = [b.title for b, keep in zip(bounds_list, cover_mask) if not keep]
-        if dropped_cover_titles:
+        for warning in item.document.warnings:
             _report_progress(
                 job.id,
                 stage="outlining",
                 pct=80,
-                message=(
-                    f"skipped chapter cover pages in {item.asset.filename}: "
-                    f"{', '.join(dropped_cover_titles)}"
-                ),
+                message=f"{item.asset.filename}: {warning}",
             )
-        bounds_list = [b for b, keep in zip(bounds_list, cover_mask) if keep]
-        asset_chapter_labels = [lbl for lbl, keep in zip(asset_chapter_labels, cover_mask) if keep]
 
-        for idx, bounds in enumerate(bounds_list):
-            page_slice = [(p, item.pages[p]) for p in range(bounds.page_start, bounds.page_end + 1)]
-            body_md = "\n\n".join(text for _, text in page_slice if text and text.strip())
-            # Rewrite pymupdf4llm's local-filesystem image refs into servable
-            # API paths BEFORE normalizing/hashing — body_md is immutable
-            # once a section is persisted (see Section.body_md), so this is
-            # the only chance to bake the real reference in; a re-ingest of
-            # the same course/asset reproduces the identical rewritten text
-            # (same course_id, same deterministic image filenames), so
-            # content-addressed identity (section_id_for) is unaffected.
-            body_md = rewrite_image_refs_to_api_path(body_md, course_id)
-            normalized = normalize_text(body_md)
-
-            occurrence = occurrence_counts.get(normalized, 0)
-            occurrence_counts[normalized] = occurrence + 1
-            section_id = section_id_for(course_id, normalized, occurrence)
+        for normalized_section in item.document.sections:
+            occurrence = occurrence_counts.get(normalized_section.body_md, 0)
+            occurrence_counts[normalized_section.body_md] = occurrence + 1
+            section_id = section_id_for(course_id, normalized_section.body_md, occurrence)
 
             new_sections.append(
                 {
                     "id": section_id,
-                    "title": bounds.title,
+                    "title": normalized_section.title,
                     "order_index": order_index,
-                    "asset_id": item.asset.id,
-                    "page_start": bounds.page_start,
-                    "page_end": bounds.page_end,
-                    "body_md": normalized,
-                    "content_hash": content_hash_for(normalized),
-                    "kind": classify_section_kind(bounds.title),
-                    "chapter_label": asset_chapter_labels[idx],
-                    "pages": page_slice,
+                    "asset_id": normalized_section.asset_id,
+                    "page_start": normalized_section.page_start,
+                    "page_end": normalized_section.page_end,
+                    "source_format": normalized_section.source_format,
+                    "source_locator": normalized_section.source_locator.to_dict(),
+                    "extractor_version": item.document.extractor_version,
+                    "body_md": normalized_section.body_md,
+                    "content_hash": normalized_section.content_hash,
+                    "kind": normalized_section.kind,
+                    "chapter_label": normalized_section.chapter_label,
+                    "pages": normalized_section.pages,
                 }
             )
             order_index += 1
@@ -402,14 +356,13 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     new_ids = {s["id"] for s in new_sections}
     removed_section_ids = set(existing_sections) - new_ids
 
-    # Course-scoped, non-diffable derived history does not survive re-ingest
-    # (per the derived-tables registry). Review state / progress survive
-    # naturally: they hang off card_id/section_id, which only disappear if
-    # their own row is actually deleted below — no explicit "remap" step
-    # needed beyond doing the section diff correctly.
+    # Course-scoped, non-diffable generated history does not survive re-ingest
+    # (per the derived-tables registry). Section-scoped learner state survives
+    # naturally: notes/highlights/cards/review/progress hang off section_id or
+    # card_id, which only disappear if their own section row is actually
+    # deleted below.
     session.query(ChatTurn).filter(ChatTurn.course_id == course_id).delete()
-    session.query(Highlight).filter(Highlight.course_id == course_id).delete()
-    session.query(Note).filter(Note.course_id == course_id).delete()
+    search_index.delete_course_documents(session, course_id, sync_fts=False)
     # TestAttempt before Test: TestAttempt.test_id -> Test.id is ON DELETE
     # CASCADE, so deleting Test first would already remove these via the
     # DB itself, but every REPLACED table gets its own explicit delete here
@@ -469,7 +422,9 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
             existing.asset_id = data["asset_id"]
             existing.page_start = data["page_start"]
             existing.page_end = data["page_end"]
-            existing.extractor_version = version_tag
+            existing.source_format = data["source_format"]
+            existing.source_locator = data["source_locator"]
+            existing.extractor_version = data["extractor_version"]
             existing.kind = data["kind"]
             existing.chapter_label = data["chapter_label"]
             section_row = existing
@@ -483,10 +438,12 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                 asset_id=data["asset_id"],
                 page_start=data["page_start"],
                 page_end=data["page_end"],
+                source_format=data["source_format"],
+                source_locator=data["source_locator"],
                 body_md=data["body_md"],
                 content_hash=data["content_hash"],
                 lesson_status="none",
-                extractor_version=version_tag,
+                extractor_version=data["extractor_version"],
                 kind=data["kind"],
                 chapter_label=data["chapter_label"],
             )
@@ -504,6 +461,13 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
                     source_ref=f"{section_row.id}:p.{tc.page + 1}",
                 )
             )
+        search_index.upsert_section_document(session, section_row, sync_fts=False)
+        search_index.upsert_lesson_document(session, section_row, sync_fts=False)
+
+    for note in session.query(Note).filter(Note.course_id == course_id).all():
+        search_index.upsert_note_document(session, note, sync_fts=False)
+    for highlight in session.query(Highlight).filter(Highlight.course_id == course_id).all():
+        search_index.upsert_highlight_document(session, highlight, sync_fts=False)
 
     any_extracted_ok = any(a.status == "extracted" for a in assets)
     course.status = "ready" if any_extracted_ok else "ingest_failed"
@@ -514,5 +478,6 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     # so this is nothing more than inserting a queued Job row.
     if any_extracted_ok and html_conversion_enabled():
         session.add(Job(type="convert_html", status="queued", payload={"course_id": course_id}))
+    search_index.rebuild_fts_if_present(session)
     _report_progress_in_session(job, stage="done", pct=100, message="ingest complete")
     session.commit()

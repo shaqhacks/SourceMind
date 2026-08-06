@@ -67,6 +67,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     status: "ready",
     section_count: 4,
     failed_asset_count: 0,
+    is_sample: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     progress: null,
@@ -93,6 +94,10 @@ function makeSection(overrides: Partial<SectionOut> = {}): SectionOut {
 
 function pdfFile(name: string): File {
   return new File(["%PDF-1.4 fake"], name, { type: "application/pdf" });
+}
+
+function markdownFile(name: string): File {
+  return new File(["# Chapter\n\nBody"], name, { type: "text/markdown" });
 }
 
 // Four content sections, saved progress sitting on the second one — gives
@@ -128,7 +133,7 @@ describe("Home page", () => {
     mockedListCourses.mockResolvedValue(ok([]));
     render(<Home />);
 
-    expect(await screen.findByText(/drop a pdf anywhere to start/i)).toBeInTheDocument();
+    expect(await screen.findByText(/drop files anywhere to start/i)).toBeInTheDocument();
   });
 
   it("shows a retryable error banner when loading courses fails", async () => {
@@ -141,7 +146,18 @@ describe("Home page", () => {
     mockedListCourses.mockResolvedValue(ok([]));
     await userEvent.setup().click(screen.getByRole("button", { name: /retry/i }));
 
-    expect(await screen.findByText(/drop a pdf anywhere to start/i)).toBeInTheDocument();
+    expect(await screen.findByText(/drop files anywhere to start/i)).toBeInTheDocument();
+  });
+
+  it("opens the upload flow for Markdown files selected from the dashboard picker", async () => {
+    mockedListCourses.mockResolvedValue(ok([]));
+    render(<Home />);
+
+    const input = await screen.findByLabelText("Upload course files");
+    fireEvent.change(input, { target: { files: [markdownFile("chapter.md")] } });
+
+    expect(screen.getByRole("dialog", { name: /start a new course/i })).toBeInTheDocument();
+    expect(screen.getByText("chapter.md")).toBeInTheDocument();
   });
 
   it("shows the heading and renders a course card for each course", async () => {
@@ -224,7 +240,17 @@ describe("Home page", () => {
       );
       mockedGetReviewSummary.mockResolvedValue(
         ok({
-          courses: [{ course_id: "a", title: "Distributed Systems", due_count: 7, new_count: 2 }],
+          courses: [
+            {
+              course_id: "a",
+              title: "Distributed Systems",
+              due_count: 7,
+              overdue_count: 7,
+              new_count: 2,
+              available_count: 9,
+              total_count: 9,
+            },
+          ],
           due_total: 7,
           daily_throughput: 3,
           backlog_warning: false,
@@ -347,7 +373,17 @@ describe("Home page", () => {
     mockedListSections.mockResolvedValue(ok(CONTENT_SECTIONS));
     mockedGetReviewSummary.mockResolvedValue(
       ok({
-        courses: [{ course_id: "a", title: "Distributed Systems", due_count: 5, new_count: 1 }],
+        courses: [
+          {
+            course_id: "a",
+            title: "Distributed Systems",
+            due_count: 5,
+            overdue_count: 5,
+            new_count: 1,
+            available_count: 6,
+            total_count: 6,
+          },
+        ],
         due_total: 5,
         daily_throughput: 2.6,
         backlog_warning: false,
@@ -379,9 +415,9 @@ describe("Home page", () => {
   it("opens the upload flow after choosing files via the Start a new course button", async () => {
     mockedListCourses.mockResolvedValue(ok([]));
     render(<Home />);
-    await screen.findByText(/drop a pdf anywhere to start/i);
+    await screen.findByText(/drop files anywhere to start/i);
 
-    const input = screen.getByLabelText(/start a new course/i) as HTMLInputElement;
+    const input = screen.getByLabelText("Upload course files") as HTMLInputElement;
     await userEvent.setup().upload(input, pdfFile("book.pdf"));
 
     expect(screen.getByRole("dialog", { name: /start a new course/i })).toBeInTheDocument();
@@ -390,7 +426,7 @@ describe("Home page", () => {
   it("opens the upload flow when PDFs are dropped anywhere on the dashboard", async () => {
     mockedListCourses.mockResolvedValue(ok([]));
     const { container } = render(<Home />);
-    await screen.findByText(/drop a pdf anywhere to start/i);
+    await screen.findByText(/drop files anywhere to start/i);
 
     const dropTarget = container.firstChild as HTMLElement;
     const file = pdfFile("dropped.pdf");
@@ -399,48 +435,48 @@ describe("Home page", () => {
     expect(await screen.findByRole("dialog", { name: /start a new course/i })).toBeInTheDocument();
   });
 
-  it("ignores non-PDF files dropped on the dashboard", async () => {
+  it("keeps blocked archive drops visible on the dashboard without opening upload", async () => {
     mockedListCourses.mockResolvedValue(ok([]));
     const { container } = render(<Home />);
-    await screen.findByText(/drop a pdf anywhere to start/i);
+    await screen.findByText(/drop files anywhere to start/i);
 
     const dropTarget = container.firstChild as HTMLElement;
-    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+    const file = new File(["PK"], "notes.docx");
     fireEvent.drop(dropTarget, { dataTransfer: { files: [file], types: ["Files"] } });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/notes\.docx/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/not supported yet/i);
   });
 
   describe("sample course hint", () => {
-    it("shows the hint when exactly one course exists and it's ready", async () => {
+    it("does not show the sample hint for a sole user-created ready course", async () => {
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "ready", is_sample: false })]));
+
+      render(<Home />);
+      await screen.findByText("Distributed Systems");
+
+      expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
+    });
+
+    it("shows the hint when a seeded sample course exists alongside user courses", async () => {
       mockedListCourses.mockResolvedValue(
-        ok([makeCourse({ id: "a", title: "Welcome to SourceMind", status: "ready" })]),
+        ok([
+          makeCourse({
+            id: "sample",
+            title: "Welcome to SourceMind",
+            status: "ready",
+            is_sample: true,
+          }),
+          makeCourse({ id: "user-course", title: "Distributed Systems", status: "ready" }),
+        ]),
       );
 
       render(<Home />);
 
       expect(
-        await screen.findByText(/this is a sample course — drop any pdf to create your own/i),
+        await screen.findByText(/this is a sample course — drop your own file to create a course/i),
       ).toBeInTheDocument();
-    });
-
-    it("shows the hint while the single course is still ingesting", async () => {
-      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "ingesting" })]));
-
-      render(<Home />);
-
-      expect(await screen.findByText(/this is a sample course/i)).toBeInTheDocument();
-    });
-
-    it("does not show the hint when more than one course exists", async () => {
-      mockedListCourses.mockResolvedValue(
-        ok([makeCourse({ id: "a" }), makeCourse({ id: "b", title: "Second course" })]),
-      );
-
-      render(<Home />);
-      await screen.findByText("Second course");
-
-      expect(screen.queryByText(/this is a sample course/i)).not.toBeInTheDocument();
     });
 
     it("does not show the hint for a draft or failed single course", async () => {
@@ -453,7 +489,7 @@ describe("Home page", () => {
     });
 
     it("dismissing hides it and persists the choice across remounts", async () => {
-      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "ready" })]));
+      mockedListCourses.mockResolvedValue(ok([makeCourse({ id: "a", status: "ready", is_sample: true })]));
       const user = userEvent.setup();
 
       const { unmount } = render(<Home />);

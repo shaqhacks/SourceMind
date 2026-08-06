@@ -31,6 +31,32 @@ def data_dir() -> Path:
     return _REPO_ROOT / "data"
 
 
+def local_settings_path() -> Path:
+    override = os.environ.get("SMV2_LOCAL_SETTINGS_PATH")
+    if override:
+        return Path(override)
+    return data_dir() / "local_settings.toml"
+
+
+def secrets_path() -> Path:
+    override = os.environ.get("SMV2_SECRETS_PATH")
+    if override:
+        return Path(override)
+    return data_dir() / "secrets.toml"
+
+
+def _read_local_settings() -> dict:
+    path = local_settings_path()
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("rb") as f:
+            return tomllib.load(f)
+    except Exception:
+        logger.warning("could not parse %s as TOML; ignoring", path, exc_info=True)
+        return {}
+
+
 def _read_secrets() -> dict:
     """Reads data_dir()/secrets.toml fresh on every call — no caching, so a
     monkeypatched data dir in tests (or a live-edited file on a real
@@ -40,7 +66,7 @@ def _read_secrets() -> dict:
     silently; a malformed file logs a warning and also returns {} rather
     than crashing the app over a config typo.
     """
-    path = data_dir() / "secrets.toml"
+    path = secrets_path()
     if not path.is_file():
         return {}
     try:
@@ -108,11 +134,23 @@ def skip_front_matter() -> bool:
 
 
 def llm_provider() -> str:
-    return os.environ.get("SMV2_LLM_PROVIDER", "anthropic")
+    env = os.environ.get("SMV2_LLM_PROVIDER")
+    if env:
+        return env
+    from_local = _read_local_settings().get("provider")
+    if isinstance(from_local, str) and from_local:
+        return from_local
+    return "anthropic"
 
 
 def llm_model() -> str:
-    return os.environ.get("SMV2_LLM_MODEL", "claude-sonnet-5")
+    env = os.environ.get("SMV2_LLM_MODEL")
+    if env:
+        return env
+    from_local = _read_local_settings().get("model")
+    if isinstance(from_local, str) and from_local:
+        return from_local
+    return "claude-sonnet-5"
 
 
 def llm_max_concurrency() -> int:
@@ -131,6 +169,14 @@ def ollama_base_url() -> str:
     if isinstance(from_secrets, str) and from_secrets:
         return from_secrets
     return "http://localhost:11434"
+
+
+def ollama_base_url_configured() -> bool:
+    env = os.environ.get("SMV2_OLLAMA_BASE_URL")
+    if env:
+        return True
+    from_secrets = _read_secrets().get("ollama_base_url")
+    return isinstance(from_secrets, str) and bool(from_secrets)
 
 
 def anthropic_api_key() -> str | None:

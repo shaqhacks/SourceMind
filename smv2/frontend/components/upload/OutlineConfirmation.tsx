@@ -254,7 +254,10 @@ export default function OutlineConfirmation({
                     Rename
                   </Button>
                 )}
-                {!isSplitStaged && splitOpenId !== id && (
+                {section.page_start !== null &&
+                  section.page_end !== null &&
+                  !isSplitStaged &&
+                  splitOpenId !== id && (
                   <Button
                     variant="ghost"
                     size="sm"

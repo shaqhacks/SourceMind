@@ -17,6 +17,7 @@ import {
   type CourseOut,
   type JobOut,
   type ReviewQueueCardOut,
+  type ReviewQueueOut,
   type ReviewSummaryOut,
 } from "@/lib/api/client";
 
@@ -53,6 +54,7 @@ function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
     status: "ready",
     section_count: 3,
     failed_asset_count: 0,
+    is_sample: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     progress: null,
@@ -99,6 +101,24 @@ function makeQueueCard(overrides: Partial<ReviewQueueCardOut> = {}): ReviewQueue
   };
 }
 
+function makeQueue(overrides: Partial<ReviewQueueOut> = {}): ReviewQueueOut {
+  const cards = overrides.cards ?? [];
+  const total = overrides.total ?? cards.length;
+  const due = overrides.due ?? 0;
+  const newCount = overrides.new ?? Math.max(total - due, 0);
+  return {
+    cards,
+    due,
+    new: newCount,
+    total,
+    overdue_count: due,
+    new_count: newCount,
+    available_count: due + newCount,
+    total_count: total,
+    ...overrides,
+  };
+}
+
 function makeSummary(overrides: Partial<ReviewSummaryOut> = {}): ReviewSummaryOut {
   return {
     backlog_warning: false,
@@ -118,6 +138,8 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     result: null,
     progress: null,
     error: null,
+    error_detail: null,
+    retryable: true,
     attempts: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -158,7 +180,7 @@ function setUpHappyPathMocks() {
     return Promise.resolve(ok([]));
   });
   mockedGetReviewQueue.mockResolvedValue(
-    ok({
+    ok(makeQueue({
       cards: [
         makeQueueCard({
           id: "card-a",
@@ -173,10 +195,28 @@ function setUpHappyPathMocks() {
       due: 1,
       new: 1,
       total: 4,
-    }),
+      overdue_count: 1,
+      new_count: 1,
+      available_count: 2,
+      total_count: 4,
+    })),
   );
   mockedGetReviewSummary.mockResolvedValue(
-    ok(makeSummary({ courses: [{ course_id: "course-1", title: "Course One", due_count: 1, new_count: 1 }] })),
+    ok(
+      makeSummary({
+        courses: [
+          {
+            course_id: "course-1",
+            title: "Course One",
+            due_count: 1,
+            overdue_count: 1,
+            new_count: 1,
+            available_count: 2,
+            total_count: 2,
+          },
+        ],
+      }),
+    ),
   );
   mockedFindActiveCardsJob.mockResolvedValue(null);
 }
@@ -329,7 +369,7 @@ describe("FlashcardsClient", () => {
       if (sectionId === "sec-9") return Promise.resolve(ok([]));
       return Promise.resolve(ok([]));
     });
-    mockedGetReviewQueue.mockResolvedValue(ok({ cards: [], due: 0, new: 0, total: 0 }));
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue()));
     mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
 
     const user = userEvent.setup();
@@ -348,7 +388,7 @@ describe("FlashcardsClient", () => {
     mockedListCourses.mockResolvedValueOnce(err(500)).mockResolvedValueOnce(ok([makeCourse()]));
     mockedListChapters.mockResolvedValue(ok([chapter1]));
     mockedListCards.mockResolvedValue(ok([cardA]));
-    mockedGetReviewQueue.mockResolvedValue(ok({ cards: [], due: 0, new: 0, total: 1 }));
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1 })));
     mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
 
     const user = userEvent.setup();
@@ -368,7 +408,7 @@ describe("FlashcardsClient", () => {
     mockedListCards.mockResolvedValue(ok([cardA]));
     mockedGetReviewQueue
       .mockResolvedValueOnce(err(500))
-      .mockResolvedValueOnce(ok({ cards: [], due: 0, new: 0, total: 1 }));
+      .mockResolvedValueOnce(ok(makeQueue({ total: 1 })));
     mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
 
     const user = userEvent.setup();
@@ -386,7 +426,7 @@ describe("FlashcardsClient", () => {
     mockedListCourses.mockResolvedValue(ok([makeCourse()]));
     mockedListChapters.mockResolvedValue(ok([chapter1]));
     mockedListCards.mockResolvedValueOnce(err(500)).mockResolvedValueOnce(ok([cardA]));
-    mockedGetReviewQueue.mockResolvedValue(ok({ cards: [], due: 0, new: 0, total: 1 }));
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1 })));
     mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
 
     const user = userEvent.setup();
@@ -415,7 +455,7 @@ describe("FlashcardsClient", () => {
     mockedListCourses.mockResolvedValue(ok([makeCourse()]));
     mockedListChapters.mockResolvedValueOnce(err(500)).mockResolvedValueOnce(ok([chapter1]));
     mockedListCards.mockResolvedValue(ok([cardA]));
-    mockedGetReviewQueue.mockResolvedValue(ok({ cards: [], due: 0, new: 0, total: 1 }));
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1 })));
     mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
 
     const user = userEvent.setup();

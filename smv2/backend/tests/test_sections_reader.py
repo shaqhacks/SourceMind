@@ -15,6 +15,8 @@ def test_list_sections_shape(client, ingest_course):
             "asset_id",
             "page_start",
             "page_end",
+            "source_format",
+            "source_locator",
             "lesson_status",
             "has_content",
             "word_count",
@@ -25,6 +27,8 @@ def test_list_sections_shape(client, ingest_course):
         assert s["has_content"] is True
         assert s["word_count"] > 0
         assert s["kind"] == "content"
+        assert s["source_format"] == "pdf"
+        assert s["source_locator"]["type"] == "pdf_pages"
 
 
 def test_list_sections_404_for_missing_course(client):
@@ -46,6 +50,8 @@ def test_get_section_returns_full_body(client, ingest_course):
     assert body["lesson_model"] is None
     assert body["lesson_prompt_version"] is None
     assert body["extractor_version"].startswith("pymupdf4llm-")
+    assert body["source_format"] == "pdf"
+    assert body["source_locator"]["type"] == "pdf_pages"
 
 
 def test_get_section_404_for_missing_section(client):

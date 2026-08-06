@@ -3,7 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from app.schemas import AdaptiveStudyQueueOut, JobOut
-from app.services import adaptive_study_service, courses_service, learner_context
+from app.services import (
+    adaptive_study_service,
+    courses_service,
+    learner_context,
+    llm_readiness_service,
+)
 
 router = APIRouter(prefix="/api/courses/{course_id}/study", tags=["study"])
 
@@ -38,6 +43,8 @@ def replenish_concept_practice(course_id: str, concept_id: str) -> JobOut:
         raise HTTPException(status_code=404, detail="course not found")
     try:
         job = adaptive_study_service.start_replenishment(course_id, concept_id)
+    except llm_readiness_service.LlmReadinessUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return JobOut.model_validate(job)

@@ -161,6 +161,28 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "convert_html": _convert_html_handler,
 }
 
+RETRYABLE_JOB_TYPES = frozenset(
+    {
+        "generate_lesson",
+        "generate_cards",
+        "generate_test",
+        "generate_practice_assessment",
+        "concept_extraction",
+        "concept_practice_generation",
+    }
+)
+
+LLM_READINESS_REQUIRED_JOB_TYPES = frozenset(
+    {
+        "generate_lesson",
+        "generate_cards",
+        "generate_test",
+        "generate_practice_assessment",
+        "concept_extraction",
+        "concept_practice_generation",
+    }
+)
+
 
 def default_on_orphan(session: Session, job: Job) -> None:
     """Requeue a lease-expired job up to MAX_ORPHAN_ATTEMPTS, then fail it for good."""

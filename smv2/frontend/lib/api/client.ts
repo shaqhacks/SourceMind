@@ -1,5 +1,6 @@
 import createClient from "openapi-fetch";
 
+import { getCachedCsrfToken, setCsrfToken } from "@/lib/security/csrf";
 import type { components, paths } from "./schema";
 
 /**
@@ -13,6 +14,12 @@ export const API_BASE = process.env.NEXT_PUBLIC_SMV2_API_URL ?? "http://localhos
 
 export const client = createClient<paths>({ baseUrl: API_BASE });
 
+export interface ApiErrorDetail {
+  code?: string | null;
+  failure_category?: string | null;
+  message?: string | null;
+  remediation?: string | null;
+}
 export type JobOut = components["schemas"]["JobOut"];
 export type JobCreate = components["schemas"]["JobCreate"];
 export type CourseOut = components["schemas"]["CourseOut"];
@@ -27,6 +34,10 @@ export type GenerateLessonOut = components["schemas"]["GenerateLessonOut"];
 export type LessonEstimateOut = components["schemas"]["LessonEstimateOut"];
 export type GenerateAllLessonsOut = components["schemas"]["GenerateAllLessonsOut"];
 export type LlmUsageOut = components["schemas"]["LlmUsageOut"];
+export type LlmStatusOut = components["schemas"]["LlmStatusOut"];
+export type SettingsOut = components["schemas"]["SettingsOut"];
+export type SettingsUpdateIn = components["schemas"]["SettingsUpdateIn"];
+export type SettingsClearIn = components["schemas"]["SettingsClearIn"];
 export type CardOut = components["schemas"]["CardOut"];
 export type UpdateCardIn = components["schemas"]["UpdateCardIn"];
 export type GenerateCardsOut = components["schemas"]["GenerateCardsOut"];
@@ -38,6 +49,8 @@ export type GradeCardIn = components["schemas"]["GradeCardIn"];
 export type GradeCardOut = components["schemas"]["GradeCardOut"];
 export type ReviewSummaryOut = components["schemas"]["ReviewSummaryOut"];
 export type CourseReviewSummaryOut = components["schemas"]["CourseReviewSummaryOut"];
+export type SearchResultOut = components["schemas"]["SearchResultOut"];
+export type SearchResultsOut = components["schemas"]["SearchResultsOut"];
 export type GenerateTestOut = components["schemas"]["GenerateTestOut"];
 export type GenerateTestIn = components["schemas"]["GenerateTestIn"];
 export type ChapterOut = components["schemas"]["ChapterOut"];
@@ -120,6 +133,20 @@ async function request<T>(
   }
 }
 
+async function csrfHeaders(): Promise<Record<string, string>> {
+  const cached = getCachedCsrfToken();
+  if (cached) return { "X-CSRF-Token": cached };
+
+  const response = await fetch(`${API_BASE}/api/settings/bootstrap`, {
+    method: "GET",
+    cache: "no-store",
+  });
+  const data = (await response.json()) as { csrf_token?: unknown };
+  const token = typeof data.csrf_token === "string" ? data.csrf_token : "";
+  setCsrfToken(token);
+  return { "X-CSRF-Token": token };
+}
+
 export function getHealth() {
   return request(client.GET("/health"));
 }
@@ -136,6 +163,45 @@ export function getJob(jobId: string) {
   return request(
     client.GET("/api/jobs/{job_id}", { params: { path: { job_id: jobId } } }),
   );
+}
+
+export async function retryJob(jobId: string): Promise<ApiResult<JobOut>> {
+  return request(
+    client.POST("/api/jobs/{job_id}/retry", { params: { path: { job_id: jobId } } }),
+  );
+}
+
+export function getLlmStatus(): Promise<ApiResult<LlmStatusOut>> {
+  return request(client.GET("/api/llm/status"));
+}
+
+export function checkLlmStatus(): Promise<ApiResult<LlmStatusOut>> {
+  return request(client.POST("/api/llm/status/check"));
+}
+
+export function getSettings(): Promise<ApiResult<SettingsOut>> {
+  return request(client.GET("/api/settings"));
+}
+
+export async function saveSettings(body: SettingsUpdateIn): Promise<ApiResult<SettingsOut>> {
+  return request(client.PUT("/api/settings", {
+    headers: await csrfHeaders(),
+    body: {
+      provider: body.provider ?? null,
+      model: body.model ?? null,
+      credentials: body.credentials ?? {},
+    },
+  }));
+}
+
+export async function clearProviderSecret(
+  provider: SettingsClearIn["provider"],
+  confirmation: SettingsClearIn["confirmation"],
+): Promise<ApiResult<SettingsOut>> {
+  return request(client.DELETE("/api/settings", {
+    headers: await csrfHeaders(),
+    body: { provider, confirmation },
+  }));
 }
 
 export function listCourses() {
@@ -312,6 +378,27 @@ export function listSections(courseId: string) {
   return request(
     client.GET("/api/courses/{course_id}/sections", {
       params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function searchCourse(
+  courseId: string,
+  query: string,
+  filters: { documentTypes?: string[]; cursor?: string | null; limit?: number } = {},
+) {
+  const documentTypes = filters.documentTypes?.filter(Boolean);
+  return request(
+    client.GET("/api/courses/{course_id}/search", {
+      params: {
+        path: { course_id: courseId },
+        query: {
+          query,
+          document_type: documentTypes && documentTypes.length > 0 ? documentTypes : undefined,
+          cursor: filters.cursor ?? undefined,
+          limit: filters.limit,
+        },
+      },
     }),
   );
 }

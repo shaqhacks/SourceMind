@@ -40,6 +40,8 @@ def edit_outline(course_id: str, operations: list[Any]) -> list[dict[str, Any]]:
                 "asset_id": s.asset_id,
                 "page_start": to_display_page(s.page_start),
                 "page_end": to_display_page(s.page_end),
+                "source_format": s.source_format,
+                "source_locator": s.source_locator,
                 "lesson_status": s.lesson_status,
                 "has_content": bool((s.body_md or "").strip()),
                 "word_count": len((s.body_md or "").split()),

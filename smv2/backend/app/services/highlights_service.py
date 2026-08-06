@@ -11,6 +11,7 @@ from typing import Any
 
 from app.db.engine import get_session
 from app.db.models import Highlight, Section, utcnow
+from app.services import search_index
 from app.services.sections_service import to_display_page
 
 
@@ -82,6 +83,8 @@ def create_highlight(
             surface=surface,
         )
         session.add(h)
+        session.flush()
+        search_index.upsert_highlight_document(session, h)
         session.commit()
         return _to_dict(h)
     finally:
@@ -103,6 +106,7 @@ def update_highlight(highlight_id: str, fields: dict[str, Any]) -> dict[str, Any
         if fields.get("color") is not None:
             h.color = fields["color"]
         h.updated_at = utcnow()
+        search_index.upsert_highlight_document(session, h)
         session.commit()
         return _to_dict(h)
     finally:
@@ -115,6 +119,7 @@ def delete_highlight(highlight_id: str) -> bool:
         h = session.get(Highlight, highlight_id)
         if h is None:
             return False
+        search_index.delete_highlight_document(session, highlight_id)
         session.delete(h)
         session.commit()
         return True

@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from app.llm.ledger import SpendCapExceededError
 from app.llm.provider import ProviderNotConfiguredError, ProviderTimeoutError
 from app.schemas import ChatIn, ChatOut, ChatTurnOut
-from app.services import chat_service, courses_service, learner_context
+from app.services import chat_service, courses_service, learner_context, llm_readiness_service
 
 router = APIRouter(tags=["chat"])
 
@@ -29,7 +29,12 @@ def send_chat(
     except ProviderTimeoutError as exc:
         raise HTTPException(status_code=504, detail=str(exc)) from exc
     except ProviderNotConfiguredError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=503,
+            detail=llm_readiness_service.readiness_failure_detail(),
+        ) from exc
+    except llm_readiness_service.LlmReadinessUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=exc.detail) from exc
     except SpendCapExceededError as exc:
         # Distinct 429 detail from LLMBusyError's ("LLM concurrency limit
         # reached") global handler — the client needs to tell "busy, retry"
