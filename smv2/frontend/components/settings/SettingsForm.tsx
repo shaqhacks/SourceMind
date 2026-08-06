@@ -32,12 +32,14 @@ function readinessLabel(readiness: LlmStatusOut): string {
 type OllamaDiscoveryState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "loaded"; models: string[]; configuredModelAvailable: boolean }
+  | { kind: "loaded"; models: string[]; configuredModel: string | null; configuredModelAvailable: boolean }
   | { kind: "error"; category: string | null; message: string };
 
 const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434";
-const MISSING_CONFIGURED_MODEL_MESSAGE =
-  "The saved Ollama model is not installed locally. Select an installed model before saving.";
+
+function missingConfiguredModelMessage(model: string): string {
+  return `Your configured Ollama model “${model}” is not installed. Install it in Ollama or select another available model.`;
+}
 
 function ollamaErrorCategory(error: unknown): string | null {
   if (!error || typeof error !== "object") return null;
@@ -95,8 +97,9 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
       if (discoveryRequestId.current !== requestId) return;
       if (result.data) {
         const models = result.data.models;
+        const configuredModel = result.data.configured_model;
         const configuredModelAvailable = result.data.configured_model_available;
-        setOllamaDiscovery({ kind: "loaded", models, configuredModelAvailable });
+        setOllamaDiscovery({ kind: "loaded", models, configuredModel, configuredModelAvailable });
         setModel((currentModel) => (models.includes(currentModel) ? currentModel : ""));
         return;
       }
@@ -167,6 +170,8 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
       void refreshOllamaModels({ base_url: baseUrl, configured_model: null });
       return;
     }
+    discoveryRequestId.current += 1;
+    inFlightDiscovery.current = null;
     setOllamaDiscovery({ kind: "idle" });
     setModel(settings.provider === "anthropic" ? settings.model : "");
   }
@@ -183,6 +188,7 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
     provider === "ollama" &&
     ollamaDiscovery.kind === "loaded" &&
     !ollamaDiscovery.configuredModelAvailable &&
+    Boolean(ollamaDiscovery.configuredModel) &&
     !model;
 
   return (
@@ -238,7 +244,9 @@ export default function SettingsForm({ settings, onSettings }: SettingsFormProps
           <p className="mt-1 text-sm text-muted-foreground">{ollamaErrorMessage("ollama_no_completion_models")}</p>
         )}
         {showMissingConfiguredModel && (
-          <p className="mt-1 text-sm text-muted-foreground">{MISSING_CONFIGURED_MODEL_MESSAGE}</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {missingConfiguredModelMessage(ollamaDiscovery.configuredModel ?? "")}
+          </p>
         )}
         {provider === "ollama" && ollamaDiscovery.kind === "error" && (
           <p className="mt-1 text-sm text-muted-foreground">{ollamaDiscovery.message}</p>

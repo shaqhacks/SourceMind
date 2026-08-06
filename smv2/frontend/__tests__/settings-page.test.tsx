@@ -30,7 +30,8 @@ const mockedSaveSettings = vi.mocked(saveSettings);
 const mockedClearProviderSecret = vi.mocked(clearProviderSecret);
 const mockedDiscoverOllamaModels = vi.mocked(discoverOllamaModels);
 
-const missingConfiguredModelMessage = "The saved Ollama model is not installed locally. Select an installed model before saving.";
+const missingConfiguredModelMessage =
+  "Your configured Ollama model “missing:latest” is not installed. Install it in Ollama or select another available model.";
 
 function makeSettings(overrides: Partial<SettingsOut> = {}): SettingsOut {
   return {
@@ -193,6 +194,36 @@ describe("SettingsPage", () => {
         configured_model_available: true,
       },
     });
+  });
+
+  it("ignores an in-flight Ollama discovery after switching back to Anthropic", async () => {
+    const user = userEvent.setup();
+    let resolveDiscovery: typeof mockedDiscoverOllamaModels extends { mockResolvedValue: (value: infer T) => unknown } ? (value: T) => void : never;
+    const pendingDiscovery = new Promise<Awaited<ReturnType<typeof discoverOllamaModels>>>((resolve) => {
+      resolveDiscovery = resolve;
+    });
+    mockedDiscoverOllamaModels.mockReturnValue(pendingDiscovery);
+    render(<SettingsPage />);
+
+    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+    await user.selectOptions(screen.getByLabelText(/provider/i), "anthropic");
+
+    expect(screen.getByLabelText(/provider/i)).toHaveValue("anthropic");
+    expect(screen.getByLabelText(/model/i)).toHaveValue("claude-sonnet-4-5");
+
+    resolveDiscovery!({
+      status: 200,
+      ok: true,
+      data: {
+        models: ["gemma3:4b"],
+        configured_model: null,
+        configured_model_available: true,
+      },
+    });
+    await pendingDiscovery;
+
+    expect(screen.getByLabelText(/model/i)).toHaveValue("claude-sonnet-4-5");
+    expect(screen.queryByRole("option", { name: "gemma3:4b" })).not.toBeInTheDocument();
   });
 
   it("leaves a missing configured Ollama model absent, blank, and unsavable", async () => {
