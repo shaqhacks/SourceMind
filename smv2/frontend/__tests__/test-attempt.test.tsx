@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import TestAttemptClient from "@/components/test/TestAttemptClient";
@@ -71,18 +72,18 @@ function makeSubmitResult(overrides: Partial<SubmitTestOut> = {}): SubmitTestOut
   };
 }
 
-async function advanceFirstQuestionByKeyboard() {
-  fireEvent.keyDown(window, { key: "2" });
+async function advanceFirstQuestionByKeyboard(user: ReturnType<typeof userEvent.setup>) {
+  await user.keyboard("2");
   await waitFor(() => expect(screen.getByRole("radio", { name: "4" })).toBeChecked());
-  fireEvent.keyDown(window, { key: "Enter" });
+  await user.keyboard("{Enter}");
   await screen.findByText("Capital of France?");
 }
 
-async function submitQuizByKeyboard() {
-  await advanceFirstQuestionByKeyboard();
-  fireEvent.keyDown(window, { key: "1" });
+async function submitQuizByKeyboard(user: ReturnType<typeof userEvent.setup>) {
+  await advanceFirstQuestionByKeyboard(user);
+  await user.keyboard("1");
   await waitFor(() => expect(screen.getByRole("radio", { name: "Berlin" })).toBeChecked());
-  fireEvent.keyDown(window, { key: "Enter" });
+  await user.keyboard("{Enter}");
 }
 
 describe("TestAttemptClient", () => {
@@ -115,34 +116,36 @@ describe("TestAttemptClient", () => {
   });
 
   it("blocks advancing with an unanswered guard, and keys 1-4 + Enter select/advance/submit", async () => {
+    const user = userEvent.setup();
     mockedGetTest.mockResolvedValue(ok(makeAttempt()));
     mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult()));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
 
-    fireEvent.keyDown(window, { key: "Enter" });
+    await user.keyboard("{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent(/select an answer/i);
     expect(screen.getByText("2+2=?")).toBeInTheDocument();
 
-    await advanceFirstQuestionByKeyboard();
+    await advanceFirstQuestionByKeyboard(user);
     expect(screen.getByText("Question 2 of 2")).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "1" });
+    await user.keyboard("1");
     await waitFor(() => expect(screen.getByRole("radio", { name: "Berlin" })).toBeChecked());
-    fireEvent.keyDown(window, { key: "Enter" });
+    await user.keyboard("{Enter}");
 
     expect(mockedSubmitTest).toHaveBeenCalledWith("attempt-1", [1, 0]);
   });
 
   it("submitting shows the score and a per-question review with accessible (not color-only) correctness marking", async () => {
+    const user = userEvent.setup();
     mockedGetTest.mockResolvedValue(ok(makeAttempt()));
     mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult()));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
 
-    await submitQuizByKeyboard();
+    await submitQuizByKeyboard(user);
 
     expect(await screen.findByText("50%")).toBeInTheDocument();
     expect(screen.getByText("1 of 2 correct")).toBeInTheDocument();
@@ -154,6 +157,7 @@ describe("TestAttemptClient", () => {
   });
 
   it("shows a missed-concepts banner when added_card_ids is non-empty, and fires notifyReviewSettled", async () => {
+    const user = userEvent.setup();
     mockedGetTest.mockResolvedValue(ok(makeAttempt()));
     mockedSubmitTest.mockResolvedValue(
       ok(makeSubmitResult({ added_card_ids: ["card-1", "card-2"] })),
@@ -162,7 +166,7 @@ describe("TestAttemptClient", () => {
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
 
-    await submitQuizByKeyboard();
+    await submitQuizByKeyboard(user);
 
     // Wait for a piece of text unique to the post-submit view first — the
     // in-progress "N of 2" indicator also has role="status", so querying
@@ -175,37 +179,40 @@ describe("TestAttemptClient", () => {
   });
 
   it("shows a 'Start review' CTA linking to a due-now session when cards are due, hidden otherwise", async () => {
+    const user = userEvent.setup();
     mockedGetTest.mockResolvedValue(ok(makeAttempt()));
     mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult({ due_now_count: 5 })));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
-    await submitQuizByKeyboard();
+    await submitQuizByKeyboard(user);
 
     const link = await screen.findByRole("link", { name: /start review.*5 cards due now/i });
     expect(link).toHaveAttribute("href", "/review?course=course-1&start=due");
   });
 
   it("hides the 'Start review' CTA when no cards are due", async () => {
+    const user = userEvent.setup();
     mockedGetTest.mockResolvedValue(ok(makeAttempt()));
     mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult({ due_now_count: 0 })));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
-    await submitQuizByKeyboard();
+    await submitQuizByKeyboard(user);
 
     await screen.findByText("50%");
     expect(screen.queryByRole("link", { name: /start review/i })).not.toBeInTheDocument();
   });
 
   it("'Retake test' starts a zero-LLM retake and navigates straight into the new attempt", async () => {
+    const user = userEvent.setup();
     mockedGetTest.mockResolvedValue(ok(makeAttempt()));
     mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult()));
     mockedRetakeTest.mockResolvedValue(ok({ attempt_id: "attempt-2" }));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
-    await submitQuizByKeyboard();
+    await submitQuizByKeyboard(user);
 
     await screen.findByText("50%");
     fireEvent.click(screen.getByRole("button", { name: /retake test/i }));
@@ -218,25 +225,27 @@ describe("TestAttemptClient", () => {
   });
 
   it("uses singular 'concept' for exactly one missed card", async () => {
+    const user = userEvent.setup();
     mockedGetTest.mockResolvedValue(ok(makeAttempt()));
     mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult({ added_card_ids: ["card-1"] })));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
 
-    await submitQuizByKeyboard();
+    await submitQuizByKeyboard(user);
 
     expect(await screen.findByText(/1 missed concept added to your reviews/i)).toBeInTheDocument();
   });
 
   it("disables Previous on question 1, and Previous navigates back once advanced", async () => {
+    const user = userEvent.setup();
     mockedGetTest.mockResolvedValue(ok(makeAttempt()));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
     expect(screen.getByRole("button", { name: /previous/i })).toBeDisabled();
 
-    await advanceFirstQuestionByKeyboard();
+    await advanceFirstQuestionByKeyboard(user);
     expect(screen.getByRole("button", { name: /previous/i })).not.toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: /previous/i }));
@@ -263,13 +272,14 @@ describe("TestAttemptClient", () => {
   });
 
   it("shows no banner when added_card_ids is absent or empty", async () => {
+    const user = userEvent.setup();
     mockedGetTest.mockResolvedValue(ok(makeAttempt()));
     mockedSubmitTest.mockResolvedValue(ok(makeSubmitResult({ added_card_ids: [] })));
 
     render(<TestAttemptClient courseId="course-1" attemptId="attempt-1" />);
     await screen.findByText("2+2=?");
 
-    await submitQuizByKeyboard();
+    await submitQuizByKeyboard(user);
 
     await screen.findByText("50%");
     expect(screen.queryByText(/missed concept/i)).not.toBeInTheDocument();
