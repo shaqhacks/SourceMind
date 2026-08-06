@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import tomllib
 
+import pytest
+from fastapi import HTTPException
+
 from app.config import data_dir
+from app.routers import settings as settings_router
+from app.services.ollama_discovery_service import OllamaDiscoveryError
 
 
 def _csrf_headers(client) -> dict[str, str]:
@@ -277,3 +282,77 @@ def test_ollama_settings_save_accepts_exact_discovered_model_and_redacts_endpoin
     secrets = tomllib.loads((data_dir() / "secrets.toml").read_text())
     assert local_settings == {"model": "llama3.2:latest", "provider": "ollama"}
     assert secrets["ollama_base_url"] == "http://127.0.0.1:11434"
+
+
+def test_ollama_settings_save_requires_exact_mixed_case_model_membership(
+    client,
+    monkeypatch,
+):
+    async def fake_discover(base_url: str) -> list[str]:
+        assert base_url == "http://127.0.0.1:11434"
+        return ["Llama3.2:Latest"]
+
+    monkeypatch.setattr("app.routers.settings.discover_ollama_models", fake_discover)
+    headers = _csrf_headers(client)
+
+    lower_resp = client.put(
+        "/api/settings",
+        json={
+            "provider": "ollama",
+            "model": "llama3.2:latest",
+            "credentials": {"ollama_base_url": "http://localhost:11434"},
+        },
+        headers=headers,
+    )
+
+    assert lower_resp.status_code == 409
+    assert lower_resp.json()["detail"]["failure_category"] == "ollama_model_unavailable"
+    assert not (data_dir() / "local_settings.toml").exists()
+    assert not (data_dir() / "secrets.toml").exists()
+
+    exact_resp = client.put(
+        "/api/settings",
+        json={
+            "provider": "ollama",
+            "model": "Llama3.2:Latest",
+            "credentials": {"ollama_base_url": "http://localhost:11434"},
+        },
+        headers=headers,
+    )
+
+    assert exact_resp.status_code == 200
+    local_settings = tomllib.loads((data_dir() / "local_settings.toml").read_text())
+    assert local_settings["model"] == "Llama3.2:Latest"
+
+
+@pytest.mark.anyio
+async def test_ollama_discovery_http_error_suppresses_raw_service_cause(monkeypatch):
+    async def fake_discover(base_url: str) -> list[str]:
+        unsafe = RuntimeError("http://127.0.0.1:11434/api/tags?token=upstream-secret")
+        raise OllamaDiscoveryError(
+            "ollama_unreachable",
+            "Ollama could not be reached.",
+            status_code=503,
+        ) from unsafe
+
+    monkeypatch.setattr(settings_router, "discover_ollama_models", fake_discover)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await settings_router._discover_ollama_models_or_http_error(
+            "http://127.0.0.1:11434"
+        )
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.__cause__ is None
+    assert "upstream-secret" not in repr(exc_info.value)
+
+
+def test_ollama_invalid_url_http_error_suppresses_raw_value_error_cause():
+    with pytest.raises(HTTPException) as exc_info:
+        settings_router._resolve_ollama_base_url(
+            "http://127.0.0.1:11434/api/tags?token=upstream-secret"
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.__cause__ is None
+    assert "upstream-secret" not in repr(exc_info.value)

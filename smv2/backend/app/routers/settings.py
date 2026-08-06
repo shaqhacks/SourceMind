@@ -165,7 +165,7 @@ def _resolve_ollama_base_url(value: str | None) -> str:
         candidate = config.ollama_base_url()
     try:
         return normalize_ollama_base_url(candidate)
-    except ValueError as exc:
+    except ValueError:
         raise HTTPException(
             status_code=400,
             detail=_ollama_error_detail(
@@ -173,7 +173,7 @@ def _resolve_ollama_base_url(value: str | None) -> str:
                 "ollama_invalid_url",
                 "Ollama base URL must be an HTTP loopback origin.",
             ),
-        ) from exc
+        ) from None
 
 
 async def _discover_ollama_models_or_http_error(base_url: str) -> list[str]:
@@ -187,7 +187,7 @@ async def _discover_ollama_models_or_http_error(base_url: str) -> list[str]:
                 exc.category,
                 _safe_ollama_discovery_message(exc.category),
             ),
-        ) from exc
+        ) from None
 
 
 def _safe_ollama_discovery_message(category: str) -> str:

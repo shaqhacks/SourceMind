@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import AsyncIterator
 
 import httpx
 import pytest
 
+from app.services import ollama_discovery_service
 from app.services.ollama_discovery_service import (
     OllamaDiscoveryError,
     discover_ollama_models,
@@ -12,6 +15,15 @@ from app.services.ollama_discovery_service import (
 
 
 pytestmark = pytest.mark.anyio
+
+
+class StreamingBody(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes]):
+        self._chunks = chunks
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk
 
 
 def _json_response(payload: object) -> httpx.Response:
@@ -51,7 +63,94 @@ async def test_service_returns_sorted_deduplicated_completion_models_only():
         transport=httpx.MockTransport(handler),
     )
 
-    assert models == ["gemma3:4b", "llama3.2:latest"]
+    assert models == ["GEMMA3:4B", "llama3.2:latest"]
+
+
+async def test_service_preserves_exact_model_identifier_when_deduplicating_case_insensitively():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return _json_response(
+                {
+                    "models": [
+                        {"name": "Beta:Latest"},
+                        {"name": "alpha:latest"},
+                        {"name": "BETA:latest"},
+                    ]
+                }
+            )
+        if request.url.path == "/api/show":
+            return _json_response({"capabilities": ["completion"]})
+        raise AssertionError(f"unexpected request path {request.url.path}")
+
+    models = await discover_ollama_models(
+        "http://127.0.0.1:11434",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert models == ["alpha:latest", "Beta:Latest"]
+
+
+async def test_service_enforces_response_cap_while_streaming_before_full_body_buffer():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            stream=StreamingBody([b"x" * (512 * 1024), b"upstream-secret" * 50000]),
+        )
+
+    with pytest.raises(OllamaDiscoveryError) as exc_info:
+        await discover_ollama_models(
+            "http://127.0.0.1:11434",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert exc_info.value.category == "ollama_invalid_response"
+    assert exc_info.value.__cause__ is None
+    assert "upstream-secret" not in str(exc_info.value)
+
+
+async def test_service_uses_explicit_httpx_timeout_configuration(monkeypatch):
+    captured_timeout: httpx.Timeout | None = None
+
+    class SpyAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            nonlocal captured_timeout
+            captured_timeout = kwargs.get("timeout")
+            super().__init__(*args, **kwargs)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/tags":
+            return _json_response({"models": [{"name": "llama3.2:latest"}]})
+        if request.url.path == "/api/show":
+            return _json_response({"capabilities": ["completion"]})
+        raise AssertionError(f"unexpected request path {request.url.path}")
+
+    monkeypatch.setattr(ollama_discovery_service.httpx, "AsyncClient", SpyAsyncClient)
+
+    await discover_ollama_models(
+        "http://127.0.0.1:11434",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert isinstance(captured_timeout, httpx.Timeout)
+    assert captured_timeout.connect == 1.0
+    assert captured_timeout.read == 5.0
+
+
+async def test_service_total_discovery_timeout_maps_to_safe_timeout(monkeypatch):
+    async def handler(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.01)
+        return _json_response({"models": [{"name": "llama3.2:latest"}]})
+
+    monkeypatch.setattr(ollama_discovery_service, "_TOTAL_DISCOVERY_TIMEOUT", 0.001)
+
+    with pytest.raises(OllamaDiscoveryError) as exc_info:
+        await discover_ollama_models(
+            "http://127.0.0.1:11434",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert exc_info.value.category == "ollama_timeout"
+    assert exc_info.value.__cause__ is None
 
 
 @pytest.mark.parametrize(
@@ -119,8 +218,26 @@ async def test_service_maps_network_failures_to_safe_categories(
         )
 
     assert exc_info.value.category == category
+    assert exc_info.value.__cause__ is None
     assert "upstream-secret" not in str(exc_info.value)
     assert "/api/" not in str(exc_info.value)
+
+
+async def test_service_suppresses_httpx_exception_cause_with_raw_request_url():
+    request = httpx.Request("GET", "http://127.0.0.1:11434/api/tags?token=upstream-secret")
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connect failed", request=request)
+
+    with pytest.raises(OllamaDiscoveryError) as exc_info:
+        await discover_ollama_models(
+            "http://127.0.0.1:11434",
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert exc_info.value.category == "ollama_unreachable"
+    assert exc_info.value.__cause__ is None
+    assert "upstream-secret" not in repr(exc_info.value)
 
 
 @pytest.mark.parametrize(
