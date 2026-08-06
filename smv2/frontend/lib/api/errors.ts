@@ -21,10 +21,10 @@ export function apiErrorDetail(error: unknown): ApiErrorDetail | null {
   const message = optionalString(candidate.message);
   const remediation = optionalString(candidate.remediation);
   if (
-    code === undefined ||
-    failureCategory === undefined ||
-    message === undefined ||
-    remediation === undefined
+    (("code" in candidate) && code === undefined) ||
+    (("failure_category" in candidate) && failureCategory === undefined) ||
+    (("message" in candidate) && message === undefined) ||
+    (("remediation" in candidate) && remediation === undefined)
   ) {
     return null;
   }
