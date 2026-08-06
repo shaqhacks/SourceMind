@@ -1203,6 +1203,7 @@ describe("CourseReader", () => {
         "aria-pressed",
         "true",
       );
+      expect(window.localStorage.getItem("smv2.readerView.course-text")).toBe("pages");
 
       await user.keyboard("s");
 
