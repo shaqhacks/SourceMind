@@ -7,7 +7,7 @@
 - Scope: Tasks 1-5 plus final Task 6 release gate.
 - Status: PASS after final whole-branch fix wave. No `FAIL`, unresolved `PARTIAL`, or `Pending` scenario rows remain.
 - Browser: Playwright `1.62.1`, Chromium desktop and mobile projects.
-- Dependency versions verified: Next `16.3.0`, eslint-config-next `16.3.0`, @playwright/test `1.62.1`, @axe-core/playwright `4.12.1`.
+- Dependency versions verified: Next `16.3.0`, eslint-config-next `16.3.0`, @playwright/test `1.62.1`, @axe-core/playwright `4.12.1`, openapi-typescript `7.13.0`, @redocly/openapi-core `1.34.7`.
 - Runtime floor enforced: root `.node-version` pins `22.13.0`; `frontend/package.json` and `frontend/package-lock.json` declare Node `>=22.13.0 || >=24`; `frontend/.npmrc` sets `engine-strict=true`. Current verification Node was `26.3.0`, which satisfies the declared range.
 - Safety: no paid LLM calls were made. Live model checks used local Ollama on `127.0.0.1:11434`.
 - Remote push verification remains controller-owned; this report does not claim remote sync.
@@ -45,7 +45,7 @@
 | REL-01 | Interrupted student | Navigation/unmount during fetch/SSE and retry after failure | Full frontend suite; Playwright LLM recovery | Stale updates ignored; streams cleaned | Full frontend suite and E2E passed | PASS | `./build.sh` frontend `772 passed`; Playwright passed | none |
 | REL-02 | Repeated user | Double-click/coalesced discovery/generation/submission | Frontend/backend sensitive slices 3x | No duplicate jobs or stale overwrite | Sensitive slices passed 3x with no flakes | PASS | backend `159/159` x3; frontend `115/115` x3 | none |
 | REL-03 | Stale client | Malformed localStorage, stale job/model/course identifiers | Full frontend suite | Safe fallback and recovery copy | Full frontend suite passed | PASS | `./build.sh` frontend `96 files / 772 tests` | storage reset by tests |
-| REL-04 | Maintainer | Full suite, repeated sensitive tests, hidden skips, misleading success | Build/lint/audits/repeats/e2e/runtime enforcement | Deterministic green; zero unexplained production vulnerabilities; Node floor enforced | Build passed; lint exit 0 with no warnings; production npm audit 0 vulns; engine-strict `npm ci`/`npm install` passed on Node `26.3.0`; pip-audit no known vulns; Playwright 37 passed/1 expected skip | PASS | see Commands Run | none |
+| REL-04 | Maintainer | Full suite, repeated sensitive tests, hidden skips, misleading success | Build/lint/audits/repeats/e2e/runtime enforcement | Deterministic green; zero unexplained high-severity npm vulnerabilities; Node floor enforced | Build passed; lint exit 0 with no warnings; default and production npm audits 0 vulns; engine-strict `npm ci`/`npm install` passed on Node `26.3.0`; pip-audit no known vulns; Playwright 37 passed/1 expected skip | PASS | see Commands Run | none |
 | REL-05 | Maintainer | Generated OpenAPI/client drift and dirty worktree preservation | Build drift check and explicit diff | No drift and gate-enforced cleanliness | `git diff --exit-code -- openapi.json frontend/lib/api/schema.d.ts` exit 0; build gate includes same drift check | PASS | explicit drift check exit 0 | report/test files are intentional |
 | SEC-01 | Observer | Secrets/internal details in client bundle, logs, errors, or API output | Security tests; live settings redaction/readiness | No key/body/path/trace leakage | Settings responses redacted; no paid key used | PASS | backend slice and live settings matrix | disposable settings data removed |
 | SEC-02 | Framing/content-sniff attacker | Security headers on HTML/API/uploaded files | Backend security headers; live header matrix | Context-appropriate frame/nosniff/referrer policy | `/health` and asset responses include `x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`, `referrer-policy: no-referrer` | PASS | live header matrix | none |
@@ -65,7 +65,10 @@
 - `[0] live adversarial matrix`: `rtk env UV_CACHE_DIR=/private/tmp/uv-cache SMV2_DATA_DIR=/private/tmp/smv2-task6-live-data uv run python /private/tmp/task6_live_matrix.py` from `backend/` covered health/global headers, CSRF/origin rejection, Ollama SSRF rejection, model discovery/readiness, Markdown upload/ingest/progress/search/highlight/export/delete, inline PDF, non-inline Markdown, malformed search, and cleanup 404. Key outputs: ingest job `f26ddcd0-d47b-430d-93ca-7d0cdd52e4c1` reached `succeeded`/100%; hostile valid search returned 200; malformed limit and cursor returned 422; disposable course/asset returned 404 after cleanup.
 - `[0] final Node engine check`: `node -e "const semver = require('./frontend/node_modules/semver'); const pkg = require('./frontend/package.json'); const v = process.versions.node; console.log(v); console.log(pkg.engines.node); console.log(semver.satisfies(v, pkg.engines.node));"` -> `26.3.0`, `>=22.13.0 || >=24`, `true`.
 - `[0] final npm install/ci engine enforcement`: `npm_config_cache=/private/tmp/npm-cache npm ci` -> `added 612 packages`; `npm_config_cache=/private/tmp/npm-cache npm install` -> `up to date`; both ran with `frontend/.npmrc` `engine-strict=true`.
+- `[0] final default npm audit`: `npm_config_cache=/private/tmp/npm-cache npm audit --audit-level=high` from `frontend/` -> `found 0 vulnerabilities`.
 - `[0] final production npm audit`: `npm_config_cache=/private/tmp/npm-cache npm audit --omit=dev --audit-level=high` -> `found 0 vulnerabilities`.
+- `[0] final OpenAPI dependency tree`: `npm ls @redocly/openapi-core js-yaml openapi-typescript brace-expansion undici` from `frontend/` -> `openapi-typescript@7.13.0` deduped to `@redocly/openapi-core@1.34.7`; `js-yaml@4.3.1`; `brace-expansion@1.1.18`, `2.1.4`, and `5.0.9`; `undici@7.29.0`.
+- `[0] final OpenAPI generation`: `npm run gen:api` from `frontend/` -> `openapi-typescript 7.13.0`; `git status --short` showed no generated API schema drift.
 - `[0] final readiness RED/GREEN`: new assertion in `tests/test_chat.py::test_send_chat_provider_not_configured_maps_to_503` first failed with `KeyError: 'code'`, then passed after central readiness detail added `code: llm_readiness_unavailable`.
 - `[0] final focused readiness slice`: `UV_CACHE_DIR=/private/tmp/uv-cache PYTHONDONTWRITEBYTECODE=1 uv run pytest -q tests/test_chat.py::test_send_chat_provider_not_configured_maps_to_503 tests/test_jobs_api.py -p no:cacheprovider` from `backend/` -> `12 passed`, 8 warnings.
 - `[0] final focused PDF/settings slice`: `npm_config_cache=/private/tmp/npm-cache npm run test -- __tests__/settings-page.test.tsx __tests__/pdf-pages-view.test.tsx __tests__/reader/pdf-text-layer.test.tsx __tests__/reader/pdf-highlight-paint.test.tsx __tests__/reader/pdf-note.test.tsx __tests__/pages-view.test.tsx --run` -> `6 files / 44 tests passed`.
@@ -78,7 +81,7 @@
 - `frontend/vitest.config.ts` excludes `e2e/**` and `test-results/**` from Vitest using `configDefaults.exclude`.
 - `frontend/__tests__/vitest-config.test.ts` locks the Playwright artifact exclusion with explicit RED/GREEN evidence.
 - `frontend/__tests__/review-page.test.tsx` was restored to committed coverage; the partial deletion of the two-fetch assertion was not evidence-backed.
-- Final fix wave added Node runtime enforcement for `pdfjs-dist@6.2.108`, added symmetric immediate readiness 503 `code: llm_readiness_unavailable`, updated stale pdfjs comments, and removed the settings test lint warning without behavior change.
+- Final fix wave added Node runtime enforcement for `pdfjs-dist@6.2.108`, added symmetric immediate readiness 503 `code: llm_readiness_unavailable`, updated stale pdfjs comments, removed the settings test lint warning without behavior change, and cleared the default high-severity dev npm audit without using overrides or force.
 
 ## Cleanup
 
@@ -90,7 +93,6 @@
 
 ## Residual Risks
 
-- Default `npm ci` output reports 4 high dev-dependency advisories; the release production audit gate remains `npm audit --omit=dev --audit-level=high`, which returned 0 vulnerabilities.
 - Playwright has one expected skip for the desktop project variant of a mobile-specific reader-controls test; the mobile project passed the scenario.
 - `pip-audit` cannot audit the local package name `smv2-backend` because it is not published on PyPI; third-party installed packages returned no known vulnerabilities.
 - Remote push verification remains controller-owned and is not claimed here.
