@@ -398,6 +398,7 @@ def test_send_chat_provider_not_configured_maps_to_503(client, ingest_course, st
     resp = client.post(f"/api/courses/{course_id}/chat", json={"message": "hi"})
     assert resp.status_code == 503
     assert resp.json()["detail"]["message"] == "LLM provider is not ready"
+    assert resp.json()["detail"]["code"] == "llm_readiness_unavailable"
 
 
 def test_send_chat_triggers_embed_course_job_when_no_embeddings_yet(client, ingest_course, stub_provider):

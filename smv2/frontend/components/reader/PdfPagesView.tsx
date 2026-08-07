@@ -17,7 +17,7 @@ import { GlobalWorkerOptions, TextLayer, getDocument, type PDFDocumentProxy } fr
 // bundler-integration helper (node_modules/pdfjs-dist/webpack.mjs) uses,
 // and Turbopack documents supporting the same webpack-compatible
 // `new Worker()`/`new URL()` handling — verified against the installed
-// 6.1.200 package rather than assumed. The `.min.mjs` build is referenced
+// 6.2.108 package rather than assumed. The `.min.mjs` build is referenced
 // here (that helper's own file uses the unminified one) because a
 // worker script is loaded by URL at runtime, bypassing Next's own JS
 // minifier — the main pdfjs-dist import below does not need this, since
@@ -308,7 +308,7 @@ function PdfPage({
 
         // `canvas` (not the older, now-backwards-compat-only
         // `canvasContext`) is this version's primary render parameter —
-        // verified against the installed 6.1.200 types rather than assumed.
+        // verified against the installed 6.2.108 types rather than assumed.
         const task = page.render({
           canvas,
           viewport,
@@ -346,7 +346,7 @@ function PdfPage({
             // that's a derived var pdf.js's own stylesheet computes from
             // `--scale-factor` on a `.pdfViewer .page` ancestor this app
             // doesn't have, so it's set directly here instead. Confirmed
-            // against the installed pdfjs-dist 6.1.200 sources.
+            // against the installed pdfjs-dist 6.2.108 sources.
             textLayerEl.style.setProperty("--total-scale-factor", String(viewport.scale));
             tl.render().then(
               () => {

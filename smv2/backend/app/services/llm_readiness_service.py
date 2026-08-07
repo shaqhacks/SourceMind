@@ -117,6 +117,7 @@ def assert_ready_for_generation() -> None:
 def readiness_failure_detail(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or status_payload()
     return {
+        "code": "llm_readiness_unavailable",
         "message": "LLM provider is not ready",
         "failure_category": payload["failure_category"],
         "remediation": payload["remediation"],

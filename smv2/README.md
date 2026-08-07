@@ -14,6 +14,8 @@ Deviations from the brief are recorded in [`docs/decisions.md`](./docs/decisions
   (`backend/pyproject.toml` is the single dependency source).
 - **Frontend** — Next.js (App Router) + TypeScript. API client generated from
   the backend's OpenAPI schema (`npm run gen:api`) — no hand-written fetch shapes.
+  Requires Node `>=22.13.0 || >=24` (`.node-version` pins local shells to
+  `22.13.0`; frontend npm installs enforce this with `engine-strict=true`).
 - **Jobs** — durable `Job` table + worker loop with atomic lease claims and a
   startup reconciler. No framework background tasks.
 

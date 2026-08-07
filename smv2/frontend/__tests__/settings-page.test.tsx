@@ -335,7 +335,7 @@ describe("settings CSRF helpers", () => {
 
   it("fetches the bootstrap token with no-store, keeps it out of browser storage, and sends it only on mutations", async () => {
     vi.resetModules();
-    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.endsWith("/api/settings/bootstrap")) {
         return new Response(JSON.stringify({ csrf_token: "token-123", rollout: { local_settings_enabled: true } }), {
