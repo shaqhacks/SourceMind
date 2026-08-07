@@ -6,8 +6,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.config import data_dir
-from app.routers import settings as settings_router
 from app.llm.ollama_discovery_service import OllamaDiscoveryError
+from app.routers import settings as settings_router
 
 
 def _csrf_headers(client) -> dict[str, str]:
@@ -99,14 +99,38 @@ def test_settings_check_flow_reports_ready_after_local_ollama_selection(
         return ["llama3.2"]
 
     class FakeResponse:
+        status_code = 200
+        is_redirect = False
+        content = b"{}"
+
+        def __init__(self, capabilities: list[str]):
+            self._capabilities = capabilities
+
         def raise_for_status(self):
             return None
 
+        def json(self):
+            return {"capabilities": self._capabilities}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, path: str, *, json: dict):
+            capabilities = {
+                "llama3.2": ["completion"],
+                "nomic-embed-text": ["embedding"],
+            }[json["name"]]
+            return FakeResponse(capabilities)
+
     monkeypatch.setattr("app.routers.settings.discover_ollama_models", fake_discover)
-    monkeypatch.setattr(
-        "app.llm.probe.httpx.get",
-        lambda url, *, timeout: FakeResponse(),
-    )
+    monkeypatch.setattr("app.llm.probe.httpx.Client", FakeClient)
     headers = _csrf_headers(client)
     put_resp = client.put(
         "/api/settings",

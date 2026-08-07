@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from conftest import _first_section_id
+
 from app.db.engine import get_session
 from app.db.models import Job, LlmCall, Section
-from conftest import _first_section_id
 
 
 def _llm_call_count() -> int:
@@ -11,6 +14,53 @@ def _llm_call_count() -> int:
         return session.query(LlmCall).count()
     finally:
         session.close()
+
+
+class _FakeOllamaResponse:
+    def __init__(self, *, status_code: int = 200, payload: dict | None = None):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.is_redirect = False
+        self.content = b"{}"
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError("ollama request failed")
+
+    def json(self):
+        return self._payload
+
+
+class _FakeOllamaClient:
+    def __init__(self, *, model_capabilities: dict[str, list[str]], calls: list[dict]):
+        self._model_capabilities = model_capabilities
+        self._calls = calls
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def post(self, path: str, *, json: dict):
+        name = json["name"]
+        self._calls.append({"path": path, "name": name})
+        capabilities = self._model_capabilities.get(name)
+        if capabilities is None:
+            return _FakeOllamaResponse(status_code=404)
+        return _FakeOllamaResponse(payload={"capabilities": capabilities})
+
+
+def _patch_ollama_probe(monkeypatch, model_capabilities: dict[str, list[str]]) -> list[dict]:
+    calls: list[dict] = []
+
+    def fake_client(**kwargs):
+        calls.append({"client_kwargs": kwargs})
+        return _FakeOllamaClient(model_capabilities=model_capabilities, calls=calls)
+
+    monkeypatch.setattr("app.llm.probe.httpx.Client", fake_client)
+    monkeypatch.setattr("app.llm.probe.httpx.get", lambda *args, **kwargs: _FakeOllamaResponse())
+    return calls
 
 
 def test_llm_status_reports_readiness_without_network_call(client):
@@ -209,21 +259,18 @@ def test_llm_status_config_identity_change_invalidates_stale_check(client, monke
 
 
 def test_llm_status_check_calls_ollama_probe_without_metering(client, monkeypatch):
-    calls = {"url": None}
-
-    class FakeResponse:
-        def raise_for_status(self):
-            return None
-
-    def fake_get(url, *, timeout):
-        calls["url"] = url
-        assert timeout > 0
-        return FakeResponse()
+    calls = _patch_ollama_probe(
+        monkeypatch,
+        {
+            "llama3.2": ["completion"],
+            "nomic-embed-text": ["embedding"],
+        },
+    )
 
     monkeypatch.setenv("SMV2_LLM_PROVIDER", "ollama")
     monkeypatch.setenv("SMV2_LLM_MODEL", "llama3.2")
+    monkeypatch.setenv("SMV2_EMBED_MODEL", "nomic-embed-text")
     monkeypatch.setenv("SMV2_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-    monkeypatch.setattr("app.llm.probe.httpx.get", fake_get)
     calls_before = _llm_call_count()
 
     resp = client.post("/api/llm/status/check")
@@ -235,5 +282,111 @@ def test_llm_status_check_calls_ollama_probe_without_metering(client, monkeypatc
     assert body["available"] is True
     assert body["capabilities"] == {"completion": True, "embeddings": True}
     assert body["failure_category"] is None
-    assert calls["url"] == "http://127.0.0.1:11434/api/version"
+    assert [call for call in calls if call.get("path") == "/api/show"] == [
+        {"path": "/api/show", "name": "llama3.2"},
+        {"path": "/api/show", "name": "nomic-embed-text"},
+    ]
     assert _llm_call_count() == calls_before
+
+
+def test_llm_status_check_reports_missing_configured_ollama_completion_model(
+    client, monkeypatch
+):
+    calls = _patch_ollama_probe(
+        monkeypatch,
+        {
+            "nomic-embed-text": ["embedding"],
+        },
+    )
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("SMV2_LLM_MODEL", "llama3.2")
+    monkeypatch.setenv("SMV2_EMBED_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("SMV2_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+    resp = client.post("/api/llm/status/check")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["available"] is False
+    assert payload["capabilities"]["completion"] is False
+    assert payload["failure_category"] == "ollama_model_unavailable"
+    client_kwargs = calls[0]["client_kwargs"]
+    assert client_kwargs["base_url"] == "http://127.0.0.1:11434"
+    assert client_kwargs["follow_redirects"] is False
+    assert client_kwargs["timeout"].connect == 1.0
+    assert client_kwargs["timeout"].read == 5.0
+    assert calls[1:] == [
+        {"path": "/api/show", "name": "llama3.2"},
+        {"path": "/api/show", "name": "nomic-embed-text"},
+    ]
+
+
+def test_llm_status_check_allows_ollama_completion_when_embed_model_missing(
+    client, monkeypatch
+):
+    _patch_ollama_probe(
+        monkeypatch,
+        {
+            "llama3.2": ["completion"],
+        },
+    )
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("SMV2_LLM_MODEL", "llama3.2")
+    monkeypatch.setenv("SMV2_EMBED_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("SMV2_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+    resp = client.post("/api/llm/status/check")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["available"] is True
+    assert payload["capabilities"] == {"completion": True, "embeddings": False}
+    assert payload["failure_category"] == "ollama_embed_model_unavailable"
+
+
+def test_ollama_generation_preflight_refreshes_stale_checks_and_reuses_fresh_success(
+    client, ingest_course, monkeypatch
+):
+    model_capabilities = {
+        "llama3.2": ["completion"],
+        "nomic-embed-text": ["embedding"],
+    }
+    calls = _patch_ollama_probe(monkeypatch, model_capabilities)
+    monotonic = {"now": 100.0}
+    from app.services import llm_readiness_service
+
+    monkeypatch.setattr(
+        llm_readiness_service,
+        "time",
+        SimpleNamespace(monotonic=lambda: monotonic["now"]),
+        raising=False,
+    )
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("SMV2_LLM_MODEL", "llama3.2")
+    monkeypatch.setenv("SMV2_EMBED_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("SMV2_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    ready = client.post("/api/llm/status/check")
+    fresh_generation = client.post(f"/api/sections/{section_id}/lesson")
+    model_capabilities.pop("llama3.2")
+    monotonic["now"] = 131.0
+    stale_generation = client.post(f"/api/sections/{section_id}/lesson?force=true")
+
+    assert ready.status_code == 200
+    assert fresh_generation.status_code == 202
+    assert stale_generation.status_code == 503
+    assert stale_generation.json()["detail"]["failure_category"] == "ollama_model_unavailable"
+    show_calls = [call for call in calls if call.get("path") == "/api/show"]
+    assert show_calls == [
+        {"path": "/api/show", "name": "llama3.2"},
+        {"path": "/api/show", "name": "nomic-embed-text"},
+        {"path": "/api/show", "name": "llama3.2"},
+        {"path": "/api/show", "name": "nomic-embed-text"},
+    ]
+    session = get_session()
+    try:
+        assert session.query(Job).filter(Job.type == "generate_lesson").count() == 1
+    finally:
+        session.close()
