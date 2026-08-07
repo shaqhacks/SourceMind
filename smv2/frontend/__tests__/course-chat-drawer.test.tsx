@@ -4,7 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import CourseChatDrawer from "@/components/reader/CourseChatDrawer";
-import { getChatHistory, sendChat, type ChatSelectionIn } from "@/lib/api/client";
+import {
+  getChatHistory,
+  sendChat,
+  type ApiErrorDetail,
+  type ChatSelectionIn,
+} from "@/lib/api/client";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 
 import { err, ok } from "./support/api-result";
@@ -25,6 +30,12 @@ const mockedGetChatHistory = vi.mocked(getChatHistory);
 const mockedSendChat = vi.mocked(sendChat);
 const realInnerWidth = window.innerWidth;
 const realMatchMedia = window.matchMedia;
+const workerFailureDetail: ApiErrorDetail = {
+  code: "worker_failed",
+  failure_category: "generation_failed",
+  message: "The assistant worker failed.",
+  remediation: "Retry the request or inspect the job.",
+};
 
 function setViewport(width: number): void {
   Object.defineProperty(window, "innerWidth", {
@@ -230,6 +241,35 @@ describe("CourseChatDrawer", () => {
       await screen.findByText(/assistant is busy — try again in a moment/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("keeps retry and Jobs recovery for structured non-readiness 5xx send failures", async () => {
+    mockedGetChatHistory.mockResolvedValue(ok([]));
+    mockedSendChat
+      .mockResolvedValueOnce({
+        status: 500,
+        ok: false,
+        error: { detail: workerFailureDetail },
+      })
+      .mockResolvedValueOnce(ok({ reply_md: "Recovered.", citations: [] }));
+    const user = userEvent.setup();
+
+    render(<CourseChatDrawer courseId="course-1" open onClose={vi.fn()} />);
+    await waitFor(() => expect(mockedGetChatHistory).toHaveBeenCalled());
+
+    await user.type(screen.getByLabelText(/message/i), "Retry this worker failure");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("The assistant worker failed.");
+    expect(screen.getByRole("link", { name: /view job details/i })).toHaveAttribute(
+      "href",
+      "/jobs",
+    );
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(mockedSendChat).toHaveBeenLastCalledWith("course-1", "Retry this worker failure");
+    expect(await screen.findByText("Recovered.")).toBeInTheDocument();
   });
 
   it("sends without a selection by default — the no-selection path stays byte-identical", async () => {

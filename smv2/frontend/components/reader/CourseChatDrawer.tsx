@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import Chat, { type ChatCitation, type ChatSendResult, type ChatTurn } from "@/components/Chat";
+import { recoveryAllowsRetry } from "@/components/RecoveryBanner";
 import SelectionContextPill from "@/components/reader/SelectionContextPill";
 import { getChatHistory, sendChat, type ChatSelectionIn, type ChatTurnOut } from "@/lib/api/client";
 import { describeError, type FetchError } from "@/lib/api/errors";
@@ -62,7 +63,10 @@ function describeSendError(
 ): FetchError & { retryable: boolean } {
   const described = describeError(status, "The assistant", error);
   if (described.detail) {
-    return { ...described, retryable: false };
+    return {
+      ...described,
+      retryable: recoveryAllowsRetry(described.detail) && (status === undefined || status >= 500),
+    };
   }
   if (status === 429) {
     return { message: "Assistant is busy — try again in a moment.", retryable: true };
