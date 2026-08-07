@@ -9,11 +9,13 @@ import ChapterMasteryBar from "@/components/chapter/ChapterMasteryBar";
 import InlinePracticeAssessment from "@/components/chapter/InlinePracticeAssessment";
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
+  type ApiErrorDetail,
   generateTest,
   getJob,
   getSection,
@@ -105,12 +107,12 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
   const [tests, setTests] = useState<TestSummaryOut[] | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<FetchError | null>(null);
   const [retakingTestId, setRetakingTestId] = useState<string | null>(null);
   const [retakeError, setRetakeError] = useState<string | null>(null);
-  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
-    null,
-  );
+  const [failureInfo, setFailureInfo] = useState<
+    { jobId: string; message: string | null; detail: ApiErrorDetail | null } | null
+  >(null);
   // Attempt ids known before the current generation started, so the
   // settle handler can tell which attempt in the refetched list is the
   // new one to navigate into — generate_test's own response is just a
@@ -124,6 +126,7 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
   const isGenerating = jobId !== null && !done;
   const jobFailed = done && job?.status === "failed";
   const failureMessage = failureInfo?.jobId === jobId ? failureInfo.message : null;
+  const failureDetail = failureInfo?.jobId === jobId ? failureInfo.detail : null;
 
   const retryLoad = useCallback(() => {
     setState({ kind: "loading" });
@@ -193,7 +196,11 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     if (!jobFailed || !jobId) return;
     let active = true;
     getJob(jobId).then(({ data }) => {
-      if (active) setFailureInfo({ jobId, message: data?.error ?? null });
+      if (active) {
+        const detail =
+          (data as { error_detail?: ApiErrorDetail | null } | undefined)?.error_detail ?? null;
+        setFailureInfo({ jobId, message: data?.error ?? null, detail });
+      }
     });
     return () => {
       active = false;
@@ -206,13 +213,13 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     knownAttemptIdsRef.current = new Set(
       (tests ?? []).flatMap((test) => test.attempts.map((attempt) => attempt.id)),
     );
-    const { data, status } = await generateTest(courseId, { chapterLabel });
+    const { data, status, error } = await generateTest(courseId, { chapterLabel });
     setStarting(false);
     if (data) {
       setJobId(data.job_id);
       return;
     }
-    setStartError(describeError(status, "Starting chapter test generation").message);
+    setStartError(describeError(status, "Starting chapter test generation", error));
   }
 
   if (state.kind === "loading") {
@@ -283,9 +290,11 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
 
         <div className="flex flex-col gap-2">
           {jobFailed && (
-            <ErrorBanner
+            <RecoveryBanner
               message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
               onRetry={() => void handleGenerate()}
+              jobId={jobId}
+              errorDetail={failureDetail}
             />
           )}
           {isGenerating ? (
@@ -309,7 +318,13 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
               </Button>
             )
           )}
-          {startError && <p className="text-xs text-red-600 dark:text-red-400">{startError}</p>}
+          {startError && (
+            <RecoveryBanner
+              message={startError.message}
+              errorDetail={startError.detail}
+              onRetry={() => void handleGenerate()}
+            />
+          )}
         </div>
 
         <div className="flex flex-col gap-2">

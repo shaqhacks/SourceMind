@@ -108,6 +108,13 @@ const mockedGenerateTest = vi.mocked(generateTest);
 const mockedGetJob = vi.mocked(getJob);
 const mockedRetakeTest = vi.mocked(retakeTest);
 
+const readinessDetail = {
+  code: "llm_readiness_unavailable",
+  failure_category: "ollama_model_unavailable",
+  message: "Your configured Ollama model is not present.",
+  remediation: "Open Settings and select a currently installed model.",
+};
+
 function makeChapter(overrides: Partial<ChapterOut> = {}): ChapterOut {
   return {
     chapter_label: "Chapter 1",
@@ -436,6 +443,68 @@ describe("ChapterTestClient", () => {
 
     await user.click(screen.getByRole("button", { name: /retry/i }));
     expect(mockedGenerateTest).toHaveBeenCalledTimes(2);
+  });
+
+  it("routes immediate structured provider readiness failures to Settings without starting a job stream", async () => {
+    mockedListChapters.mockResolvedValue(ok([makeChapter()]));
+    mockedGetSection.mockImplementation(mockGetSectionById);
+    mockedListTests.mockResolvedValue(ok([]));
+    mockedGenerateTest.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+
+    const user = userEvent.setup();
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+    await screen.findByText("Practice question: what is 2+2?");
+
+    await user.click(await screen.findByRole("button", { name: /take chapter test/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(mockedGetJob).not.toHaveBeenCalled();
+  });
+
+  it("routes watched-job structured provider readiness failures to Settings and preserves job details", async () => {
+    mockedListChapters.mockResolvedValue(ok([makeChapter()]));
+    mockedGetSection.mockImplementation(mockGetSectionById);
+    mockedListTests.mockResolvedValue(ok([]));
+    mockedGenerateTest.mockResolvedValue(ok({ job_id: "job-1" }, 202));
+    mockedGetJob.mockResolvedValue(
+      ok(
+        makeJob({
+          status: "failed",
+          error: "Your configured Ollama model is not present.",
+          error_detail: readinessDetail,
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+    await screen.findByText("Practice question: what is 2+2?");
+
+    await user.click(await screen.findByRole("button", { name: /take chapter test/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      FakeEventSource.instances[0].emit("update", { id: "job-1", status: "failed", progress: null });
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/your configured ollama model is not present/i);
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
   });
 
   it("shows a retryable error banner when the chapter itself fails to load", async () => {

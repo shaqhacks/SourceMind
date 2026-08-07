@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import InlinePracticeAssessment from "@/components/chapter/InlinePracticeAssessment";
 import {
+  type ApiErrorDetail,
   getPracticeAssessment,
   startPracticeAssessment,
   submitPracticeAnswer,
@@ -24,6 +25,13 @@ vi.mock("@/lib/api/client", () => ({
 const mockedGetPracticeAssessment = vi.mocked(getPracticeAssessment);
 const mockedStartPracticeAssessment = vi.mocked(startPracticeAssessment);
 const mockedSubmitPracticeAnswer = vi.mocked(submitPracticeAnswer);
+
+const readinessDetail: ApiErrorDetail = {
+  code: "llm_readiness_unavailable",
+  failure_category: "ollama_model_unavailable",
+  message: "Your configured Ollama model is not present.",
+  remediation: "Open Settings and select a currently installed model.",
+};
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -220,6 +228,51 @@ describe("InlinePracticeAssessment", () => {
       expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1"),
     );
     expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes immediate structured provider readiness failures to Settings when starting questions", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "not_started", questions: undefined })),
+    );
+    mockedStartPracticeAssessment.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+
+    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps a failed assessment visible when retry hits a structured provider readiness failure", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "failed", questions: undefined, message: "Extraction failed." })),
+    );
+    mockedStartPracticeAssessment.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+
+    const user = userEvent.setup();
+    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+
+    expect(await screen.findByText("Extraction failed.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(await screen.findByText("Extraction failed.")).toBeInTheDocument();
+    expect(screen.getByText("Your configured Ollama model is not present.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
   });
 
   it("ignores a stale not_started start after props change", async () => {

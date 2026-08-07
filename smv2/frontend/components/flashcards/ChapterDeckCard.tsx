@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
-import ErrorBanner from "@/components/ErrorBanner";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -16,7 +15,7 @@ import {
 } from "@/lib/api/client";
 import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
-import { useJobFailureMessage } from "@/lib/hooks/useJobFailureMessage";
+import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
 import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
@@ -94,7 +93,7 @@ export default function ChapterDeckCard({
   // brief "finishing up" status instead of flashing back to the "Generate
   // cards" button in that gap.
   const justFinished = done && watchedJobId !== null && job?.status === "succeeded" && !hasCards;
-  const failureMessage = useJobFailureMessage(jobFailed, watchedJobId);
+  const failureInfo = useJobFailure(jobFailed, watchedJobId);
 
   // Advances the generation queue. Every setState call here happens inside
   // an async continuation (after an await, or in a .then()) rather than
@@ -206,9 +205,11 @@ export default function ChapterDeckCard({
           Finishing up…
         </p>
       ) : jobFailed ? (
-        <ErrorBanner
-          message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
+        <RecoveryBanner
+          message={`Generation failed${failureInfo.message ? `: ${failureInfo.message}` : "."}`}
           onRetry={() => void handleGenerate()}
+          jobId={watchedJobId}
+          errorDetail={failureInfo.detail}
         />
       ) : (
         <>

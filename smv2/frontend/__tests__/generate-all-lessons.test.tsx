@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import GenerateAllLessons from "@/components/reader/GenerateAllLessons";
-import { generateAllLessons, getJob, type JobOut } from "@/lib/api/client";
+import { generateAllLessons, getJob, type ApiErrorDetail, type JobOut } from "@/lib/api/client";
 
 import { FakeEventSource } from "./support/fake-event-source";
 
@@ -16,6 +16,13 @@ vi.mock("@/lib/api/client", () => ({
 
 const mockedGenerateAllLessons = vi.mocked(generateAllLessons);
 const mockedGetJob = vi.mocked(getJob);
+
+const readinessDetail: ApiErrorDetail = {
+  code: "llm_readiness_unavailable",
+  failure_category: "ollama_model_unavailable",
+  message: "Your configured Ollama model is not present.",
+  remediation: "Open Settings and select a currently installed model.",
+};
 
 function makeJob(id: string, sectionId: string): JobOut {
   return {
@@ -117,5 +124,28 @@ describe("GenerateAllLessons", () => {
 
     expect(await screen.findByText(/starting generation failed/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /view job details/i })).toHaveAttribute("href", "/jobs");
+  });
+
+  it("routes immediate structured provider readiness failures to Settings without starting job streams", async () => {
+    mockedGenerateAllLessons.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+
+    const user = userEvent.setup();
+    render(<GenerateAllLessons courseId="course-1" onSectionSettled={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /generate all lessons/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(mockedGetJob).not.toHaveBeenCalled();
   });
 });

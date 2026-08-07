@@ -9,6 +9,7 @@ import remarkMath from "remark-math";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import {
   getPracticeAssessment,
@@ -19,6 +20,7 @@ import {
   type PracticeQuestionOut,
   type SubmitPracticeAnswerOut,
 } from "@/lib/api/client";
+import { describeError, type FetchError } from "@/lib/api/errors";
 
 interface InlinePracticeAssessmentProps {
   courseId: string;
@@ -120,7 +122,8 @@ export default function InlinePracticeAssessment({
   const [assessment, setAssessment] = useState<PracticeAssessmentOut | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
-  const [loadError, setLoadError] = useState<{ message: string; status?: number } | null>(null);
+  const [loadError, setLoadError] = useState<FetchError | null>(null);
+  const [retryError, setRetryError] = useState<FetchError | null>(null);
   const [answers, setAnswers] = useState<AnswerMap>({});
   const [submitting, setSubmitting] = useState<Record<string, boolean>>({});
   const [submitErrors, setSubmitErrors] = useState<SubmitErrorMap>({});
@@ -134,6 +137,7 @@ export default function InlinePracticeAssessment({
     }
     setAssessment(next);
     setLoadError(null);
+    setRetryError(null);
     if (next.status === "ready") {
       setAnswers((current) => {
         const merged = { ...current };
@@ -208,10 +212,7 @@ export default function InlinePracticeAssessment({
       setStarting(false);
 
       if (!startResult.ok || !startResult.data) {
-        setLoadError({
-          message: "Could not start practice questions.",
-          status: startResult.status,
-        });
+        setLoadError(describeError(startResult.status, "Starting practice questions", startResult.error));
         return;
       }
 
@@ -224,22 +225,17 @@ export default function InlinePracticeAssessment({
     const loadSeq = loadSeqRef.current + 1;
     loadSeqRef.current = loadSeq;
     startedForRef.current = `${courseId}:${sectionId}`;
-    setLoading(true);
-    setStarting(true);
-    setLoadError(null);
+    setRetryError(null);
 
     const startResult = await startPracticeAssessment(courseId, sectionId);
     if (!isCurrentLoad(loadSeq)) {
       return;
     }
-    setStarting(false);
-    setLoading(false);
 
     if (!startResult.ok || !startResult.data) {
-      setLoadError({
-        message: "Could not restart practice questions.",
-        status: startResult.status,
-      });
+      setRetryError(
+        describeError(startResult.status, "Restarting practice questions", startResult.error),
+      );
       return;
     }
 
@@ -346,11 +342,11 @@ export default function InlinePracticeAssessment({
 
   if (loadError) {
     return (
-      <ErrorBanner
-        message={loadError.message}
-        status={loadError.status}
-        onRetry={() => void loadAssessment({ resetStart: true, showLoading: true })}
-      />
+        <RecoveryBanner
+          message={loadError.message}
+          errorDetail={loadError.detail}
+          onRetry={() => void loadAssessment({ resetStart: true, showLoading: true })}
+        />
     );
   }
 
@@ -372,10 +368,19 @@ export default function InlinePracticeAssessment({
 
   if (assessment.status === "failed") {
     return (
-      <ErrorBanner
-        message={assessment.message ?? "Practice question extraction failed."}
-        onRetry={() => void retryFailedAssessment()}
-      />
+      <div className="flex flex-col gap-2">
+        <ErrorBanner
+          message={assessment.message ?? "Practice question extraction failed."}
+          onRetry={() => void retryFailedAssessment()}
+        />
+        {retryError ? (
+          <RecoveryBanner
+            message={retryError.message}
+            errorDetail={retryError.detail}
+            onRetry={() => void retryFailedAssessment()}
+          />
+        ) : null}
+      </div>
     );
   }
 

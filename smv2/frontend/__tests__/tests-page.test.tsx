@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import TestsPage from "@/app/tests/page";
 import {
+  type ApiErrorDetail,
   type ChapterOut,
   type CourseOut,
   type JobOut,
@@ -57,6 +58,13 @@ const mockedRetakeTest = vi.mocked(retakeTest);
 const mockedGenerateTest = vi.mocked(generateTest);
 const mockedGetJob = vi.mocked(getJob);
 const mockedGetSkillMap = vi.mocked(getSkillMap);
+
+const readinessDetail: ApiErrorDetail = {
+  code: "llm_readiness_unavailable",
+  failure_category: "ollama_model_unavailable",
+  message: "Your configured Ollama model is not present.",
+  remediation: "Open Settings and select a currently installed model.",
+};
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
@@ -291,6 +299,33 @@ describe("TestsPage", () => {
 
     expect(await screen.findByText(/generation failed: llm unavailable/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /view job details/i })).toHaveAttribute("href", "/jobs?job=job-1");
+  });
+
+  it("routes immediate structured provider readiness failures to Settings without starting a job stream", async () => {
+    mockedGenerateTest.mockReset();
+    mockedListCourses.mockResolvedValue(ok([makeCourse()]));
+    mockedListChapters.mockResolvedValue(ok([makeChapter({ chapter_label: "Chapter 3", test_stats: null })]));
+    mockedListTests.mockResolvedValue(ok([]));
+    mockedGenerateTest.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+
+    const user = userEvent.setup();
+    render(<TestsPage />);
+
+    await user.click(await screen.findByRole("button", { name: /generate test/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(mockedGetJob).not.toHaveBeenCalled();
   });
 
   it("renders the score history bar chart and a real-data diagnosis card", async () => {

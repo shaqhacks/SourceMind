@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CourseReader from "@/components/reader/CourseReader";
 import {
+  type ApiErrorDetail,
   getChatHistory,
   getLlmUsage,
   getSection,
@@ -103,6 +104,12 @@ const COURSE: ReaderCourse = {
 
 const BODY = "Read the example passage below for context.";
 const NO_PROGRESS: ReaderProgress = { section_id: null, scroll_pos: 0 };
+const readinessDetail: ApiErrorDetail = {
+  code: "llm_readiness_unavailable",
+  failure_category: "ollama_model_unavailable",
+  message: "Your configured Ollama model is not present.",
+  remediation: "Open Settings and select a currently installed model.",
+};
 
 /** Same helper as selection-popover.test.tsx: builds a Range over the
  * first occurrence of `phrase` and installs it as the live selection. */
@@ -220,5 +227,33 @@ describe("Explain-in-chat wiring (CourseReader -> CourseChatDrawer -> sendChat)"
 
     // Still open and docked — Add to chat never closes the drawer mid-flow.
     expect(drawer).toBeInTheDocument();
+  });
+
+  it("routes structured provider readiness failures from explain-in-chat to Settings without duplicate pending text", async () => {
+    mockedSendChat.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+    const user = userEvent.setup();
+
+    render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+    const paragraph = await screen.findByText(/read the example passage/i);
+
+    selectPhrase(paragraph, "example passage");
+    fireEvent.mouseUp(paragraph);
+    await user.click(await screen.findByRole("button", { name: "Add to chat" }));
+
+    await user.type(screen.getByLabelText(/message/i), "Explain this model");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Explain this model")).not.toBeInTheDocument();
   });
 });

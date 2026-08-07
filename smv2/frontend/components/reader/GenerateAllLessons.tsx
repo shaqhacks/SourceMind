@@ -5,6 +5,7 @@ import { useCallback, useState } from "react";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { generateAllLessons, getJob } from "@/lib/api/client";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 import LessonJobWatcher from "./LessonJobWatcher";
@@ -34,7 +35,7 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
   const [settledCount, setSettledCount] = useState(0);
   const [skipped, setSkipped] = useState(0);
   const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<FetchError | null>(null);
 
   const total = watchList?.length ?? 0;
   const inProgress = watchList !== null && settledCount < total;
@@ -42,15 +43,11 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
   const handleStart = useCallback(async () => {
     setStarting(true);
     setError(null);
-    const { data, status } = await generateAllLessons(courseId);
+    const { data, status, error } = await generateAllLessons(courseId);
     setStarting(false);
 
     if (!data) {
-      setError(
-        status === undefined
-          ? "Could not reach the API."
-          : `Starting generation failed (HTTP ${status}).`,
-      );
+      setError(describeError(status, "Starting generation", error));
       return;
     }
 
@@ -94,7 +91,11 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
       </Button>
       {error && (
         <div className="min-w-72">
-          <RecoveryBanner message={error} onRetry={() => void handleStart()} />
+          <RecoveryBanner
+            message={error.message}
+            errorDetail={error.detail}
+            onRetry={() => void handleStart()}
+          />
         </div>
       )}
       {!inProgress && watchList !== null && skipped > 0 && (

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import QuizzesPanel from "@/components/reader/QuizzesPanel";
 import {
+  type ApiErrorDetail,
   generateTest,
   getJob,
   listTests,
@@ -32,6 +33,13 @@ vi.mock("@/lib/api/client", () => ({
 const mockedListTests = vi.mocked(listTests);
 const mockedGenerateTest = vi.mocked(generateTest);
 const mockedGetJob = vi.mocked(getJob);
+
+const readinessDetail: ApiErrorDetail = {
+  code: "llm_readiness_unavailable",
+  failure_category: "ollama_model_unavailable",
+  message: "Your configured Ollama model is not present.",
+  remediation: "Open Settings and select a currently installed model.",
+};
 
 function makeAttemptSummary(
   overrides: Partial<TestAttemptSummaryOut> = {},
@@ -201,5 +209,32 @@ describe("QuizzesPanel", () => {
 
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     expect(mockedGenerateTest).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes immediate structured provider readiness failures to Settings without starting a job stream", async () => {
+    mockedGenerateTest.mockReset();
+    mockedListTests.mockResolvedValue(ok([]));
+    mockedGenerateTest.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+    const user = userEvent.setup();
+
+    render(<QuizzesPanel courseId="course-1" />);
+    await user.click(screen.getByRole("button", { name: /^quizzes$/i }));
+    await screen.findByText(/no quizzes yet/i);
+
+    await user.click(screen.getByRole("button", { name: /generate quiz/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(mockedGetJob).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,9 @@ import type { FormEvent, ReactNode } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
+import type { ApiErrorDetail } from "@/lib/api/client";
 
 export interface ChatCitation {
   n: number;
@@ -23,7 +25,7 @@ export interface ChatTurn {
 
 export type ChatSendResult =
   | { ok: true; content: string; citations: ChatCitation[] }
-  | { ok: false; message: string; retryable: boolean };
+  | { ok: false; message: string; retryable: boolean; errorDetail?: ApiErrorDetail | null };
 
 export interface ChatProps {
   /** Rejects (throws) on failure — Chat shows a load-error state with retry. */
@@ -66,9 +68,11 @@ export default function Chat({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [thinkingStage, setThinkingStage] = useState<"searching" | "writing" | null>(null);
-  const [sendError, setSendError] = useState<{ message: string; retryable: boolean } | null>(
-    null,
-  );
+  const [sendError, setSendError] = useState<{
+    message: string;
+    retryable: boolean;
+    errorDetail?: ApiErrorDetail | null;
+  } | null>(null);
   const [lastFailedMessage, setLastFailedMessage] = useState<string | null>(null);
 
   // `historyState` already defaults to "loading" — no reset needed here.
@@ -132,7 +136,11 @@ export default function Chat({
       ]);
     } else {
       setLastFailedMessage(message);
-      setSendError({ message: result.message, retryable: result.retryable });
+      setSendError({
+        message: result.message,
+        retryable: result.retryable,
+        errorDetail: result.errorDetail,
+      });
       // The failed send still added a user turn above — drop it so retry
       // doesn't duplicate it once the resend succeeds and re-adds it.
       setTurns((prev) => prev.filter((turn) => turn.id !== userTurn.id));
@@ -208,10 +216,18 @@ export default function Chat({
 
         {sendError && (
           <div className="mt-3">
-            <ErrorBanner
-              message={sendError.message}
-              onRetry={sendError.retryable ? handleRetry : undefined}
-            />
+            {sendError.errorDetail ? (
+              <RecoveryBanner
+                message={sendError.message}
+                errorDetail={sendError.errorDetail}
+                onRetry={sendError.retryable ? handleRetry : undefined}
+              />
+            ) : (
+              <ErrorBanner
+                message={sendError.message}
+                onRetry={sendError.retryable ? handleRetry : undefined}
+              />
+            )}
           </div>
         )}
       </div>

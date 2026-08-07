@@ -3,10 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import ErrorBanner from "@/components/ErrorBanner";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
-import { describeError } from "@/lib/api/errors";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   generateTest,
   listJobs,
@@ -46,7 +45,7 @@ export default function GenerateTestCard({
   const [localJobId, setLocalJobId] = useState<string | null>(null);
   const [discoveredJobId, setDiscoveredJobId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<FetchError | null>(null);
   const knownAttemptIdsRef = useRef<Set<string>>(new Set());
   // Guards the job-succeeded effect below against re-firing for the SAME
   // job: `onSettled` is a fresh closure every render of the parent
@@ -98,13 +97,13 @@ export default function GenerateTestCard({
     knownAttemptIdsRef.current = new Set(
       existingTests.flatMap((test) => test.attempts.map((attempt) => attempt.id)),
     );
-    const { data, status } = await generateTest(courseId, { chapterLabel });
+    const { data, status, error } = await generateTest(courseId, { chapterLabel });
     setStarting(false);
     if (data) {
       setLocalJobId(data.job_id);
       return;
     }
-    setStartError(describeError(status, "Starting test generation").message);
+    setStartError(describeError(status, "Starting test generation", error));
   }
 
   return (
@@ -140,7 +139,13 @@ export default function GenerateTestCard({
           </Button>
         )
       )}
-      {startError && <p className="text-xs text-red-600 dark:text-red-400">{startError}</p>}
+      {startError && (
+        <RecoveryBanner
+          message={startError.message}
+          errorDetail={startError.detail}
+          onRetry={() => void handleGenerate()}
+        />
+      )}
     </div>
   );
 }

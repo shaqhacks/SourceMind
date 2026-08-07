@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import LessonPane from "@/components/reader/LessonPane";
 import {
+  type ApiErrorDetail,
   findActiveLessonJob,
   generateLesson,
   getJob,
@@ -31,6 +32,13 @@ const mockedGetLessonEstimate = vi.mocked(getLessonEstimate);
 const mockedGenerateLesson = vi.mocked(generateLesson);
 const mockedFindActiveLessonJob = vi.mocked(findActiveLessonJob);
 const mockedGetJob = vi.mocked(getJob);
+
+const readinessDetail: ApiErrorDetail = {
+  code: "llm_readiness_unavailable",
+  failure_category: "ollama_model_unavailable",
+  message: "Your configured Ollama model is not present.",
+  remediation: "Open Settings and select a currently installed model.",
+};
 
 function makeDetail(overrides: Partial<SectionDetailOut> = {}): SectionDetailOut {
   return {
@@ -313,6 +321,34 @@ describe("LessonPane", () => {
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent(/generation failed: anthropic_api_key is not configured/i);
     expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
+  });
+
+  it("routes immediate structured provider readiness failures to Settings without starting a job stream", async () => {
+    mockedGenerateLesson.mockReset();
+    mockedGetSection.mockResolvedValue(ok(makeDetail()));
+    mockedGetLessonEstimate.mockResolvedValue(
+      ok({ est_seconds: 30, est_cost_usd: 0.01, based_on_calls: 1 }),
+    );
+    mockedGenerateLesson.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+
+    const user = userEvent.setup();
+    render(<LessonPane sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate lesson/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(mockedGetJob).not.toHaveBeenCalled();
   });
 
   it("bubbles the effective status up via onStatusChange", async () => {

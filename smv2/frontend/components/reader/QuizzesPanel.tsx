@@ -35,7 +35,7 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
   const [listState, setListState] = useState<ListState>({ kind: "loading" });
   const [jobId, setJobId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<FetchError | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useDialogFocus<HTMLDivElement>(open, { trap: false });
   const close = useCallback(() => setOpen(false), []);
@@ -72,13 +72,13 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
   async function handleGenerate() {
     setStarting(true);
     setStartError(null);
-    const { data, status } = await generateTest(courseId);
+    const { data, status, error } = await generateTest(courseId);
     setStarting(false);
     if (data) {
       setJobId(data.job_id);
       return;
     }
-    setStartError(describeError(status, "Starting quiz generation").message);
+    setStartError(describeError(status, "Starting quiz generation", error));
   }
 
   return (
@@ -123,7 +123,13 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
             </div>
           )}
           {startError && (
-            <p className="mb-2 text-xs text-status-serious">{startError}</p>
+            <div className="mb-2">
+              <RecoveryBanner
+                message={startError.message}
+                errorDetail={startError.detail}
+                onRetry={() => void handleGenerate()}
+              />
+            </div>
           )}
 
           {listState.kind === "loading" && (

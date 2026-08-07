@@ -31,9 +31,9 @@ const providerReadinessError = {
   error: {
     detail: {
       code: "llm_readiness_unavailable",
-      failure_category: "missing_credentials",
-      message: "LLM provider is not ready",
-      remediation: "Configure an available model in Settings.",
+      failure_category: "ollama_model_unavailable",
+      message: "Your configured Ollama model is not present.",
+      remediation: "Open Settings and select a currently installed model.",
     },
   },
 } satisfies ApiResult<GenerateCardsOut>;
@@ -94,7 +94,7 @@ describe("ChapterDeckCard", () => {
     await user.click(screen.getByRole("button", { name: /generate cards/i }));
 
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("LLM provider is not ready");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
     expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     expect(FakeEventSource.instances).toHaveLength(0);
@@ -133,10 +133,65 @@ describe("ChapterDeckCard", () => {
 
     await waitFor(() => expect(mockedGenerateCards).toHaveBeenCalledWith("sec-2"));
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("LLM provider is not ready");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
     expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(mockedGetJob).not.toHaveBeenCalled();
+  });
+
+  it("routes watched-job structured provider readiness failures to Settings and preserves job details", async () => {
+    mockedGenerateCards.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-1" } });
+    mockedGetJob.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: {
+        id: "job-1",
+        type: "generate_cards",
+        status: "failed",
+        payload: { section_id: "sec-1" },
+        result: null,
+        progress: null,
+        error: "Your configured Ollama model is not present.",
+        error_detail: providerReadinessError.error.detail,
+        retryable: false,
+        attempts: 1,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      },
+    });
+
+    const user = userEvent.setup();
+    render(
+      <ChapterDeckCard
+        courseId="course-1"
+        chapterNumber={4}
+        title="Watched Chapter"
+        sectionIds={["sec-1"]}
+        cards={[]}
+        dueCount={0}
+        isBrowsed={false}
+        onBrowse={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /generate cards/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-1",
+        status: "failed",
+        progress: null,
+      });
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/your configured ollama model is not present/i);
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
   });
 });
