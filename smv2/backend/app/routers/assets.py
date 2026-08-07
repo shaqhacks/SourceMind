@@ -115,8 +115,8 @@ def list_assets(course_id: str) -> list[AssetOut]:
 @asset_router.get("/{asset_id}/file", operation_id="get_asset_file")
 def get_asset_file(asset_id: str) -> FileResponse:
     """Serves the original uploaded source as-is, for the reader's
-    original-source page view. Inline disposition keeps browser-viewable
-    sources embedded where supported instead of forcing a download.
+    original-source page view. PDFs stay inline for the reader; every
+    other source is downloaded to avoid browser execution.
     """
     try:
         path, filename, media_type, source_format = assets_service.resolve_asset_file_path(asset_id)
@@ -125,6 +125,7 @@ def get_asset_file(asset_id: str) -> FileResponse:
     except AssetFileMissingError as exc:
         raise HTTPException(status_code=404, detail="asset file not found") from exc
 
+    is_pdf = source_format == "pdf" or media_type == "application/pdf"
     return FileResponse(
         path,
         media_type=media_type,
@@ -133,7 +134,8 @@ def get_asset_file(asset_id: str) -> FileResponse:
             source_format=source_format,
             media_type=media_type,
         ),
-        content_disposition_type="inline",
+        content_disposition_type="inline" if is_pdf else "attachment",
+        headers={"X-Content-Type-Options": "nosniff"},
     )
 
 

@@ -149,6 +149,50 @@ def test_html_adapter_sanitizes_hostile_html_and_keeps_readable_content(client):
     assert all(section["source_format"] == "html" for section in sections)
 
 
+def test_asset_file_delivery_preserves_hostile_html_bytes_as_attachment(client):
+    """Catches serving a hostile original HTML source inline where a browser
+    could execute it.
+    """
+    html = (IMPORT_FIXTURES / "html" / "malicious.html").read_bytes()
+    course_id = _create_course(client, "Hostile HTML delivery")
+    stored_path = data_dir() / "assets" / course_id / "malicious.html"
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    stored_path.write_bytes(html)
+
+    from app.db.engine import get_session
+    from app.db.models import Asset
+
+    session = get_session()
+    try:
+        asset = Asset(
+            course_id=course_id,
+            filename='malicious.html\r\nX-Injected: yes\r\n.html',
+            content_type="text/html",
+            source_format="html",
+            media_type="text/html",
+            size_bytes=len(html),
+            sha256=hashlib.sha256(html).hexdigest(),
+            stored_path=str(stored_path),
+            status="stored",
+        )
+        session.add(asset)
+        session.commit()
+        asset_id = asset.id
+    finally:
+        session.close()
+
+    response = client.get(f"/api/assets/{asset_id}/file")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/html; charset=utf-8"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "attachment" in response.headers["content-disposition"]
+    assert "x-injected" not in response.headers
+    assert "\r" not in response.headers["content-disposition"]
+    assert "\n" not in response.headers["content-disposition"]
+    assert response.content == html
+
+
 def test_html_adapter_escapes_entity_decoded_constructs_and_sanitizes_links(client):
     """Catches entity-decoded tag text or hostile hrefs becoming active Markdown/HTML."""
     html = b"""<!doctype html>
