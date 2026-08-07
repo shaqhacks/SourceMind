@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -7,6 +8,7 @@ import anthropic
 import httpx
 
 from app.config import anthropic_api_key, embed_model, llm_model, ollama_base_url
+from app.security.local_settings import normalize_ollama_base_url
 
 _OLLAMA_PROBE_TIMEOUT_SECONDS = 5.0
 _OLLAMA_PROBE_TIMEOUT = httpx.Timeout(_OLLAMA_PROBE_TIMEOUT_SECONDS, connect=1.0, read=5.0)
@@ -41,8 +43,9 @@ def _probe_anthropic() -> ProbeResult:
 
 def _probe_ollama() -> ProbeResult:
     try:
+        base_url = normalize_ollama_base_url(ollama_base_url())
         with httpx.Client(
-            base_url=ollama_base_url().rstrip("/"),
+            base_url=base_url,
             follow_redirects=False,
             timeout=_OLLAMA_PROBE_TIMEOUT,
         ) as client:
@@ -74,18 +77,35 @@ def _probe_ollama() -> ProbeResult:
 
 
 def _model_has_capability(client: httpx.Client, model_name: str, capability: str) -> bool:
-    response = client.post("/api/show", json={"name": model_name})
-    if response.is_redirect:
-        raise RuntimeError("Ollama returned an unsupported redirect response.")
-    if response.status_code == 404:
-        return False
-    response.raise_for_status()
-    if len(response.content) > _MAX_RESPONSE_BYTES:
-        raise RuntimeError("Ollama returned a response that was too large.")
-    payload: Any = response.json()
+    payload = _show_model_payload(client, model_name)
     capabilities = payload.get("capabilities") if isinstance(payload, dict) else None
     if not isinstance(capabilities, list) or not all(
         isinstance(item, str) for item in capabilities
     ):
         raise RuntimeError("Ollama returned an invalid model metadata response.")
     return capability in {item.lower() for item in capabilities}
+
+
+def _show_model_payload(client: httpx.Client, model_name: str) -> Any:
+    with client.stream("POST", "/api/show", json={"name": model_name}) as response:
+        if response.is_redirect:
+            raise RuntimeError("Ollama returned an unsupported redirect response.")
+        if response.status_code == 404:
+            return {"capabilities": []}
+        response.raise_for_status()
+        raw = _read_limited(response)
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise RuntimeError("Ollama returned an invalid JSON response.") from None
+
+
+def _read_limited(response: httpx.Response) -> bytes:
+    total = 0
+    chunks: list[bytes] = []
+    for chunk in response.iter_bytes():
+        total += len(chunk)
+        if total > _MAX_RESPONSE_BYTES:
+            raise RuntimeError("Ollama returned a response that was too large.")
+        chunks.append(chunk)
+    return b"".join(chunks)

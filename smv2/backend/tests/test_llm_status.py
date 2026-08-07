@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from conftest import _first_section_id
@@ -23,12 +24,21 @@ class _FakeOllamaResponse:
         self.is_redirect = False
         self.content = b"{}"
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
     def raise_for_status(self):
         if self.status_code >= 400:
             raise RuntimeError("ollama request failed")
 
     def json(self):
         return self._payload
+
+    def iter_bytes(self):
+        yield json.dumps(self._payload).encode("utf-8")
 
 
 class _FakeOllamaClient:
@@ -49,6 +59,10 @@ class _FakeOllamaClient:
         if capabilities is None:
             return _FakeOllamaResponse(status_code=404)
         return _FakeOllamaResponse(payload={"capabilities": capabilities})
+
+    def stream(self, method: str, path: str, *, json: dict):
+        assert method == "POST"
+        return self.post(path, json=json)
 
 
 def _patch_ollama_probe(monkeypatch, model_capabilities: dict[str, list[str]]) -> list[dict]:
@@ -106,6 +120,97 @@ def test_llm_status_check_calls_anthropic_probe_without_metering(client, monkeyp
     assert body["last_checked_at"] is not None
     assert calls["models_list"] == 1
     assert _llm_call_count() == calls_before
+
+
+def test_llm_status_check_rejects_unsafe_configured_ollama_url_before_http_client(
+    client, monkeypatch
+):
+    unsafe_urls = [
+        "http://8.8.8.8:11434",
+        "http://user:pass@localhost:11434",
+        "http://169.254.169.254:11434",
+        "http://2130706433:11434",
+    ]
+    created_clients = 0
+
+    def fail_if_client_created(**kwargs):
+        nonlocal created_clients
+        created_clients += 1
+        raise AssertionError("unsafe Ollama URL must not create an HTTP client")
+
+    monkeypatch.setattr("app.llm.probe.httpx.Client", fail_if_client_created)
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("SMV2_LLM_MODEL", "llama3.2")
+    monkeypatch.setenv("SMV2_EMBED_MODEL", "nomic-embed-text")
+
+    for raw_url in unsafe_urls:
+        monkeypatch.setenv("SMV2_OLLAMA_BASE_URL", raw_url)
+
+        resp = client.post("/api/llm/status/check")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["available"] is False
+        assert payload["failure_category"] == "unreachable"
+        assert raw_url not in resp.text
+
+    assert created_clients == 0
+
+
+def test_llm_status_check_rejects_oversized_ollama_show_stream_before_json_parse(
+    client, monkeypatch
+):
+    from app.llm import probe
+
+    parsed_json = False
+
+    class OversizedResponse:
+        status_code = 200
+        is_redirect = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self):
+            yield b"{"
+            yield b'"padding":"' + (b"x" * probe._MAX_RESPONSE_BYTES) + b'"}'
+
+        def json(self):
+            nonlocal parsed_json
+            parsed_json = True
+            return {"capabilities": ["completion"]}
+
+    class OversizedClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method: str, path: str, *, json: dict):
+            return OversizedResponse()
+
+    monkeypatch.setattr("app.llm.probe.httpx.Client", OversizedClient)
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("SMV2_LLM_MODEL", "llama3.2")
+    monkeypatch.setenv("SMV2_EMBED_MODEL", "nomic-embed-text")
+    monkeypatch.setenv("SMV2_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+
+    resp = client.post("/api/llm/status/check")
+
+    assert resp.status_code == 200
+    assert resp.json()["available"] is False
+    assert resp.json()["failure_category"] == "unreachable"
+    assert parsed_json is False
 
 
 def test_llm_status_check_redacts_anthropic_probe_failure(client, monkeypatch):
