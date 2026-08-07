@@ -4914,7 +4914,7 @@
   "paths": {
     "/api/assets/{asset_id}/file": {
       "get": {
-        "description": "Serves the original uploaded source as-is, for the reader's\noriginal-source page view. Inline disposition keeps browser-viewable\nsources embedded where supported instead of forcing a download.",
+        "description": "Serves the original uploaded source as-is, for the reader's\noriginal-source page view. PDFs stay inline for the reader; every\nother source is downloaded to avoid browser execution.",
         "operationId": "get_asset_file",
         "parameters": [
           {

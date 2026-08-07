@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tomllib
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -101,16 +102,25 @@ def test_settings_check_flow_reports_ready_after_local_ollama_selection(
     class FakeResponse:
         status_code = 200
         is_redirect = False
-        content = b"{}"
 
         def __init__(self, capabilities: list[str]):
             self._capabilities = capabilities
+            self.content = json.dumps({"capabilities": self._capabilities}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
 
         def raise_for_status(self):
             return None
 
         def json(self):
             return {"capabilities": self._capabilities}
+
+        def iter_bytes(self):
+            yield self.content
 
     class FakeClient:
         def __init__(self, **kwargs):
@@ -123,6 +133,11 @@ def test_settings_check_flow_reports_ready_after_local_ollama_selection(
             return False
 
         def post(self, path: str, *, json: dict):
+            return self.stream("POST", path, json=json)
+
+        def stream(self, method: str, path: str, *, json: dict):
+            assert method == "POST"
+            assert path == "/api/show"
             capabilities = {
                 "llama3.2": ["completion"],
                 "nomic-embed-text": ["embedding"],
