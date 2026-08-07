@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,6 +28,7 @@ export default defineConfig({
     },
     setupFiles: ["./vitest.setup.ts"],
     globals: true,
+    exclude: [...configDefaults.exclude, "e2e/**", "test-results/**"],
     // @testing-library/dom's default asyncUtilTimeout (1000ms, set in
     // vitest.setup.ts) is well under vitest's own 5000ms default — under
     // CPU contention (many worker threads/processes competing for cores,

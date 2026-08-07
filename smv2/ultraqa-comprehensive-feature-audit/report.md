@@ -1,0 +1,83 @@
+# Comprehensive Feature UltraQA Report
+
+## Final Result
+
+- Branch: `codex/student-experience-remediation`
+- Final QA date: 2026-08-07
+- Scope: Tasks 1-5 plus final Task 6 release gate.
+- Status: PASS. No `FAIL`, unresolved `PARTIAL`, or `Pending` scenario rows remain.
+- Browser: Playwright `1.62.1`, Chromium desktop and mobile projects.
+- Dependency versions verified: Next `16.3.0`, eslint-config-next `16.3.0`, @playwright/test `1.62.1`, @axe-core/playwright `4.12.1`.
+- Safety: no paid LLM calls were made. Live model checks used local Ollama on `127.0.0.1:11434`.
+
+## Scenario Matrix
+
+| ID | User/attacker model | Scenario | Setup / command or harness | Expected signal | Actual result | Status | Fix / evidence | Cleanup |
+|---|---|---|---|---|---|---|---|---|
+| UX-01 | New student | Dashboard, sample identity, first-run/empty/loading/error states | `./build.sh`; Playwright route shell matrix | Stable shell and actionable states | Frontend `96 files / 772 tests`; Playwright route shells passed | PASS | `rtk env UV_CACHE_DIR=/private/tmp/uv-cache ./build.sh`; `rtk npm --prefix frontend run test:e2e` | none |
+| UX-02 | Student | Upload PDF, Markdown, text, and HTML | Backend import/asset slice 3x; live Markdown lifecycle | Supported imports with correct provenance | Backend slice `159/159` passed 3x; live Markdown upload/ingest succeeded | PASS | live job `f26ddcd0-d47b-430d-93ca-7d0cdd52e4c1` reached `succeeded`/100% | course `822fdd46-f4cf-47a8-9ed7-57d20f1fa129` deleted; asset 404 |
+| UX-03 | Hostile uploader | Wrong MIME, double extension, archive, oversized/corrupt/polyglot-like input | Backend asset/import/security slice 3x; live non-inline source check | Reject or serve safely without execution/path leak | Validation suites passed; Markdown original served `attachment` with `nosniff`; PDF stayed inline | PASS | `159/159` backend slice 3x; live `Content-Disposition: attachment; filename="task6.md"` | disposable courses/assets deleted |
+| UX-04 | Student | Reader default Pages for PDF and safe fallback for non-PDF | Playwright `pdf-default.spec.ts`; reader/frontend slice 3x | PDF opens Pages; saved choices persist | Desktop/mobile PDF default passed; frontend slice `115/115` passed 3x | PASS | Playwright `37 passed / 1 skipped`; frontend slice 3x | none |
+| UX-05 | Student | Reader navigation, source/lesson switching, keyboard and mobile shell | Reader/frontend slice; Playwright app navigation | Controls remain clickable/keyboard reachable | Frontend slice `115/115` 3x; mobile reader controls passed in mobile project | PASS | desktop duplicate mobile-control case intentionally skipped; mobile project covers it | none |
+| UX-06 | Student | Notes/highlights create, edit, delete, and persistence | Backend tests; live highlight create/list/delete cascade | Durable state and correct empty/error handling | Live highlight `d4d216ff-44fe-4c0f-b975-c24c1c5e1c7e` created/listed, then deleted by course cascade | PASS | live matrix result `highlight create`/`highlight list` true | course deleted; subsequent course/asset 404 |
+| UX-07 | Student | Course chat, citations, history, selection context, provider failure | Frontend LLM slice 3x; Playwright `llm-recovery.spec.ts` | Bounded answers/citations or actionable recovery | Structured lesson-start 503 opened Settings; chat tests passed | PASS | frontend slice `115/115` 3x; Playwright desktop/mobile LLM recovery passed | no provider generation call |
+| UX-08 | Student | Search empty/query/filter/pagination/open-result | Backend search tests 3x; live indexed Markdown search | Deterministic bounded results and navigation | Hostile valid query returned 200 with sanitized excerpts; search tests passed | PASS | backend slice `159/159` includes search API | course deleted |
+| UX-09 | Hostile search user | SQL-like, prompt injection, Unicode, oversized/bad cursor/filter | Backend search tests; live malformed query matrix | 200/422 only; no crash, leak, or instruction execution | Hostile `<script>` query 200; `limit=0` 422; bad cursor 422 | PASS | live matrix `hostile search valid`, `malformed search limit`, `malformed search cursor` | none |
+| UX-10 | Student | Flashcard browse, edit/delete, generate, review, grade, queue | Frontend slice 3x; focused review-page guard restored | Counts/state and generation recovery work | `chapter-deck-card` and `review-page` tests passed; removed assertion was restored | PASS | `review-page.test.tsx` `18/18`; frontend slice `115/115` 3x | none |
+| UX-11 | Student | Tests index, generate, chapter practice, attempt, submit, retake | Frontend LLM/test slice 3x | Correct lifecycle and actionable readiness failures | Test-generation entry points passed structured recovery tests | PASS | frontend slice includes `tests-page`, `chapter-test-client`, `quizzes-panel`, `inline-practice-assessment` | no provider generation call |
+| UX-12 | Student | Skills map/detail and missing-data states | Full frontend/backend suites; route Playwright | Valid and empty/not-found states are actionable | Full gate passed; route shells passed | PASS | build gate backend `808 passed`, frontend `772 passed` | none |
+| UX-13 | Instructor | Curriculum view/edit/version and validation diagnostics | Full backend/frontend suites | Role-specific workflows and failure states work | Full gate passed | PASS | `./build.sh` exit 0 | none |
+| UX-14 | Student | Jobs list, live progress, failed job detail, retry gating | Full suites; live ingest job polling | No dead spinner; safe retry semantics | Live ingest job reached `succeeded` with `pct: 100`; job UI/e2e passed | PASS | live job `f26ddcd0-d47b-430d-93ca-7d0cdd52e4c1` | deleted by course cascade |
+| UX-15 | Student | Settings load/save/test/clear for Anthropic | Settings API/security tests 3x; live CSRF check | Safe mutation and redacted status | Settings slice passed; evil origin rejected 403 | PASS | backend slice `159/159` 3x; live `CSRF/origin rejection` | live test used disposable data dir |
+| UX-16 | Local Ollama student | Discovery dropdown, exact identifiers, unavailable model, save/test | Live Ollama matrix; settings tests 3x | Only current completion models; missing model blocked | Discovery returned 6 completion models; missing configured model reported unavailable; selected `deepseek-coder-v2:latest` readiness passed | PASS | live model list: `deepseek-coder-v2:latest`, `llama3.1:8b`, `llama3.1:latest`, `qwen2.5-coder:1.5b-base`, `qwen2.5-coder:14b`, `qwen3.6:latest` | disposable settings data removed |
+| UX-17 | Student | Refresh/reload persistence for reader, notes, progress, theme, filters | Full frontend/backend suites | Explicit choices persist; stale values fall back safely | Full frontend suite passed | PASS | `./build.sh` frontend `772 passed` | test storage reset by suites |
+| UX-18 | Keyboard/screen-reader user | Focus, dialogs, labels, live regions, Escape/Enter/Space behavior | Playwright axe + frontend interaction suites | Controls accessible without pointer | Critical axe coverage passed on desktop/mobile; keyboard/interaction suites passed | PASS | Playwright `37 passed / 1 skipped`; frontend slice 3x | none |
+| UX-19 | Mobile/narrow-screen user | Sidebar, modals, reader panels, long content | Playwright mobile project + responsive tests | No unreachable controls/overflow traps | Mobile route shells and mobile reader controls passed | PASS | mobile project passed all applicable cases | none |
+| API-01 | Malformed client | Invalid/missing JSON fields and wrong content types | Full backend suite; live malformed search | 400/415/422 without tracebacks | Backend `808 passed`; live malformed search returned 422 | PASS | `./build.sh` backend suite | none |
+| API-02 | Cross-origin attacker | Settings CSRF/Origin/CORS bypass attempts | Security tests 3x; live evil origin | Fail closed; trusted split-port loopback succeeds | Evil origin rejected 403; settings tests passed | PASS | backend slice `159/159` 3x | none |
+| API-03 | SSRF attacker | Ollama URL parser confusion, redirects, non-loopback, odd ports | Settings security/discovery suites 3x; live metadata URL | Loopback HTTP only, redirects off, bounded requests | `169.254.169.254` Ollama URL rejected 400 before request | PASS | live `ollama_invalid_url`; backend slice 3x | none |
+| API-04 | Resource enumerator | Invalid/cross-resource UUIDs and parent-child mismatches | Full backend suite; live cleanup 404 | 404/422; no unrelated data mutation | Deleted disposable course and asset returned 404 | PASS | live cleanup 404 checks | disposable data removed |
+| API-05 | XSS attacker | HTML/Markdown/file names/search/error payloads containing script/event URLs | Asset/import tests; live hostile search/source response | Sanitized/escaped output and safe headers | Non-PDF originals attach with `nosniff`; hostile search 200 with sanitized excerpts | PASS | backend slice 3x; live matrix | disposable course deleted |
+| API-06 | Path traversal attacker | Encoded separators, `..`, absolute paths, hostile filenames | Backend security/import suites 3x | Cannot escape storage root or control response headers | Backend slice passed; live filenames returned controlled dispositions | PASS | backend slice `159/159` 3x | none |
+| API-07 | Resource exhaustion attacker | Oversized bodies, too many models/items, slow/hung upstream | Backend suites; live bounded Ollama/search checks | Size/count/time/concurrency caps enforced | Backend slice passed; live model discovery returned bounded list | PASS | backend slice `159/159` 3x | none |
+| REL-01 | Interrupted student | Navigation/unmount during fetch/SSE and retry after failure | Full frontend suite; Playwright LLM recovery | Stale updates ignored; streams cleaned | Full frontend suite and E2E passed | PASS | `./build.sh` frontend `772 passed`; Playwright passed | none |
+| REL-02 | Repeated user | Double-click/coalesced discovery/generation/submission | Frontend/backend sensitive slices 3x | No duplicate jobs or stale overwrite | Sensitive slices passed 3x with no flakes | PASS | backend `159/159` x3; frontend `115/115` x3 | none |
+| REL-03 | Stale client | Malformed localStorage, stale job/model/course identifiers | Full frontend suite | Safe fallback and recovery copy | Full frontend suite passed | PASS | `./build.sh` frontend `96 files / 772 tests` | storage reset by tests |
+| REL-04 | Maintainer | Full suite, repeated sensitive tests, hidden skips, misleading success | Build/lint/audits/repeats/e2e | Deterministic green; zero unexplained vulnerabilities | Build passed; lint exit 0 with one warning; npm audit 0 vulns; pip-audit no known vulns; Playwright 37 passed/1 expected skip | PASS | see Commands Run | none |
+| REL-05 | Maintainer | Generated OpenAPI/client drift and dirty worktree preservation | Build drift check and explicit diff | No drift and gate-enforced cleanliness | `git diff --exit-code -- openapi.json frontend/lib/api/schema.d.ts` exit 0; build gate includes same drift check | PASS | explicit drift check exit 0 | report/test files are intentional |
+| SEC-01 | Observer | Secrets/internal details in client bundle, logs, errors, or API output | Security tests; live settings redaction/readiness | No key/body/path/trace leakage | Settings responses redacted; no paid key used | PASS | backend slice and live settings matrix | disposable settings data removed |
+| SEC-02 | Framing/content-sniff attacker | Security headers on HTML/API/uploaded files | Backend security headers; live header matrix | Context-appropriate frame/nosniff/referrer policy | `/health` and asset responses include `x-content-type-options: nosniff`, `x-frame-options: SAMEORIGIN`, `referrer-policy: no-referrer` | PASS | live header matrix | none |
+
+## Commands Run
+
+- `[1 then 0] RED/GREEN for Vitest guard`: temporarily removed `test.exclude`, then `rtk npm --prefix frontend run test -- __tests__/vitest-config.test.ts --run` failed with `config.test?.exclude` undefined; restored exclusion and reran with `1 passed`.
+- `[0] restored review assertion`: `rtk npm --prefix frontend run test -- __tests__/review-page.test.tsx --run` -> `1 file / 18 tests passed`.
+- `[0] backend sensitive slice x3`: `rtk env UV_CACHE_DIR=/private/tmp/uv-cache uv run pytest -q tests/test_asset_upload.py tests/test_simple_import_adapters.py tests/test_html_conversion.py tests/test_llm_status.py tests/test_llm_provider.py tests/test_settings_api.py tests/test_settings_security.py tests/test_ollama_discovery.py tests/test_security_headers.py tests/test_search_api.py` from `backend/` -> `159 passed` each run, 8 warnings each run, no flakes.
+- `[0] frontend sensitive slice x3`: `rtk npm --prefix frontend run test -- __tests__/recovery-banner.test.tsx __tests__/tests-page.test.tsx __tests__/chapter-test-client.test.tsx __tests__/generate-all-lessons.test.tsx __tests__/lesson-pane.test.tsx __tests__/quizzes-panel.test.tsx __tests__/chapter-deck-card.test.tsx __tests__/chat.test.tsx __tests__/annotations/explain-in-chat.test.tsx __tests__/inline-practice-assessment.test.tsx __tests__/course-reader-client.test.tsx __tests__/settings-page.test.tsx __tests__/vitest-config.test.ts --run` -> `13 files / 115 tests passed` each run, no flakes.
+- `[0] full release gate`: `rtk env UV_CACHE_DIR=/private/tmp/uv-cache ./build.sh` -> backend `808 passed`, OpenAPI export, generated drift check, frontend typecheck, frontend `96 files / 772 tests passed`, Next build, `BUILD OK`.
+- `[0] lint`: `rtk npm --prefix frontend run lint` -> 0 errors, 1 warning (`frontend/__tests__/settings-page.test.tsx:338` unused `init` callback arg).
+- `[0] npm audit`: `rtk npm --prefix frontend audit --omit=dev --audit-level=high` -> `found 0 vulnerabilities`.
+- `[0] pip-audit`: `rtk env UV_CACHE_DIR=/private/tmp/uv-cache UV_TOOL_DIR=/private/tmp/uv-tools uvx pip-audit --path backend/.venv/lib/python3.12/site-packages` -> no known vulnerabilities; local `smv2-backend` skipped because it is not on PyPI.
+- `[0] Playwright`: `rtk npm --prefix frontend run test:e2e` -> `37 passed`, `1 skipped` in 28.9s. The skipped case is the desktop project instance of the mobile reader-controls spec; the mobile project ran and passed that scenario.
+- `[0] generated drift`: `rtk git diff --exit-code -- openapi.json frontend/lib/api/schema.d.ts`.
+- `[0] live adversarial matrix`: disposable backend with `SMV2_DATA_DIR=/private/tmp/smv2-task6-live-data` covered health/global headers, CSRF/origin rejection, Ollama SSRF rejection, model discovery/readiness, Markdown upload/ingest/progress/search/highlight/export/delete, inline PDF, non-inline Markdown, malformed search, and cleanup 404.
+
+## Fixes Applied In Task 6
+
+- `frontend/vitest.config.ts` excludes `e2e/**` and `test-results/**` from Vitest using `configDefaults.exclude`.
+- `frontend/__tests__/vitest-config.test.ts` locks the Playwright artifact exclusion with explicit RED/GREEN evidence.
+- `frontend/__tests__/review-page.test.tsx` was restored to committed coverage; the partial deletion of the two-fetch assertion was not evidence-backed.
+
+## Cleanup
+
+- Removed generated `frontend/test-results`.
+- Removed temporary live harness `/private/tmp/task6_live_matrix.py`.
+- Removed disposable live data directory `/private/tmp/smv2-task6-live-data`.
+- Deleted live disposable course `822fdd46-f4cf-47a8-9ed7-57d20f1fa129`; verified course 404 and asset `1397db23-edd3-46ac-ac7b-b213ffc54cc9` 404.
+- Deleted earlier harness-mismatch course `766fc887-e62a-4a5e-bcda-36c861f6a662`; verified 404.
+
+## Residual Risks
+
+- Lint has one warning in existing test code: `frontend/__tests__/settings-page.test.tsx:338` unused callback argument `init`. It does not fail the lint gate.
+- Playwright has one expected skip for the desktop project variant of a mobile-specific reader-controls test; the mobile project passed the scenario.
+- `pip-audit` cannot audit the local package name `smv2-backend` because it is not published on PyPI; third-party installed packages returned no known vulnerabilities.
