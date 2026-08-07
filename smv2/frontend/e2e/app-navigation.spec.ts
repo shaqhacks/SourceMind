@@ -60,6 +60,23 @@ test.describe("390x844 mobile reader controls", () => {
     test.skip(testInfo.project.name !== "mobile-chromium", "mobile overlay coverage runs in the mobile project");
     test.setTimeout(60_000);
     await page.route("**/api/settings", (route) => route.fulfill({ json: mockedSettings() }));
+    let readinessCheckCalls = 0;
+    await page.route("**/api/llm/status/check", (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      readinessCheckCalls += 1;
+      return route.fulfill({
+        json: {
+          provider: "ollama",
+          model: "e2e-mobile-unavailable:latest",
+          configured: true,
+          available: false,
+          capabilities: { completion: true, embeddings: true },
+          last_checked_at: "2026-08-07T00:00:00Z",
+          failure_category: "e2e_mobile_readiness_probe_blocked",
+          remediation: "E2E deterministic readiness result.",
+        },
+      });
+    });
     const course = await createPdfCourse(request, testInfo);
     const errors = attachPageErrorGuard(page);
 
@@ -84,6 +101,9 @@ test.describe("390x844 mobile reader controls", () => {
       await expect(page.getByLabel("Model")).toBeVisible();
       await expect(page.getByRole("button", { name: "Test connection" })).toBeEnabled();
       await page.getByRole("button", { name: "Test connection" }).click();
+      await expect(page.getByText("Connection unavailable.")).toBeVisible();
+      await expect(page.getByText("E2E deterministic readiness result.")).toBeVisible();
+      expect(readinessCheckCalls, "mobile settings test uses deterministic readiness route").toBe(1);
 
       await expectCleanPage(errors);
     } finally {

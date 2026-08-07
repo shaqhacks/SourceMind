@@ -1,10 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const backendPort = 8000;
 const frontendPort = 3000;
 const backendUrl = `http://127.0.0.1:${backendPort}`;
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
-const e2eDataDir = process.env.SMV2_E2E_DATA_DIR ?? "/private/tmp/smv2-playwright-data";
+const e2eDataDir = process.env.SMV2_E2E_DATA_DIR ?? join(tmpdir(), "smv2-playwright-data");
+const uvCacheDir = join(tmpdir(), "uv-cache");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -25,7 +28,7 @@ export default defineConfig({
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
       env: {
-        UV_CACHE_DIR: "/private/tmp/uv-cache",
+        UV_CACHE_DIR: uvCacheDir,
         SMV2_DATA_DIR: e2eDataDir,
         SMV2_DB_URL: `sqlite:///${e2eDataDir}/smv2.db`,
         SMV2_BACKUPS_ENABLED: "0",

@@ -12,7 +12,7 @@ import {
 const shellRoutes = ["/", "/flashcards", "/jobs", "/review", "/search", "/settings", "/tests"];
 
 async function expectNoCriticalViolations(page: import("@playwright/test").Page, name: string) {
-  const results = await new AxeBuilder({ page }).include("main").analyze();
+  const results = await new AxeBuilder({ page }).include("body").analyze();
   const critical = results.violations.filter((violation) => violation.impact === "critical");
   const nonCritical = results.violations.filter((violation) => violation.impact !== "critical");
   test.info().annotations.push({
