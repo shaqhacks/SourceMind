@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import InlinePracticeAssessment from "@/components/chapter/InlinePracticeAssessment";
+import type { PracticeSectionState } from "@/components/chapter/practiceAssessmentState";
 import {
   type ApiErrorDetail,
   getPracticeAssessment,
@@ -96,6 +97,44 @@ function makeAssessment(overrides: Partial<PracticeAssessmentOut> = {}): Practic
     run_id: "run-1",
     ...overrides,
   };
+}
+
+function practiceChild({
+  onStateChange,
+  retryVersion = 0,
+  sectionId = "section-1",
+}: {
+  onStateChange?: (state: PracticeSectionState) => void;
+  retryVersion?: number;
+  sectionId?: string;
+}) {
+  return (
+    <InlinePracticeAssessment
+      courseId="course-1"
+      sectionId={sectionId}
+      retryVersion={retryVersion}
+      onStateChange={onStateChange}
+    />
+  );
+}
+
+function renderPracticeChild(options: Parameters<typeof practiceChild>[0] = {}) {
+  return render(practiceChild(options));
+}
+
+async function flushPracticeTasks() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+async function advancePracticePoll() {
+  await act(async () => {
+    vi.advanceTimersByTime(1500);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 describe("InlinePracticeAssessment", () => {
@@ -214,6 +253,51 @@ describe("InlinePracticeAssessment", () => {
     expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(3);
   });
 
+  it("reports generating and ready transitions to its parent", async () => {
+    vi.useFakeTimers();
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "generating", questions: [] })))
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "ready", questions: [makeQuestion()] })));
+
+    renderPracticeChild({ retryVersion: 0, onStateChange });
+
+    await flushPracticeTasks();
+    await advancePracticePoll();
+
+    expect(onStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "generating", sectionId: "section-1" }),
+    );
+    expect(onStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "ready", sectionId: "section-1", questionCount: 1 }),
+    );
+  });
+
+  it("does not notify the parent again for repeated generating poll payloads", async () => {
+    vi.useFakeTimers();
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "generating", questions: [], message: "Still working." })),
+    );
+
+    renderPracticeChild({ onStateChange });
+
+    await flushPracticeTasks();
+    await advancePracticePoll();
+
+    expect(
+      onStateChange.mock.calls.filter(([state]) => state.kind === "generating"),
+    ).toHaveLength(1);
+    expect(onStateChange).toHaveBeenCalledWith({
+      kind: "generating",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "Still working.",
+      errorDetail: null,
+      retryKind: null,
+    });
+  });
+
   it("starts extraction with POST when read-only status is not_started", async () => {
     mockedGetPracticeAssessment.mockResolvedValue(
       ok(makeAssessment({ status: "not_started", questions: undefined })),
@@ -326,6 +410,51 @@ describe("InlinePracticeAssessment", () => {
     consoleError.mockRestore();
   });
 
+  it("does not notify the parent after unmount during start", async () => {
+    const oldStart = deferred<Awaited<ReturnType<typeof startPracticeAssessment>>>();
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "not_started", questions: undefined })),
+    );
+    mockedStartPracticeAssessment.mockReturnValue(oldStart.promise);
+
+    const { unmount } = renderPracticeChild({ onStateChange });
+
+    await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1));
+    onStateChange.mockClear();
+    unmount();
+
+    oldStart.resolve(ok(makeAssessment({ status: "generating", questions: undefined })));
+    await flushPracticeTasks();
+
+    expect(onStateChange).not.toHaveBeenCalled();
+  });
+
+  it("does not notify the parent for a stale start response after props change", async () => {
+    const oldStart = deferred<Awaited<ReturnType<typeof startPracticeAssessment>>>();
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "not_started", questions: undefined })))
+      .mockResolvedValueOnce(ok(makeAssessment({ section_id: "section-2" })));
+    mockedStartPracticeAssessment.mockReturnValueOnce(oldStart.promise);
+
+    const { rerender } = renderPracticeChild({ onStateChange, sectionId: "section-1" });
+
+    await waitFor(() =>
+      expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1"),
+    );
+    rerender(practiceChild({ onStateChange, sectionId: "section-2" }));
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
+    onStateChange.mockClear();
+
+    oldStart.resolve(ok(makeAssessment({ status: "generating", questions: undefined })));
+    await flushPracticeTasks();
+
+    expect(onStateChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sectionId: "section-1" }),
+    );
+  });
+
   it("shows failed extraction through ErrorBanner and retries with POST", async () => {
     mockedGetPracticeAssessment.mockResolvedValueOnce(
       ok(
@@ -350,6 +479,114 @@ describe("InlinePracticeAssessment", () => {
     expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
     expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
     expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1");
+  });
+
+  it("retries a failed extraction once when retryVersion increases", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),
+    );
+    mockedStartPracticeAssessment.mockResolvedValue(ok(makeAssessment()));
+
+    const view = renderPracticeChild({ retryVersion: 0 });
+    await screen.findByText("Invalid format");
+    view.rerender(practiceChild({ retryVersion: 1 }));
+
+    await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not retry a failed extraction when retryVersion is unchanged", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),
+    );
+
+    const view = renderPracticeChild({ retryVersion: 0 });
+    await screen.findByText("Invalid format");
+    view.rerender(practiceChild({ retryVersion: 0 }));
+    await flushPracticeTasks();
+
+    expect(mockedStartPracticeAssessment).not.toHaveBeenCalled();
+  });
+
+  it("ignores retryVersion increases while ready", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(ok(makeAssessment()));
+
+    const view = renderPracticeChild({ retryVersion: 0 });
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
+    view.rerender(practiceChild({ retryVersion: 1 }));
+    await flushPracticeTasks();
+
+    expect(mockedStartPracticeAssessment).not.toHaveBeenCalled();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores retryVersion increases while generating", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "generating", questions: [] })),
+    );
+
+    const view = renderPracticeChild({ retryVersion: 0 });
+    expect(await screen.findByRole("status")).toHaveTextContent(/preparing practice questions/i);
+    view.rerender(practiceChild({ retryVersion: 1 }));
+    await flushPracticeTasks();
+
+    expect(mockedStartPracticeAssessment).not.toHaveBeenCalled();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports load transport failures as reloadable parent state", async () => {
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValueOnce(err(503));
+
+    renderPracticeChild({ onStateChange });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/practice questions/i);
+    expect(onStateChange).toHaveBeenCalledWith({
+      kind: "failed",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "Could not load practice questions.",
+      errorDetail: null,
+      retryKind: "reload",
+    });
+  });
+
+  it("reports extraction failures as restartable parent state", async () => {
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValueOnce(
+      ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),
+    );
+
+    renderPracticeChild({ onStateChange });
+
+    await screen.findByText("Invalid format");
+    expect(onStateChange).toHaveBeenCalledWith({
+      kind: "failed",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "Invalid format",
+      errorDetail: null,
+      retryKind: "restart",
+    });
+  });
+
+  it("runs local and parent failed extraction retries through one active request guard", async () => {
+    const restart = deferred<Awaited<ReturnType<typeof startPracticeAssessment>>>();
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),
+    );
+    mockedStartPracticeAssessment.mockReturnValueOnce(restart.promise);
+
+    const user = userEvent.setup();
+    const view = renderPracticeChild({ retryVersion: 0 });
+    await screen.findByText("Invalid format");
+
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+    view.rerender(practiceChild({ retryVersion: 1 }));
+    await flushPracticeTasks();
+
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+    restart.resolve(ok(makeAssessment()));
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
   });
 
   it("renders answered summaries as locked without resubmitting", async () => {

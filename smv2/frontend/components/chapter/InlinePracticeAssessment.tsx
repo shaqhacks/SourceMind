@@ -12,6 +12,13 @@ import Markdown from "@/components/Markdown";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import {
+  loadingPracticeSectionState,
+  practiceSectionStateFromAssessment,
+  practiceSectionStateFromLoadError,
+  practiceSectionStateSignature,
+  type PracticeSectionState,
+} from "@/components/chapter/practiceAssessmentState";
+import {
   getPracticeAssessment,
   startPracticeAssessment,
   submitPracticeAnswer,
@@ -25,6 +32,8 @@ import { describeError, type FetchError } from "@/lib/api/errors";
 interface InlinePracticeAssessmentProps {
   courseId: string;
   sectionId: string;
+  retryVersion?: number;
+  onStateChange?: (state: PracticeSectionState) => void;
 }
 
 type AnswerState = Pick<
@@ -118,6 +127,8 @@ function choiceClassName(
 export default function InlinePracticeAssessment({
   courseId,
   sectionId,
+  retryVersion = 0,
+  onStateChange,
 }: InlinePracticeAssessmentProps) {
   const [assessment, setAssessment] = useState<PracticeAssessmentOut | null>(null);
   const [loading, setLoading] = useState(true);
@@ -130,6 +141,26 @@ export default function InlinePracticeAssessment({
   const startedForRef = useRef<string | null>(null);
   const loadSeqRef = useRef(0);
   const mountedRef = useRef(false);
+  const lastEmittedStateRef = useRef<string | null>(null);
+  const currentSectionStateRef = useRef<PracticeSectionState | null>(null);
+  const consumedRetryVersionRef = useRef(retryVersion);
+  const retryingFailedAssessmentRef = useRef(false);
+
+  const emitSectionState = useCallback(
+    (nextState: PracticeSectionState) => {
+      if (!mountedRef.current) {
+        return;
+      }
+      currentSectionStateRef.current = nextState;
+      const signature = practiceSectionStateSignature(nextState);
+      if (lastEmittedStateRef.current === signature) {
+        return;
+      }
+      lastEmittedStateRef.current = signature;
+      onStateChange?.(nextState);
+    },
+    [onStateChange],
+  );
 
   const applyAssessment = useCallback((next: PracticeAssessmentOut) => {
     if (!mountedRef.current) {
@@ -149,7 +180,8 @@ export default function InlinePracticeAssessment({
         return merged;
       });
     }
-  }, []);
+    emitSectionState(practiceSectionStateFromAssessment(sectionId, next));
+  }, [emitSectionState, sectionId]);
 
   const isCurrentLoad = useCallback((loadSeq: number) => {
     return mountedRef.current && loadSeqRef.current === loadSeq;
@@ -175,6 +207,7 @@ export default function InlinePracticeAssessment({
       }
       if (showLoading) {
         setLoading(true);
+        emitSectionState(loadingPracticeSectionState(sectionId));
       }
       setLoadError(null);
 
@@ -185,10 +218,12 @@ export default function InlinePracticeAssessment({
       setLoading(false);
 
       if (!result.ok || !result.data) {
-        setLoadError({
+        const nextError = {
           message: "Could not load practice questions.",
           status: result.status,
-        });
+        };
+        setLoadError(nextError);
+        emitSectionState(practiceSectionStateFromLoadError(sectionId, nextError));
         return;
       }
 
@@ -212,16 +247,26 @@ export default function InlinePracticeAssessment({
       setStarting(false);
 
       if (!startResult.ok || !startResult.data) {
-        setLoadError(describeError(startResult.status, "Starting practice questions", startResult.error));
+        const nextError = describeError(
+          startResult.status,
+          "Starting practice questions",
+          startResult.error,
+        );
+        setLoadError(nextError);
+        emitSectionState(practiceSectionStateFromLoadError(sectionId, nextError));
         return;
       }
 
       applyAssessment(startResult.data);
     },
-    [applyAssessment, courseId, isCurrentLoad, sectionId],
+    [applyAssessment, courseId, emitSectionState, isCurrentLoad, sectionId],
   );
 
   const retryFailedAssessment = useCallback(async () => {
+    if (retryingFailedAssessmentRef.current) {
+      return;
+    }
+    retryingFailedAssessmentRef.current = true;
     const loadSeq = loadSeqRef.current + 1;
     loadSeqRef.current = loadSeq;
     startedForRef.current = `${courseId}:${sectionId}`;
@@ -229,16 +274,19 @@ export default function InlinePracticeAssessment({
 
     const startResult = await startPracticeAssessment(courseId, sectionId);
     if (!isCurrentLoad(loadSeq)) {
+      retryingFailedAssessmentRef.current = false;
       return;
     }
 
     if (!startResult.ok || !startResult.data) {
+      retryingFailedAssessmentRef.current = false;
       setRetryError(
         describeError(startResult.status, "Restarting practice questions", startResult.error),
       );
       return;
     }
 
+    retryingFailedAssessmentRef.current = false;
     applyAssessment(startResult.data);
   }, [applyAssessment, courseId, isCurrentLoad, sectionId]);
 
@@ -247,6 +295,7 @@ export default function InlinePracticeAssessment({
     return () => {
       mountedRef.current = false;
       loadSeqRef.current += 1;
+      retryingFailedAssessmentRef.current = false;
     };
   }, []);
 
@@ -264,6 +313,24 @@ export default function InlinePracticeAssessment({
   }, [loadAssessment]);
 
   useEffect(() => {
+    if (retryVersion <= consumedRetryVersionRef.current) {
+      return;
+    }
+
+    const currentState = currentSectionStateRef.current;
+    if (currentState?.kind !== "failed") {
+      return;
+    }
+
+    consumedRetryVersionRef.current = retryVersion;
+    if (currentState.retryKind === "reload") {
+      void loadAssessment({ showLoading: true });
+      return;
+    }
+    void retryFailedAssessment();
+  }, [loadAssessment, retryFailedAssessment, retryVersion]);
+
+  useEffect(() => {
     if (assessment?.status !== "generating") {
       return;
     }
@@ -278,10 +345,12 @@ export default function InlinePracticeAssessment({
           return;
         }
         if (!result.ok || !result.data) {
-          setLoadError({
+          const nextError = {
             message: "Could not refresh practice questions.",
             status: result.status,
-          });
+          };
+          setLoadError(nextError);
+          emitSectionState(practiceSectionStateFromLoadError(sectionId, nextError));
           return;
         }
         applyAssessment(result.data);
@@ -299,7 +368,7 @@ export default function InlinePracticeAssessment({
         window.clearTimeout(timeout);
       }
     };
-  }, [applyAssessment, assessment?.status, courseId, sectionId]);
+  }, [applyAssessment, assessment?.status, courseId, emitSectionState, sectionId]);
 
   async function handleSubmit(question: PracticeQuestionOut, selectedIndex: number) {
     if (answers[question.id] || submitting[question.id]) {
