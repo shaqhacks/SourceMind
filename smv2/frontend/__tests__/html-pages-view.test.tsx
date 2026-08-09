@@ -140,16 +140,16 @@ describe("HtmlPagesView", () => {
     mockedGetAssetHtmlManifest.mockResolvedValue(ok(makeManifest()));
     const addEventListenerSpy = vi.spyOn(HTMLIFrameElement.prototype, "addEventListener");
 
-    render(<HtmlPagesView assetId="asset-iframe-error" pageStart={1} pageEnd={2} />);
-    await waitFor(() => expect(FakeIntersectionObserver.instances).toHaveLength(2));
-    act(() => {
-      for (const observer of FakeIntersectionObserver.instances) {
-        for (const el of observer.observed) observer.triggerIntersect(el);
-      }
-    });
-
-    const iframe1 = await screen.findByTitle("Page 1");
     try {
+      render(<HtmlPagesView assetId="asset-iframe-error" pageStart={1} pageEnd={2} />);
+      await waitFor(() => expect(FakeIntersectionObserver.instances).toHaveLength(2));
+      act(() => {
+        for (const observer of FakeIntersectionObserver.instances) {
+          for (const el of observer.observed) observer.triggerIntersect(el);
+        }
+      });
+
+      const iframe1 = await screen.findByTitle("Page 1");
       await waitFor(() => {
         const listenerAttached = addEventListenerSpy.mock.calls.some(
           (call, index) =>
@@ -161,12 +161,12 @@ describe("HtmlPagesView", () => {
       act(() => {
         fireEvent.error(iframe1);
       });
+
+      expect(await screen.findByText(/could not render page 1/i)).toBeInTheDocument();
+      expect(screen.getByTitle("Page 2")).toBeInTheDocument();
     } finally {
       addEventListenerSpy.mockRestore();
     }
-
-    expect(await screen.findByText(/could not render page 1/i)).toBeInTheDocument();
-    expect(screen.getByTitle("Page 2")).toBeInTheDocument();
   });
 
   // Text selection inside the sandbox="" iframe is intentionally not
