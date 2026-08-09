@@ -1,14 +1,26 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type ConsoleMessage, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-
-import { attachPageErrorGuard, expectCleanPage } from "./support/test-data";
 
 type GenerationPhase = "loading" | "thinking" | "cancelled";
 
 interface GenerationRouteOptions {
   phases: GenerationPhase[];
   elapsedSeconds?: number;
-  cancelAccepted?: boolean;
+}
+
+type BrowserError =
+  | {
+      kind: "console";
+      type: string;
+      text: string;
+      location: ReturnType<ConsoleMessage["location"]>;
+    }
+  | { kind: "pageerror"; message: string; stack?: string };
+
+interface MockedResponse {
+  method: string;
+  url: string;
+  status: number;
 }
 
 const courseId = "course-streaming";
@@ -104,6 +116,24 @@ async function installNoPaidProviderGuard(page: Page) {
     });
   }
   return calls;
+}
+
+function attachGenerationErrorGuard(page: Page): BrowserError[] {
+  const errors: BrowserError[] = [];
+  page.on("pageerror", (error) =>
+    errors.push({ kind: "pageerror", message: error.message, stack: error.stack }),
+  );
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      errors.push({
+        kind: "console",
+        type: message.type(),
+        text: message.text(),
+        location: message.location(),
+      });
+    }
+  });
+  return errors;
 }
 
 async function installFakeEventSource(page: Page, options: GenerationRouteOptions) {
@@ -266,9 +296,15 @@ async function installGenerationRoutes(page: Page, options: GenerationRouteOptio
 }
 
 async function installPracticeFailureRoute(page: Page, { code }: { code: "invalid_model_output" }) {
+  const mockedFailures: MockedResponse[] = [];
   await installChapterRoutes(page);
   await page.route(`**/api/courses/${courseId}/sections/${practiceSectionId}/practice-assessment**`, (route) => {
     if (route.request().method() === "POST") {
+      mockedFailures.push({
+        method: route.request().method(),
+        url: route.request().url(),
+        status: 503,
+      });
       return route.fulfill({
         status: 503,
         json: {
@@ -292,6 +328,7 @@ async function installPracticeFailureRoute(page: Page, { code }: { code: "invali
       },
     });
   });
+  return mockedFailures;
 }
 
 async function openChapterPractice(page: Page) {
@@ -307,15 +344,35 @@ function appAlerts(page: Page) {
   return page.locator('[role="alert"]:not(#__next-route-announcer__)');
 }
 
-async function expectCleanGenerationPage(errors: string[], allowed: RegExp[] = []) {
-  await expectCleanPage(
-    errors.filter(
-      (error) =>
-        !error.includes("/_next/hmr") &&
-        !error.includes("ERR_INVALID_HTTP_RESPONSE") &&
-        !allowed.some((pattern) => pattern.test(error)),
-    ),
-  );
+async function expectNoBrowserErrors(errors: BrowserError[]) {
+  expect(errors, "no uncaught page errors or console errors").toEqual([]);
+}
+
+async function expectOnlyMockedPractice503(
+  errors: BrowserError[],
+  mockedFailures: MockedResponse[],
+) {
+  expect(mockedFailures, "one mocked practice-assessment POST returned 503").toEqual([
+    expect.objectContaining({
+      method: "POST",
+      status: 503,
+      url: expect.stringMatching(
+        new RegExp(`/api/courses/${courseId}/sections/${practiceSectionId}/practice-assessment$`),
+      ),
+    }),
+  ]);
+  expect(errors, "only the expected mocked practice-assessment 503 reached the browser console").toEqual([
+    expect.objectContaining({
+      kind: "console",
+      type: "error",
+      text: "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+      location: expect.objectContaining({
+        url: expect.stringMatching(
+          new RegExp(`/api/courses/${courseId}/sections/${practiceSectionId}/practice-assessment$`),
+        ),
+      }),
+    }),
+  ]);
 }
 
 async function expectThinkingLivenessAndBackgroundAction(page: Page) {
@@ -367,33 +424,33 @@ test("thinking remains active beyond the old timeout and can continue in backgro
   page,
 }) => {
   const paidProviderCalls = await installNoPaidProviderGuard(page);
-  const errors = attachPageErrorGuard(page);
+  const errors = attachGenerationErrorGuard(page);
 
   await installGenerationRoutes(page, { phases: ["loading", "thinking"], elapsedSeconds: 125 });
   await expectThinkingLivenessAndBackgroundAction(page);
 
   expect(paidProviderCalls, "browser made no paid provider calls").toEqual([]);
-  await expectCleanGenerationPage(errors);
+  await expectNoBrowserErrors(errors);
 });
 
 test("cancelled generation becomes terminal without a failure banner", async ({ page }) => {
   const paidProviderCalls = await installNoPaidProviderGuard(page);
-  const errors = attachPageErrorGuard(page);
+  const errors = attachGenerationErrorGuard(page);
 
-  await installGenerationRoutes(page, { phases: ["thinking", "cancelled"], cancelAccepted: true });
+  await installGenerationRoutes(page, { phases: ["thinking", "cancelled"] });
   await expectCancellationWithoutFailure(page);
 
   expect(paidProviderCalls, "browser made no paid provider calls").toEqual([]);
-  await expectCleanGenerationPage(errors);
+  await expectNoBrowserErrors(errors);
 });
 
 test("invalid practice output surfaces structured retry guidance", async ({ page }) => {
   const paidProviderCalls = await installNoPaidProviderGuard(page);
-  const errors = attachPageErrorGuard(page);
+  const errors = attachGenerationErrorGuard(page);
 
-  await installPracticeFailureRoute(page, { code: "invalid_model_output" });
+  const mockedFailures = await installPracticeFailureRoute(page, { code: "invalid_model_output" });
   await expectStructuredRetryGuidance(page);
 
   expect(paidProviderCalls, "browser made no paid provider calls").toEqual([]);
-  await expectCleanGenerationPage(errors, [/503 \(Service Unavailable\)/]);
+  await expectOnlyMockedPractice503(errors, mockedFailures);
 });
