@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import json
 
-from conftest import _first_section_id
-
 from app.db.engine import get_session
 from app.db.models import Card, Job, LlmCall, ReviewState
 from app.jobs.worker import run_due_jobs_once
-from app.llm.structured_output import CARDS_SCHEMA
 from app.llm.provider import (
     PROVIDER_NOT_CONFIGURED_MESSAGE,
     CompletionResult,
     ProviderNotConfiguredError,
 )
+from app.llm.structured_output import CARDS_SCHEMA
+from conftest import _first_section_id
 
 
 def test_generate_cards_happy_path(client, ingest_course, stub_provider):
@@ -189,6 +188,50 @@ def test_generate_cards_retries_once_on_top_level_parse_failure(client, ingest_c
 
     cards = client.get(f"/api/sections/{section_id}/cards").json()
     assert len(cards) == 1
+
+
+def test_generate_cards_cancellation_after_invalid_completion_prevents_repair_and_artifacts(
+    client, ingest_course, stub_provider, monkeypatch
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+    cancel_after_first_completion = {"value": False}
+
+    def _complete_impl(messages, *, max_tokens, options, system=None):
+        stub_provider.call_count += 1
+        stub_provider.complete_call_count += 1
+        stub_provider.received_messages.append(messages)
+        stub_provider.received_systems.append(system)
+        stub_provider.received_completion_options.append(options)
+        cancel_after_first_completion["value"] = True
+        return CompletionResult(
+            text="not json at all",
+            input_tokens=1,
+            output_tokens=1,
+            model="stub-model",
+        )
+
+    stub_provider._complete_impl = _complete_impl
+    monkeypatch.setattr(
+        "app.services.jobs_service.is_cancel_requested",
+        lambda job_id: cancel_after_first_completion["value"],
+    )
+
+    response = client.post(f"/api/sections/{section_id}/cards")
+    job_id = response.json()["job_id"]
+
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "cancelled"
+    assert stub_provider.complete_call_count == 1
+    assert client.get(f"/api/sections/{section_id}/cards").json() == []
+
+    session = get_session()
+    try:
+        assert session.query(Card).filter(Card.section_id == section_id).count() == 0
+    finally:
+        session.close()
 
 
 def test_generate_cards_schema_sent_on_first_and_repair_completion(

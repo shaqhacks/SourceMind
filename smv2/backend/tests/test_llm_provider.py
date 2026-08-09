@@ -3,10 +3,13 @@ from __future__ import annotations
 from typing import ClassVar
 
 import pytest
-
 from app.db.engine import get_session
 from app.db.models import LlmCall
-from app.llm.completion_control import CompletionOptions, ProviderStreamError
+from app.llm.completion_control import (
+    CompletionOptions,
+    ProviderCancelledError,
+    ProviderStreamError,
+)
 
 
 def test_completion_options_passes_progress_schema_and_cancel_controls(stub_provider):
@@ -23,6 +26,35 @@ def test_completion_options_passes_progress_schema_and_cancel_controls(stub_prov
         options=options,
     )
     assert stub_provider.received_completion_options[-1] is options
+
+
+def test_complete_checks_cancellation_after_synchronous_provider_returns(client):
+    from app.llm.provider import CompletionResult, Provider
+
+    cancelled = False
+
+    class _CancelsDuringCompletionProvider(Provider):
+        model_name = "cancel-after-return"
+
+        def _complete_impl(self, messages, *, max_tokens, options, system=None):
+            nonlocal cancelled
+            cancelled = True
+            return CompletionResult(
+                text="late success",
+                input_tokens=1,
+                output_tokens=1,
+                model=self.model_name,
+            )
+
+    options = CompletionOptions(is_cancelled=lambda: cancelled)
+
+    with pytest.raises(ProviderCancelledError):
+        _CancelsDuringCompletionProvider().complete(
+            [{"role": "user", "content": "hello"}],
+            max_tokens=8,
+            purpose="lesson",
+            options=options,
+        )
 
 
 def test_partial_stream_error_is_not_retried(stub_provider):
@@ -111,7 +143,6 @@ def test_get_provider_returns_ollama_when_configured(client, monkeypatch):
 
 def test_get_provider_rejects_unknown_backend(client, monkeypatch):
     import pytest
-
     from app.llm.provider import get_provider
 
     monkeypatch.setenv("SMV2_LLM_PROVIDER", "not-a-real-provider")
@@ -261,7 +292,6 @@ def test_anthropic_provider_missing_credentials_raises_friendly_error(monkeypatc
     letting the raw SDK message reach job.error or a chat response.
     """
     import pytest
-
     from app.llm.anthropic_provider import AnthropicProvider
     from app.llm.provider import (
         PROVIDER_NOT_CONFIGURED_MESSAGE,
@@ -321,7 +351,6 @@ def test_anthropic_provider_authentication_error_raises_friendly_error(monkeypat
     import anthropic
     import httpx
     import pytest
-
     from app.llm.anthropic_provider import AnthropicProvider
     from app.llm.provider import (
         PROVIDER_NOT_CONFIGURED_MESSAGE,
@@ -349,7 +378,6 @@ def test_ollama_provider_complete_prepends_system_as_its_own_message(client, mon
     import json
 
     import httpx
-
     from app.llm.ollama_provider import OllamaProvider
 
     monkeypatch.setenv("SMV2_LLM_MODEL", "some-ollama-model")
