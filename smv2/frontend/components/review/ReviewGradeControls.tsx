@@ -34,6 +34,7 @@ export interface ReviewGradeRequest {
 interface ReviewGradeControlsProps {
   card: ReviewQueueCardOut;
   onGraded?: (grade: ReviewGrade, result: ApiResult<GradeCardOut>) => void;
+  onPendingChange?: (pending: boolean) => void;
   request?: ReviewGradeRequest | null;
   className?: string;
 }
@@ -41,6 +42,7 @@ interface ReviewGradeControlsProps {
 export default function ReviewGradeControls({
   card,
   onGraded,
+  onPendingChange,
   request,
   className = "",
 }: ReviewGradeControlsProps) {
@@ -67,8 +69,10 @@ export default function ReviewGradeControls({
       if (pendingGrade !== null || savedGrade !== null) return;
 
       setSubmission({ cardId: card.id, pendingGrade: grade, savedGrade: null, error: null });
+      onPendingChange?.(true);
       const elapsedMs = Date.now() - (shownAtRef.current ?? Date.now());
       const result = await gradeCardAndNotify(card.id, grade, elapsedMs);
+      onPendingChange?.(false);
       if (result.ok) {
         setSubmission({ cardId: card.id, pendingGrade: null, savedGrade: grade, error: null });
         onGraded?.(grade, result);
@@ -81,7 +85,7 @@ export default function ReviewGradeControls({
         });
       }
     },
-    [card.id, onGraded, pendingGrade, savedGrade],
+    [card.id, onGraded, onPendingChange, pendingGrade, savedGrade],
   );
 
   useEffect(() => {

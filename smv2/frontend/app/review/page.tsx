@@ -20,6 +20,7 @@ import ReviewGradeControls, {
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   getReviewQueue,
+  getReviewSelection,
   getAdaptiveStudyQueue,
   getReviewSummary,
   submitPracticeAnswer,
@@ -32,6 +33,15 @@ import {
 import { useKeyboardShortcuts, type ShortcutMap } from "@/lib/hooks/useKeyboardShortcuts";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
 import type { ReviewGrade } from "@/lib/review/intervalPreview";
+import {
+  clearActiveReviewSession,
+  readActiveReviewSession,
+  readCompletedReviewSession,
+  writeActiveReviewSession,
+  writeCompletedReviewSession,
+  type CompletedReviewSession,
+  type ReviewScope,
+} from "@/lib/review/sessionStorage";
 
 const SHORTCUT_HINTS: ShortcutHint[] = [
   { keys: "space", description: "Reveal answer" },
@@ -41,60 +51,8 @@ const SHORTCUT_HINTS: ShortcutHint[] = [
 
 const GRADE_LABELS: Record<number, string> = { 1: "Again", 2: "Hard", 3: "Good", 4: "Easy" };
 const GRADE_TONES: Record<number, BadgeTone> = { 1: "serious", 2: "warning", 3: "good", 4: "accent" };
-const REVIEW_SESSION_STORAGE_KEY = "smv2.review.session";
-
-function isReviewScope(value: string | null): value is "available" | "all" | "needs_attention" {
+function isReviewScope(value: string | null): value is ReviewScope {
   return value === "available" || value === "all" || value === "needs_attention";
-}
-
-interface StoredReviewSession {
-  courseId: string | null;
-  chosenSize: number;
-  remainingCardIds: string[];
-  gradedTally: Record<number, number>;
-  startedAt: number;
-}
-
-function isStoredReviewSession(value: unknown): value is StoredReviewSession {
-  if (typeof value !== "object" || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    (typeof v.courseId === "string" || v.courseId === null) &&
-    typeof v.chosenSize === "number" &&
-    Array.isArray(v.remainingCardIds) &&
-    v.remainingCardIds.every((id) => typeof id === "string") &&
-    typeof v.gradedTally === "object" &&
-    v.gradedTally !== null &&
-    typeof v.startedAt === "number"
-  );
-}
-
-function readStoredSession(): StoredReviewSession | null {
-  try {
-    const raw = window.localStorage.getItem(REVIEW_SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return isStoredReviewSession(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredSession(session: StoredReviewSession): void {
-  try {
-    window.localStorage.setItem(REVIEW_SESSION_STORAGE_KEY, JSON.stringify(session));
-  } catch {
-    // localStorage unavailable/full — resume is a nicety, not critical;
-    // fail silently rather than breaking the review flow over it.
-  }
-}
-
-function clearStoredSession(): void {
-  try {
-    window.localStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
-  } catch {
-    // ignore
-  }
 }
 
 type HubState =
@@ -149,14 +107,21 @@ function queueMetrics(
   };
 }
 
+function newSessionId(): string {
+  return `review-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function ReviewPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const courseParam = searchParams.get("course");
   const startParam = searchParams.get("start");
   const scopeParam = searchParams.get("scope");
+  const completedParam = searchParams.get("completed");
   const reviewScope = isReviewScope(scopeParam) ? scopeParam : undefined;
   const chapterLabel = searchParams.get("chapter") ?? undefined;
+  const queryKey = searchParams.toString();
+  const hasExplicitSessionQuery = Boolean(startParam || completedParam || scopeParam || chapterLabel);
 
   // "resuming" is a brief transitional phase, only entered when a saved
   // session exists at mount: it reconciles remainingCardIds against a
@@ -171,10 +136,11 @@ function ReviewPageInner() {
   // entirely and takes priority over resuming a stale saved session,
   // which gets silently superseded rather than restored.
   const [phase, setPhase] = useState<
-    "hub" | "chooser" | "session" | "resuming" | "bootstrapping-due"
+    "hub" | "chooser" | "session" | "resuming" | "bootstrapping-due" | "completed"
   >(() => {
+    if (courseParam && completedParam) return "completed";
     if (courseParam && startParam === "due") return "bootstrapping-due";
-    return readStoredSession() ? "resuming" : courseParam ? "chooser" : "hub";
+    return !hasExplicitSessionQuery && readActiveReviewSession() ? "resuming" : courseParam ? "chooser" : "hub";
   });
   const [courseId, setCourseId] = useState<string | null>(courseParam);
   // Only ever populated from the hub's already-loaded ReviewSummaryOut (see
@@ -196,10 +162,71 @@ function ReviewPageInner() {
   const [cardIndex, setCardIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [gradeRequest, setGradeRequest] = useState<ReviewGradeRequest | null>(null);
+  const [gradePending, setGradePending] = useState(false);
   const [gradeCounts, setGradeCounts] = useState<Record<number, number>>({});
+  const [againCardIds, setAgainCardIds] = useState<string[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [completedSession, setCompletedSession] = useState<CompletedReviewSession | null>(() => {
+    if (!courseParam || !completedParam) return null;
+    const stored = readCompletedReviewSession();
+    return stored && stored.courseId === courseParam && stored.sessionId === completedParam ? stored : null;
+  });
+  const [replayMissingMessage, setReplayMissingMessage] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const reconciledQueryRef = useRef(queryKey);
+  const bootstrappedQueryRef = useRef<string | null>(null);
   useRouteFocus(headingRef);
+
+  useEffect(() => {
+    if (reconciledQueryRef.current === queryKey) return;
+    reconciledQueryRef.current = queryKey;
+    let active = true;
+
+    queueMicrotask(() => {
+      if (!active) return;
+      setCourseId(courseParam);
+      setReplayMissingMessage(null);
+
+      if (courseParam && completedParam) {
+        const stored = readCompletedReviewSession();
+        setCompletedSession(
+          stored && stored.courseId === courseParam && stored.sessionId === completedParam ? stored : null,
+        );
+        setSessionState({ kind: "done" });
+        setPhase("completed");
+        return;
+      }
+
+      setCompletedSession(null);
+      if (courseParam && startParam === "due") {
+        setPhase("bootstrapping-due");
+        return;
+      }
+
+      if (courseParam) {
+        if (!hasExplicitSessionQuery && readActiveReviewSession()) {
+          setPhase("resuming");
+          return;
+        }
+        if (hasExplicitSessionQuery) clearActiveReviewSession();
+        setChooserState({ kind: "loading" });
+        setPhase("chooser");
+        return;
+      }
+
+      if (!hasExplicitSessionQuery && readActiveReviewSession()) {
+        setPhase("resuming");
+        return;
+      }
+
+      setPhase("hub");
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [queryKey, courseParam, completedParam, startParam, hasExplicitSessionQuery]);
 
   // Runs once, only when mount found a saved session: reconcile it
   // against a fresh queue fetch and either drop straight into the
@@ -210,9 +237,9 @@ function ReviewPageInner() {
     let active = true;
 
     async function reconcile() {
-      const stored = readStoredSession();
+      const stored = readActiveReviewSession();
       if (!stored || !stored.courseId || stored.remainingCardIds.length === 0) {
-        clearStoredSession();
+        clearActiveReviewSession();
         if (active) setPhase(courseParam ? "chooser" : "hub");
         return;
       }
@@ -233,7 +260,7 @@ function ReviewPageInner() {
         .map((id) => byId.get(id))
         .filter((card): card is ReviewQueueCardOut => card !== undefined);
       if (reconciled.length === 0) {
-        clearStoredSession();
+        clearActiveReviewSession();
         setPhase("chooser");
         return;
       }
@@ -241,6 +268,8 @@ function ReviewPageInner() {
       setCardIndex(0);
       setRevealed(false);
       setGradeCounts(stored.gradedTally);
+      setAgainCardIds(stored.againCardIds);
+      setActiveSessionId(stored.sessionId);
       setSessionSize(stored.chosenSize);
       setSessionStartedAt(stored.startedAt);
       setIsResumedSession(true);
@@ -360,12 +389,21 @@ function ReviewPageInner() {
         setCardIndex(0);
         setRevealed(false);
         setGradeRequest(null);
+        setGradePending(false);
         setSessionStartedAt(startedAt);
-        writeStoredSession({
+        const sessionId = newSessionId();
+        setActiveSessionId(sessionId);
+        setAgainCardIds([]);
+        writeActiveReviewSession({
+          version: 1,
+          sessionId,
           courseId,
+          scope: reviewScope ?? "available",
+          chapterLabel: chapterLabel ?? null,
           chosenSize: size,
           remainingCardIds: review.data.cards.map((card) => card.id),
           gradedTally: {},
+          againCardIds: [],
           startedAt,
         });
         setSessionState({ kind: "active" });
@@ -382,7 +420,9 @@ function ReviewPageInner() {
   // chooser if the lookup fails or nothing is actually due.
   useEffect(() => {
     if (phase !== "bootstrapping-due" || !courseId) return;
-    clearStoredSession();
+    if (bootstrappedQueryRef.current === queryKey) return;
+    bootstrappedQueryRef.current = queryKey;
+    clearActiveReviewSession();
     let active = true;
     Promise.all([
       getReviewQueue(courseId, { limit: MAX_QUEUE_FETCH, scope: reviewScope, chapterLabel }),
@@ -411,10 +451,10 @@ function ReviewPageInner() {
     return () => {
       active = false;
     };
-  }, [phase, courseId, chapterLabel, reviewScope, startSession]);
+  }, [phase, courseId, chapterLabel, queryKey, reviewScope, startSession]);
 
   const discardResumedSession = useCallback(() => {
-    clearStoredSession();
+    clearActiveReviewSession();
     setIsResumedSession(false);
     setCards([]);
     setCardIndex(0);
@@ -428,31 +468,141 @@ function ReviewPageInner() {
   const requestGrade = useCallback(
     (value: number) => {
       const card = cards[cardIndex];
-      if (!card || !revealed) return;
+      if (!card || !revealed || gradePending) return;
       setGradeRequest({ grade: value as ReviewGrade, token: Date.now() });
     },
-    [cards, cardIndex, revealed],
+    [cards, cardIndex, gradePending, revealed],
   );
+
+  const completeSession = useCallback(
+    (tally: Record<number, number>, missedIds: string[]) => {
+      if (!courseId) return;
+      const completed: CompletedReviewSession = {
+        version: 1,
+        sessionId: activeSessionId ?? newSessionId(),
+        courseId,
+        scope: reviewScope ?? "available",
+        chapterLabel: chapterLabel ?? null,
+        endedAt: Date.now(),
+        gradedTally: tally,
+        againCardIds: missedIds,
+      };
+      writeCompletedReviewSession(completed);
+      setCompletedSession(completed);
+      clearActiveReviewSession();
+      setSessionState({ kind: "done" });
+      router.replace(`/review?course=${courseId}&completed=${completed.sessionId}`);
+    },
+    [activeSessionId, chapterLabel, courseId, reviewScope, router],
+  );
+
+  const goBackToReview = useCallback(() => {
+    if (!courseId) {
+      setPhase("hub");
+      router.replace("/review");
+      return;
+    }
+    setSessionState({ kind: "loading" });
+    setChooserState({ kind: "loading" });
+    setReplayMissingMessage(null);
+    setPhase("chooser");
+    router.replace(`/review?course=${courseId}`);
+  }, [courseId, router]);
+
+  const startMissedReplay = useCallback(async () => {
+    if (!completedSession || completedSession.againCardIds.length === 0) return;
+    setPhase("session");
+    setSessionState({ kind: "loading" });
+    setReplayMissingMessage(null);
+    const { data, status } = await getReviewSelection(completedSession.courseId, completedSession.againCardIds);
+    if (!data) {
+      setSessionState({ kind: "error", error: describeError(status, "Loading missed cards") });
+      return;
+    }
+    if (data.missing_card_ids.length > 0) {
+      const count = data.missing_card_ids.length;
+      setReplayMissingMessage(
+        `${count} missed ${count === 1 ? "card is" : "cards are"} no longer available.`,
+      );
+    }
+    if (data.cards.length === 0) {
+      setSessionState({ kind: "empty" });
+      return;
+    }
+    const sessionId = newSessionId();
+    const startedAt = Date.now();
+    setCourseId(completedSession.courseId);
+    setActiveSessionId(sessionId);
+    setCards(data.cards);
+    setQuestions([]);
+    setCardIndex(0);
+    setRevealed(false);
+    setGradeRequest(null);
+    setGradePending(false);
+    setGradeCounts({});
+    setAgainCardIds([]);
+    setSessionSize(data.cards.length);
+    setSessionStartedAt(startedAt);
+    setIsResumedSession(false);
+    writeActiveReviewSession({
+      version: 1,
+      sessionId,
+      courseId: completedSession.courseId,
+      scope: completedSession.scope,
+      chapterLabel: completedSession.chapterLabel,
+      chosenSize: data.cards.length,
+      remainingCardIds: data.cards.map((card) => card.id),
+      gradedTally: {},
+      againCardIds: [],
+      startedAt,
+    });
+    setSessionState({ kind: "active" });
+  }, [completedSession]);
 
   const handleCardGraded = useCallback(
     (value: ReviewGrade) => {
       const card = cards[cardIndex];
       if (!card) return;
       const nextTally = { ...gradeCounts, [value]: (gradeCounts[value] ?? 0) + 1 };
+      const nextAgainCardIds = value === 1 ? [...againCardIds, card.id] : againCardIds;
       setGradeCounts(nextTally);
+      setAgainCardIds(nextAgainCardIds);
+      setGradePending(false);
+      setReplayMissingMessage(null);
 
       const nextIndex = cardIndex + 1;
       if (nextIndex >= cards.length) {
-        clearStoredSession();
-        if (questions.length === 0) setSessionState({ kind: "done" });
-        else setCardIndex(nextIndex);
+        if (questions.length === 0) {
+          completeSession(nextTally, nextAgainCardIds);
+        } else {
+          if (courseId && sessionSize !== null) {
+            writeActiveReviewSession({
+              version: 1,
+              sessionId: activeSessionId ?? newSessionId(),
+              courseId,
+              scope: reviewScope ?? "available",
+              chapterLabel: chapterLabel ?? null,
+              chosenSize: sessionSize,
+              remainingCardIds: [],
+              gradedTally: nextTally,
+              againCardIds: nextAgainCardIds,
+              startedAt: sessionStartedAt,
+            });
+          }
+          setCardIndex(nextIndex);
+        }
       } else {
         if (courseId && sessionSize !== null) {
-          writeStoredSession({
+          writeActiveReviewSession({
+            version: 1,
+            sessionId: activeSessionId ?? newSessionId(),
             courseId,
+            scope: reviewScope ?? "available",
+            chapterLabel: chapterLabel ?? null,
             chosenSize: sessionSize,
             remainingCardIds: cards.slice(nextIndex).map((c) => c.id),
             gradedTally: nextTally,
+            againCardIds: nextAgainCardIds,
             startedAt: sessionStartedAt,
           });
         }
@@ -461,7 +611,20 @@ function ReviewPageInner() {
         setGradeRequest(null);
       }
     },
-    [cards, cardIndex, courseId, sessionSize, sessionStartedAt, gradeCounts, questions.length],
+    [
+      activeSessionId,
+      againCardIds,
+      cards,
+      cardIndex,
+      chapterLabel,
+      courseId,
+      gradeCounts,
+      questions.length,
+      reviewScope,
+      completeSession,
+      sessionSize,
+      sessionStartedAt,
+    ],
   );
 
   const answerQuestion = useCallback(async (choice: number) => {
@@ -475,13 +638,13 @@ function ReviewPageInner() {
   const advanceQuestion = useCallback(() => {
     const next = questionIndex + 1;
     if (next >= questions.length) {
-      setSessionState({ kind: "done" });
+      completeSession(gradeCounts, againCardIds);
       return;
     }
     setQuestionIndex(next);
     setSelectedChoice(null);
     setQuestionResult(null);
-  }, [questionIndex, questions.length]);
+  }, [againCardIds, completeSession, gradeCounts, questionIndex, questions.length]);
 
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
@@ -489,13 +652,15 @@ function ReviewPageInner() {
   const shortcutMap: ShortcutMap =
     phase === "session" && sessionState.kind === "active" && cards[cardIndex]
       ? revealed
-        ? {
+        ? gradePending
+          ? { "?": openShortcuts }
+          : {
             "1": () => requestGrade(1),
             "2": () => requestGrade(2),
             "3": () => requestGrade(3),
             "4": () => requestGrade(4),
             "?": openShortcuts,
-          }
+            }
         : { " ": reveal, "?": openShortcuts }
       : { "?": openShortcuts };
 
@@ -574,6 +739,41 @@ function ReviewPageInner() {
               </li>
             ))}
           </ul>
+        </div>
+      );
+    }
+  } else if (phase === "completed") {
+    if (!completedSession) {
+      mainContent = (
+        <div className="flex flex-1 items-center justify-center p-8">
+          <EmptyState
+            icon="✨"
+            title="Review session unavailable"
+            body="This completed session is no longer available."
+          />
+        </div>
+      );
+    } else {
+      mainContent = (
+        <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 p-8 text-center">
+          <h2 className="text-lg font-semibold">Session complete</h2>
+          <ul className="flex flex-col gap-2">
+            {[1, 2, 3, 4].map((value) => (
+              <li key={value}>
+                <Badge tone={GRADE_TONES[value]}>
+                  {GRADE_LABELS[value]}: {completedSession.gradedTally[value] ?? 0}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+          {completedSession.againCardIds.length > 0 && (
+            <Button variant="primary" onClick={() => void startMissedReplay()}>
+              Review missed ({completedSession.againCardIds.length})
+            </Button>
+          )}
+          <Button variant="secondary" onClick={goBackToReview}>
+            Back to review
+          </Button>
         </div>
       );
     }
@@ -656,6 +856,7 @@ function ReviewPageInner() {
       </div>
     );
   } else if (sessionState.kind === "done") {
+    const snapshot = completedSession;
     mainContent = (
       <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 p-8 text-center">
         <h2 className="text-lg font-semibold">Session complete</h2>
@@ -668,9 +869,14 @@ function ReviewPageInner() {
             </li>
           ))}
         </ul>
-        <Link href="/review" className="text-sm font-medium text-accent underline">
+        {snapshot && snapshot.againCardIds.length > 0 && (
+          <Button variant="primary" onClick={() => void startMissedReplay()}>
+            Review missed ({snapshot.againCardIds.length})
+          </Button>
+        )}
+        <Button variant="secondary" onClick={goBackToReview}>
           Back to review
-        </Link>
+        </Button>
       </div>
     );
   } else {
@@ -696,6 +902,11 @@ function ReviewPageInner() {
               Discard
             </button>
           </div>
+        )}
+        {replayMissingMessage && (
+          <p role="alert" className="rounded-md border border-accent/40 bg-accent-soft px-4 py-2 text-sm text-accent-800">
+            {replayMissingMessage}
+          </p>
         )}
 
         <div className="flex items-center gap-3.5">
@@ -742,6 +953,7 @@ function ReviewPageInner() {
           <ReviewGradeControls
             card={card}
             request={gradeRequest}
+            onPendingChange={setGradePending}
             onGraded={handleCardGraded}
           />
         )}</> : question ? (
@@ -799,7 +1011,7 @@ function ReviewPageInner() {
   const headerLabel = courseId ? (courseTitle ? `Review session · ${courseTitle}` : "Review session") : "Review";
 
   const endSession = () => {
-    clearStoredSession();
+    clearActiveReviewSession();
     router.push("/");
   };
 

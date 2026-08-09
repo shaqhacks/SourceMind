@@ -1,28 +1,37 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ReviewPage from "@/app/review/page";
 import {
   getReviewQueue,
+  getReviewSelection,
   getAdaptiveStudyQueue,
   getReviewSummary,
   gradeCard,
   submitPracticeAnswer,
   type ReviewQueueCardOut,
   type ReviewQueueOut,
+  type ReviewSelectionOut,
   type ReviewSummaryOut,
   type AdaptiveStudyActivityOut,
   type AdaptiveStudyQueueOut,
 } from "@/lib/api/client";
+import {
+  ACTIVE_REVIEW_SESSION_STORAGE_KEY,
+  COMPLETED_REVIEW_SESSION_STORAGE_KEY,
+  type ActiveReviewSession,
+  type CompletedReviewSession,
+} from "@/lib/review/sessionStorage";
 
 import { err, ok } from "./support/api-result";
 
 let mockSearchParams = new URLSearchParams();
 const mockPush = vi.fn();
+const mockReplace = vi.fn();
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => ({ push: mockPush, replace: mockReplace }),
   useSearchParams: () => mockSearchParams,
   usePathname: () => "/review",
 }));
@@ -31,6 +40,7 @@ vi.mock("@/lib/api/client", () => ({
   MAX_QUEUE_FETCH: 200,
   getReviewSummary: vi.fn(),
   getReviewQueue: vi.fn(),
+  getReviewSelection: vi.fn(),
   getAdaptiveStudyQueue: vi.fn(),
   gradeCard: vi.fn(),
   submitPracticeAnswer: vi.fn(),
@@ -38,6 +48,7 @@ vi.mock("@/lib/api/client", () => ({
 
 const mockedGetReviewSummary = vi.mocked(getReviewSummary);
 const mockedGetReviewQueue = vi.mocked(getReviewQueue);
+const mockedGetReviewSelection = vi.mocked(getReviewSelection);
 const mockedGetAdaptiveStudyQueue = vi.mocked(getAdaptiveStudyQueue);
 const mockedGradeCard = vi.mocked(gradeCard);
 const mockedSubmitPracticeAnswer = vi.mocked(submitPracticeAnswer);
@@ -102,6 +113,14 @@ function makeQueueCard(overrides: Partial<ReviewQueueCardOut> = {}): ReviewQueue
   };
 }
 
+function makeSelection(overrides: Partial<ReviewSelectionOut> = {}): ReviewSelectionOut {
+  return {
+    cards: [],
+    missing_card_ids: [],
+    ...overrides,
+  };
+}
+
 function makeAdaptiveQueue(overrides: Partial<AdaptiveStudyQueueOut> = {}): AdaptiveStudyQueueOut {
   return { activities: [], ...overrides };
 }
@@ -123,10 +142,61 @@ function makeQuestion(overrides: Partial<AdaptiveStudyActivityOut> = {}): Adapti
   };
 }
 
+function completedSession(overrides: Partial<CompletedReviewSession> = {}): CompletedReviewSession {
+  return {
+    version: 1,
+    sessionId: "session-1",
+    courseId: "course-1",
+    scope: "all",
+    chapterLabel: null,
+    endedAt: Date.now(),
+    gradedTally: { 1: 2, 2: 0, 3: 1, 4: 0 },
+    againCardIds: ["card-3", "card-1"],
+    ...overrides,
+  };
+}
+
+function activeSession(overrides: Partial<ActiveReviewSession> = {}): ActiveReviewSession {
+  return {
+    version: 1,
+    sessionId: "active-session",
+    courseId: "course-1",
+    scope: "available",
+    chapterLabel: null,
+    chosenSize: 2,
+    remainingCardIds: ["stale-1", "stale-2"],
+    gradedTally: {},
+    againCardIds: [],
+    startedAt: Date.now(),
+    ...overrides,
+  };
+}
+
+function seedCompletedSession(overrides: Partial<CompletedReviewSession> = {}) {
+  localStorage.setItem(COMPLETED_REVIEW_SESSION_STORAGE_KEY, JSON.stringify(completedSession(overrides)));
+}
+
+function deferredGradeResponse() {
+  let resolve!: (value: Awaited<ReturnType<typeof gradeCard>>) => void;
+  const promise = new Promise<Awaited<ReturnType<typeof gradeCard>>>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+async function completeOneCardSession(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: /review all \(1\)/i }));
+  expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /reveal/i }));
+  await user.click(screen.getByRole("button", { name: /again/i }));
+  expect(await screen.findByText("Session complete")).toBeInTheDocument();
+}
+
 describe("ReviewPage", () => {
   beforeEach(() => {
     mockSearchParams = new URLSearchParams();
     mockedGradeCard.mockResolvedValue(ok({ next_due_at: "2026-01-02T00:00:00Z", remaining_due: 0 }));
+    mockedGetReviewSelection.mockResolvedValue(ok(makeSelection()));
     mockedGetAdaptiveStudyQueue.mockResolvedValue(ok(makeAdaptiveQueue()));
     mockedSubmitPracticeAnswer.mockResolvedValue(ok({
       question_id: "question-1",
@@ -317,6 +387,54 @@ describe("ReviewPage", () => {
     );
   });
 
+  it("chooser: scope=all and scope=needs_attention are passed through to queue lookups", async () => {
+    mockSearchParams = new URLSearchParams({ course: "course-1", scope: "needs_attention" });
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1, due: 1 })));
+
+    render(<ReviewPage />);
+
+    expect(await screen.findByText(/ready to review/i)).toBeInTheDocument();
+    expect(mockedGetReviewQueue).toHaveBeenCalledWith("course-1", {
+      limit: 200,
+      scope: "needs_attention",
+      chapterLabel: undefined,
+    });
+
+    cleanup();
+    vi.clearAllMocks();
+    mockedGetAdaptiveStudyQueue.mockResolvedValue(ok(makeAdaptiveQueue()));
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1, due: 1 })));
+    mockSearchParams = new URLSearchParams({ course: "course-1", scope: "all" });
+
+    render(<ReviewPage />);
+
+    expect(await screen.findByText(/ready to review/i)).toBeInTheDocument();
+    expect(mockedGetReviewQueue).toHaveBeenCalledWith("course-1", {
+      limit: 200,
+      scope: "all",
+      chapterLabel: undefined,
+    });
+  });
+
+  it("chooser: explicit query intent supersedes stale active storage", async () => {
+    localStorage.setItem(
+      ACTIVE_REVIEW_SESSION_STORAGE_KEY,
+      JSON.stringify(activeSession({ remainingCardIds: ["stale-1"] })),
+    );
+    mockSearchParams = new URLSearchParams({ course: "course-1", scope: "all" });
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1, due: 1 })));
+
+    render(<ReviewPage />);
+
+    expect(await screen.findByText(/ready to review/i)).toBeInTheDocument();
+    expect(screen.queryByText(/resumed session/i)).not.toBeInTheDocument();
+    expect(mockedGetReviewQueue).toHaveBeenCalledWith("course-1", {
+      limit: 200,
+      scope: "all",
+      chapterLabel: undefined,
+    });
+  });
+
   it("session: space reveals the back, grading keys 1-4 advance and capture elapsed_ms, and the summary tallies by grade", async () => {
     mockSearchParams = new URLSearchParams({ course: "course-1" });
     mockedGetReviewQueue
@@ -376,6 +494,162 @@ describe("ReviewPage", () => {
     }
   });
 
+  it("returns from completion to the course chooser without relying on remount", async () => {
+    mockSearchParams = new URLSearchParams({ course: "course-1", scope: "all" });
+    mockedGetReviewQueue
+      .mockResolvedValueOnce(ok(makeQueue({ total: 1, due: 1 })))
+      .mockResolvedValueOnce(
+        ok(makeQueue({ total: 1, cards: [makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" })] })),
+      )
+      .mockResolvedValueOnce(ok(makeQueue({ total: 1, due: 1 })));
+    const user = userEvent.setup();
+
+    render(<ReviewPage />);
+
+    await completeOneCardSession(user);
+    await user.click(screen.getByRole("button", { name: "Back to review" }));
+
+    expect(screen.getByRole("heading", { name: "Ready to review" })).toBeVisible();
+    expect(mockReplace).toHaveBeenCalledWith("/review?course=course-1");
+    expect(localStorage.getItem(COMPLETED_REVIEW_SESSION_STORAGE_KEY)).not.toBeNull();
+  });
+
+  it("stores completed snapshots with exact scope, chapter label, tally, and Again IDs", async () => {
+    mockSearchParams = new URLSearchParams({
+      course: "course-1",
+      scope: "needs_attention",
+      chapter: "Chapter 7",
+    });
+    mockedGetReviewQueue
+      .mockResolvedValueOnce(
+        ok(
+          makeQueue({
+            total: 1,
+            due: 1,
+            cards: [
+              makeQueueCard({
+                id: "card-1",
+                front_md: "Q1",
+                back_md: "A1",
+                chapter_label: "Chapter 7",
+              }),
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        ok(
+          makeQueue({
+            total: 1,
+            cards: [
+              makeQueueCard({
+                id: "card-1",
+                front_md: "Q1",
+                back_md: "A1",
+                chapter_label: "Chapter 7",
+              }),
+            ],
+          }),
+        ),
+      );
+    const user = userEvent.setup();
+
+    render(<ReviewPage />);
+
+    await completeOneCardSession(user);
+
+    const raw = localStorage.getItem(COMPLETED_REVIEW_SESSION_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    expect(raw).not.toContain("Q1");
+    expect(raw).not.toContain("A1");
+    expect(JSON.parse(raw ?? "null")).toMatchObject({
+      courseId: "course-1",
+      scope: "needs_attention",
+      chapterLabel: "Chapter 7",
+      gradedTally: { 1: 1 },
+      againCardIds: ["card-1"],
+    });
+  });
+
+  it("refreshes completed sessions and follows browser back-forward query changes without remounting", async () => {
+    seedCompletedSession({ againCardIds: ["card-3", "card-1"] });
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1, due: 1 })));
+    const { rerender } = render(<ReviewPage />);
+
+    expect(await screen.findByText("Session complete")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review missed (2)" })).toBeInTheDocument();
+
+    mockSearchParams = new URLSearchParams({ course: "course-1" });
+    rerender(<ReviewPage />);
+
+    expect(await screen.findByRole("heading", { name: "Ready to review" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mockedGetReviewQueue).toHaveBeenCalledWith("course-1", {
+        limit: 200,
+        scope: undefined,
+        chapterLabel: undefined,
+      }),
+    );
+
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    rerender(<ReviewPage />);
+
+    expect(await screen.findByText("Session complete")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review missed (2)" })).toBeInTheDocument();
+  });
+
+  it("replays the exact Again cards from the completed session", async () => {
+    seedCompletedSession({ againCardIds: ["card-3", "card-1"] });
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    mockedGetReviewSelection.mockResolvedValue(
+      ok(
+        makeSelection({
+          cards: [
+            makeQueueCard({ id: "card-3", front_md: "Q3", back_md: "A3" }),
+            makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" }),
+          ],
+        }),
+      ),
+    );
+
+    render(<ReviewPage />);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Review missed (2)" }));
+
+    expect(mockedGetReviewSelection).toHaveBeenCalledWith("course-1", ["card-3", "card-1"]);
+    expect(await screen.findByText("1 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Q3")).toBeInTheDocument();
+  });
+
+  it("reports missing replay cards once while continuing with the returned cards", async () => {
+    seedCompletedSession({ againCardIds: ["card-3", "deleted-card", "card-1"] });
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    mockedGetReviewSelection.mockResolvedValue(
+      ok(
+        makeSelection({
+          cards: [
+            makeQueueCard({ id: "card-3", front_md: "Q3", back_md: "A3" }),
+            makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" }),
+          ],
+          missing_card_ids: ["deleted-card"],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(<ReviewPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Review missed (3)" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/1 missed card is no longer available/i);
+    expect(await screen.findByText("1 of 2")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /reveal/i }));
+    await user.click(screen.getByRole("button", { name: /good/i }));
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+    expect(await screen.findByText("2 of 2")).toBeInTheDocument();
+  });
+
   it("session: failed grade keeps the same card active without advancing tally or storage, then retry succeeds once", async () => {
     const STORAGE_KEY = "smv2.review.session";
     mockSearchParams = new URLSearchParams({ course: "course-1" });
@@ -422,6 +696,33 @@ describe("ReviewPage", () => {
       remainingCardIds: ["card-2"],
       gradedTally: { 3: 1 },
     });
+  });
+
+  it("session: ignores grade keyboard shortcuts while a grade request is pending", async () => {
+    const pendingGrade = deferredGradeResponse();
+    mockSearchParams = new URLSearchParams({ course: "course-1" });
+    mockedGetReviewQueue
+      .mockResolvedValueOnce(ok(makeQueue({ total: 1, due: 1 })))
+      .mockResolvedValueOnce(
+        ok(makeQueue({ total: 1, cards: [makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" })] })),
+      );
+    mockedGradeCard.mockReturnValueOnce(pendingGrade.promise);
+
+    render(<ReviewPage />);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: /review all \(1\)/i }));
+    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: " " });
+    expect(await screen.findByText("A1")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "3" });
+    fireEvent.keyDown(window, { key: "4" });
+
+    expect(mockedGradeCard).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("1 of 1")).toBeInTheDocument();
+
+    pendingGrade.resolve(ok({ next_due_at: "2026-01-02T00:00:00Z", remaining_due: 0 }));
+    expect(await screen.findByText("Session complete")).toBeInTheDocument();
   });
 
   it("session: includes concept questions, records the answer, and keeps answers out of the queue payload", async () => {
@@ -549,13 +850,12 @@ describe("ReviewPage", () => {
     it("discarding a resumed session clears storage and returns to the chooser", async () => {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({
-          courseId: "course-1",
+        JSON.stringify(activeSession({
+          sessionId: "resume-session",
           chosenSize: 5,
           remainingCardIds: ["card-3", "card-4", "card-5"],
           gradedTally: { 3: 1, 2: 1 },
-          startedAt: Date.now(),
-        }),
+        })),
       );
       mockedGetReviewQueue
         .mockResolvedValueOnce(ok(makeQueue({ total: 3, cards: fiveCards().slice(2) }))) // reconcile
@@ -601,13 +901,12 @@ describe("ReviewPage", () => {
     it("silently supersedes a stale saved session instead of resuming it", async () => {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({
-          courseId: "course-1",
+        JSON.stringify(activeSession({
+          sessionId: "stale-session",
           chosenSize: 5,
           remainingCardIds: ["stale-1", "stale-2"],
           gradedTally: {},
-          startedAt: Date.now(),
-        }),
+        })),
       );
       mockSearchParams = new URLSearchParams({ course: "course-1", start: "due" });
       mockedGetReviewQueue
