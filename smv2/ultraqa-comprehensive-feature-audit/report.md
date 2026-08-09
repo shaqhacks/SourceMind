@@ -166,3 +166,13 @@
 - Release gate: `rtk ./build.sh` passed with final `BUILD OK`: backend `889 passed, 31 warnings`, OpenAPI export, generated artifact drift check, frontend typecheck, frontend Vitest `103 files / 874 tests`, and Next production build all passed.
 - Cleanup: generated `frontend/test-results` was removed after the Playwright run; no `frontend/playwright-report` directory was present; OpenAPI/schema generated artifacts had no diff.
 - Product defects: none exposed. Initial failures were harness/environment issues only: sandboxed loopback/uv cache, root-relative backend import path, and incomplete mocked shell fixtures.
+
+### Task 5 Fix Round 1
+
+- Date: 2026-08-09.
+- Scope: harden invalid-output privacy coverage so the mocked API boundary includes representative private/raw provider data while the UI still renders only safe retry guidance.
+- Change: `invalidModelFailure()` now includes the exact unknown-field sentinel `RAW_PRIVATE_PARSER_PROVIDER_SENTINEL parser stack raw provider api.openai.com <think>` in `error_detail.parser_debug` and `error_detail.raw_provider_output.text`, while preserving `code: invalid_model_output`, `failure_category: structured_output_invalid`, and the safe message `The model returned invalid practice questions. Retry generation.`
+- Non-vacuous boundary proof: `installChapterRoutes()` records practice-assessment GET response bodies, and the invalid-output E2E asserts `JSON.stringify(posts.practiceGets)` contains the exact sentinel before asserting the DOM does not contain the sentinel, `parser`, `stack`, `raw provider`, `api.openai.com`, `<think>`, Anthropic/OpenAI provider terms, or `claude`.
+- Verification: `rtk npm --prefix frontend run test:e2e -- chapter-test-practice-recovery.spec.ts` passed `10 passed (11.3s)` across Chromium desktop and mobile; `rtk npm --prefix frontend run typecheck` passed; `rtk npm --prefix frontend run lint` passed.
+- Guards preserved: strict page/console guards stayed clean, axe critical checks stayed empty, and paid-provider/Ollama route guards still recorded zero real provider calls.
+- Cleanup: generated `frontend/test-results` was removed after the E2E run; no `frontend/playwright-report` directory was present.

@@ -14,6 +14,11 @@ interface PracticePost {
   url: string;
 }
 
+interface PracticeGet {
+  body: unknown;
+  sectionId: string;
+}
+
 interface TestPost {
   body: unknown;
   url: string;
@@ -30,6 +35,8 @@ const invalidSectionId = "practice-invalid";
 const settingsSectionId = "practice-settings";
 const generatedJobId = "job-chapter-test-ready";
 const generatedAttemptId = "attempt-generated-mixed-state";
+const rawInvalidOutputSentinel =
+  "RAW_PRIVATE_PARSER_PROVIDER_SENTINEL parser stack raw provider api.openai.com <think>";
 
 const paidProviderPatterns = [
   "**://api.anthropic.com/**",
@@ -202,6 +209,11 @@ function invalidModelFailure(sectionId: string) {
       failure_category: "structured_output_invalid",
       message: "The model returned invalid practice questions. Retry generation.",
       remediation: "Retry practice generation; persistent failures are visible from Jobs.",
+      parser_debug: rawInvalidOutputSentinel,
+      raw_provider_output: {
+        provider: "openai",
+        text: rawInvalidOutputSentinel,
+      },
     },
   });
 }
@@ -241,6 +253,7 @@ async function installChapterRoutes(
   },
 ) {
   const practicePosts: PracticePost[] = [];
+  const practiceGets: PracticeGet[] = [];
   const testPosts: TestPost[] = [];
   const getCounts = new Map<string, number>();
   const postCounts = new Map<string, number>();
@@ -371,14 +384,16 @@ async function installChapterRoutes(
 
         const nextGet = (getCounts.get(sectionId) ?? 0) + 1;
         getCounts.set(sectionId, nextGet);
+        const body = options.states[sectionId] ?? assessment(sectionId, "ready");
+        practiceGets.push({ body, sectionId });
         return route.fulfill({
-          json: options.states[sectionId] ?? assessment(sectionId, "ready"),
+          json: body,
         });
       },
     );
   }
 
-  return { practicePosts, testPosts };
+  return { practiceGets, practicePosts, testPosts };
 }
 
 async function openChapterTest(page: Page) {
@@ -393,6 +408,7 @@ function visibleAlerts(page: Page) {
 }
 
 async function expectNoPrivateOutput(page: Page) {
+  await expect(page.locator("body")).not.toContainText(rawInvalidOutputSentinel);
   await expect(page.locator("body")).not.toContainText(
     /parser|traceback|stack|raw provider|raw model|<think>|api\.openai|api\.anthropic|claude/i,
   );
@@ -487,6 +503,10 @@ async function runInvalidOutputRecovery({ page }: { page: Page }) {
     "href",
     "/jobs",
   );
+  expect(
+    JSON.stringify(posts.practiceGets),
+    "invalid-output mocked API response included the private raw sentinel",
+  ).toContain(rawInvalidOutputSentinel);
   await expectNoPrivateOutput(page);
   await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(page.getByText(`What does ${invalidSectionId} ask you to solve?`)).toBeVisible();
