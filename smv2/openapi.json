@@ -2633,6 +2633,18 @@
       },
       "PracticeAssessmentOut": {
         "properties": {
+          "error_detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
           "job_id": {
             "anyOf": [
               {

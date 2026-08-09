@@ -51,6 +51,13 @@ interface PracticeSection {
 }
 
 const EMPTY_PRACTICE_SECTIONS: PracticeSection[] = [];
+const PRACTICE_SETTINGS_FAILURE_CATEGORIES = new Set([
+  "missing_credentials",
+  "unknown_provider",
+  "unreachable",
+  "ollama_model_unavailable",
+  "ollama_embed_model_unavailable",
+]);
 
 type LoadState =
   | { kind: "loading" }
@@ -77,6 +84,43 @@ async function loadSections(ids: string[]): Promise<PracticeSection[]> {
     }
   });
   return sections;
+}
+
+function practiceFailureGuidance(states: Record<string, PracticeSectionState>) {
+  let invalidModelOutput = 0;
+  let settings = 0;
+
+  for (const state of Object.values(states)) {
+    if (state.kind !== "failed") {
+      continue;
+    }
+    if (
+      state.errorDetail?.code === "invalid_model_output" ||
+      state.errorDetail?.failure_category === "structured_output_invalid" ||
+      state.errorDetail?.failure_category === "llm_response_invalid"
+    ) {
+      invalidModelOutput += 1;
+      continue;
+    }
+    if (
+      state.errorDetail?.code === "llm_readiness_unavailable" ||
+      (state.errorDetail?.failure_category
+        ? PRACTICE_SETTINGS_FAILURE_CATEGORIES.has(state.errorDetail.failure_category)
+        : false)
+    ) {
+      settings += 1;
+    }
+  }
+
+  return { invalidModelOutput, settings };
+}
+
+function pluralizeSections(count: number) {
+  return `${count} section${count === 1 ? "" : "s"}`;
+}
+
+function sectionNeedsVerb(count: number) {
+  return count === 1 ? "needs" : "need";
 }
 
 function PracticeMaterial({ courseId, section }: { courseId: string; section: PracticeSection }) {
@@ -164,6 +208,7 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     [practiceChapterKey, practiceSectionStates],
   );
   const practiceSummary = summarizePracticeSections(currentPracticeStates, practiceSections.length);
+  const practiceGuidance = practiceFailureGuidance(currentPracticeStates);
   const failedPracticeSectionIds = useMemo(
     () =>
       practiceSections
@@ -419,6 +464,22 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
                   </Button>
                 )}
               </div>
+              {practiceGuidance.invalidModelOutput > 0 || practiceGuidance.settings > 0 ? (
+                <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+                  {practiceGuidance.invalidModelOutput > 0 ? (
+                    <li>
+                      {pluralizeSections(practiceGuidance.invalidModelOutput)}{" "}
+                      {sectionNeedsVerb(practiceGuidance.invalidModelOutput)} a valid model response
+                    </li>
+                  ) : null}
+                  {practiceGuidance.settings > 0 ? (
+                    <li>
+                      {pluralizeSections(practiceGuidance.settings)}{" "}
+                      {sectionNeedsVerb(practiceGuidance.settings)} model settings
+                    </li>
+                  ) : null}
+                </ul>
+              ) : null}
               {practiceSections.map((section, index) => (
                 <div
                   key={section.id}

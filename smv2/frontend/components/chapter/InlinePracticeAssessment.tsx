@@ -7,7 +7,6 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
-import ErrorBanner from "@/components/ErrorBanner";
 import Markdown from "@/components/Markdown";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
@@ -27,7 +26,7 @@ import {
   type PracticeQuestionOut,
   type SubmitPracticeAnswerOut,
 } from "@/lib/api/client";
-import { describeError, type FetchError } from "@/lib/api/errors";
+import { apiErrorDetail, describeError, type FetchError } from "@/lib/api/errors";
 
 interface InlinePracticeAssessmentProps {
   courseId: string;
@@ -438,10 +437,14 @@ export default function InlinePracticeAssessment({
   }
 
   if (assessment.status === "failed") {
+    const errorDetail = apiErrorDetail({ detail: assessment.error_detail });
     return (
       <div className="flex flex-col gap-2">
-        <ErrorBanner
-          message={assessment.message ?? "Practice question extraction failed."}
+        <RecoveryBanner
+          message={
+            errorDetail?.message ?? assessment.message ?? "Practice question extraction failed."
+          }
+          errorDetail={errorDetail}
           onRetry={() => void retryFailedAssessment()}
         />
         {retryError ? (

@@ -267,6 +267,20 @@ function failedPracticeState(sectionId: string): PracticeSectionState {
   };
 }
 
+function failedPracticeStateWithDetail(
+  sectionId: string,
+  overrides: Partial<Pick<PracticeSectionState & { kind: "failed" }, "message" | "errorDetail">>,
+): PracticeSectionState {
+  return {
+    kind: "failed",
+    sectionId,
+    questionCount: 0,
+    message: overrides.message ?? "Practice question extraction failed.",
+    errorDetail: overrides.errorDetail ?? null,
+    retryKind: "restart",
+  };
+}
+
 function emitPracticeState(sectionId: string, state: PracticeSectionState) {
   act(() => {
     inlinePracticeMock.callbacks.get(sectionId)?.(state);
@@ -354,6 +368,59 @@ describe("ChapterTestClient", () => {
 
     emitPracticeState("sec-failed", generatingPracticeState("sec-failed"));
     expect(screen.queryByRole("button", { name: /retry failed/i })).not.toBeInTheDocument();
+  });
+
+  it("groups failed practice sections by recovery category without exposing raw parser output", async () => {
+    mockedListChapters.mockResolvedValue(
+      ok([
+        makeChapter({
+          practice_section_ids: ["sec-invalid-a", "sec-readiness", "sec-invalid-b"],
+        }),
+      ]),
+    );
+    mockedGetSection.mockImplementation((id: string) =>
+      Promise.resolve(ok(makeSectionDetail({ id, body_md: `Source for ${id}` }))),
+    );
+    mockedListTests.mockResolvedValue(ok([]));
+
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+
+    await screen.findByText("Ready practice questions for sec-invalid-a");
+    emitPracticeState(
+      "sec-invalid-a",
+      failedPracticeStateWithDetail("sec-invalid-a", {
+        message: "Parser stack: {\"questions\":\"bad\"}",
+        errorDetail: {
+          code: "invalid_model_output",
+          failure_category: "structured_output_invalid",
+          message: "Parser stack: {\"questions\":\"bad\"}",
+        },
+      }),
+    );
+    emitPracticeState(
+      "sec-readiness",
+      failedPracticeStateWithDetail("sec-readiness", {
+        message: "Your configured Ollama model is not present.",
+        errorDetail: readinessDetail,
+      }),
+    );
+    emitPracticeState(
+      "sec-invalid-b",
+      failedPracticeStateWithDetail("sec-invalid-b", {
+        message: "Raw parser output: ```json bad```",
+        errorDetail: {
+          code: "invalid_model_output",
+          failure_category: "structured_output_invalid",
+          message: "Raw parser output: ```json bad```",
+        },
+      }),
+    );
+
+    expect(screen.getByText("2 sections need a valid model response")).toBeInTheDocument();
+    expect(screen.getByText("1 section needs model settings")).toBeInTheDocument();
+    expect(screen.queryByText(/parser stack/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/raw parser output/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/```json bad```/i)).not.toBeInTheDocument();
   });
 
   it("continues with ready practice by moving focus to the first ready section", async () => {

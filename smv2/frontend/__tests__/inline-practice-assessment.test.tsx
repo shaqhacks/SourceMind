@@ -521,6 +521,30 @@ describe("InlinePracticeAssessment", () => {
     expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1");
   });
 
+  it("shows invalid model output as a retryable section failure", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(
+        makeAssessment({
+          status: "failed",
+          questions: [],
+          message: "Parser dump: {\"raw\":\"not learner safe\"}",
+          error_detail: {
+            code: "invalid_model_output",
+            failure_category: "structured_output_invalid",
+            message: "The model returned an invalid question format.",
+          },
+        }),
+      ),
+    );
+
+    renderPracticeChild({ retryVersion: 0 });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/invalid question format/i);
+    expect(banner).not.toHaveTextContent(/parser dump/i);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
   it("retries a failed extraction once when retryVersion increases", async () => {
     mockedGetPracticeAssessment.mockResolvedValue(
       ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),

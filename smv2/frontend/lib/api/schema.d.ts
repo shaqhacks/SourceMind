@@ -2184,6 +2184,10 @@ export interface components {
         };
         /** PracticeAssessmentOut */
         PracticeAssessmentOut: {
+            /** Error Detail */
+            error_detail?: {
+                [key: string]: unknown;
+            } | null;
             /** Job Id */
             job_id?: string | null;
             /** Message */

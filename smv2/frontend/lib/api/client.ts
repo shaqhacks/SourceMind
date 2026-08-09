@@ -15,6 +15,7 @@ export const API_BASE = process.env.NEXT_PUBLIC_SMV2_API_URL ?? "http://localhos
 export const client = createClient<paths>({ baseUrl: API_BASE });
 
 export interface ApiErrorDetail {
+  [key: string]: unknown;
   code?: string | null;
   failure_category?: string | null;
   message?: string | null;
