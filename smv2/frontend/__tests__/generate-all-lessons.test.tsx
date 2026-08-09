@@ -9,7 +9,7 @@ import { FakeEventSource } from "./support/fake-event-source";
 
 vi.mock("@/lib/api/client", () => ({
   API_BASE: "http://localhost:8000",
-  TERMINAL_JOB_STATUSES: new Set(["succeeded", "failed"]),
+  TERMINAL_JOB_STATUSES: new Set(["succeeded", "failed", "cancelled"]),
   generateAllLessons: vi.fn(),
   getJob: vi.fn(),
 }));
@@ -99,6 +99,37 @@ describe("GenerateAllLessons", () => {
 
     expect(onSectionSettled).toHaveBeenCalledWith("sec-2", "failed");
     expect(screen.getByRole("button", { name: /^generate all lessons$/i })).toBeInTheDocument();
+  });
+
+  it("does not patch a cancelled batch lesson job to failed", async () => {
+    mockedGenerateAllLessons.mockResolvedValue({
+      status: 202,
+      ok: true,
+      data: { job_ids: ["job-1"], skipped: 0 },
+    });
+    mockedGetJob.mockResolvedValue({
+      status: 200,
+      ok: true,
+      data: makeJob("job-1", "sec-1"),
+    });
+
+    const onSectionSettled = vi.fn();
+    const user = userEvent.setup();
+    render(<GenerateAllLessons courseId="course-1" onSectionSettled={onSectionSettled} />);
+
+    await user.click(screen.getByRole("button", { name: /generate all lessons/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-1",
+        status: "cancelled",
+        progress: { stage: "cancelled", pct: null, message: "Cancelled" },
+      });
+    });
+
+    expect(onSectionSettled).not.toHaveBeenCalled();
+    expect(screen.queryByText(/failed/i)).not.toBeInTheDocument();
   });
 
   it("shows real active job phase, elapsed time, and recent activity while preserving batch counts", async () => {

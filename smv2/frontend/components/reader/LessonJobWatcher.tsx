@@ -34,6 +34,7 @@ export default function LessonJobWatcher({
   useEffect(() => {
     if (!done || !job || settledRef.current) return;
     settledRef.current = true;
+    if (job.status === "cancelled") return;
     onSettled(sectionId, job.status === "succeeded" ? "ready" : "failed");
   }, [done, job, sectionId, onSettled]);
 
