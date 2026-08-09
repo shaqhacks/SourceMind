@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import InlinePracticeAssessment from "@/components/chapter/InlinePracticeAssessment";
@@ -120,6 +121,28 @@ function practiceChild({
 
 function renderPracticeChild(options: Parameters<typeof practiceChild>[0] = {}) {
   return render(practiceChild(options));
+}
+
+function CallbackIdentityWrapper({
+  onStateChange,
+}: {
+  onStateChange: (state: PracticeSectionState) => void;
+}) {
+  const [rerenderCount, setRerenderCount] = useState(0);
+
+  return (
+    <>
+      <button type="button" onClick={() => setRerenderCount((count) => count + 1)}>
+        Rerender parent {rerenderCount}
+      </button>
+      <InlinePracticeAssessment
+        courseId="course-1"
+        sectionId="section-1"
+        retryVersion={0}
+        onStateChange={(state) => onStateChange(state)}
+      />
+    </>
+  );
 }
 
 async function flushPracticeTasks() {
@@ -271,6 +294,23 @@ describe("InlinePracticeAssessment", () => {
     expect(onStateChange).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "ready", sectionId: "section-1", questionCount: 1 }),
     );
+  });
+
+  it("does not restart loading when a parent rerender changes onStateChange identity", async () => {
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValue(ok(makeAssessment()));
+
+    const user = userEvent.setup();
+    render(<CallbackIdentityWrapper onStateChange={onStateChange} />);
+
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: /rerender parent/i }));
+    await flushPracticeTasks();
+
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
+    expect(mockedStartPracticeAssessment).not.toHaveBeenCalled();
   });
 
   it("does not notify the parent again for repeated generating poll payloads", async () => {
@@ -548,6 +588,25 @@ describe("InlinePracticeAssessment", () => {
       errorDetail: null,
       retryKind: "reload",
     });
+  });
+
+  it("restarts extraction after a parent reload retry when the first not_started POST fails", async () => {
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "not_started", questions: [] })))
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "not_started", questions: [] })));
+    mockedStartPracticeAssessment
+      .mockResolvedValueOnce(err(503))
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "generating", questions: [] })));
+
+    const view = renderPracticeChild({ retryVersion: 0 });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/starting practice questions/i);
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+
+    view.rerender(practiceChild({ retryVersion: 1 }));
+
+    await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("status")).toHaveTextContent(/preparing practice questions/i);
   });
 
   it("reports extraction failures as restartable parent state", async () => {

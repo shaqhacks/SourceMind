@@ -141,26 +141,28 @@ export default function InlinePracticeAssessment({
   const startedForRef = useRef<string | null>(null);
   const loadSeqRef = useRef(0);
   const mountedRef = useRef(false);
+  const onStateChangeRef = useRef(onStateChange);
   const lastEmittedStateRef = useRef<string | null>(null);
   const currentSectionStateRef = useRef<PracticeSectionState | null>(null);
   const consumedRetryVersionRef = useRef(retryVersion);
   const retryingFailedAssessmentRef = useRef(false);
 
-  const emitSectionState = useCallback(
-    (nextState: PracticeSectionState) => {
-      if (!mountedRef.current) {
-        return;
-      }
-      currentSectionStateRef.current = nextState;
-      const signature = practiceSectionStateSignature(nextState);
-      if (lastEmittedStateRef.current === signature) {
-        return;
-      }
-      lastEmittedStateRef.current = signature;
-      onStateChange?.(nextState);
-    },
-    [onStateChange],
-  );
+  useEffect(() => {
+    onStateChangeRef.current = onStateChange;
+  }, [onStateChange]);
+
+  const emitSectionState = useCallback((nextState: PracticeSectionState) => {
+    if (!mountedRef.current) {
+      return;
+    }
+    currentSectionStateRef.current = nextState;
+    const signature = practiceSectionStateSignature(nextState);
+    if (lastEmittedStateRef.current === signature) {
+      return;
+    }
+    lastEmittedStateRef.current = signature;
+    onStateChangeRef.current?.(nextState);
+  }, []);
 
   const applyAssessment = useCallback((next: PracticeAssessmentOut) => {
     if (!mountedRef.current) {
@@ -324,7 +326,7 @@ export default function InlinePracticeAssessment({
 
     consumedRetryVersionRef.current = retryVersion;
     if (currentState.retryKind === "reload") {
-      void loadAssessment({ showLoading: true });
+      void loadAssessment({ resetStart: true, showLoading: true });
       return;
     }
     void retryFailedAssessment();
