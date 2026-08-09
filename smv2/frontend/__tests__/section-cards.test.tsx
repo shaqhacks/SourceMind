@@ -9,12 +9,14 @@ import {
   findActiveCardsJob,
   generateCards,
   getReviewQueue,
+  getReviewSelection,
   listCards,
   patchCard,
   type ApiResult,
   type CardOut,
   type GradeCardOut,
   type ReviewQueueCardOut,
+  type ReviewSelectionOut,
 } from "@/lib/api/client";
 import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
@@ -34,6 +36,7 @@ vi.mock("@/lib/api/client", () => ({
   patchCard: vi.fn(),
   deleteCard: vi.fn(),
   getReviewQueue: vi.fn(),
+  getReviewSelection: vi.fn(),
 }));
 
 vi.mock("@/lib/review/gradeCardAndNotify", () => ({
@@ -50,6 +53,7 @@ const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 const mockedPatchCard = vi.mocked(patchCard);
 const mockedDeleteCard = vi.mocked(deleteCard);
 const mockedGetReviewQueue = vi.mocked(getReviewQueue);
+const mockedGetReviewSelection = vi.mocked(getReviewSelection);
 const mockedGradeCardAndNotify = vi.mocked(gradeCardAndNotify);
 const mockedNotifyReviewSettled = vi.mocked(notifyReviewSettled);
 
@@ -99,6 +103,13 @@ function reviewQueue(cards: ReviewQueueCardOut[] = [makeReviewCard()]) {
   });
 }
 
+function reviewSelection(cards: ReviewQueueCardOut[] = [makeReviewCard()]): ApiResult<ReviewSelectionOut> {
+  return ok({
+    cards,
+    missing_card_ids: [],
+  });
+}
+
 function successfulGradeResult(): ApiResult<GradeCardOut> {
   return {
     ok: true,
@@ -123,6 +134,7 @@ describe("SectionCards", () => {
   beforeEach(() => {
     mockedFindActiveCardsJob.mockResolvedValue(null);
     mockedGetReviewQueue.mockResolvedValue(reviewQueue());
+    mockedGetReviewSelection.mockResolvedValue(reviewSelection());
     mockedGradeCardAndNotify.mockResolvedValue(successfulGradeResult());
   });
 
@@ -471,5 +483,54 @@ describe("SectionCards", () => {
     await screen.findByText("Front text");
     expect(screen.queryByRole("link", { name: "Review this chapter" })).not.toBeInTheDocument();
     expect(mockedGetReviewQueue).not.toHaveBeenCalled();
+  });
+
+  it("loads exact review metadata for front-matter cards without a chapter review link", async () => {
+    mockedListCards.mockResolvedValue(
+      ok([
+        makeCard({ id: "card-1", front_md: "Front matter one" }),
+        makeCard({ id: "card-2", front_md: "Front matter two" }),
+      ]),
+    );
+    mockedGetReviewSelection.mockResolvedValue(
+      reviewSelection([makeReviewCard({ id: "card-2", front_md: "Front matter two" })]),
+    );
+    const user = userEvent.setup();
+
+    render(<SectionCards courseId="course-1" chapterLabel={null} sectionId="sec-1" />);
+
+    expect(await screen.findByText("Front matter one")).toBeInTheDocument();
+    expect(screen.getByText("Front matter two")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Review this chapter" })).not.toBeInTheDocument();
+    expect(mockedGetReviewQueue).not.toHaveBeenCalled();
+    expect(mockedGetReviewSelection).toHaveBeenCalledWith("course-1", ["card-1", "card-2"]);
+
+    const revealButtons = screen.getAllByRole("button", { name: "Show answer" });
+    await user.click(revealButtons[0]);
+    expect(screen.queryByRole("button", { name: /again/i })).not.toBeInTheDocument();
+
+    await user.click(revealButtons[1]);
+    expect(screen.getByRole("button", { name: /again/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /hard/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /good/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /easy/i })).toBeVisible();
+  });
+
+  it("keeps front-matter cards editable when exact review metadata fails and retries metadata loading", async () => {
+    mockedListCards.mockResolvedValue(ok([makeCard({ id: "card-1", front_md: "Preface card" })]));
+    mockedGetReviewSelection.mockResolvedValueOnce(err(503)).mockResolvedValueOnce(reviewSelection());
+    const user = userEvent.setup();
+
+    render(<SectionCards courseId="course-1" chapterLabel={null} sectionId="sec-1" />);
+
+    expect(await screen.findByText("Preface card")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^edit$/i })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/loading review metadata/i);
+
+    await user.click(screen.getByRole("button", { name: /retry review metadata/i }));
+    await user.click(await screen.findByRole("button", { name: "Show answer" }));
+
+    expect(screen.getByRole("button", { name: /again/i })).toBeVisible();
+    expect(mockedGetReviewSelection).toHaveBeenCalledTimes(2);
   });
 });

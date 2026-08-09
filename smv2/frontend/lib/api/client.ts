@@ -178,7 +178,10 @@ export async function retryJob(jobId: string): Promise<ApiResult<JobOut>> {
 
 export async function cancelJob(jobId: string): Promise<ApiResult<JobOut>> {
   return request(
-    client.POST("/api/jobs/{job_id}/cancel", { params: { path: { job_id: jobId } } }),
+    client.POST("/api/jobs/{job_id}/cancel", {
+      params: { path: { job_id: jobId } },
+      headers: await csrfHeaders(),
+    }),
   );
 }
 

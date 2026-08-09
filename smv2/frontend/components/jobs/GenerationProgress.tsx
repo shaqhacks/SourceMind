@@ -17,6 +17,8 @@ function currentElapsed(job: JobEvent | null): number {
   return Math.max(0, Math.floor(job?.progress?.elapsed_seconds ?? 0));
 }
 
+const NO_JOB_CANCEL_KEY = "__no-job__";
+
 export default function GenerationProgress({
   job,
   quiet,
@@ -31,7 +33,8 @@ export default function GenerationProgress({
   const elapsed = currentElapsed(job);
   const announcedPhase = formatPhaseLabel(phase);
   const isTerminal = job?.status === "cancelled" || job?.status === "succeeded" || job?.status === "failed";
-  const cancelRequested = cancelRequestedFor === job?.id;
+  const cancelKey = job?.id ?? NO_JOB_CANCEL_KEY;
+  const cancelRequested = cancelRequestedFor === cancelKey;
 
   const headline = useMemo(() => {
     if (job?.status === "cancelled") return "Cancelled";
@@ -48,7 +51,7 @@ export default function GenerationProgress({
     setCancelError(null);
     try {
       await onCancel();
-      setCancelRequestedFor(job?.id ?? null);
+      setCancelRequestedFor(cancelKey);
     } catch {
       setCancelRequestedFor(null);
       setCancelError("Could not cancel generation. Check your connection and try again.");

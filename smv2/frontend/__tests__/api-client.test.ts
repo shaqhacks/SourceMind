@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getReviewQueue, getReviewSelection } from "@/lib/api/client";
+import { cancelJob, getReviewQueue, getReviewSelection } from "@/lib/api/client";
 import { gradeCardAndNotify } from "@/lib/review/gradeCardAndNotify";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
@@ -18,6 +18,11 @@ vi.mock("openapi-fetch", () => ({
 
 vi.mock("@/lib/review/reviewBus", () => ({
   notifyReviewSettled: vi.fn(),
+}));
+
+vi.mock("@/lib/security/csrf", () => ({
+  getCachedCsrfToken: vi.fn(() => "token-123"),
+  setCsrfToken: vi.fn(),
 }));
 
 const mockedNotifyReviewSettled = vi.mocked(notifyReviewSettled);
@@ -65,6 +70,15 @@ describe("api client review helpers", () => {
     expect(mockPost).toHaveBeenCalledWith("/api/courses/{course_id}/review/selection", {
       params: { path: { course_id: "course-1" } },
       body: { card_ids: ["card-2", "card-1"] },
+    });
+  });
+
+  it("sends the CSRF header when cancelling a job", async () => {
+    await cancelJob("job-1");
+
+    expect(mockPost).toHaveBeenCalledWith("/api/jobs/{job_id}/cancel", {
+      params: { path: { job_id: "job-1" } },
+      headers: { "X-CSRF-Token": "token-123" },
     });
   });
 

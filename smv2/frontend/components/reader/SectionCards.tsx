@@ -10,6 +10,7 @@ import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   deleteCard,
   getReviewQueue,
+  getReviewSelection,
   listCards,
   patchCard,
   type CardOut,
@@ -42,19 +43,18 @@ async function fetchCards(
   chapterLabel: string | null,
 ): Promise<LoadState> {
   const cardsPromise = listCards(sectionId);
-  const reviewPromise =
-    chapterLabel === null
-      ? Promise.resolve(null)
-      : getReviewQueue(courseId, { scope: "all", chapterLabel, limit: REVIEW_QUEUE_LIMIT });
-
-  const [{ data, status }, reviewResult] = await Promise.all([cardsPromise, reviewPromise]);
+  const { data, status } = await cardsPromise;
   if (!data) return { kind: "error", error: describeError(status, "Loading flashcards") };
+  const reviewResult =
+    chapterLabel === null
+      ? await getReviewSelection(courseId, data.map((card) => card.id))
+      : await getReviewQueue(courseId, { scope: "all", chapterLabel, limit: REVIEW_QUEUE_LIMIT });
   const reviewError =
-    reviewResult !== null && !reviewResult.data
+    !reviewResult.data
       ? describeError(reviewResult.status, "Loading review metadata")
       : null;
   const reviewCardsById = new Map(
-    reviewResult?.data?.cards.map((card) => [card.id, card] as const) ?? [],
+    reviewResult.data?.cards.map((card) => [card.id, card] as const) ?? [],
   );
   return { kind: "loaded", cards: data, reviewCardsById, reviewError };
 }

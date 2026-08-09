@@ -48,9 +48,10 @@ def normalize_ollama_base_url(value: str) -> str:
     raise ValueError("Ollama base URL must use localhost, 127.0.0.1, or ::1")
 
 
-def require_local_settings_write(request: Request) -> None:
+def require_local_settings_write(request: Request, *, require_json: bool = True) -> None:
     _require_loopback(request)
-    _require_json(request)
+    if require_json:
+        _require_json(request)
     _require_trusted_loopback_origin(request)
     supplied = request.headers.get(CSRF_HEADER_NAME)
     if not supplied or not secrets.compare_digest(supplied, _CSRF_TOKEN):

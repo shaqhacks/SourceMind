@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.schemas import JobCreate, JobOut
+from app.security.local_settings import require_local_settings_write
 from app.services import jobs_service, llm_readiness_service
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -47,7 +48,8 @@ def retry_job(job_id: str) -> JobOut:
 
 
 @router.post("/{job_id}/cancel", operation_id="cancel_job", response_model=JobOut)
-def cancel_job(job_id: str) -> JobOut:
+def cancel_job(job_id: str, request: Request) -> JobOut:
+    require_local_settings_write(request, require_json=False)
     try:
         job = jobs_service.cancel_job(job_id)
     except LookupError as exc:

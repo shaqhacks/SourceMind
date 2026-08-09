@@ -81,6 +81,21 @@ describe("GenerationProgress", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  it("does not call cancel again after a resolved quiet request without a job payload", async () => {
+    const onCancel = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(<GenerationProgress job={null} quiet onCancel={onCancel} />);
+
+    await user.click(screen.getByRole("button", { name: /cancel generation/i }));
+    await waitFor(() => expect(onCancel).toHaveBeenCalledTimes(1));
+
+    expect(screen.getByRole("button", { name: /cancel requested/i })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /cancel requested/i }));
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
   it("shows a retryable cancel error and allows a second cancel only after failure", async () => {
     const onCancel = vi
       .fn()

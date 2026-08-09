@@ -3,15 +3,28 @@ from __future__ import annotations
 import copy
 from datetime import timedelta
 
+from conftest import _first_section_id
+
 from app.db.engine import get_session
 from app.db.models import Job, utcnow
 from app.jobs import registry
 from app.jobs.error_envelope import encode_job_error
+from app.jobs.registry import LLM_READINESS_REQUIRED_JOB_TYPES
 from app.jobs.worker import run_due_jobs_once
 from app.llm.completion_control import ProviderCancelledError
-from app.jobs.registry import LLM_READINESS_REQUIRED_JOB_TYPES
+from app.security.local_settings import csrf_token
 from app.services import jobs_service
-from conftest import _first_section_id
+
+
+def _mutation_headers(token: str | None = None, **overrides: str) -> dict[str, str]:
+    headers = {
+        "Origin": "http://localhost:3000",
+        "Host": "localhost:8000",
+    }
+    if token is not None:
+        headers["X-CSRF-Token"] = token
+    headers.update(overrides)
+    return headers
 
 
 def _seed_job(
@@ -268,7 +281,7 @@ def test_create_job_preserves_safe_noop_payload(client):
 def test_cancel_queued_job_is_immediately_terminal(client):
     job = client.post("/api/jobs", json={"type": "noop", "payload": {}}).json()
 
-    response = client.post(f"/api/jobs/{job['id']}/cancel")
+    response = client.post(f"/api/jobs/{job['id']}/cancel", headers=_mutation_headers(csrf_token()))
 
     assert response.status_code == 200
     body = response.json()
@@ -293,7 +306,7 @@ def test_cancel_running_job_sets_cooperative_request(client):
     finally:
         session.close()
 
-    response = client.post(f"/api/jobs/{job_id}/cancel")
+    response = client.post(f"/api/jobs/{job_id}/cancel", headers=_mutation_headers(csrf_token()))
 
     assert response.status_code == 200
     body = response.json()
@@ -313,17 +326,54 @@ def test_cancel_terminal_job_is_idempotent_and_unchanged(client):
     )
     before = client.get(f"/api/jobs/{job_id}").json()
 
-    response = client.post(f"/api/jobs/{job_id}/cancel")
+    response = client.post(f"/api/jobs/{job_id}/cancel", headers=_mutation_headers(csrf_token()))
 
     assert response.status_code == 200
     assert response.json() == before
 
 
 def test_cancel_missing_job_is_404_without_internal_details(client):
-    response = client.post("/api/jobs/does-not-exist/cancel")
+    response = client.post("/api/jobs/does-not-exist/cancel", headers=_mutation_headers(csrf_token()))
 
     assert response.status_code == 404
     assert response.json() == {"detail": "job not found"}
+
+
+def test_cancel_requires_csrf_token_without_mutating_job(client):
+    job = client.post("/api/jobs", json={"type": "noop", "payload": {}}).json()
+    before = client.get(f"/api/jobs/{job['id']}").json()
+
+    response = client.post(f"/api/jobs/{job['id']}/cancel", headers=_mutation_headers())
+
+    assert response.status_code == 403
+    assert "CSRF" in response.json()["detail"]
+    assert client.get(f"/api/jobs/{job['id']}").json() == before
+
+
+def test_cancel_rejects_invalid_csrf_token_without_mutating_job(client):
+    job = client.post("/api/jobs", json={"type": "noop", "payload": {}}).json()
+    before = client.get(f"/api/jobs/{job['id']}").json()
+
+    response = client.post(f"/api/jobs/{job['id']}/cancel", headers=_mutation_headers("not-valid"))
+
+    assert response.status_code == 403
+    assert "CSRF" in response.json()["detail"]
+    assert client.get(f"/api/jobs/{job['id']}").json() == before
+
+
+def test_cancel_rejects_untrusted_origin_without_mutating_job(client, monkeypatch):
+    monkeypatch.setenv("SMV2_CORS_ORIGINS", "http://testserver")
+    job = client.post("/api/jobs", json={"type": "noop", "payload": {}}).json()
+    before = client.get(f"/api/jobs/{job['id']}").json()
+
+    response = client.post(
+        f"/api/jobs/{job['id']}/cancel",
+        headers=_mutation_headers(csrf_token(), Origin="https://evil.example"),
+    )
+
+    assert response.status_code == 403
+    assert "origin" in response.json()["detail"].lower()
+    assert client.get(f"/api/jobs/{job['id']}").json() == before
 
 
 def test_retry_rejects_cancelled_job_without_creating_replacement(client, monkeypatch):
@@ -357,7 +407,10 @@ def test_cancelled_queued_lesson_job_allows_explicit_generation_to_create_new_jo
     assert first.status_code == 202
     first_job_id = first.json()["job_id"]
 
-    cancel_response = client.post(f"/api/jobs/{first_job_id}/cancel")
+    cancel_response = client.post(
+        f"/api/jobs/{first_job_id}/cancel",
+        headers=_mutation_headers(csrf_token()),
+    )
     assert cancel_response.status_code == 200
 
     second = client.post(f"/api/sections/{section_id}/lesson")
