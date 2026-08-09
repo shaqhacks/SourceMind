@@ -89,20 +89,17 @@ class Provider(ABC):
         """
         completion_options = options if options is not None else CompletionOptions()
 
-        def complete_attempt() -> CompletionResult:
-            result = self._complete_impl(
-                messages,
-                max_tokens=max_tokens,
-                options=completion_options,
-                system=system,
-            )
-            self._raise_if_cancelled(completion_options)
-            return result
-
         with llm_slot(wait=wait_for_slot):
             started = time.monotonic()
             try:
-                result = retry_transient(complete_attempt)
+                result = retry_transient(
+                    lambda: self._complete_impl(
+                        messages,
+                        max_tokens=max_tokens,
+                        options=completion_options,
+                        system=system,
+                    )
+                )
             except Exception:
                 latency_ms = int((time.monotonic() - started) * 1000)
                 self._record_call_safely(
@@ -131,6 +128,7 @@ class Provider(ABC):
                 status="ok",
                 course_id=course_id,
             )
+            self._raise_if_cancelled(completion_options)
             return result
 
     @staticmethod

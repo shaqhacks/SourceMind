@@ -10,6 +10,7 @@ from app.llm.completion_control import (
     ProviderCancelledError,
     ProviderStreamError,
 )
+from app.llm.pricing import estimate_cost
 
 
 def test_completion_options_passes_progress_schema_and_cancel_controls(stub_provider):
@@ -31,18 +32,19 @@ def test_completion_options_passes_progress_schema_and_cancel_controls(stub_prov
 def test_complete_checks_cancellation_after_synchronous_provider_returns(client):
     from app.llm.provider import CompletionResult, Provider
 
+    course_id = client.post("/api/courses", json={"title": "Cancelled Ledger Course"}).json()["id"]
     cancelled = False
 
     class _CancelsDuringCompletionProvider(Provider):
-        model_name = "cancel-after-return"
+        model_name = "claude-sonnet-5"
 
         def _complete_impl(self, messages, *, max_tokens, options, system=None):
             nonlocal cancelled
             cancelled = True
             return CompletionResult(
                 text="late success",
-                input_tokens=1,
-                output_tokens=1,
+                input_tokens=100,
+                output_tokens=20,
                 model=self.model_name,
             )
 
@@ -53,8 +55,25 @@ def test_complete_checks_cancellation_after_synchronous_provider_returns(client)
             [{"role": "user", "content": "hello"}],
             max_tokens=8,
             purpose="lesson",
+            course_id=course_id,
+            prompt_version="v-cancel",
             options=options,
         )
+
+    session = get_session()
+    try:
+        rows = session.query(LlmCall).filter(LlmCall.course_id == course_id).all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.status == "ok"
+        assert row.purpose == "lesson"
+        assert row.model == "claude-sonnet-5"
+        assert row.input_tokens == 100
+        assert row.output_tokens == 20
+        assert row.prompt_version == "v-cancel"
+        assert row.cost_estimate == pytest.approx(estimate_cost("claude-sonnet-5", 100, 20))
+    finally:
+        session.close()
 
 
 def test_partial_stream_error_is_not_retried(stub_provider):

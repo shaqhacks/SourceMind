@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from app.db.engine import get_session
 from app.db.models import Card, Job, LlmCall, ReviewState
 from app.jobs.worker import run_due_jobs_once
+from app.llm.pricing import estimate_cost
 from app.llm.provider import (
     PROVIDER_NOT_CONFIGURED_MESSAGE,
     CompletionResult,
@@ -206,9 +208,9 @@ def test_generate_cards_cancellation_after_invalid_completion_prevents_repair_an
         cancel_after_first_completion["value"] = True
         return CompletionResult(
             text="not json at all",
-            input_tokens=1,
-            output_tokens=1,
-            model="stub-model",
+            input_tokens=100,
+            output_tokens=20,
+            model="claude-sonnet-5",
         )
 
     stub_provider._complete_impl = _complete_impl
@@ -230,6 +232,15 @@ def test_generate_cards_cancellation_after_invalid_completion_prevents_repair_an
     session = get_session()
     try:
         assert session.query(Card).filter(Card.section_id == section_id).count() == 0
+        calls = session.query(LlmCall).filter(LlmCall.course_id == course_id).all()
+        assert len(calls) == 1
+        call = calls[0]
+        assert call.status == "ok"
+        assert call.purpose == "cards"
+        assert call.model == "claude-sonnet-5"
+        assert call.input_tokens == 100
+        assert call.output_tokens == 20
+        assert call.cost_estimate == pytest.approx(estimate_cost("claude-sonnet-5", 100, 20))
     finally:
         session.close()
 
