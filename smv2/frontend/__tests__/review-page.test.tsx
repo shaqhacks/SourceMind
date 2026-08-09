@@ -529,6 +529,59 @@ describe("ReviewPage", () => {
     expect(localStorage.getItem(COMPLETED_REVIEW_SESSION_STORAGE_KEY)).not.toBeNull();
   });
 
+  it("keeps Back to review on the chooser across a completed-url remount with stale active state", async () => {
+    seedCompletedSession({ againCardIds: ["card-3"] });
+    localStorage.setItem(
+      ACTIVE_REVIEW_SESSION_STORAGE_KEY,
+      JSON.stringify(activeSession({ remainingCardIds: ["stale-card"] })),
+    );
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    mockedGetReviewQueue.mockResolvedValue(
+      ok(
+        makeQueue({
+          total: 1,
+          due: 1,
+          cards: [makeQueueCard({ id: "stale-card", front_md: "Stale Q", back_md: "Stale A" })],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    const { unmount } = render(<ReviewPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Back to review" }));
+
+    expect(await screen.findByRole("heading", { name: "Ready to review" })).toBeInTheDocument();
+    expect(mockReplace).toHaveBeenCalledWith("/review?course=course-1");
+
+    mockSearchParams = new URLSearchParams({ course: "course-1" });
+    unmount();
+    render(<ReviewPage />);
+
+    expect(await screen.findByRole("heading", { name: "Ready to review" })).toBeInTheDocument();
+    expect(screen.queryByText(/resumed session/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Stale Q")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("reloads the chooser after Back to review when Next applies the completed-to-course URL update", async () => {
+    seedCompletedSession({ againCardIds: ["card-3"] });
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1, due: 1 })));
+    const user = userEvent.setup();
+    const { rerender } = render(<ReviewPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Back to review" }));
+
+    expect(await screen.findByRole("heading", { name: "Ready to review" })).toBeInTheDocument();
+
+    mockSearchParams = new URLSearchParams({ course: "course-1" });
+    rerender(<ReviewPage />);
+
+    expect(await screen.findByRole("heading", { name: "Ready to review" })).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await waitFor(() => expect(mockedGetReviewQueue).toHaveBeenCalledTimes(2));
+  });
+
   it("stores completed snapshots with exact scope, chapter label, tally, and Again IDs", async () => {
     mockSearchParams = new URLSearchParams({
       course: "course-1",

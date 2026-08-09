@@ -193,11 +193,8 @@ function ReviewPageInner() {
   const [gradeCounts, setGradeCounts] = useState<Record<number, number>>({});
   const [againCardIds, setAgainCardIds] = useState<string[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [completedSession, setCompletedSession] = useState<CompletedReviewSession | null>(() => {
-    if (!courseParam || !completedParam) return null;
-    const stored = readCompletedReviewSession();
-    return stored && stored.courseId === courseParam && stored.sessionId === completedParam ? stored : null;
-  });
+  const [completedSession, setCompletedSession] = useState<CompletedReviewSession | null>(null);
+  const [completedSessionChecked, setCompletedSessionChecked] = useState(!courseParam || !completedParam);
   const [replayMissingMessage, setReplayMissingMessage] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -210,6 +207,26 @@ function ReviewPageInner() {
   useEffect(() => {
     latestQueryRef.current = { courseParam, completedParam, queryKey };
   }, [courseParam, completedParam, queryKey]);
+
+  useEffect(() => {
+    if (!courseParam || !completedParam) return;
+    let active = true;
+
+    queueMicrotask(() => {
+      if (!active) return;
+      const stored = readCompletedReviewSession();
+      setCompletedSession(
+        stored && stored.courseId === courseParam && stored.sessionId === completedParam ? stored : null,
+      );
+      setCompletedSessionChecked(true);
+      setSessionState({ kind: "done" });
+      setPhase("completed");
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [courseParam, completedParam]);
 
   useEffect(() => {
     if (reconciledQueryRef.current === queryKey) return;
@@ -226,12 +243,14 @@ function ReviewPageInner() {
         setCompletedSession(
           stored && stored.courseId === courseParam && stored.sessionId === completedParam ? stored : null,
         );
+        setCompletedSessionChecked(true);
         setSessionState({ kind: "done" });
         setPhase("completed");
         return;
       }
 
       setCompletedSession(null);
+      setCompletedSessionChecked(true);
       if (courseParam && startParam === "due") {
         setPhase("bootstrapping-due");
         return;
@@ -383,7 +402,7 @@ function ReviewPageInner() {
     return () => {
       active = false;
     };
-  }, [phase, courseId, chapterLabel, reviewScope]);
+  }, [phase, courseId, chapterLabel, reviewScope, queryKey]);
 
   function goToChooser(id: string, title: string) {
     setCourseId(id);
@@ -530,6 +549,13 @@ function ReviewPageInner() {
   );
 
   const goBackToReview = useCallback(() => {
+    clearActiveReviewSession();
+    setCompletedSession(null);
+    setIsResumedSession(false);
+    setCards([]);
+    setQuestions([]);
+    setCardIndex(0);
+    setQuestionIndex(0);
     if (!courseId) {
       setPhase("hub");
       router.replace("/review");
@@ -799,7 +825,14 @@ function ReviewPageInner() {
       );
     }
   } else if (phase === "completed") {
-    if (!completedSession) {
+    if (!completedSessionChecked) {
+      mainContent = (
+        <div role="status" className="p-8">
+          <span className="sr-only">Loading…</span>
+          <Skeleton className="mx-auto mt-8 h-40 w-full max-w-2xl" />
+        </div>
+      );
+    } else if (!completedSession) {
       mainContent = (
         <div className="flex flex-1 items-center justify-center p-8">
           <EmptyState
