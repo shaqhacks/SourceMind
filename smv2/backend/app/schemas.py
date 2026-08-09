@@ -12,7 +12,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, StrictInt, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StrictInt,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from app.jobs.error_envelope import decode_job_error
 
@@ -500,6 +507,22 @@ class ReviewQueueOut(BaseModel):
     new_count: int
     available_count: int
     total_count: int
+
+
+class ReviewSelectionIn(BaseModel):
+    card_ids: list[str] = Field(min_length=1, max_length=200)
+
+    @field_validator("card_ids")
+    @classmethod
+    def _card_ids_are_unique(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("card_ids must be unique")
+        return value
+
+
+class ReviewSelectionOut(BaseModel):
+    cards: list[ReviewQueueCardOut]
+    missing_card_ids: list[str]
 
 
 class AdaptiveStudyActivityOut(BaseModel):

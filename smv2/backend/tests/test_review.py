@@ -186,6 +186,7 @@ def _review_scope_course(client) -> SimpleNamespace:
 
         return SimpleNamespace(
             id=course.id,
+            profile_id=profile_id,
             available_ids={new_card.id, chapter_2_card.id, due_card.id},
             available_ordered_ids=[new_card.id, chapter_2_card.id, due_card.id],
             all_ids=[
@@ -203,6 +204,38 @@ def _review_scope_course(client) -> SimpleNamespace:
             latest_good_id=latest_good_card.id,
             chapter_2_id=chapter_2_card.id,
         )
+    finally:
+        session.close()
+
+
+def _other_review_course() -> SimpleNamespace:
+    session = get_session()
+    try:
+        course = Course(title="Other review course")
+        session.add(course)
+        session.flush()
+        section = Section(
+            id=f"other-review-section-{uuid.uuid4()}",
+            course_id=course.id,
+            order_index=0,
+            title="Other Section",
+            body_md="Other course material.",
+            content_hash=f"other-review-section-{uuid.uuid4()}",
+            chapter_label="Other Chapter",
+        )
+        session.add(section)
+        session.flush()
+        card = Card(
+            id=f"other-review-card-{uuid.uuid4()}",
+            course_id=course.id,
+            section_id=section.id,
+            front_md="Other front should not leak",
+            back_md="Other back should not leak",
+            position=0,
+        )
+        session.add(card)
+        session.commit()
+        return SimpleNamespace(id=course.id, card_id=card.id)
     finally:
         session.close()
 
@@ -365,6 +398,107 @@ def test_review_queue_scope_keeps_course_wide_counts_unchanged(client):
                 "total_count",
             )
         } == default_counts
+
+
+def test_review_selection_preserves_requested_order_and_includes_not_due(client):
+    review_course = _review_scope_course(client)
+    requested = [review_course.future_id, review_course.new_id, review_course.due_id]
+
+    response = client.post(
+        f"/api/courses/{review_course.id}/review/selection",
+        json={"card_ids": requested},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [card["id"] for card in body["cards"]] == requested
+    assert body["missing_card_ids"] == []
+    cards_by_id = {card["id"]: card for card in body["cards"]}
+    assert cards_by_id[review_course.future_id]["is_due"] is False
+    assert cards_by_id[review_course.future_id]["interval_days"] == 6.0
+    assert cards_by_id[review_course.new_id]["is_new"] is True
+    assert cards_by_id[review_course.due_id]["is_due"] is True
+
+
+def test_review_selection_reports_wrong_course_id_without_metadata(client):
+    review_course = _review_scope_course(client)
+    other_course = _other_review_course()
+    deleted_card_id = f"deleted-card-{uuid.uuid4()}"
+
+    response = client.post(
+        f"/api/courses/{review_course.id}/review/selection",
+        json={"card_ids": [review_course.due_id, other_course.card_id, deleted_card_id]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [card["id"] for card in body["cards"]] == [review_course.due_id]
+    assert body["missing_card_ids"] == [other_course.card_id, deleted_card_id]
+    serialized = json.dumps(body)
+    assert "Other front should not leak" not in serialized
+    assert other_course.id not in serialized
+
+
+def test_review_selection_rejects_empty_duplicate_and_too_many_ids(client):
+    review_course = _review_scope_course(client)
+
+    empty_response = client.post(
+        f"/api/courses/{review_course.id}/review/selection",
+        json={"card_ids": []},
+    )
+    duplicate_response = client.post(
+        f"/api/courses/{review_course.id}/review/selection",
+        json={"card_ids": [review_course.due_id, review_course.due_id]},
+    )
+    too_many_response = client.post(
+        f"/api/courses/{review_course.id}/review/selection",
+        json={"card_ids": [f"card-{index}" for index in range(201)]},
+    )
+
+    assert empty_response.status_code == 422
+    assert duplicate_response.status_code == 422
+    assert too_many_response.status_code == 422
+
+
+def test_review_selection_does_not_mutate_review_state_or_logs(client):
+    review_course = _review_scope_course(client)
+
+    session = get_session()
+    try:
+        before_state = session.get(ReviewState, (review_course.profile_id, review_course.due_id))
+        before = (
+            before_state.due_at,
+            before_state.interval_days,
+            before_state.ease,
+            before_state.reps,
+            before_state.lapses,
+            before_state.last_grade,
+            session.query(ReviewLog).filter_by(card_id=review_course.due_id).count(),
+        )
+    finally:
+        session.close()
+
+    response = client.post(
+        f"/api/courses/{review_course.id}/review/selection",
+        json={"card_ids": [review_course.due_id]},
+    )
+
+    assert response.status_code == 200
+    session = get_session()
+    try:
+        after_state = session.get(ReviewState, (review_course.profile_id, review_course.due_id))
+        after = (
+            after_state.due_at,
+            after_state.interval_days,
+            after_state.ease,
+            after_state.reps,
+            after_state.lapses,
+            after_state.last_grade,
+            session.query(ReviewLog).filter_by(card_id=review_course.due_id).count(),
+        )
+    finally:
+        session.close()
+    assert after == before
 
 
 def test_review_queue_includes_past_due_and_excludes_future_due(client, ingest_course, stub_provider):

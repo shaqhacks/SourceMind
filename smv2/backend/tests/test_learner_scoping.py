@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect
@@ -206,6 +207,72 @@ def test_review_queue_is_scoped_to_requesting_learner(client):
         assert other_learner.cookies.get("smv2_learner") is not None
         assert [card["id"] for card in second_queue.json()["cards"]] == [card_id]
         assert second_queue.json()["cards"][0]["is_new"] is True
+
+
+def test_review_selection_uses_requesting_learners_scheduler_fields(client):
+    course_id, card_id = _seed_card()
+    learner_a = str(uuid.uuid4())
+    learner_b = str(uuid.uuid4())
+    now = utcnow()
+    session = get_session()
+    try:
+        profile_a = ensure_course_learning_profile(session, learner_a, course_id)
+        profile_b = ensure_course_learning_profile(session, learner_b, course_id)
+        session.add_all(
+            [
+                ReviewState(
+                    course_learning_profile_id=profile_a.id,
+                    card_id=card_id,
+                    course_id=course_id,
+                    due_at=now - timedelta(hours=1),
+                    interval_days=1.0,
+                    ease=2.1,
+                    reps=1,
+                    lapses=0,
+                    last_grade=3,
+                ),
+                ReviewState(
+                    course_learning_profile_id=profile_b.id,
+                    card_id=card_id,
+                    course_id=course_id,
+                    due_at=now + timedelta(days=10),
+                    interval_days=10.0,
+                    ease=2.9,
+                    reps=5,
+                    lapses=2,
+                    last_grade=4,
+                ),
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    client.cookies.set("smv2_learner", learner_a)
+    response_a = client.post(
+        f"/api/courses/{course_id}/review/selection",
+        json={"card_ids": [card_id]},
+    )
+    with TestClient(create_app(), cookies={"smv2_learner": learner_b}) as other_learner:
+        response_b = other_learner.post(
+            f"/api/courses/{course_id}/review/selection",
+            json={"card_ids": [card_id]},
+        )
+
+    assert response_a.status_code == 200
+    assert response_b.status_code == 200
+    card_a = response_a.json()["cards"][0]
+    card_b = response_b.json()["cards"][0]
+    assert card_a["is_due"] is True
+    assert card_a["interval_days"] == 1.0
+    assert card_a["ease"] == 2.1
+    assert card_a["reps"] == 1
+    assert card_a["last_grade"] == 3
+    assert card_b["is_due"] is False
+    assert card_b["interval_days"] == 10.0
+    assert card_b["ease"] == 2.9
+    assert card_b["reps"] == 5
+    assert card_b["last_grade"] == 4
 
 
 def test_review_queue_needs_attention_scope_ignores_other_learners_again_state(client):

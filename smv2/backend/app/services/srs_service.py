@@ -125,6 +125,34 @@ def schedule_next(grade: int, *, interval_days: float, ease: float, reps: int) -
     )
 
 
+def _serialize_review_card(
+    card: Card,
+    section: Section,
+    review_state: ReviewState | None,
+    *,
+    now: datetime,
+) -> dict[str, Any]:
+    return {
+        "id": card.id,
+        "section_id": card.section_id,
+        "chapter_label": section.chapter_label,
+        "section_title": section.title,
+        "front_md": card.front_md,
+        "back_md": card.back_md,
+        "due_at": review_state.due_at if review_state else None,
+        "is_new": review_state is None,
+        "is_due": bool(review_state and ensure_utc(review_state.due_at) <= now),
+        "last_grade": review_state.last_grade if review_state else None,
+        # Same bootstrap values grade_card() uses for a card with no
+        # ReviewState yet (see below) — lets a caller run
+        # schedule_next-equivalent math for a preview without a
+        # second lookup.
+        "interval_days": review_state.interval_days if review_state else 0.0,
+        "ease": review_state.ease if review_state else DEFAULT_EASE,
+        "reps": review_state.reps if review_state else 0,
+    }
+
+
 def get_review_queue(
     course_id: str,
     limit: int = 20,
@@ -180,25 +208,7 @@ def get_review_queue(
         )
 
         cards = [
-            {
-                "id": card.id,
-                "section_id": card.section_id,
-                "chapter_label": section.chapter_label,
-                "section_title": section.title,
-                "front_md": card.front_md,
-                "back_md": card.back_md,
-                "due_at": review_state.due_at if review_state else None,
-                "is_new": review_state is None,
-                "is_due": bool(review_state and ensure_utc(review_state.due_at) <= now),
-                "last_grade": review_state.last_grade if review_state else None,
-                # Same bootstrap values grade_card() uses for a card with no
-                # ReviewState yet (see below) — lets a caller run
-                # schedule_next-equivalent math for a preview without a
-                # second lookup.
-                "interval_days": review_state.interval_days if review_state else 0.0,
-                "ease": review_state.ease if review_state else DEFAULT_EASE,
-                "reps": review_state.reps if review_state else 0,
-            }
+            _serialize_review_card(card, section, review_state, now=now)
             for card, section, review_state in rows
         ]
 
@@ -212,6 +222,44 @@ def get_review_queue(
             "new_count": counts.new_count,
             "available_count": counts.available_count,
             "total_count": counts.total_count,
+        }
+    finally:
+        session.close()
+
+
+def get_review_selection(
+    course_id: str,
+    card_ids: list[str],
+    *,
+    learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID,
+) -> dict[str, Any]:
+    session = get_session()
+    try:
+        now = utcnow()
+        course_profile = learner_context.ensure_course_learning_profile(
+            session, learner_id, course_id
+        )
+        rows = (
+            session.query(Card, Section, ReviewState)
+            .join(Section, Section.id == Card.section_id)
+            .outerjoin(
+                ReviewState,
+                and_(
+                    ReviewState.card_id == Card.id,
+                    ReviewState.course_learning_profile_id == course_profile.id,
+                ),
+            )
+            .filter(Card.course_id == course_id, Card.id.in_(card_ids))
+            .all()
+        )
+        cards_by_id = {
+            card.id: _serialize_review_card(card, section, review_state, now=now)
+            for card, section, review_state in rows
+        }
+
+        return {
+            "cards": [cards_by_id[card_id] for card_id in card_ids if card_id in cards_by_id],
+            "missing_card_ids": [card_id for card_id in card_ids if card_id not in cards_by_id],
         }
     finally:
         session.close()
