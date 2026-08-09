@@ -63,14 +63,13 @@ class OllamaProvider(Provider):
         started = _monotonic()
         last_activity = started
         had_activity = False
-        emitted_phases: set[CompletionPhase] = set()
+        current_phase: CompletionPhase = "loading"
         content_parts: list[str] = []
         usage = {"input": 0, "output": 0}
 
         def emit_progress(phase: CompletionPhase) -> None:
-            if phase in emitted_phases:
-                return
-            emitted_phases.add(phase)
+            nonlocal current_phase
+            current_phase = phase
             if options.progress is None:
                 return
             now = _monotonic()
@@ -87,6 +86,9 @@ class OllamaProvider(Provider):
             had_activity = True
             last_activity = _monotonic()
             emit_progress(phase)
+
+        def emit_supervisor_progress() -> None:
+            emit_progress(current_phase)
 
         def check_cancelled() -> None:
             if options.is_cancelled is not None and options.is_cancelled():
@@ -141,6 +143,7 @@ class OllamaProvider(Provider):
                     response.aiter_lines(),
                     content_parts=content_parts,
                     mark_activity=mark_activity,
+                    emit_supervisor_progress=emit_supervisor_progress,
                     check_cancelled=check_cancelled,
                     check_deadlines=check_deadlines,
                     has_activity=lambda: had_activity,
@@ -190,6 +193,7 @@ class OllamaProvider(Provider):
         *,
         content_parts: list[str],
         mark_activity,
+        emit_supervisor_progress,
         check_cancelled,
         check_deadlines,
         has_activity: Callable[[], bool],
@@ -204,6 +208,9 @@ class OllamaProvider(Provider):
                     {pending_line}, timeout=_SUPERVISOR_TICK_SECONDS
                 )
                 if not done:
+                    check_cancelled()
+                    check_deadlines()
+                    emit_supervisor_progress()
                     continue
                 try:
                     line = pending_line.result()

@@ -7,7 +7,6 @@ from typing import Any
 
 import httpx
 import pytest
-
 from app.llm import ollama_provider
 from app.llm.completion_control import (
     CompletionOptions,
@@ -40,6 +39,17 @@ class OneChunkThenHangingBody(httpx.AsyncByteStream):
         yield self._chunk
         await asyncio.sleep(3600)
         yield b""
+
+
+class DelayedStreamingBody(httpx.AsyncByteStream):
+    def __init__(self, steps: list[tuple[float, bytes]]):
+        self._steps = steps
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for delay, chunk in self._steps:
+            if delay:
+                await asyncio.sleep(delay)
+            yield chunk
 
 
 def _line(payload: object) -> bytes:
@@ -108,7 +118,107 @@ def test_ollama_stream_discards_thinking_and_assembles_content(monkeypatch, thin
         assert thinking not in result.text
     assert captured["stream"] is True
     assert captured["format"] == {"type": "array"}
-    assert phases == ["loading", "thinking", "generating", "finalizing"]
+    assert phases[0] == "loading"
+    assert phases[-1] == "finalizing"
+    assert phases.index("thinking") < phases.index("generating")
+
+
+def test_ollama_stream_repeats_same_phase_progress_on_activity_and_supervisor_ticks(monkeypatch):
+    captured: dict[str, Any] = {"requests": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["requests"] += 1
+        return httpx.Response(
+            200,
+            stream=DelayedStreamingBody(
+                [
+                    (
+                        0.0,
+                        _line(
+                            {"message": {"thinking": "private first", "content": ""}, "done": False}
+                        ),
+                    ),
+                    (
+                        0.025,
+                        _line(
+                            {"message": {"thinking": "private second", "content": ""}, "done": False}
+                        ),
+                    ),
+                    (0.0, _line({"message": {"content": "a"}, "done": False})),
+                    (0.025, _line({"message": {"content": "b"}, "done": False})),
+                    (0.0, _line({"done": True, "prompt_eval_count": 1, "eval_count": 2})),
+                ]
+            ),
+            request=request,
+        )
+
+    class MockedAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    events = []
+    monkeypatch.setattr(ollama_provider.httpx, "AsyncClient", MockedAsyncClient)
+    monkeypatch.setattr(ollama_provider, "_SUPERVISOR_TICK_SECONDS", 0.005)
+    monkeypatch.setattr(ollama_provider, "_INACTIVITY_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setenv("SMV2_LLM_MODEL", "llama3.2")
+    provider = OllamaProvider()
+
+    result = provider.complete(
+        [{"role": "user", "content": "make json"}],
+        max_tokens=8,
+        purpose="cards",
+        options=CompletionOptions(progress=events.append),
+    )
+
+    phases = [event.phase for event in events]
+    assert result.text == "ab"
+    assert "private" not in result.text
+    assert captured["requests"] == 1
+    assert phases.count("thinking") >= 3
+    assert phases.count("generating") >= 3
+    assert phases[-1] == "finalizing"
+
+
+def test_ollama_supervisor_progress_does_not_refresh_activity_timeout(monkeypatch):
+    captured: dict[str, Any] = {"requests": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["requests"] += 1
+        return httpx.Response(
+            200,
+            stream=OneChunkThenHangingBody(
+                _line({"message": {"content": "partial"}, "done": False})
+            ),
+            request=request,
+        )
+
+    class MockedAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    events = []
+    monkeypatch.setattr(ollama_provider.httpx, "AsyncClient", MockedAsyncClient)
+    monkeypatch.setattr(ollama_provider, "_SUPERVISOR_TICK_SECONDS", 0.005)
+    monkeypatch.setattr(ollama_provider, "_INACTIVITY_TIMEOUT_SECONDS", 0.025)
+    monkeypatch.setenv("SMV2_LLM_MODEL", "llama3.2")
+    provider = OllamaProvider()
+
+    with pytest.raises(ProviderStreamError) as exc_info:
+        provider.complete(
+            [{"role": "user", "content": "make json"}],
+            max_tokens=8,
+            purpose="cards",
+            options=CompletionOptions(progress=events.append),
+        )
+
+    generating_events = [event for event in events if event.phase == "generating"]
+    assert exc_info.value.category == "ollama_inactivity_timeout"
+    assert exc_info.value.had_activity is True
+    assert captured["requests"] == 1
+    assert len(generating_events) >= 2
+    assert max(event.seconds_since_activity for event in generating_events) > 0.0
 
 
 def test_ollama_stream_rejects_malformed_lines_without_leaking_provider_data(monkeypatch):
