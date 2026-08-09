@@ -473,10 +473,14 @@ class UpdateCardIn(BaseModel):
 class ReviewQueueCardOut(BaseModel):
     id: str
     section_id: str
+    chapter_label: str | None
+    section_title: str
     front_md: str
     back_md: str
     due_at: datetime | None
     is_new: bool
+    is_due: bool
+    last_grade: int | None
     # Scheduler state going INTO the next grade (srs_service.schedule_next's
     # own convention) — a new card (is_new=True) gets the same bootstrap
     # values grade_card() uses when it has no ReviewState yet. Exposed so

@@ -31,7 +31,15 @@ from typing import Any
 from sqlalchemy import and_, func
 
 from app.db.engine import get_session
-from app.db.models import Card, Course, ReviewLog, ReviewState, utcnow
+from app.db.models import (
+    Card,
+    Course,
+    ReviewLog,
+    ReviewState,
+    Section,
+    ensure_utc,
+    utcnow,
+)
 from app.services import evidence_items_service, evidence_service, learner_context
 from app.services.review_availability_service import get_review_availability
 
@@ -122,6 +130,8 @@ def get_review_queue(
     limit: int = 20,
     *,
     learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID,
+    scope: str = "available",
+    chapter_label: str | None = None,
 ) -> dict[str, Any]:
     """due cards: ReviewState.due_at <= now OR no ReviewState yet (new).
     Ordered by COALESCE(due_at, created_at) then created_at — a fully
@@ -139,8 +149,9 @@ def get_review_queue(
         )
         order_key = func.coalesce(ReviewState.due_at, Card.created_at)
 
-        rows = (
+        query = (
             session.query(Card, ReviewState)
+            .join(Section, Section.id == Card.section_id)
             .outerjoin(
                 ReviewState,
                 and_(
@@ -149,8 +160,17 @@ def get_review_queue(
                 ),
             )
             .filter(Card.course_id == course_id)
-            .filter((ReviewState.due_at.is_(None)) | (ReviewState.due_at <= now))
-            .order_by(order_key.asc(), Card.created_at.asc())
+        )
+        if chapter_label is not None:
+            query = query.filter(Section.chapter_label == chapter_label)
+        if scope == "available":
+            query = query.filter((ReviewState.card_id.is_(None)) | (ReviewState.due_at <= now))
+        elif scope == "needs_attention":
+            query = query.filter(ReviewState.last_grade == AGAIN)
+
+        rows = (
+            query.with_entities(Card, Section, ReviewState)
+            .order_by(order_key.asc(), Card.created_at.asc(), Card.id.asc())
             .limit(limit)
             .all()
         )
@@ -159,10 +179,14 @@ def get_review_queue(
             {
                 "id": card.id,
                 "section_id": card.section_id,
+                "chapter_label": section.chapter_label,
+                "section_title": section.title,
                 "front_md": card.front_md,
                 "back_md": card.back_md,
                 "due_at": review_state.due_at if review_state else None,
                 "is_new": review_state is None,
+                "is_due": bool(review_state and ensure_utc(review_state.due_at) <= now),
+                "last_grade": review_state.last_grade if review_state else None,
                 # Same bootstrap values grade_card() uses for a card with no
                 # ReviewState yet (see below) — lets a caller run
                 # schedule_next-equivalent math for a preview without a
@@ -171,7 +195,7 @@ def get_review_queue(
                 "ease": review_state.ease if review_state else DEFAULT_EASE,
                 "reps": review_state.reps if review_state else 0,
             }
-            for card, review_state in rows
+            for card, section, review_state in rows
         ]
 
         counts = get_review_availability(session, course_id, learner_id, now=now)

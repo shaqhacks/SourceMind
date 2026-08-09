@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import uuid
 
-from sqlalchemy import inspect
 from fastapi.testclient import TestClient
+from sqlalchemy import inspect
 
 from app.db.engine import get_engine, get_session
 from app.db.models import (
@@ -22,9 +22,9 @@ from app.db.models import (
     TestAttempt,
     utcnow,
 )
-from app.main import create_app
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
+from app.main import create_app
 from app.services.learner_context import ensure_course_learning_profile
 
 
@@ -208,6 +208,24 @@ def test_review_queue_is_scoped_to_requesting_learner(client):
         assert second_queue.json()["cards"][0]["is_new"] is True
 
 
+def test_review_queue_needs_attention_scope_ignores_other_learners_again_state(client):
+    course_id, card_id = _seed_card()
+
+    with TestClient(create_app()) as other_learner:
+        assert other_learner.post(
+            f"/api/cards/{card_id}/grade", json={"grade": 1}
+        ).status_code == 200
+        assert other_learner.cookies.get("smv2_learner") != client.cookies.get("smv2_learner")
+
+    response = client.get(
+        f"/api/courses/{course_id}/review/queue",
+        params={"scope": "needs_attention"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["cards"] == []
+
+
 def test_two_learners_create_independently_owned_quiz_attempts(client):
     _course_id, test_id = _seed_test()
 
@@ -377,7 +395,7 @@ def test_skill_map_ignores_legacy_mastery_rows_for_every_learner(client):
 
 
 def test_practice_submission_uses_shared_course_learning_profile(client):
-    course_id, section_id, question_id = _seed_practice_question()
+    course_id, _section_id, question_id = _seed_practice_question()
 
     response = client.post(
         f"/api/courses/{course_id}/practice-questions/{question_id}/answer",

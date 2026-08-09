@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from app.schemas import GradeCardIn, GradeCardOut, ReviewQueueOut, ReviewSummaryOut
@@ -16,12 +18,20 @@ def review_queue(
     request: Request,
     response: Response,
     limit: int = Query(default=20, ge=1, le=200),
+    scope: Literal["available", "all", "needs_attention"] = "available",
+    chapter_label: str | None = None,
 ) -> ReviewQueueOut:
     if courses_service.get_course(course_id) is None:
         raise HTTPException(status_code=404, detail="course not found")
     learner_id = learner_context.ensure_learner_key(request, response)
     return ReviewQueueOut.model_validate(
-        srs_service.get_review_queue(course_id, limit, learner_id=learner_id)
+        srs_service.get_review_queue(
+            course_id,
+            limit,
+            learner_id=learner_id,
+            scope=scope,
+            chapter_label=chapter_label,
+        )
     )
 
 
