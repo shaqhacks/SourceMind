@@ -33,6 +33,7 @@ function makeSummary(overrides: Partial<ReviewSummaryOut> = {}): ReviewSummaryOu
             new_count: 0,
             available_count: dueTotal,
             total_count: dueTotal,
+            needs_attention_count: 0,
           },
         ]
       : []);

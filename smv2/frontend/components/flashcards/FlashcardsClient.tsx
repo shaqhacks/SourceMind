@@ -10,18 +10,21 @@ import EmptyState from "@/components/ui/EmptyState";
 import Skeleton from "@/components/ui/Skeleton";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
-  getReviewQueue,
+  getReviewSelection,
+  getReviewSummary,
   listCards,
   listChapters,
   listCourses,
   MAX_QUEUE_FETCH,
   type CardOut,
+  type CourseReviewSummaryOut,
   type ChapterOut,
   type CourseOut,
   type ReviewQueueCardOut,
 } from "@/lib/api/client";
 import { subscribeCardsSettled } from "@/lib/cards/cardsBus";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
+import { subscribeReviewSettled } from "@/lib/review/reviewBus";
 
 type CoursesState =
   | { kind: "loading" }
@@ -35,8 +38,8 @@ type CourseDataState =
       kind: "ready";
       chapters: ChapterOut[];
       cardsBySection: Record<string, CardOut[]>;
-      dueCards: ReviewQueueCardOut[];
-      totalCards: number;
+      reviewCards: ReviewQueueCardOut[];
+      reviewSummary: CourseReviewSummaryOut | null;
     };
 
 /** Cards live on a chapter's own content sections (ChapterOut.section_ids)
@@ -61,15 +64,15 @@ function dueCountForChapter(
 }
 
 async function loadCourseData(courseId: string): Promise<CourseDataState> {
-  const [chaptersResult, queueResult] = await Promise.all([
+  const [chaptersResult, summaryResult] = await Promise.all([
     listChapters(courseId),
-    getReviewQueue(courseId, { scope: "all", limit: MAX_QUEUE_FETCH }),
+    getReviewSummary(),
   ]);
   if (!chaptersResult.data) {
     return { kind: "error", error: describeError(chaptersResult.status, "Loading chapters") };
   }
-  if (!queueResult.data) {
-    return { kind: "error", error: describeError(queueResult.status, "Loading review queue") };
+  if (!summaryResult.data) {
+    return { kind: "error", error: describeError(summaryResult.status, "Loading review summary") };
   }
 
   // Front matter (null chapter_label) has nothing to study/link, same
@@ -86,14 +89,34 @@ async function loadCourseData(courseId: string): Promise<CourseDataState> {
   sectionIds.forEach((id, index) => {
     cardsBySection[id] = cardsResults[index].data ?? [];
   });
+  const cardIds = Object.values(cardsBySection).flatMap((cards) => cards.map((card) => card.id));
+  const selectionResults = await Promise.all(
+    chunk(cardIds, MAX_QUEUE_FETCH).map((ids) => getReviewSelection(courseId, ids)),
+  );
+  const failedSelection = selectionResults.find((result) => !result.data);
+  if (failedSelection) {
+    return {
+      kind: "error",
+      error: describeError(failedSelection.status, "Loading review metadata"),
+    };
+  }
 
   return {
     kind: "ready",
     chapters,
     cardsBySection,
-    dueCards: queueResult.data.cards,
-    totalCards: queueResult.data.total_count,
+    reviewCards: selectionResults.flatMap((result) => result.data?.cards ?? []),
+    reviewSummary:
+      summaryResult.data.courses.find((course) => course.course_id === courseId) ?? null,
   };
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 /** courseData tagged with the course it belongs to — the same "derive
@@ -196,6 +219,12 @@ export default function FlashcardsClient() {
     });
   }, [selectedCourseId]);
 
+  useEffect(() => {
+    return subscribeReviewSettled(() => {
+      if (selectedCourseId) reloadCourseData(selectedCourseId);
+    });
+  }, [selectedCourseId]);
+
   if (coursesState.kind === "loading") {
     return (
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-8 py-10">
@@ -254,15 +283,14 @@ export default function FlashcardsClient() {
       : { kind: "loading" };
   const dueById =
     courseData.kind === "ready"
-      ? new Map(courseData.dueCards.map((card) => [card.id, card]))
+      ? new Map(courseData.reviewCards.map((card) => [card.id, card]))
       : new Map<string, ReviewQueueCardOut>();
-  const cardMetadata = courseData.kind === "ready" ? courseData.dueCards : null;
-  const totalCards = courseData.kind === "ready" ? courseData.totalCards : null;
-  const dueCards = cardMetadata ? cardMetadata.filter((card) => card.is_due).length : null;
-  const newCards = cardMetadata ? cardMetadata.filter((card) => card.is_new).length : null;
-  const needsAttentionCards = cardMetadata
-    ? cardMetadata.filter((card) => card.last_grade === 1).length
-    : null;
+  const selectedCourseReviewSummary =
+    courseData.kind === "ready" ? courseData.reviewSummary : null;
+  const totalCards = selectedCourseReviewSummary?.total_count ?? null;
+  const dueCards = selectedCourseReviewSummary?.overdue_count ?? null;
+  const newCards = selectedCourseReviewSummary?.new_count ?? null;
+  const needsAttentionCards = selectedCourseReviewSummary?.needs_attention_count ?? null;
 
   const browsedChapter =
     courseData.kind === "ready"

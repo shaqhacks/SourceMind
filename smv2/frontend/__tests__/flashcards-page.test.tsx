@@ -8,18 +8,23 @@ import {
   generateCards,
   getJob,
   getReviewQueue,
+  getReviewSelection,
   getReviewSummary,
   listCards,
   listChapters,
   listCourses,
+  type ApiResult,
   type CardOut,
   type ChapterOut,
   type CourseOut,
   type JobOut,
   type ReviewQueueCardOut,
   type ReviewQueueOut,
+  type ReviewSelectionOut,
   type ReviewSummaryOut,
 } from "@/lib/api/client";
+import { gradeCardAndNotify } from "@/lib/review/gradeCardAndNotify";
+import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 import { err, ok } from "./support/api-result";
 import { FakeEventSource } from "./support/fake-event-source";
@@ -32,10 +37,15 @@ vi.mock("@/lib/api/client", () => ({
   listChapters: vi.fn(),
   listCards: vi.fn(),
   getReviewQueue: vi.fn(),
+  getReviewSelection: vi.fn(),
   getReviewSummary: vi.fn(),
   generateCards: vi.fn(),
   findActiveCardsJob: vi.fn(),
   getJob: vi.fn(),
+}));
+
+vi.mock("@/lib/review/gradeCardAndNotify", () => ({
+  gradeCardAndNotify: vi.fn(),
 }));
 
 const mockedListCourses = vi.mocked(listCourses);
@@ -46,6 +56,8 @@ const mockedGetReviewSummary = vi.mocked(getReviewSummary);
 const mockedGenerateCards = vi.mocked(generateCards);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 const mockedGetJob = vi.mocked(getJob);
+const mockedGetReviewSelection = vi.mocked(getReviewSelection);
+const mockedGradeCardAndNotify = vi.mocked(gradeCardAndNotify);
 
 function makeCourse(overrides: Partial<CourseOut> = {}): CourseOut {
   return {
@@ -121,6 +133,22 @@ function makeQueue(overrides: Partial<ReviewQueueOut> = {}): ReviewQueueOut {
     total_count: total,
     ...overrides,
   };
+}
+
+function makeSelection(overrides: Partial<ReviewSelectionOut> = {}): ReviewSelectionOut {
+  return {
+    cards: [],
+    missing_card_ids: [],
+    ...overrides,
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 function makeSummary(overrides: Partial<ReviewSummaryOut> = {}): ReviewSummaryOut {
@@ -231,6 +259,49 @@ function setUpHappyPathMocks() {
       total_count: 4,
     })),
   );
+  mockedGetReviewSelection.mockResolvedValue(
+    ok(
+      makeSelection({
+        cards: [
+          makeQueueCard({
+            id: "card-a",
+            section_id: "sec-1",
+            due_at: "2026-01-01T00:00:00Z",
+            is_new: false,
+            is_due: true,
+            interval_days: 1.0,
+            reps: 1,
+          }),
+          makeQueueCard({ id: "card-b", section_id: "sec-1", due_at: null, is_new: true }),
+          makeQueueCard({
+            id: "card-c",
+            section_id: "sec-1",
+            front_md: "What is the Krebs cycle?",
+            back_md: "A series of reactions that releases stored energy.",
+            due_at: "2026-03-01T00:00:00Z",
+            is_new: false,
+            is_due: false,
+            interval_days: 8,
+            reps: 2,
+            last_grade: 3,
+          }),
+          makeQueueCard({
+            id: "card-d",
+            section_id: "sec-3",
+            front_md: "Why take breaks?",
+            back_md: "Breaks reduce fatigue and improve recall.",
+            due_at: "2026-03-01T00:00:00Z",
+            is_new: false,
+            is_due: false,
+            interval_days: 4,
+            reps: 1,
+            chapter_label: "Study Habits",
+            last_grade: 1,
+          }),
+        ],
+      }),
+    ),
+  );
   mockedGetReviewSummary.mockResolvedValue(
     ok(
       makeSummary({
@@ -242,13 +313,18 @@ function setUpHappyPathMocks() {
             overdue_count: 1,
             new_count: 1,
             available_count: 2,
-            total_count: 2,
+            total_count: 4,
+            needs_attention_count: 1,
           },
         ],
       }),
     ),
   );
   mockedFindActiveCardsJob.mockResolvedValue(null);
+  mockedGradeCardAndNotify.mockImplementation(async () => {
+    notifyReviewSettled();
+    return ok({ next_due_at: "2026-08-10T00:00:00Z", remaining_due: 0 });
+  });
 }
 
 describe("FlashcardsClient", () => {
@@ -284,7 +360,14 @@ describe("FlashcardsClient", () => {
       "href",
       "/review?course=course-1&scope=needs_attention",
     );
-    expect(mockedGetReviewQueue).toHaveBeenCalledWith("course-1", { scope: "all", limit: 200 });
+    expect(mockedGetReviewSummary).toHaveBeenCalledTimes(1);
+    expect(mockedGetReviewSelection).toHaveBeenCalledWith("course-1", [
+      "card-a",
+      "card-b",
+      "card-c",
+      "card-d",
+    ]);
+    expect(mockedGetReviewQueue).not.toHaveBeenCalled();
 
     // Front matter (null chapter_label) never renders.
     expect(screen.queryByText(/front matter/i)).not.toBeInTheDocument();
@@ -331,11 +414,220 @@ describe("FlashcardsClient", () => {
 
     expect(await screen.findByText("Why take breaks?")).toBeInTheDocument();
     expect(screen.queryByText("What is a mitochondria?")).not.toBeInTheDocument();
-    // card-d is a user-added card not present in the review queue at all.
+    // card-d is user-added and currently marked Again in the exact selection metadata.
     const item = screen.getByText("Why take breaks?").closest("li")!;
     expect(within(item).getByText("User-added")).toBeInTheDocument();
     expect(within(item).getByText("Not due yet")).toBeInTheDocument();
     expect(within(item).getByText("Needs attention")).toBeInTheDocument();
+  });
+
+  it("uses exact summary counts and batches visible-card metadata beyond 200 cards", async () => {
+    const manyCards = Array.from({ length: 201 }, (_, index) =>
+      makeCard({
+        id: `card-${index + 1}`,
+        section_id: "sec-1",
+        front_md: index === 200 ? "Outside cap" : `Card ${index + 1}`,
+      }),
+    );
+    mockedListCourses.mockResolvedValue(ok([makeCourse()]));
+    mockedListChapters.mockResolvedValue(ok([chapter1]));
+    mockedListCards.mockResolvedValue(ok(manyCards));
+    mockedGetReviewSummary.mockResolvedValue(
+      ok(
+        makeSummary({
+          courses: [
+            {
+              course_id: "course-1",
+              title: "Course One",
+              due_count: 1,
+              overdue_count: 1,
+              new_count: 200,
+              available_count: 201,
+              total_count: 201,
+              needs_attention_count: 1,
+            },
+          ],
+        }),
+      ),
+    );
+    mockedGetReviewQueue.mockResolvedValue(
+      ok(
+        makeQueue({
+          cards: manyCards.slice(0, 200).map((card) =>
+            makeQueueCard({
+              id: card.id,
+              front_md: card.front_md,
+              back_md: card.back_md,
+              is_new: true,
+            }),
+          ),
+          total_count: 201,
+        }),
+      ),
+    );
+    mockedGetReviewSelection.mockImplementation((_courseId, cardIds) =>
+      Promise.resolve(
+        ok(
+          makeSelection({
+            cards: cardIds.map((id) =>
+              makeQueueCard({
+                id,
+                front_md: id === "card-201" ? "Outside cap" : id,
+                back_md: id === "card-201" ? "Outside cap answer" : `${id} answer`,
+                is_new: id !== "card-201",
+                is_due: id === "card-201",
+                last_grade: id === "card-201" ? 1 : null,
+              }),
+            ),
+          }),
+        ),
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<FlashcardsClient />);
+
+    expect(await screen.findByText("201 total · 1 due · 200 new · 1 needs attention")).toBeInTheDocument();
+    expect(mockedGetReviewQueue).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockedGetReviewSelection).toHaveBeenCalledTimes(2));
+    expect(mockedGetReviewSelection.mock.calls[0][1]).toHaveLength(200);
+    expect(mockedGetReviewSelection.mock.calls[1][1]).toEqual(["card-201"]);
+    for (const [, cardIds] of mockedGetReviewSelection.mock.calls) {
+      expect(cardIds.length).toBeLessThanOrEqual(200);
+    }
+
+    const item = screen.getByText("Outside cap").closest("li")!;
+    expect(within(item).getByText("Due now")).toBeInTheDocument();
+    expect(within(item).getByText("Needs attention")).toBeInTheDocument();
+
+    await user.click(within(item).getByRole("button", { name: /show answer/i }));
+
+    expect(within(item).getByRole("group", { name: /grade flashcard/i })).toBeInTheDocument();
+  });
+
+  it("refreshes summary and visible metadata after inline grading", async () => {
+    setUpHappyPathMocks();
+    mockedGetReviewSummary
+      .mockResolvedValueOnce(
+        ok(
+          makeSummary({
+            courses: [
+              {
+                course_id: "course-1",
+                title: "Course One",
+                due_count: 1,
+                overdue_count: 1,
+                new_count: 1,
+                available_count: 2,
+                total_count: 4,
+                needs_attention_count: 1,
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValue(
+        ok(
+          makeSummary({
+            courses: [
+              {
+                course_id: "course-1",
+                title: "Course One",
+                due_count: 0,
+                overdue_count: 0,
+                new_count: 1,
+                available_count: 1,
+                total_count: 4,
+                needs_attention_count: 0,
+              },
+            ],
+          }),
+        ),
+      );
+    mockedGetReviewSelection
+      .mockResolvedValueOnce(
+        ok(
+          makeSelection({
+            cards: [
+              makeQueueCard({
+                id: "card-a",
+                section_id: "sec-1",
+                is_new: false,
+                is_due: true,
+              }),
+              makeQueueCard({ id: "card-b", section_id: "sec-1", is_new: true }),
+              makeQueueCard({
+                id: "card-c",
+                section_id: "sec-1",
+                front_md: "What is the Krebs cycle?",
+                is_new: false,
+                is_due: false,
+                last_grade: 3,
+              }),
+              makeQueueCard({
+                id: "card-d",
+                section_id: "sec-3",
+                front_md: "Why take breaks?",
+                back_md: "Breaks reduce fatigue and improve recall.",
+                is_new: false,
+                is_due: true,
+                chapter_label: "Study Habits",
+                last_grade: 1,
+              }),
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValue(
+        ok(
+          makeSelection({
+            cards: [
+              makeQueueCard({
+                id: "card-a",
+                section_id: "sec-1",
+                is_new: false,
+                is_due: false,
+                last_grade: 3,
+              }),
+              makeQueueCard({ id: "card-b", section_id: "sec-1", is_new: true }),
+              makeQueueCard({
+                id: "card-c",
+                section_id: "sec-1",
+                front_md: "What is the Krebs cycle?",
+                is_new: false,
+                is_due: false,
+                last_grade: 3,
+              }),
+              makeQueueCard({
+                id: "card-d",
+                section_id: "sec-3",
+                front_md: "Why take breaks?",
+                back_md: "Breaks reduce fatigue and improve recall.",
+                is_new: false,
+                is_due: false,
+                chapter_label: "Study Habits",
+                last_grade: 3,
+              }),
+            ],
+          }),
+        ),
+      );
+    const user = userEvent.setup();
+    render(<FlashcardsClient />);
+
+    await screen.findByText("4 total · 1 due · 1 new · 1 needs attention");
+    const chapter3Card = screen.getByText("Study Habits").closest("div")!;
+    await user.click(within(chapter3Card).getByRole("button", { name: /browse/i }));
+    const item = await screen.findByText("Why take breaks?").then((node) => node.closest("li")!);
+    expect(within(item).getByText("Needs attention")).toBeInTheDocument();
+
+    await user.click(within(item).getByRole("button", { name: /show answer/i }));
+    await user.click(within(item).getByRole("button", { name: /good/i }));
+
+    expect(await screen.findByText("4 total · 0 due · 1 new · 0 needs attention")).toBeInTheDocument();
+    await waitFor(() => expect(mockedGetReviewSelection).toHaveBeenCalledTimes(2));
+    const refreshedItem = screen.getByText("Why take breaks?").closest("li")!;
+    expect(within(refreshedItem).queryByText("Needs attention")).not.toBeInTheDocument();
   });
 
   it("generating cards for an empty chapter runs the job and the chapter gains cards on settle", async () => {
@@ -425,6 +717,88 @@ describe("FlashcardsClient", () => {
     expect(mockedListChapters).toHaveBeenCalledWith("course-2");
   });
 
+  it("ignores stale prior-course summary and metadata responses after a course switch", async () => {
+    const courseTwo = makeCourse({ id: "course-2", title: "Course Two" });
+    const courseOneChapters = deferred<ApiResult<ChapterOut[]>>();
+    mockedListCourses.mockResolvedValue(ok([makeCourse(), courseTwo]));
+    mockedListChapters.mockImplementation((courseId: string) => {
+      if (courseId === "course-1") return courseOneChapters.promise;
+      return Promise.resolve(
+        ok([makeChapter({ chapter_label: "Course Two Chapter", section_ids: ["sec-9"] })]),
+      );
+    });
+    mockedListCards.mockImplementation((sectionId: string) => {
+      if (sectionId === "sec-1") return Promise.resolve(ok([cardA]));
+      if (sectionId === "sec-9") {
+        return Promise.resolve(
+          ok([makeCard({ id: "card-9", section_id: "sec-9", front_md: "Course Two card" })]),
+        );
+      }
+      return Promise.resolve(ok([]));
+    });
+    mockedGetReviewSummary.mockResolvedValue(
+      ok(
+        makeSummary({
+          courses: [
+            {
+              course_id: "course-1",
+              title: "Course One",
+              due_count: 1,
+              overdue_count: 1,
+              new_count: 0,
+              available_count: 1,
+              total_count: 1,
+              needs_attention_count: 1,
+            },
+            {
+              course_id: "course-2",
+              title: "Course Two",
+              due_count: 0,
+              overdue_count: 0,
+              new_count: 1,
+              available_count: 1,
+              total_count: 1,
+              needs_attention_count: 0,
+            },
+          ],
+        }),
+      ),
+    );
+    mockedGetReviewSelection.mockImplementation((courseId, cardIds) =>
+      Promise.resolve(
+        ok(
+          makeSelection({
+            cards: cardIds.map((id) =>
+              makeQueueCard({
+                id,
+                section_id: courseId === "course-2" ? "sec-9" : "sec-1",
+                front_md: courseId === "course-2" ? "Course Two card" : "Course One stale card",
+                is_new: courseId === "course-2",
+                is_due: courseId === "course-1",
+                last_grade: courseId === "course-1" ? 1 : null,
+              }),
+            ),
+          }),
+        ),
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(<FlashcardsClient />);
+
+    await user.click(await screen.findByRole("tab", { name: "Course Two" }));
+
+    expect(await screen.findByText("Course Two Chapter")).toBeInTheDocument();
+    expect(await screen.findByText("1 total · 0 due · 1 new · 0 needs attention")).toBeInTheDocument();
+
+    courseOneChapters.resolve(ok([chapter1]));
+
+    await waitFor(() => expect(screen.getByText("Course Two Chapter")).toBeInTheDocument());
+    expect(screen.queryByText("Cell Biology Basics")).not.toBeInTheDocument();
+    expect(screen.queryByText("Course One stale card")).not.toBeInTheDocument();
+    expect(screen.getByText("1 total · 0 due · 1 new · 0 needs attention")).toBeInTheDocument();
+  });
+
   it("shows an error banner with a working retry when courses fail to load", async () => {
     mockedListCourses.mockResolvedValueOnce(err(500)).mockResolvedValueOnce(ok([makeCourse()]));
     mockedListChapters.mockResolvedValue(ok([chapter1]));
@@ -443,20 +817,37 @@ describe("FlashcardsClient", () => {
     expect(await screen.findByText("Cell Biology Basics")).toBeInTheDocument();
   });
 
-  it("shows an error banner with a working retry when the review queue fails to load", async () => {
+  it("shows an error banner with a working retry when review metadata fails to load", async () => {
     mockedListCourses.mockResolvedValue(ok([makeCourse()]));
     mockedListChapters.mockResolvedValue(ok([chapter1]));
     mockedListCards.mockResolvedValue(ok([cardA]));
-    mockedGetReviewQueue
+    mockedGetReviewSelection
       .mockResolvedValueOnce(err(500))
-      .mockResolvedValueOnce(ok(makeQueue({ total: 1 })));
-    mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
+      .mockResolvedValueOnce(ok(makeSelection({ cards: [makeQueueCard({ id: "card-a" })] })));
+    mockedGetReviewSummary.mockResolvedValue(
+      ok(
+        makeSummary({
+          courses: [
+            {
+              course_id: "course-1",
+              title: "Course One",
+              due_count: 0,
+              overdue_count: 0,
+              new_count: 1,
+              available_count: 1,
+              total_count: 1,
+              needs_attention_count: 0,
+            },
+          ],
+        }),
+      ),
+    );
 
     const user = userEvent.setup();
     render(<FlashcardsClient />);
 
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/loading review queue failed/i);
+    expect(banner).toHaveTextContent(/loading review metadata failed/i);
 
     await user.click(within(banner).getByRole("button", { name: /retry/i }));
 

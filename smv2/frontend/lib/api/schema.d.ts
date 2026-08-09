@@ -1495,6 +1495,8 @@ export interface components {
             course_id: string;
             /** Due Count */
             due_count: number;
+            /** Needs Attention Count */
+            needs_attention_count: number;
             /** New Count */
             new_count: number;
             /** Overdue Count */

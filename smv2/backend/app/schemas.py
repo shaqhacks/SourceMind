@@ -564,6 +564,7 @@ class CourseReviewSummaryOut(BaseModel):
     new_count: int
     available_count: int
     total_count: int
+    needs_attention_count: int
 
 
 class ReviewSummaryOut(BaseModel):

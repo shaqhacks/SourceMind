@@ -585,6 +585,10 @@
             "title": "Due Count",
             "type": "integer"
           },
+          "needs_attention_count": {
+            "title": "Needs Attention Count",
+            "type": "integer"
+          },
           "new_count": {
             "title": "New Count",
             "type": "integer"
@@ -609,7 +613,8 @@
           "overdue_count",
           "new_count",
           "available_count",
-          "total_count"
+          "total_count",
+          "needs_attention_count"
         ],
         "title": "CourseReviewSummaryOut",
         "type": "object"

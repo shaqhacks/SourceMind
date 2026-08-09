@@ -6,7 +6,6 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-
 from app.db.engine import get_session
 from app.db.models import (
     Card,
@@ -568,6 +567,7 @@ def test_review_queue_and_summary_contract_require_canonical_counts(client):
             "available_count",
             "total_count",
         }.issubset(required)
+    assert "needs_attention_count" in components["CourseReviewSummaryOut"]["required"]
 
 
 def test_review_queue_respects_limit(client, ingest_course, stub_provider):
@@ -678,6 +678,22 @@ def test_review_summary_aggregates_across_courses(client, ingest_course, stub_pr
     assert matching[0]["new_count"] == 2
     assert matching[0]["available_count"] == 2
     assert matching[0]["total_count"] == 2
+    assert matching[0]["needs_attention_count"] == 0
+
+
+def test_review_summary_counts_needs_attention_exactly_beyond_queue_limit(client):
+    review_course = _review_scope_course(client)
+
+    response = client.get("/api/review/summary")
+
+    assert response.status_code == 200
+    course_summary = next(
+        course for course in response.json()["courses"] if course["course_id"] == review_course.id
+    )
+    assert course_summary["total_count"] == 6
+    assert course_summary["overdue_count"] == 1
+    assert course_summary["new_count"] == 2
+    assert course_summary["needs_attention_count"] == 1
 
 
 def test_review_summary_backlog_warning_flags_large_backlog(client, ingest_course, stub_provider):

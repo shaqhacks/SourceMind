@@ -374,6 +374,15 @@ def get_review_summary(
             )
             course_profile_ids.append(course_profile.id)
             counts = get_review_availability(session, course.id, learner_id, now=now)
+            needs_attention_count = (
+                session.query(ReviewState)
+                .filter(
+                    ReviewState.course_learning_profile_id == course_profile.id,
+                    ReviewState.course_id == course.id,
+                    ReviewState.last_grade == AGAIN,
+                )
+                .count()
+            )
             per_course.append(
                 {
                     "course_id": course.id,
@@ -383,6 +392,7 @@ def get_review_summary(
                     "new_count": counts.new_count,
                     "available_count": counts.available_count,
                     "total_count": counts.total_count,
+                    "needs_attention_count": needs_attention_count,
                 }
             )
             due_total += counts.overdue_count

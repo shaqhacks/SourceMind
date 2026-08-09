@@ -99,6 +99,7 @@ describe("AppSidebar", () => {
             new_count: 6,
             available_count: 10,
             total_count: 10,
+            needs_attention_count: 0,
           },
         ],
       },

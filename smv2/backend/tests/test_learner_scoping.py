@@ -4,9 +4,6 @@ import json
 import uuid
 from datetime import timedelta
 
-from fastapi.testclient import TestClient
-from sqlalchemy import inspect
-
 from app.db.engine import get_engine, get_session
 from app.db.models import (
     Card,
@@ -27,6 +24,8 @@ from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from app.main import create_app
 from app.services.learner_context import ensure_course_learning_profile
+from fastapi.testclient import TestClient
+from sqlalchemy import inspect
 
 
 def _seed_card() -> tuple[str, str]:
@@ -291,6 +290,24 @@ def test_review_queue_needs_attention_scope_ignores_other_learners_again_state(c
 
     assert response.status_code == 200
     assert response.json()["cards"] == []
+
+
+def test_review_summary_needs_attention_count_ignores_other_learners_again_state(client):
+    course_id, card_id = _seed_card()
+
+    with TestClient(create_app()) as other_learner:
+        assert other_learner.post(
+            f"/api/cards/{card_id}/grade", json={"grade": 1}
+        ).status_code == 200
+        assert other_learner.cookies.get("smv2_learner") != client.cookies.get("smv2_learner")
+
+    response = client.get("/api/review/summary")
+
+    assert response.status_code == 200
+    course_summary = next(
+        course for course in response.json()["courses"] if course["course_id"] == course_id
+    )
+    assert course_summary["needs_attention_count"] == 0
 
 
 def test_two_learners_create_independently_owned_quiz_attempts(client):

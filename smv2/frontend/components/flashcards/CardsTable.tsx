@@ -9,9 +9,8 @@ import type { CardOut, ReviewQueueCardOut } from "@/lib/api/client";
 export interface CardsTableProps {
   chapterTitle: string;
   cards: CardOut[];
-  /** This course's all-card queue (getReviewQueue scope=all), keyed by card
-   * id — the only source of scheduler state, since CardOut itself carries
-   * none. */
+  /** Exact review-selection metadata for the loaded cards, keyed by card id
+   * — the only source of scheduler state, since CardOut itself carries none. */
   dueCardsById: Map<string, ReviewQueueCardOut>;
 }
 
