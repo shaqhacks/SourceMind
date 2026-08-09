@@ -544,6 +544,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/review/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Review Selection */
+        post: operations["review_selection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/search": {
         parameters: {
             query?: never;
@@ -2373,6 +2390,8 @@ export interface components {
         ReviewQueueCardOut: {
             /** Back Md */
             back_md: string;
+            /** Chapter Label */
+            chapter_label: string | null;
             /** Due At */
             due_at: string | null;
             /** Ease */
@@ -2383,12 +2402,18 @@ export interface components {
             id: string;
             /** Interval Days */
             interval_days: number;
+            /** Is Due */
+            is_due: boolean;
             /** Is New */
             is_new: boolean;
+            /** Last Grade */
+            last_grade: number | null;
             /** Reps */
             reps: number;
             /** Section Id */
             section_id: string;
+            /** Section Title */
+            section_title: string;
         };
         /** ReviewQueueOut */
         ReviewQueueOut: {
@@ -2408,6 +2433,18 @@ export interface components {
             total: number;
             /** Total Count */
             total_count: number;
+        };
+        /** ReviewSelectionIn */
+        ReviewSelectionIn: {
+            /** Card Ids */
+            card_ids: string[];
+        };
+        /** ReviewSelectionOut */
+        ReviewSelectionOut: {
+            /** Cards */
+            cards: components["schemas"]["ReviewQueueCardOut"][];
+            /** Missing Card Ids */
+            missing_card_ids: string[];
         };
         /** ReviewSummaryOut */
         ReviewSummaryOut: {
@@ -4207,6 +4244,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                scope?: "available" | "all" | "needs_attention";
+                chapter_label?: string | null;
             };
             header?: never;
             path: {
@@ -4223,6 +4262,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewQueueOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_selection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewSelectionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSelectionOut"];
                 };
             };
             /** @description Validation Error */

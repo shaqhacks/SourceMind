@@ -45,6 +45,8 @@ export type UpdateCardIn = components["schemas"]["UpdateCardIn"];
 export type GenerateCardsOut = components["schemas"]["GenerateCardsOut"];
 export type ReviewQueueOut = components["schemas"]["ReviewQueueOut"];
 export type ReviewQueueCardOut = components["schemas"]["ReviewQueueCardOut"];
+export type ReviewSelectionIn = components["schemas"]["ReviewSelectionIn"];
+export type ReviewSelectionOut = components["schemas"]["ReviewSelectionOut"];
 export type AdaptiveStudyActivityOut = components["schemas"]["AdaptiveStudyActivityOut"];
 export type AdaptiveStudyQueueOut = components["schemas"]["AdaptiveStudyQueueOut"];
 export type GradeCardIn = components["schemas"]["GradeCardIn"];
@@ -694,10 +696,33 @@ export async function findActiveCardsJob(sectionId: string): Promise<JobOut | nu
 // define their own identical constant.
 export const MAX_QUEUE_FETCH = 200;
 
-export function getReviewQueue(courseId: string, limit?: number) {
+export interface ReviewQueueOptions {
+  limit?: number;
+  scope?: "available" | "all" | "needs_attention";
+  chapterLabel?: string;
+}
+
+export function getReviewQueue(courseId: string, options: ReviewQueueOptions = {}) {
+  const query: {
+    limit?: number;
+    scope?: ReviewQueueOptions["scope"];
+    chapter_label?: string;
+  } = {};
+  if (options.limit !== undefined) query.limit = options.limit;
+  if (options.scope !== undefined) query.scope = options.scope;
+  if (options.chapterLabel !== undefined) query.chapter_label = options.chapterLabel;
   return request(
     client.GET("/api/courses/{course_id}/review/queue", {
-      params: { path: { course_id: courseId }, query: limit === undefined ? {} : { limit } },
+      params: { path: { course_id: courseId }, query },
+    }),
+  );
+}
+
+export function getReviewSelection(courseId: string, cardIds: string[]) {
+  return request(
+    client.POST("/api/courses/{course_id}/review/selection", {
+      params: { path: { course_id: courseId } },
+      body: { card_ids: cardIds },
     }),
   );
 }
@@ -808,7 +833,7 @@ export function retakeTest(testId: string) {
  * used, not the cards themselves.
  */
 export async function getDueCountForCourse(courseId: string): Promise<number> {
-  const { data } = await getReviewQueue(courseId, 1);
+  const { data } = await getReviewQueue(courseId, { limit: 1 });
   return data?.due ?? 0;
 }
 

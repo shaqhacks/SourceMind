@@ -3156,6 +3156,17 @@
             "title": "Back Md",
             "type": "string"
           },
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
           "due_at": {
             "anyOf": [
               {
@@ -3184,9 +3195,24 @@
             "title": "Interval Days",
             "type": "number"
           },
+          "is_due": {
+            "title": "Is Due",
+            "type": "boolean"
+          },
           "is_new": {
             "title": "Is New",
             "type": "boolean"
+          },
+          "last_grade": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Grade"
           },
           "reps": {
             "title": "Reps",
@@ -3195,15 +3221,23 @@
           "section_id": {
             "title": "Section Id",
             "type": "string"
+          },
+          "section_title": {
+            "title": "Section Title",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "section_id",
+          "chapter_label",
+          "section_title",
           "front_md",
           "back_md",
           "due_at",
           "is_new",
+          "is_due",
+          "last_grade",
           "interval_days",
           "ease",
           "reps"
@@ -3260,6 +3294,48 @@
           "total_count"
         ],
         "title": "ReviewQueueOut",
+        "type": "object"
+      },
+      "ReviewSelectionIn": {
+        "properties": {
+          "card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Card Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "card_ids"
+        ],
+        "title": "ReviewSelectionIn",
+        "type": "object"
+      },
+      "ReviewSelectionOut": {
+        "properties": {
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewQueueCardOut"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "missing_card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Card Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cards",
+          "missing_card_ids"
+        ],
+        "title": "ReviewSelectionOut",
         "type": "object"
       },
       "ReviewSummaryOut": {
@@ -6751,6 +6827,37 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "available",
+              "enum": [
+                "available",
+                "all",
+                "needs_attention"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "chapter_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Chapter Label"
+            }
           }
         ],
         "responses": {
@@ -6776,6 +6883,58 @@
           }
         },
         "summary": "Review Queue",
+        "tags": [
+          "review"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/review/selection": {
+      "post": {
+        "operationId": "review_selection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewSelectionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSelectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Selection",
         "tags": [
           "review"
         ]

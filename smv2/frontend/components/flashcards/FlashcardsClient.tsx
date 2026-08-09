@@ -67,7 +67,7 @@ function dueCountForChapter(
 async function loadCourseData(courseId: string): Promise<CourseDataState> {
   const [chaptersResult, queueResult] = await Promise.all([
     listChapters(courseId),
-    getReviewQueue(courseId, MAX_QUEUE_FETCH),
+    getReviewQueue(courseId, { limit: MAX_QUEUE_FETCH }),
   ]);
   if (!chaptersResult.data) {
     return { kind: "error", error: describeError(chaptersResult.status, "Loading chapters") };

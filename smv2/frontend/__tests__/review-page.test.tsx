@@ -93,6 +93,10 @@ function makeQueueCard(overrides: Partial<ReviewQueueCardOut> = {}): ReviewQueue
     interval_days: 1.0,
     ease: 2.5,
     reps: 1,
+    chapter_label: "Chapter 1",
+    section_title: "Section 1",
+    is_due: true,
+    last_grade: null,
     ...overrides,
   };
 }
@@ -274,7 +278,7 @@ describe("ReviewPage", () => {
     expect(await screen.findByText("1 of 2")).toBeInTheDocument();
     expect(screen.getByText("Q1")).toBeInTheDocument();
     expect(screen.queryByText("A1")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^again \(1\)$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /again/i })).not.toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: " " });
     expect(await screen.findByText("A1")).toBeInTheDocument();
@@ -291,7 +295,7 @@ describe("ReviewPage", () => {
     expect(screen.queryByText("A2")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /reveal/i }));
-    await user.click(screen.getByRole("button", { name: /^easy \(4\)$/i }));
+    await user.click(screen.getByRole("button", { name: /easy/i }));
 
     expect(mockedGradeCard).toHaveBeenCalledWith(
       "card-2",
@@ -391,6 +395,7 @@ describe("ReviewPage", () => {
       fireEvent.keyDown(window, { key: " " });
       fireEvent.keyDown(window, { key: "1" }); // grade card 3: Again
 
+      await screen.findByText("2 of 3");
       const storedAfterResumeGrade = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
       expect(storedAfterResumeGrade).toMatchObject({
         remainingCardIds: ["card-4", "card-5"],
@@ -479,7 +484,7 @@ describe("ReviewPage", () => {
       expect(await screen.findByText("1 of 3")).toBeInTheDocument();
       expect(screen.queryByText(/ready to review/i)).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /intro to testing/i })).not.toBeInTheDocument();
-      expect(mockedGetReviewQueue).toHaveBeenNthCalledWith(2, "course-1", 3);
+      expect(mockedGetReviewQueue).toHaveBeenNthCalledWith(2, "course-1", { limit: 3 });
     });
 
     it("silently supersedes a stale saved session instead of resuming it", async () => {
@@ -554,7 +559,7 @@ describe("ReviewPage", () => {
       render(<ReviewPage />);
 
       expect(await screen.findByText("All caught up")).toBeInTheDocument();
-      expect(mockedGetReviewQueue).not.toHaveBeenCalledWith("course-1", 5);
+      expect(mockedGetReviewQueue).not.toHaveBeenCalledWith("course-1", { limit: 5 });
     });
   });
 });

@@ -97,6 +97,10 @@ function makeQueueCard(overrides: Partial<ReviewQueueCardOut> = {}): ReviewQueue
     interval_days: 0,
     ease: 2.5,
     reps: 0,
+    chapter_label: "Chapter 1",
+    section_title: "Section 1",
+    is_due: false,
+    last_grade: null,
     ...overrides,
   };
 }

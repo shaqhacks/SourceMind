@@ -14,12 +14,14 @@ import Card from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import ProgressBar from "@/components/ui/ProgressBar";
 import Skeleton from "@/components/ui/Skeleton";
+import ReviewGradeControls, {
+  type ReviewGradeRequest,
+} from "@/components/review/ReviewGradeControls";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   getReviewQueue,
   getAdaptiveStudyQueue,
   getReviewSummary,
-  gradeCard,
   submitPracticeAnswer,
   MAX_QUEUE_FETCH,
   type ReviewQueueCardOut,
@@ -29,8 +31,7 @@ import {
 } from "@/lib/api/client";
 import { useKeyboardShortcuts, type ShortcutMap } from "@/lib/hooks/useKeyboardShortcuts";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
-import { formatIntervalPreview, previewIntervalDays, type ReviewGrade } from "@/lib/review/intervalPreview";
-import { notifyReviewSettled } from "@/lib/review/reviewBus";
+import type { ReviewGrade } from "@/lib/review/intervalPreview";
 
 const SHORTCUT_HINTS: ShortcutHint[] = [
   { keys: "space", description: "Reveal answer" },
@@ -40,15 +41,11 @@ const SHORTCUT_HINTS: ShortcutHint[] = [
 
 const GRADE_LABELS: Record<number, string> = { 1: "Again", 2: "Hard", 3: "Good", 4: "Easy" };
 const GRADE_TONES: Record<number, BadgeTone> = { 1: "serious", 2: "warning", 3: "good", 4: "accent" };
-// Organic system: attention ramp for the two "didn't stick" grades, sage
-// ramp for the two "stuck" grades — see the redesign handoff §4.
-const GRADE_BUTTON_BG: Record<number, string> = {
-  1: "bg-accent-200",
-  2: "bg-accent-100",
-  3: "bg-sage-200",
-  4: "bg-sage-300",
-};
 const REVIEW_SESSION_STORAGE_KEY = "smv2.review.session";
+
+function isReviewScope(value: string | null): value is "available" | "all" | "needs_attention" {
+  return value === "available" || value === "all" || value === "needs_attention";
+}
 
 interface StoredReviewSession {
   courseId: string | null;
@@ -138,6 +135,9 @@ function ReviewPageInner() {
   const searchParams = useSearchParams();
   const courseParam = searchParams.get("course");
   const startParam = searchParams.get("start");
+  const scopeParam = searchParams.get("scope");
+  const reviewScope = isReviewScope(scopeParam) ? scopeParam : undefined;
+  const chapterLabel = searchParams.get("chapter") ?? undefined;
 
   // "resuming" is a brief transitional phase, only entered when a saved
   // session exists at mount: it reconciles remainingCardIds against a
@@ -176,7 +176,7 @@ function ReviewPageInner() {
   const [questionResult, setQuestionResult] = useState<SubmitPracticeAnswerOut | null>(null);
   const [cardIndex, setCardIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
-  const [cardShownAt, setCardShownAt] = useState(0);
+  const [gradeRequest, setGradeRequest] = useState<ReviewGradeRequest | null>(null);
   const [gradeCounts, setGradeCounts] = useState<Record<number, number>>({});
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -200,7 +200,7 @@ function ReviewPageInner() {
       const storedCourseId = stored.courseId;
       if (active) setCourseId(storedCourseId);
 
-      const { data } = await getReviewQueue(storedCourseId, MAX_QUEUE_FETCH);
+      const { data } = await getReviewQueue(storedCourseId, { limit: MAX_QUEUE_FETCH });
       if (!active) return;
       if (!data) {
         // Couldn't reconcile (network) — don't lose the session over a
@@ -221,7 +221,6 @@ function ReviewPageInner() {
       setCards(reconciled);
       setCardIndex(0);
       setRevealed(false);
-      setCardShownAt(Date.now());
       setGradeCounts(stored.gradedTally);
       setSessionSize(stored.chosenSize);
       setSessionStartedAt(stored.startedAt);
@@ -260,7 +259,10 @@ function ReviewPageInner() {
 
   const loadChooser = useCallback((id: string) => {
     setChooserState({ kind: "loading" });
-    Promise.all([getReviewQueue(id, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(id, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
+    Promise.all([
+      getReviewQueue(id, { limit: MAX_QUEUE_FETCH, scope: reviewScope, chapterLabel }),
+      getAdaptiveStudyQueue(id, MAX_QUEUE_FETCH),
+    ]).then(([review, adaptive]) => {
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
         setChooserState({
@@ -273,12 +275,15 @@ function ReviewPageInner() {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
       }
     });
-  }, []);
+  }, [chapterLabel, reviewScope]);
 
   useEffect(() => {
     if (phase !== "chooser" || !courseId) return;
     let active = true;
-    Promise.all([getReviewQueue(courseId, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
+    Promise.all([
+      getReviewQueue(courseId, { limit: MAX_QUEUE_FETCH, scope: reviewScope, chapterLabel }),
+      getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH),
+    ]).then(([review, adaptive]) => {
       if (!active) return;
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
@@ -295,7 +300,7 @@ function ReviewPageInner() {
     return () => {
       active = false;
     };
-  }, [phase, courseId]);
+  }, [phase, courseId, chapterLabel, reviewScope]);
 
   function goToChooser(id: string, title: string) {
     setCourseId(id);
@@ -312,7 +317,10 @@ function ReviewPageInner() {
       setSessionSize(size);
       setGradeCounts({});
       setIsResumedSession(false);
-      Promise.all([getReviewQueue(courseId, size), getAdaptiveStudyQueue(courseId, size)]).then(([review, adaptive]) => {
+      Promise.all([
+        getReviewQueue(courseId, { limit: size, scope: reviewScope, chapterLabel }),
+        getAdaptiveStudyQueue(courseId, size),
+      ]).then(([review, adaptive]) => {
         if (!review.data) {
           setSessionState({ kind: "error", error: describeError(review.status, "Loading review queue") });
           return;
@@ -330,7 +338,7 @@ function ReviewPageInner() {
         setQuestionResult(null);
         setCardIndex(0);
         setRevealed(false);
-        setCardShownAt(startedAt);
+        setGradeRequest(null);
         setSessionStartedAt(startedAt);
         writeStoredSession({
           courseId,
@@ -342,7 +350,7 @@ function ReviewPageInner() {
         setSessionState({ kind: "active" });
       });
     },
-    [courseId],
+    [chapterLabel, courseId, reviewScope],
   );
 
   // Runs once when the URL says start=due: discard whatever saved session
@@ -355,7 +363,10 @@ function ReviewPageInner() {
     if (phase !== "bootstrapping-due" || !courseId) return;
     clearStoredSession();
     let active = true;
-    Promise.all([getReviewQueue(courseId, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
+    Promise.all([
+      getReviewQueue(courseId, { limit: MAX_QUEUE_FETCH, scope: reviewScope, chapterLabel }),
+      getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH),
+    ]).then(([review, adaptive]) => {
       if (!active) return;
       if (!review.data) {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
@@ -379,7 +390,7 @@ function ReviewPageInner() {
     return () => {
       active = false;
     };
-  }, [phase, courseId, startSession]);
+  }, [phase, courseId, chapterLabel, reviewScope, startSession]);
 
   const discardResumedSession = useCallback(() => {
     clearStoredSession();
@@ -393,17 +404,21 @@ function ReviewPageInner() {
 
   const reveal = useCallback(() => setRevealed(true), []);
 
-  const grade = useCallback(
+  const requestGrade = useCallback(
     (value: number) => {
       const card = cards[cardIndex];
+      if (!card || !revealed) return;
+      setGradeRequest({ grade: value as ReviewGrade, token: Date.now() });
+    },
+    [cards, cardIndex, revealed],
+  );
+
+  const handleCardGraded = useCallback(
+    (value: ReviewGrade) => {
+      const card = cards[cardIndex];
       if (!card) return;
-      const elapsedMs = Date.now() - cardShownAt;
       const nextTally = { ...gradeCounts, [value]: (gradeCounts[value] ?? 0) + 1 };
       setGradeCounts(nextTally);
-      // Fire-and-forget: grading must feel instant (keyboard-first is the
-      // law here), not wait on a network round trip before the next card.
-      void gradeCard(card.id, { grade: value, elapsed_ms: elapsedMs });
-      notifyReviewSettled();
 
       const nextIndex = cardIndex + 1;
       if (nextIndex >= cards.length) {
@@ -422,10 +437,10 @@ function ReviewPageInner() {
         }
         setCardIndex(nextIndex);
         setRevealed(false);
-        setCardShownAt(Date.now());
+        setGradeRequest(null);
       }
     },
-    [cards, cardIndex, cardShownAt, courseId, sessionSize, sessionStartedAt, gradeCounts, questions.length],
+    [cards, cardIndex, courseId, sessionSize, sessionStartedAt, gradeCounts, questions.length],
   );
 
   const answerQuestion = useCallback(async (choice: number) => {
@@ -454,10 +469,10 @@ function ReviewPageInner() {
     phase === "session" && sessionState.kind === "active" && cards[cardIndex]
       ? revealed
         ? {
-            "1": () => grade(1),
-            "2": () => grade(2),
-            "3": () => grade(3),
-            "4": () => grade(4),
+            "1": () => requestGrade(1),
+            "2": () => requestGrade(2),
+            "3": () => requestGrade(3),
+            "4": () => requestGrade(4),
             "?": openShortcuts,
           }
         : { " ": reveal, "?": openShortcuts }
@@ -703,31 +718,11 @@ function ReviewPageInner() {
             Reveal (space)
           </Button>
         ) : (
-          <div className="grid grid-cols-4 gap-3">
-            {([1, 2, 3, 4] as ReviewGrade[]).map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => grade(value)}
-                aria-label={`${GRADE_LABELS[value]} (${value})`}
-                className={`flex flex-col items-center gap-1 rounded-md py-3 text-foreground transition-opacity hover:opacity-80 ${GRADE_BUTTON_BG[value]}`}
-              >
-                <span aria-hidden="true" className="text-[15px] font-semibold">
-                  {GRADE_LABELS[value]}
-                </span>
-                <span aria-hidden="true" className="font-mono text-[11px] opacity-70">
-                  {value} ·{" "}
-                  {formatIntervalPreview(
-                    previewIntervalDays(value, {
-                      intervalDays: card.interval_days,
-                      ease: card.ease,
-                      reps: card.reps,
-                    }),
-                  )}
-                </span>
-              </button>
-            ))}
-          </div>
+          <ReviewGradeControls
+            card={card}
+            request={gradeRequest}
+            onGraded={handleCardGraded}
+          />
         )}</> : question ? (
           <Card className="flex min-h-[320px] flex-col gap-4 p-10 shadow-md">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-accent">
