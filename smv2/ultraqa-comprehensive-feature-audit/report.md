@@ -96,3 +96,19 @@
 - Playwright has one expected skip for the desktop project variant of a mobile-specific reader-controls test; the mobile project passed the scenario.
 - `pip-audit` cannot audit the local package name `smv2-backend` because it is not published on PyPI; third-party installed packages returned no known vulnerabilities.
 - Remote push verification remains controller-owned and is not claimed here.
+
+## Task 7 Streamed Generation Reliability Addendum
+
+- Date: 2026-08-09.
+- Scope: deterministic E2E coverage for streamed generation liveness beyond the old 120s timeout, terminal cancellation without failure UI, structured invalid-output retry guidance, critical accessibility checks, and no paid-provider calls.
+- Result: Task 7 browser slice passed in desktop Chromium and mobile Chromium: `6 passed (9.4s)`.
+- Timing simulation: `generation-streaming.spec.ts` injects deterministic SSE updates with `elapsed_seconds: 125`, proving the UI remains in `Thinking · 2m 05s` and exposes `Continue in background` without waiting 120 real seconds.
+- Cancellation behavior: the mocked cancel endpoint returns accepted cancellation and the fake SSE emits terminal `status: "cancelled"`; the UI removes active cancel controls, shows no app alert, shows no `Generation failed` banner, and returns to an enabled `Take chapter test` action.
+- Structured retry behavior: the practice-assessment start route intentionally returns HTTP 503 with `code: invalid_model_output`, `failure_category: structured_output_invalid`, and remediation copy; the UI shows the structured message, a `Retry` button, and `View job details` link to `/jobs`.
+- Accessibility: each scenario runs `@axe-core/playwright` over `body`; all critical-impact violation lists were empty.
+- Paid-provider protection: each scenario routes and records `api.anthropic.com`, `api.openai.com`, `127.0.0.1:11434`, and `localhost:11434`; all assertions observed `[]` calls.
+- Harness hardening: reader-page routes reached by `Continue in background` now return typed array/object payloads for cards, highlights, notes, jobs, and LLM usage instead of falling through to real 404s. The invalid-output scenario allows only the one expected mocked `503 (Service Unavailable)` console entry; all other console/page errors still fail.
+- Backend reliability slice: `124 passed, 8 warnings` on all three repeated runs.
+- Frontend verification: `tsc --noEmit` passed; `eslint` passed; Vitest passed `97 files / 784 tests`.
+- Release gate: `rtk ./build.sh` is blocked outside Task 7 by backend collection errors importing missing `MAX_ORPHAN_ATTEMPTS` from `app.jobs.worker` in `tests/test_lesson_orphan_recovery.py` and `tests/test_reconciler.py`.
+- Audits: `pip-audit` found no known vulnerabilities. Both npm audit commands failed at DNS resolution for `registry.npmjs.org` with `getaddrinfo ENOTFOUND`, matching the network-restricted audit case.
