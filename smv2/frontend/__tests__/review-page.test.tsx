@@ -755,6 +755,50 @@ describe("ReviewPage", () => {
     expect(screen.getByText(/easy: 1/i)).toBeInTheDocument();
   });
 
+  it("ignores a stale replay selection response after the active replay query changes", async () => {
+    const pendingReplay = deferredSelectionResponse();
+    seedCompletedSession({
+      againCardIds: ["card-3"],
+      scope: "needs_attention",
+      chapterLabel: "Chapter 1",
+    });
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    mockedGetReviewSelection.mockReturnValueOnce(pendingReplay.promise);
+    mockedGetReviewQueue.mockResolvedValue(
+      ok(makeQueue({ total: 1, due: 1, cards: [makeQueueCard({ id: "other-card", front_md: "Other Q" })] })),
+    );
+    const user = userEvent.setup();
+    const { rerender } = render(<ReviewPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Review missed (1)" }));
+    expect(mockReplace).toHaveBeenCalledWith(
+      "/review?course=course-1&scope=needs_attention&chapter=Chapter+1",
+    );
+
+    mockSearchParams = new URLSearchParams({
+      course: "course-1",
+      scope: "all",
+      chapter: "Chapter 2",
+    });
+    rerender(<ReviewPage />);
+    expect(await screen.findByRole("heading", { name: "Ready to review" })).toBeInTheDocument();
+
+    await act(async () => {
+      pendingReplay.resolve(
+        ok(
+          makeSelection({
+            cards: [makeQueueCard({ id: "card-3", front_md: "Q3", back_md: "A3" })],
+          }),
+        ),
+      );
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Q3")).not.toBeInTheDocument();
+    expect(localStorage.getItem(ACTIVE_REVIEW_SESSION_STORAGE_KEY)).toBeNull();
+    expect(screen.getByRole("heading", { name: "Ready to review" })).toBeInTheDocument();
+  });
+
   it("reports missing replay cards once while continuing with the returned cards", async () => {
     seedCompletedSession({ againCardIds: ["card-3", "deleted-card", "card-1"] });
     mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });

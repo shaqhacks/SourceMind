@@ -561,10 +561,13 @@ function ReviewPageInner() {
     router.replace(activeUrl);
     const { data, status } = await getReviewSelection(completedSession.courseId, completedSession.againCardIds);
     const latest = latestQueryRef.current;
+    const queryStillMatchesReplay =
+      latest.completedParam === replaySource.sessionId ||
+      (latest.completedParam === null && latest.queryKey === activeQuery);
     if (
       replayRequestTokenRef.current !== requestToken ||
       latest.courseParam !== replaySource.courseId ||
-      (latest.completedParam !== null && latest.completedParam !== replaySource.sessionId)
+      !queryStillMatchesReplay
     ) {
       return;
     }
