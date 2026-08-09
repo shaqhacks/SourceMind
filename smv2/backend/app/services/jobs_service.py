@@ -11,6 +11,8 @@ import re
 import time
 from typing import Any, AsyncIterator
 
+from sqlalchemy import func
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from app.db.engine import get_session
@@ -148,23 +150,42 @@ def retry_job(job_id: str) -> Job:
 def cancel_job(job_id: str) -> Job:
     session = get_session()
     try:
+        now = utcnow()
+
+        queued_id = session.execute(
+            sa_update(Job)
+            .where(Job.id == job_id, Job.status == "queued")
+            .values(
+                status="cancelled",
+                cancel_requested_at=func.coalesce(Job.cancel_requested_at, now),
+                error=None,
+                lease_until=None,
+            )
+            .returning(Job.id)
+        ).scalar_one_or_none()
+        if queued_id is not None:
+            job = session.get(Job, queued_id)
+            assert job is not None
+            restore_cancelled_domain_state_in_session(session, job)
+            session.commit()
+            return job
+
+        running_id = session.execute(
+            sa_update(Job)
+            .where(Job.id == job_id, Job.status == "running")
+            .values(cancel_requested_at=func.coalesce(Job.cancel_requested_at, now))
+            .returning(Job.id)
+        ).scalar_one_or_none()
+        if running_id is not None:
+            session.commit()
+            job = session.get(Job, running_id)
+            assert job is not None
+            return job
+
+        session.expire_all()
         job = session.get(Job, job_id)
         if job is None:
             raise LookupError(f"job not found: {job_id}")
-        if job.status in TERMINAL_JOB_STATUSES:
-            return job
-
-        now = utcnow()
-        if job.cancel_requested_at is None:
-            job.cancel_requested_at = now
-        if job.status == "queued":
-            job.status = "cancelled"
-            job.error = None
-            job.lease_until = None
-            restore_cancelled_domain_state_in_session(session, job)
-        elif job.status == "running":
-            job.status = "running"
-        session.commit()
         return job
     finally:
         session.close()

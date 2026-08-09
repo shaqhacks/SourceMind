@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.config import course_spend_cap_usd
 from app.db.models import Job, Section
+from app.llm.completion_control import ProviderCancelledError
 from app.llm.ledger import SpendCapExceededError, course_spend_so_far, ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
@@ -64,6 +65,13 @@ def run_lesson_generation(session: Session, job: Job, section_id: str) -> dict[s
 
     try:
         return _generate(session, job, section_id)
+    except ProviderCancelledError:
+        session.rollback()
+        cancelled_section = session.get(Section, section_id)
+        if cancelled_section is not None:
+            cancelled_section.lesson_status = "ready" if cancelled_section.lesson_md else "none"
+            session.commit()
+        raise
     except Exception:
         session.rollback()
         failed_section = session.get(Section, section_id)
