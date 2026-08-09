@@ -62,6 +62,42 @@ describe("GenerationProgress", () => {
     resolveCancel();
   });
 
+  it("does not call cancel again after a resolved request while the job is still running", async () => {
+    const onCancel = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <GenerationProgress job={job()} quiet={false} onCancel={onCancel} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /cancel generation/i }));
+    await waitFor(() => expect(onCancel).toHaveBeenCalledTimes(1));
+
+    rerender(<GenerationProgress job={job()} quiet={false} onCancel={onCancel} />);
+
+    expect(screen.getByRole("button", { name: /cancel requested/i })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /cancel requested/i }));
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a retryable cancel error and allows a second cancel only after failure", async () => {
+    const onCancel = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce(undefined);
+    const user = userEvent.setup();
+
+    render(<GenerationProgress job={job()} quiet={false} onCancel={onCancel} />);
+
+    await user.click(screen.getByRole("button", { name: /cancel generation/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not cancel generation/i);
+    await user.click(screen.getByRole("button", { name: /retry cancel/i }));
+
+    expect(onCancel).toHaveBeenCalledTimes(2);
+  });
+
   it("continues in the background without cancelling", async () => {
     const onCancel = vi.fn();
     const onContinue = vi.fn();

@@ -101,6 +101,57 @@ describe("GenerateAllLessons", () => {
     expect(screen.getByRole("button", { name: /^generate all lessons$/i })).toBeInTheDocument();
   });
 
+  it("shows real active job phase, elapsed time, and recent activity while preserving batch counts", async () => {
+    mockedGenerateAllLessons.mockResolvedValue({
+      status: 202,
+      ok: true,
+      data: { job_ids: ["job-1", "job-2"], skipped: 0 },
+    });
+    mockedGetJob.mockImplementation((jobId: string) =>
+      Promise.resolve({
+        status: 200,
+        ok: true,
+        data: makeJob(jobId, jobId === "job-1" ? "sec-1" : "sec-2"),
+      }),
+    );
+
+    const onSectionSettled = vi.fn();
+    const user = userEvent.setup();
+    render(<GenerateAllLessons courseId="course-1" onSectionSettled={onSectionSettled} />);
+
+    await user.click(screen.getByRole("button", { name: /generate all lessons/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+
+    act(() => {
+      FakeEventSource.instances[1].emit("update", {
+        id: "job-2",
+        status: "running",
+        progress: {
+          stage: "thinking",
+          pct: null,
+          message: "Thinking · 4m 18s",
+          elapsed_seconds: 258,
+          last_activity_seconds: 17,
+        },
+      });
+    });
+
+    expect(screen.getByText("Thinking · 4m 18s")).toBeInTheDocument();
+    expect(screen.getByText(/model active 17s ago/i)).toBeInTheDocument();
+    expect(screen.getByText(/0 of 2 lesson jobs settled/i)).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-1",
+        status: "succeeded",
+        progress: { stage: "done", pct: 100, message: "lesson ready" },
+      });
+    });
+
+    expect(screen.getByText("Thinking · 4m 18s")).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 lesson jobs settled/i)).toBeInTheDocument();
+  });
+
   it("shows how many sections were already generated and skipped", async () => {
     mockedGenerateAllLessons.mockResolvedValue({
       status: 202,

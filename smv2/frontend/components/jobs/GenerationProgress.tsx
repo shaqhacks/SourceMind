@@ -25,9 +25,13 @@ export default function GenerationProgress({
   compact = false,
 }: GenerationProgressProps) {
   const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelRequestedFor, setCancelRequestedFor] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const phase = job?.progress?.stage ?? "preparing";
   const elapsed = currentElapsed(job);
   const announcedPhase = formatPhaseLabel(phase);
+  const isTerminal = job?.status === "cancelled" || job?.status === "succeeded" || job?.status === "failed";
+  const cancelRequested = cancelRequestedFor === job?.id;
 
   const headline = useMemo(() => {
     if (job?.status === "cancelled") return "Cancelled";
@@ -39,10 +43,15 @@ export default function GenerationProgress({
   const showQuiet = quiet || elapsed >= 30;
 
   async function handleCancel() {
-    if (!onCancel || isCancelling) return;
+    if (!onCancel || isCancelling || (cancelRequested && !cancelError)) return;
     setIsCancelling(true);
+    setCancelError(null);
     try {
       await onCancel();
+      setCancelRequestedFor(job?.id ?? null);
+    } catch {
+      setCancelRequestedFor(null);
+      setCancelError("Could not cancel generation. Check your connection and try again.");
     } finally {
       setIsCancelling(false);
     }
@@ -67,8 +76,13 @@ export default function GenerationProgress({
               This can take a little while. You can keep studying while generation continues.
             </p>
           )}
+          {cancelError && !isTerminal && (
+            <p role="alert" className="mt-2 text-status-serious">
+              {cancelError}
+            </p>
+          )}
         </div>
-        {(onCancel || onContinue) && job?.status !== "cancelled" && (
+        {(onCancel || onContinue) && !isTerminal && (
           <div className="flex shrink-0 flex-wrap gap-2">
             {onContinue && (
               <button
@@ -83,10 +97,16 @@ export default function GenerationProgress({
               <button
                 type="button"
                 onClick={() => void handleCancel()}
-                disabled={isCancelling}
+                disabled={isCancelling || (cancelRequested && !cancelError)}
                 className="rounded-md border border-status-serious/40 bg-surface px-3 py-1.5 font-medium text-status-serious transition-colors hover:bg-status-serious-soft disabled:cursor-wait disabled:opacity-70"
               >
-                {isCancelling ? "Cancelling…" : "Cancel generation"}
+                {isCancelling
+                  ? "Cancelling…"
+                  : cancelError
+                    ? "Retry cancel"
+                    : cancelRequested
+                      ? "Cancel requested"
+                      : "Cancel generation"}
               </button>
             )}
           </div>
