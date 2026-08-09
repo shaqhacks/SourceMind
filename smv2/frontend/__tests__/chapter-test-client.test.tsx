@@ -379,11 +379,15 @@ describe("ChapterTestClient", () => {
 
     await user.click(screen.getByRole("button", { name: "Continue with ready (1)" }));
 
+    const heading = screen.getByRole("heading", { name: "Practice section 2" });
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
-    expect(screen.getByRole("heading", { name: "Practice section 2" })).toHaveFocus();
+    expect(heading).toBeVisible();
+    expect(heading).toHaveFocus();
+    expect(heading).not.toHaveClass("sr-only");
+    expect(heading).not.toHaveClass("outline-none");
   });
 
-  it("ignores stale practice callbacks from a previous chapter", async () => {
+  it("ignores stale practice callbacks without overwriting a ready current chapter", async () => {
     mockedListChapters.mockResolvedValue(
       ok([
         makeChapter({ chapter_label: "Chapter 1", practice_section_ids: ["sec-old"] }),
@@ -402,14 +406,51 @@ describe("ChapterTestClient", () => {
 
     rerender(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 2" />);
     await screen.findByText("Ready practice questions for sec-new");
+    emitPracticeState("sec-new", readyPracticeState("sec-new", 3));
+    expect(screen.getByRole("status", { name: "Practice readiness" })).toHaveTextContent(
+      "1 of 1 ready",
+    );
+
     act(() => {
       oldCallback?.(failedPracticeState("sec-old"));
     });
 
     expect(screen.getByRole("status", { name: "Practice readiness" })).toHaveTextContent(
-      "0 of 1 ready",
+      "1 of 1 ready",
     );
     expect(screen.queryByRole("button", { name: /retry failed/i })).not.toBeInTheDocument();
+  });
+
+  it("clears the aggregate retry guard when two captured failures both leave failed together", async () => {
+    mockedListChapters.mockResolvedValue(
+      ok([
+        makeChapter({
+          practice_section_ids: ["sec-a", "sec-b"],
+        }),
+      ]),
+    );
+    mockedGetSection.mockImplementation((id: string) =>
+      Promise.resolve(ok(makeSectionDetail({ id, body_md: `Source for ${id}` }))),
+    );
+    mockedListTests.mockResolvedValue(ok([]));
+
+    const user = userEvent.setup();
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+
+    await screen.findByText("Ready practice questions for sec-a");
+    emitPracticeState("sec-a", failedPracticeState("sec-a"));
+    emitPracticeState("sec-b", failedPracticeState("sec-b"));
+
+    await user.click(screen.getByRole("button", { name: "Retry failed (2)" }));
+    expect(screen.getByRole("button", { name: "Retry failed (2)" })).toBeDisabled();
+
+    act(() => {
+      inlinePracticeMock.callbacks.get("sec-a")?.(generatingPracticeState("sec-a"));
+      inlinePracticeMock.callbacks.get("sec-b")?.(generatingPracticeState("sec-b"));
+    });
+    emitPracticeState("sec-a", failedPracticeState("sec-a"));
+
+    expect(screen.getByRole("button", { name: "Retry failed (1)" })).toBeEnabled();
   });
 
   it("renders original pages inside the source disclosure when page metadata is available", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -135,6 +135,15 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
   const headingRef = useRef<HTMLHeadingElement>(null);
   const practiceSectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const practiceHeadingRefs = useRef<Record<string, HTMLHeadingElement | null>>({});
+  const practiceContextRef = useRef<{ key: string; sectionIds: Set<string> }>({
+    key: "",
+    sectionIds: new Set(),
+  });
+  const practiceSectionStatesRef = useRef<{
+    key: string;
+    states: Record<string, PracticeSectionState>;
+  }>({ key: "", states: {} });
+  const retryingPracticeSectionIdsRef = useRef<string[]>([]);
   useRouteFocus(headingRef);
 
   const { job, done, stalled } = useJobEvents(jobId);
@@ -172,29 +181,39 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
       (sectionId) => currentPracticeStates[sectionId]?.kind === "failed",
     );
 
+  useLayoutEffect(() => {
+    practiceContextRef.current = { key: practiceChapterKey, sectionIds: practiceSectionIds };
+    practiceSectionStatesRef.current = practiceSectionStates;
+    retryingPracticeSectionIdsRef.current = retryingPracticeSectionIds;
+  }, [practiceChapterKey, practiceSectionIds, practiceSectionStates, retryingPracticeSectionIds]);
+
   const handlePracticeSectionStateChange = useCallback(
     (nextState: PracticeSectionState) => {
-      if (!practiceSectionIds.has(nextState.sectionId)) {
+      const context = practiceContextRef.current;
+      if (!context.sectionIds.has(nextState.sectionId)) {
         return;
       }
-      setPracticeSectionStates((current) => {
-        const states = current.key === practiceChapterKey ? current.states : {};
-        return {
-          key: practiceChapterKey,
-          states: { ...states, [nextState.sectionId]: nextState },
-        };
-      });
-      setRetryingPracticeSectionIds((retryingIds) => {
-        if (!retryingIds.includes(nextState.sectionId)) {
-          return retryingIds;
-        }
-        const nextStates = { ...currentPracticeStates, [nextState.sectionId]: nextState };
-        return retryingIds.some((sectionId) => nextStates[sectionId]?.kind === "failed")
-          ? retryingIds
-          : [];
-      });
+
+      const current = practiceSectionStatesRef.current;
+      const states = current.key === context.key ? current.states : {};
+      const nextStates = { ...states, [nextState.sectionId]: nextState };
+      const nextCollectedState = { key: context.key, states: nextStates };
+      practiceSectionStatesRef.current = nextCollectedState;
+      setPracticeSectionStates(nextCollectedState);
+
+      const retryingIds = retryingPracticeSectionIdsRef.current;
+      if (!retryingIds.includes(nextState.sectionId)) {
+        return;
+      }
+      const nextRetryingIds = retryingIds.some(
+        (sectionId) => nextStates[sectionId]?.kind === "failed",
+      )
+        ? retryingIds
+        : [];
+      retryingPracticeSectionIdsRef.current = nextRetryingIds;
+      setRetryingPracticeSectionIds(nextRetryingIds);
     },
-    [currentPracticeStates, practiceChapterKey, practiceSectionIds],
+    [],
   );
 
   const handleRetryFailedPractice = useCallback(() => {
@@ -202,6 +221,7 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     if (capturedFailedIds.length === 0) {
       return;
     }
+    retryingPracticeSectionIdsRef.current = capturedFailedIds;
     setRetryingPracticeSectionIds(capturedFailedIds);
     setPracticeRetryVersions((current) => {
       const next = { ...current };
@@ -413,7 +433,7 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
                       practiceHeadingRefs.current[section.id] = node;
                     }}
                     tabIndex={-1}
-                    className="sr-only outline-none"
+                    className="text-sm font-semibold focus-visible:ring-2 focus-visible:ring-accent-700 focus-visible:ring-offset-2"
                   >
                     Practice section {index + 1}
                   </h3>
