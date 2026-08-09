@@ -8,7 +8,15 @@ from types import SimpleNamespace
 import pytest
 
 from app.db.engine import get_session
-from app.db.models import Card, Course, ReviewLog, ReviewState, Section, utcnow
+from app.db.models import (
+    Card,
+    Course,
+    LearnerProfile,
+    ReviewLog,
+    ReviewState,
+    Section,
+    utcnow,
+)
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from app.services import srs_service
@@ -573,6 +581,29 @@ def test_review_queue_respects_limit(client, ingest_course, stub_provider):
 def test_review_queue_404_for_missing_course(client):
     resp = client.get("/api/courses/does-not-exist/review/queue")
     assert resp.status_code == 404
+
+
+def test_review_selection_404_for_missing_course_does_not_touch_learner(client):
+    session = get_session()
+    try:
+        learner_count_before = session.query(LearnerProfile).count()
+    finally:
+        session.close()
+
+    response = client.post(
+        "/api/courses/does-not-exist/review/selection",
+        json={"card_ids": ["card-that-would-be-valid-if-course-existed"]},
+    )
+
+    assert response.status_code == 404
+    assert client.cookies.get("smv2_learner") is None
+    assert "set-cookie" not in response.headers
+    session = get_session()
+    try:
+        learner_count_after = session.query(LearnerProfile).count()
+    finally:
+        session.close()
+    assert learner_count_after == learner_count_before
 
 
 def test_grade_card_creates_review_state_on_first_grade(client, ingest_course, stub_provider):
