@@ -21,7 +21,6 @@ from app.db.models import Job, ensure_utc, utcnow
 from app.jobs.error_envelope import encode_job_error
 from app.jobs.registry import (
     JOB_HANDLERS,
-    MAX_ORPHAN_ATTEMPTS,
     ON_ORPHAN_HOOKS,
     default_on_orphan,
 )
@@ -70,7 +69,16 @@ def claim_next_job(session: Session) -> Job | None:
     return session.get(Job, row[0])
 
 
-def job_progress(session: Session, job_id: str, stage: str, pct: float, message: str) -> None:
+def job_progress(
+    session: Session,
+    job_id: str,
+    stage: str,
+    pct: float | None,
+    message: str,
+    *,
+    elapsed_seconds: int | None = None,
+    last_activity_seconds: int | None = None,
+) -> None:
     """Heartbeat: handlers call this to report progress and renew their lease.
 
     Renewing the lease here (not just at claim time) means a legitimately
@@ -79,7 +87,12 @@ def job_progress(session: Session, job_id: str, stage: str, pct: float, message:
     job = session.get(Job, job_id)
     if job is None:
         return
-    job.progress = {"stage": stage, "pct": pct, "message": message}
+    progress = {"stage": stage, "pct": pct, "message": message}
+    if elapsed_seconds is not None:
+        progress["elapsed_seconds"] = elapsed_seconds
+    if last_activity_seconds is not None:
+        progress["last_activity_seconds"] = last_activity_seconds
+    job.progress = progress
     job.lease_until = utcnow() + timedelta(seconds=LEASE_SECONDS)
     session.commit()
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from conftest import _first_section_id
 
 from app.db.engine import get_session
 from app.db.models import Job, LlmCall, Section
@@ -8,7 +9,6 @@ from app.jobs.worker import run_due_jobs_once
 from app.llm.completion_control import ProviderCancelledError
 from app.llm.provider import CompletionResult
 from app.pipeline.generation import run_lesson_generation
-from conftest import _first_section_id
 
 
 def test_generate_lesson_happy_path(client, ingest_course, stub_provider):
@@ -332,6 +332,9 @@ def test_generate_lesson_succeeds_after_one_degenerate_retry(client, ingest_cour
     assert section["lesson_status"] == "ready"
     assert section["lesson_md"] == "A real lesson."
     assert stub_provider.call_count == 2
+    assert len(stub_provider.received_completion_options) == 2
+    assert all(option.progress is not None for option in stub_provider.received_completion_options)
+    assert all(option.is_cancelled is not None for option in stub_provider.received_completion_options)
 
 
 def test_generate_lesson_strips_leading_code_fence(client, ingest_course, stub_provider):

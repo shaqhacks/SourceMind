@@ -16,11 +16,11 @@ from app.db.models import (
     PracticeQuestion,
     Section,
 )
+from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
-from app.pipeline._common import report_progress_in_session
-from app.pipeline._common import strip_leading_fence
+from app.pipeline._common import report_progress_in_session, strip_leading_fence
 from app.services import evidence_items_service
 
 _MAX_SOURCE_CHARS = 12_000
@@ -156,6 +156,7 @@ def run_concept_practice_generation(
         }
     ]
     provider = get_provider()
+    completion_options = completion_options_for_job(job.id, artifact="concept_practice")
     questions = None
     result = None
     for attempt in range(2):
@@ -168,6 +169,7 @@ def run_concept_practice_generation(
             prompt_version=prompt_version,
             system=system_prompt,
             wait_for_slot=True,
+            options=completion_options,
         )
         try:
             questions = parse_concept_practice(result.text, set(options))

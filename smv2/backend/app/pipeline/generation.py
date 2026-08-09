@@ -20,12 +20,20 @@ from sqlalchemy.orm import Session
 
 from app.config import course_spend_cap_usd
 from app.db.models import Job, Section
+from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.completion_control import ProviderCancelledError
-from app.llm.ledger import SpendCapExceededError, course_spend_so_far, ensure_spend_cap, record_llm_call
+from app.llm.ledger import (
+    SpendCapExceededError,
+    course_spend_so_far,
+    ensure_spend_cap,
+    record_llm_call,
+)
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
-from app.pipeline._common import report_progress_in_session as _report_progress_in_session
+from app.pipeline._common import (
+    report_progress_in_session as _report_progress_in_session,
+)
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 from app.services import search_index
 
@@ -85,11 +93,12 @@ def _generate(session: Session, job: Job, section_id: str) -> dict[str, Any]:
     section = session.get(Section, section_id)
     assert section is not None  # already validated by run_lesson_generation
 
-    _report_progress(job.id, stage="generating", pct=10, message=f"generating lesson for {section.title}")
+    _report_progress(job.id, stage="loading", pct=None, message=f"preparing lesson for {section.title}")
 
     system_prompt, messages = _build_messages(section)
     _, prompt_version = load_prompt("lesson")
     provider = get_provider()
+    completion_options = completion_options_for_job(job.id, artifact="lesson")
 
     # Spend-cap check happens immediately before the provider call itself,
     # with no yield points (DB commits, file/network I/O) in between. This
@@ -119,6 +128,7 @@ def _generate(session: Session, job: Job, section_id: str) -> dict[str, Any]:
         prompt_version=prompt_version,
         system=system_prompt,
         wait_for_slot=True,
+        options=completion_options,
     )
     text = _strip_leading_fence(result.text)
 
@@ -134,6 +144,7 @@ def _generate(session: Session, job: Job, section_id: str) -> dict[str, Any]:
             prompt_version=prompt_version,
             system=system_prompt,
             wait_for_slot=True,
+            options=completion_options,
         )
         text = _strip_leading_fence(result.text)
 

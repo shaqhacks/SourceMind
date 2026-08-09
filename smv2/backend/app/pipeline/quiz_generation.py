@@ -13,11 +13,14 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.db.models import Course, CourseLearningProfile, Job, Section, Test, TestAttempt
+from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
-from app.pipeline._common import report_progress_in_session as _report_progress_in_session
+from app.pipeline._common import (
+    report_progress_in_session as _report_progress_in_session,
+)
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 from app.services import evidence_items_service
 
@@ -146,7 +149,7 @@ def run_test_generation(
     if not sections:
         raise ValueError("no sections available to build a test from")
 
-    _report_progress(job.id, stage="generating", pct=10, message="generating quiz")
+    _report_progress(job.id, stage="loading", pct=None, message="preparing quiz")
 
     scoped_text = _build_scoped_text(sections)
     curriculum_version_id, claim_options = evidence_items_service.claim_options_for_sections(
@@ -166,6 +169,7 @@ def run_test_generation(
     ]
 
     provider = get_provider()
+    completion_options = completion_options_for_job(job.id, artifact="quiz")
 
     # Same cap discipline as lesson generation (app/llm/ledger.ensure_spend_cap):
     # checked immediately before the call, no yield points in between.
@@ -182,6 +186,7 @@ def run_test_generation(
         prompt_version=prompt_version,
         system=system_prompt,
         wait_for_slot=True,
+        options=completion_options,
     )
 
     try:
@@ -196,6 +201,7 @@ def run_test_generation(
             prompt_version=prompt_version,
             system=system_prompt,
             wait_for_slot=True,
+            options=completion_options,
         )
         try:
             questions = _parse_questions(result.text, allowed_claim_ids)

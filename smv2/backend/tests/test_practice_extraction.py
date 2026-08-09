@@ -6,7 +6,14 @@ import uuid
 import pytest
 
 from app.db.engine import get_session
-from app.db.models import Concept, Course, Job, PracticeExtractionRun, PracticeQuestion, Section
+from app.db.models import (
+    Concept,
+    Course,
+    Job,
+    PracticeExtractionRun,
+    PracticeQuestion,
+    Section,
+)
 from app.jobs.error_envelope import decode_job_error
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
@@ -170,7 +177,7 @@ def test_parse_practice_questions_drops_confidence_above_one():
 def test_practice_extraction_job_persists_ready_questions(client, stub_provider):
     session = get_session()
     try:
-        course, practice, _answers, run, job = _seed_practice_run(session)
+        _course, practice, _answers, run, job = _seed_practice_run(session)
     finally:
         session.close()
 
@@ -258,9 +265,9 @@ def test_practice_extraction_commits_progress_before_provider_call(client, stub_
         assert stored_job is not None
         assert stored_job.status == "failed"
         assert stored_job.progress == {
-            "stage": "extracting",
-            "pct": 10,
-            "message": "extracting practice",
+            "stage": "loading",
+            "pct": None,
+            "message": "preparing practice questions",
         }
         assert stored_run is not None
         assert stored_run.status == "queued"

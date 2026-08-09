@@ -17,11 +17,14 @@ from sqlalchemy.orm import Session
 
 from app.db.identity import card_id_for
 from app.db.models import Card, Job, Section
+from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
-from app.pipeline._common import report_progress_in_session as _report_progress_in_session
+from app.pipeline._common import (
+    report_progress_in_session as _report_progress_in_session,
+)
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 from app.services import evidence_items_service
 
@@ -98,7 +101,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
     if section is None:
         raise ValueError(f"section not found: {section_id}")
 
-    _report_progress(job.id, stage="generating", pct=10, message=f"generating cards for {section.title}")
+    _report_progress(job.id, stage="loading", pct=None, message=f"preparing flashcards for {section.title}")
 
     curriculum_version_id, claim_options = evidence_items_service.claim_options_for_sections(
         session, section.course_id, [section.id]
@@ -107,6 +110,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
     system_prompt, messages = _build_messages(section, claim_options)
     _, prompt_version = load_prompt("cards")
     provider = get_provider()
+    completion_options = completion_options_for_job(job.id, artifact="flashcards")
 
     # Same cap discipline as lesson generation (app/llm/ledger.ensure_spend_cap):
     # checked immediately before the call, no yield points in between.
@@ -123,6 +127,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
         prompt_version=prompt_version,
         system=system_prompt,
         wait_for_slot=True,
+        options=completion_options,
     )
 
     try:
@@ -138,6 +143,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
             prompt_version=prompt_version,
             system=system_prompt,
             wait_for_slot=True,
+            options=completion_options,
         )
         try:
             cards_data = _parse_cards(result.text, allowed_claim_ids)

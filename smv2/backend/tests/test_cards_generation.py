@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import json
 
+from conftest import _first_section_id
+
 from app.db.engine import get_session
 from app.db.models import Card, Job, LlmCall, ReviewState
 from app.jobs.worker import run_due_jobs_once
-from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, CompletionResult, ProviderNotConfiguredError
-from conftest import _first_section_id
+from app.llm.provider import (
+    PROVIDER_NOT_CONFIGURED_MESSAGE,
+    CompletionResult,
+    ProviderNotConfiguredError,
+)
 
 
 def test_generate_cards_happy_path(client, ingest_course, stub_provider):
@@ -177,6 +182,9 @@ def test_generate_cards_retries_once_on_top_level_parse_failure(client, ingest_c
     job = client.get(f"/api/jobs/{job_id}").json()
     assert job["status"] == "succeeded"
     assert stub_provider.call_count == 2
+    assert len(stub_provider.received_completion_options) == 2
+    assert all(option.progress is not None for option in stub_provider.received_completion_options)
+    assert all(option.is_cancelled is not None for option in stub_provider.received_completion_options)
 
     cards = client.get(f"/api/sections/{section_id}/cards").json()
     assert len(cards) == 1

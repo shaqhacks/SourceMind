@@ -17,11 +17,14 @@ from app.db.models import (
     LearningClaimRevision,
     Section,
 )
+from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
-from app.pipeline._common import report_progress_in_session as _report_progress_in_session
+from app.pipeline._common import (
+    report_progress_in_session as _report_progress_in_session,
+)
 from app.pipeline._common import strip_leading_fence
 
 _MAX_INPUT_CHARS = 30_000
@@ -269,7 +272,8 @@ def run_concept_extraction(
     system_prompt, prompt_version = load_prompt("prereq_extraction")
     provider = get_provider()
     messages = [{"role": "user", "content": source_message}]
-    _report_progress(job.id, stage="extracting", pct=10, message="extracting curriculum")
+    _report_progress(job.id, stage="loading", pct=None, message="preparing curriculum draft")
+    completion_options = completion_options_for_job(job.id, artifact="curriculum")
 
     parsed = None
     last_error = None
@@ -283,6 +287,7 @@ def run_concept_extraction(
             prompt_version=prompt_version,
             system=system_prompt,
             wait_for_slot=True,
+            options=completion_options,
         )
         try:
             parsed = parse_curriculum(result.text, allowed_section_ids=allowed_ids)

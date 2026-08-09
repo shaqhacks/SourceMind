@@ -23,11 +23,14 @@ from app.db.models import (
     PracticeQuestion,
     Section,
 )
+from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.ledger import ensure_spend_cap
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
 from app.pipeline._common import report_progress as _report_progress
-from app.pipeline._common import report_progress_in_session as _report_progress_in_session
+from app.pipeline._common import (
+    report_progress_in_session as _report_progress_in_session,
+)
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 from app.services import evidence_items_service
 
@@ -160,7 +163,7 @@ def run_practice_extraction(
         .all()
     )
 
-    _report_progress(job.id, stage="extracting", pct=10, message="extracting practice")
+    _report_progress(job.id, stage="loading", pct=None, message="preparing practice questions")
     run.status = "running"
     run.error = None
 
@@ -179,6 +182,7 @@ def run_practice_extraction(
         }
     ]
     provider = get_provider()
+    completion_options = completion_options_for_job(job.id, artifact="practice_assessment")
 
     ensure_spend_cap(course_id)
     result = provider.complete(
@@ -189,6 +193,7 @@ def run_practice_extraction(
         prompt_version=prompt_version,
         system=system_prompt,
         wait_for_slot=True,
+        options=completion_options,
     )
 
     questions = parse_practice_questions(result.text, allowed_claim_ids)
