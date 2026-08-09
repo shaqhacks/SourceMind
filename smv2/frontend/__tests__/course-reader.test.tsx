@@ -11,6 +11,7 @@ import {
   findActiveLessonJob,
   getLessonEstimate,
   getLlmUsage,
+  getReviewQueue,
   getSection,
   listAssets,
   listCards,
@@ -37,6 +38,7 @@ vi.mock("@/lib/api/client", () => ({
   findActiveLessonJob: vi.fn(),
   generateLesson: vi.fn(),
   getLlmUsage: vi.fn(),
+  getReviewQueue: vi.fn(),
   getChatHistory: vi.fn(),
   sendChat: vi.fn(),
   listCards: vi.fn(),
@@ -75,6 +77,7 @@ const mockedSaveProgress = vi.mocked(saveProgress);
 const mockedGetLessonEstimate = vi.mocked(getLessonEstimate);
 const mockedFindActiveLessonJob = vi.mocked(findActiveLessonJob);
 const mockedGetLlmUsage = vi.mocked(getLlmUsage);
+const mockedGetReviewQueue = vi.mocked(getReviewQueue);
 const mockedListCards = vi.mocked(listCards);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 const mockedListSections = vi.mocked(listSections);
@@ -225,6 +228,18 @@ describe("CourseReader", () => {
     mockedGetLlmUsage.mockResolvedValue(
       ok({ calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 }),
     );
+    mockedGetReviewQueue.mockResolvedValue(
+      ok({
+        cards: [],
+        due: 0,
+        new: 0,
+        total: 0,
+        overdue_count: 0,
+        new_count: 0,
+        available_count: 0,
+        total_count: 0,
+      }),
+    );
     mockedListCards.mockResolvedValue(ok([]));
     // Default: no assets have an enhanced (html) view yet, so "pages"
     // mode falls back to plain PdfPagesView — matches existing
@@ -267,6 +282,26 @@ describe("CourseReader", () => {
     expect(screen.getByRole("heading", { level: 2, name: /chapter one/i })).toHaveFocus();
 
     await screen.findByText(/first body/i);
+  });
+
+  it("loads all-card review metadata for the active chapter's section cards", async () => {
+    const courseWithChapterLabels: ReaderCourse = {
+      ...COURSE,
+      sections: COURSE.sections.map((section, index) => ({
+        ...section,
+        chapter_label: `Chapter ${index + 1}`,
+      })),
+    };
+
+    render(<CourseReader course={courseWithChapterLabels} initialProgress={NO_PROGRESS} />);
+
+    await waitFor(() =>
+      expect(mockedGetReviewQueue).toHaveBeenCalledWith("course-1", {
+        scope: "all",
+        chapterLabel: "Chapter 1",
+        limit: 200,
+      }),
+    );
   });
 
   it("moves to the next chapter on ArrowRight and focuses its heading", async () => {
