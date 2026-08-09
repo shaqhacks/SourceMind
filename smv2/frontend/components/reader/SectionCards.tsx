@@ -29,7 +29,12 @@ const REVIEW_QUEUE_LIMIT = 200;
 type LoadState =
   | { kind: "loading" }
   | { kind: "error"; error: FetchError }
-  | { kind: "loaded"; cards: CardOut[]; reviewCardsById: Map<string, ReviewQueueCardOut> };
+  | {
+      kind: "loaded";
+      cards: CardOut[];
+      reviewCardsById: Map<string, ReviewQueueCardOut>;
+      reviewError: FetchError | null;
+    };
 
 async function fetchCards(
   sectionId: string,
@@ -44,10 +49,14 @@ async function fetchCards(
 
   const [{ data, status }, reviewResult] = await Promise.all([cardsPromise, reviewPromise]);
   if (!data) return { kind: "error", error: describeError(status, "Loading flashcards") };
+  const reviewError =
+    reviewResult !== null && !reviewResult.data
+      ? describeError(reviewResult.status, "Loading review metadata")
+      : null;
   const reviewCardsById = new Map(
     reviewResult?.data?.cards.map((card) => [card.id, card] as const) ?? [],
   );
-  return { kind: "loaded", cards: data, reviewCardsById };
+  return { kind: "loaded", cards: data, reviewCardsById, reviewError };
 }
 
 /**
@@ -121,11 +130,24 @@ export default function SectionCards({ courseId, chapterLabel, sectionId }: Sect
       const savedCard = data;
       setState((prev) => {
         if (prev.kind !== "loaded") return prev;
+        const reviewCardsById = new Map(prev.reviewCardsById);
+        const reviewCard = reviewCardsById.get(cardId);
+        if (reviewCard) {
+          reviewCardsById.delete(cardId);
+          reviewCardsById.set(savedCard.id, {
+            ...reviewCard,
+            id: savedCard.id,
+            section_id: savedCard.section_id,
+            front_md: savedCard.front_md,
+            back_md: savedCard.back_md,
+          });
+        }
         // The edit response carries a NEW, content-addressed id — swap
         // the old entry out entirely rather than patching it in place.
         return {
           ...prev,
           cards: prev.cards.map((c) => (c.id === cardId ? savedCard : c)),
+          reviewCardsById,
         };
       });
       setEditingId(null);
@@ -176,6 +198,21 @@ export default function SectionCards({ courseId, chapterLabel, sectionId }: Sect
         >
           Review this chapter
         </Link>
+      )}
+      {state.reviewError && (
+        <div
+          role="alert"
+          className="rounded-md border border-accent/30 bg-accent-soft px-3 py-2 text-xs text-muted-foreground"
+        >
+          <p>{state.reviewError.message}</p>
+          <button
+            type="button"
+            onClick={loadCards}
+            className="mt-1 font-medium text-accent underline"
+          >
+            Retry review metadata
+          </button>
+        </div>
       )}
       {state.cards.map((card) => {
         const isEditing = editingId === card.id;

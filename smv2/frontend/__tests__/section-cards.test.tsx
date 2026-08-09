@@ -419,6 +419,50 @@ describe("SectionCards", () => {
     expect(screen.getByRole("button", { name: /easy/i })).toBeDisabled();
   });
 
+  it("keeps review controls wired to the new card id after editing creates a content-addressed card", async () => {
+    mockedListCards.mockResolvedValue(ok([makeCard({ id: "old-id", front_md: "Old front" })]));
+    mockedGetReviewQueue.mockResolvedValue(reviewQueue([makeReviewCard({ id: "old-id" })]));
+    mockedPatchCard.mockResolvedValue(
+      ok(makeCard({ id: "new-id", front_md: "New front", back_md: "New answer", origin: "user" })),
+    );
+    const user = userEvent.setup();
+
+    render(<SectionCards courseId="course-1" chapterLabel="Fractions" sectionId="sec-1" />);
+    await screen.findByText("Old front");
+
+    await user.click(screen.getByRole("button", { name: /^edit$/i }));
+    const [frontTextarea, backTextarea] = screen.getAllByRole("textbox");
+    await user.clear(frontTextarea);
+    await user.type(frontTextarea, "New front");
+    await user.clear(backTextarea);
+    await user.type(backTextarea, "New answer");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await user.click(await screen.findByRole("button", { name: "Show answer" }));
+    await user.click(screen.getByRole("button", { name: /good/i }));
+
+    expect(await screen.findByText("Saved as Good.")).toBeInTheDocument();
+    expect(mockedGradeCardAndNotify).toHaveBeenCalledWith("new-id", 3, expect.any(Number));
+  });
+
+  it("keeps editable cards visible when review metadata fails and retries metadata loading", async () => {
+    mockedListCards.mockResolvedValue(ok([makeCard({ id: "card-1", front_md: "Editable front" })]));
+    mockedGetReviewQueue.mockResolvedValueOnce(err(503)).mockResolvedValueOnce(reviewQueue());
+    const user = userEvent.setup();
+
+    render(<SectionCards courseId="course-1" chapterLabel="Fractions" sectionId="sec-1" />);
+
+    expect(await screen.findByText("Editable front")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^edit$/i })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/loading review metadata/i);
+
+    await user.click(screen.getByRole("button", { name: /retry review metadata/i }));
+    await user.click(await screen.findByRole("button", { name: "Show answer" }));
+
+    expect(screen.getByRole("button", { name: /again/i })).toBeVisible();
+    expect(mockedGetReviewQueue).toHaveBeenCalledTimes(2);
+  });
+
   it("omits the chapter review link when the section has no chapter label", async () => {
     mockedListCards.mockResolvedValue(ok([makeCard({ id: "card-1" })]));
 
