@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from app.db.engine import get_session
@@ -196,7 +198,7 @@ def test_anthropic_provider_sends_system_separately_from_messages(monkeypatch):
         text = "a response"
 
     class _FakeResponse:
-        content = [_FakeBlock()]
+        content: ClassVar = [_FakeBlock()]
         usage = _FakeUsage()
         model = "claude-sonnet-5"
 
@@ -234,7 +236,7 @@ def test_anthropic_provider_omits_system_kwarg_when_not_given(monkeypatch):
         text = "ok"
 
     class _FakeResponse:
-        content = [_FakeBlock()]
+        content: ClassVar = [_FakeBlock()]
         usage = _FakeUsage()
         model = "claude-sonnet-5"
 
@@ -261,7 +263,10 @@ def test_anthropic_provider_missing_credentials_raises_friendly_error(monkeypatc
     import pytest
 
     from app.llm.anthropic_provider import AnthropicProvider
-    from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, ProviderNotConfiguredError
+    from app.llm.provider import (
+        PROVIDER_NOT_CONFIGURED_MESSAGE,
+        ProviderNotConfiguredError,
+    )
 
     monkeypatch.setenv("SMV2_LLM_MODEL", "claude-sonnet-5")
     provider = AnthropicProvider()
@@ -318,7 +323,10 @@ def test_anthropic_provider_authentication_error_raises_friendly_error(monkeypat
     import pytest
 
     from app.llm.anthropic_provider import AnthropicProvider
-    from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, ProviderNotConfiguredError
+    from app.llm.provider import (
+        PROVIDER_NOT_CONFIGURED_MESSAGE,
+        ProviderNotConfiguredError,
+    )
 
     monkeypatch.setenv("SMV2_LLM_MODEL", "claude-sonnet-5")
     provider = AnthropicProvider()
@@ -338,6 +346,8 @@ def test_anthropic_provider_authentication_error_raises_friendly_error(monkeypat
 
 
 def test_ollama_provider_complete_prepends_system_as_its_own_message(client, monkeypatch):
+    import json
+
     import httpx
 
     from app.llm.ollama_provider import OllamaProvider
@@ -348,17 +358,32 @@ def test_ollama_provider_complete_prepends_system_as_its_own_message(client, mon
 
     captured: dict = {}
 
-    def _fake_post(url, json, timeout):
-        captured["url"] = url
-        captured["json"] = json
-        request = httpx.Request("POST", url)
-        return httpx.Response(
-            200,
-            json={"message": {"content": "hi there"}, "prompt_eval_count": 5, "eval_count": 7},
-            request=request,
-        )
+    class _Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield (
+                json.dumps(
+                    {
+                        "message": {"content": "hi there"},
+                        "done": False,
+                    }
+                ).encode("utf-8")
+                + b"\n"
+            )
+            yield json.dumps({"done": True, "prompt_eval_count": 5, "eval_count": 7}).encode(
+                "utf-8"
+            ) + b"\n"
 
-    monkeypatch.setattr("app.llm.ollama_provider.httpx.post", _fake_post)
+    async def _handler(request):
+        captured["url"] = str(request.url)
+        captured["json"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, stream=_Stream(), request=request)
+
+    class _MockedAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(_handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("app.llm.ollama_provider.httpx.AsyncClient", _MockedAsyncClient)
 
     result = provider.complete(
         [{"role": "user", "content": "hello"}],
@@ -370,4 +395,5 @@ def test_ollama_provider_complete_prepends_system_as_its_own_message(client, mon
     sent_messages = captured["json"]["messages"]
     assert sent_messages[0] == {"role": "system", "content": "be a helpful teacher"}
     assert sent_messages[1] == {"role": "user", "content": "hello"}
+    assert captured["json"]["stream"] is True
     assert result.text == "hi there"
