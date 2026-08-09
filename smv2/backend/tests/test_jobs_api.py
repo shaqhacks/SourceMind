@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import copy
+from datetime import timedelta
 
 from app.db.engine import get_session
-from app.db.models import Job
+from app.db.models import Job, utcnow
+from app.jobs import registry
 from app.jobs.error_envelope import encode_job_error
+from app.jobs.worker import run_due_jobs_once
+from app.llm.completion_control import ProviderCancelledError
 from app.jobs.registry import LLM_READINESS_REQUIRED_JOB_TYPES
+from app.services import jobs_service
+from conftest import _first_section_id
 
 
 def _seed_job(
@@ -257,3 +263,137 @@ def test_create_job_preserves_safe_noop_payload(client):
     job = resp.json()
     assert job["type"] == "noop"
     assert job["payload"] == payload
+
+
+def test_cancel_queued_job_is_immediately_terminal(client):
+    job = client.post("/api/jobs", json={"type": "noop", "payload": {}}).json()
+
+    response = client.post(f"/api/jobs/{job['id']}/cancel")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "cancelled"
+    assert body["cancel_requested_at"] is not None
+    assert body["retryable"] is False
+    assert run_due_jobs_once() is False
+
+
+def test_cancel_running_job_sets_cooperative_request(client):
+    session = get_session()
+    try:
+        running = Job(
+            type="noop",
+            status="running",
+            lease_until=utcnow() + timedelta(minutes=5),
+            attempts=1,
+        )
+        session.add(running)
+        session.commit()
+        job_id = running.id
+    finally:
+        session.close()
+
+    response = client.post(f"/api/jobs/{job_id}/cancel")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "running"
+    assert body["cancel_requested_at"] is not None
+    assert jobs_service.is_cancel_requested(job_id) is True
+
+
+def test_cancel_terminal_job_is_idempotent_and_unchanged(client):
+    job_id = _seed_job(
+        "noop",
+        status="succeeded",
+        result={"ok": True},
+        progress={"stage": "done"},
+        error=None,
+        attempts=1,
+    )
+    before = client.get(f"/api/jobs/{job_id}").json()
+
+    response = client.post(f"/api/jobs/{job_id}/cancel")
+
+    assert response.status_code == 200
+    assert response.json() == before
+
+
+def test_cancel_missing_job_is_404_without_internal_details(client):
+    response = client.post("/api/jobs/does-not-exist/cancel")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "job not found"}
+
+
+def test_retry_rejects_cancelled_job_without_creating_replacement(client, monkeypatch):
+    original_id = _seed_job(
+        "generate_lesson",
+        {"section_id": "section-1"},
+        status="cancelled",
+        error=None,
+        attempts=1,
+    )
+    monkeypatch.setattr(
+        "app.services.llm_readiness_service.assert_ready_for_generation",
+        lambda: None,
+    )
+
+    response = client.post(f"/api/jobs/{original_id}/retry")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "cancelled jobs cannot be retried"
+    jobs = client.get("/api/jobs").json()
+    assert [job["id"] for job in jobs] == [original_id]
+    assert jobs[0]["retryable"] is False
+
+
+def test_cancelled_queued_lesson_job_allows_explicit_generation_to_create_new_job(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+    first = client.post(f"/api/sections/{section_id}/lesson")
+    assert first.status_code == 202
+    first_job_id = first.json()["job_id"]
+
+    cancel_response = client.post(f"/api/jobs/{first_job_id}/cancel")
+    assert cancel_response.status_code == 200
+
+    second = client.post(f"/api/sections/{section_id}/lesson")
+
+    assert second.status_code == 202
+    assert second.json()["job_id"] != first_job_id
+    jobs = client.get("/api/jobs").json()
+    statuses_by_id = {job["id"]: job["status"] for job in jobs if job["type"] == "generate_lesson"}
+    assert statuses_by_id[first_job_id] == "cancelled"
+    assert statuses_by_id[second.json()["job_id"]] == "queued"
+
+
+def test_worker_marks_provider_cancellation_terminal_and_rolls_back_partial_state(
+    client, monkeypatch
+):
+    def _cancel_after_partial_mutation(session, job):
+        job.result = {"partial": True}
+        job.progress = {"stage": "generating", "pct": 50}
+        job.error = "intermediate error"
+        raise ProviderCancelledError()
+
+    monkeypatch.setitem(registry.JOB_HANDLERS, "cancel_after_partial", _cancel_after_partial_mutation)
+    job = client.post("/api/jobs", json={"type": "cancel_after_partial"}).json()
+
+    assert run_due_jobs_once() is True
+
+    body = client.get(f"/api/jobs/{job['id']}").json()
+    assert body["status"] == "cancelled"
+    assert body["result"] is None
+    assert body["progress"] is None
+    assert body["error"] is None
+    assert body["error_detail"] is None
+    assert body["retryable"] is False
+    session = get_session()
+    try:
+        stored = session.get(Job, job["id"])
+        assert stored.lease_until is None
+    finally:
+        session.close()

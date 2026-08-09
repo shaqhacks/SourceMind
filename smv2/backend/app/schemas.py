@@ -32,6 +32,7 @@ class JobOut(BaseModel):
     error: str | None
     error_detail: dict[str, Any] | None
     attempts: int
+    cancel_requested_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -55,6 +56,7 @@ class JobOut(BaseModel):
                 "error": decoded_error,
                 "error_detail": detail,
                 "attempts": value.attempts,
+                "cancel_requested_at": value.cancel_requested_at,
                 "created_at": value.created_at,
                 "updated_at": value.updated_at,
             }
@@ -65,6 +67,8 @@ class JobOut(BaseModel):
     def retryable(self) -> bool:
         from app.jobs.registry import RETRYABLE_JOB_TYPES
 
+        if self.status == "cancelled":
+            return False
         return self.type in RETRYABLE_JOB_TYPES
 
 

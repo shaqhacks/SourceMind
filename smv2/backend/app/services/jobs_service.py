@@ -14,7 +14,7 @@ from typing import Any, AsyncIterator
 from sqlalchemy.orm import Session
 
 from app.db.engine import get_session
-from app.db.models import Job
+from app.db.models import Job, Section, utcnow
 from app.jobs.registry import (
     JOB_HANDLERS,
     LLM_READINESS_REQUIRED_JOB_TYPES,
@@ -23,8 +23,8 @@ from app.jobs.registry import (
 from app.services import llm_readiness_service
 
 SSE_POLL_INTERVAL_SECONDS = 0.3
-SSE_MAX_SECONDS = 600
-TERMINAL_JOB_STATUSES = {"succeeded", "failed"}
+SSE_MAX_SECONDS = 1860
+TERMINAL_JOB_STATUSES = {"succeeded", "failed", "cancelled"}
 _CREDENTIAL_PAYLOAD_ERROR = "job payload contains credential-like data"
 _CREDENTIAL_KEY_RE = re.compile(
     r"(api[_-]?key|apikey|token|secret|password|credential|authorization|ollama[_-]?base[_-]?url)",
@@ -38,6 +38,18 @@ _CREDENTIAL_VALUE_RE = re.compile(
 
 class JobNotRetryableError(ValueError):
     pass
+
+
+def restore_cancelled_domain_state_in_session(session: Session, job: Job) -> None:
+    if job.type != "generate_lesson":
+        return
+    section_id = (job.payload or {}).get("section_id")
+    if not section_id:
+        return
+    section = session.get(Section, section_id)
+    if section is None:
+        return
+    section.lesson_status = "ready" if section.lesson_md else "none"
 
 
 def create_job_in_session(session: Session, job_type: str, payload: dict[str, Any] | None = None) -> Job:
@@ -111,6 +123,8 @@ def retry_job(job_id: str) -> Job:
         original = session.get(Job, job_id)
         if original is None:
             raise LookupError(f"job not found: {job_id}")
+        if original.status == "cancelled":
+            raise JobNotRetryableError("cancelled jobs cannot be retried")
         if original.type not in RETRYABLE_JOB_TYPES:
             raise JobNotRetryableError(f"job type is not retryable: {original.type}")
         if original.type in LLM_READINESS_REQUIRED_JOB_TYPES:
@@ -127,6 +141,40 @@ def retry_job(job_id: str) -> Job:
         session.add(job)
         session.commit()
         return job
+    finally:
+        session.close()
+
+
+def cancel_job(job_id: str) -> Job:
+    session = get_session()
+    try:
+        job = session.get(Job, job_id)
+        if job is None:
+            raise LookupError(f"job not found: {job_id}")
+        if job.status in TERMINAL_JOB_STATUSES:
+            return job
+
+        now = utcnow()
+        if job.cancel_requested_at is None:
+            job.cancel_requested_at = now
+        if job.status == "queued":
+            job.status = "cancelled"
+            job.error = None
+            job.lease_until = None
+            restore_cancelled_domain_state_in_session(session, job)
+        elif job.status == "running":
+            job.status = "running"
+        session.commit()
+        return job
+    finally:
+        session.close()
+
+
+def is_cancel_requested(job_id: str) -> bool:
+    session = get_session()
+    try:
+        job = session.get(Job, job_id)
+        return job is not None and job.cancel_requested_at is not None
     finally:
         session.close()
 

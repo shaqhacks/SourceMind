@@ -46,6 +46,15 @@ def retry_job(job_id: str) -> JobOut:
     return JobOut.model_validate(job)
 
 
+@router.post("/{job_id}/cancel", operation_id="cancel_job", response_model=JobOut)
+def cancel_job(job_id: str) -> JobOut:
+    try:
+        job = jobs_service.cancel_job(job_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="job not found") from exc
+    return JobOut.model_validate(job)
+
+
 @router.get("/{job_id}/events", operation_id="job_events")
 async def job_events(job_id: str) -> StreamingResponse:
     job = jobs_service.get_job(job_id)

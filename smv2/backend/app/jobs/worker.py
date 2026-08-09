@@ -25,6 +25,8 @@ from app.jobs.registry import (
     ON_ORPHAN_HOOKS,
     default_on_orphan,
 )
+from app.llm.completion_control import ProviderCancelledError
+from app.services import jobs_service
 from app.services.llm_readiness_service import LlmReadinessUnavailableError
 
 LEASE_SECONDS = 60
@@ -94,6 +96,18 @@ def execute_job(session: Session, job: Job) -> None:
 
     try:
         result = handler(session, job)
+    except ProviderCancelledError:
+        session.rollback()
+        cancelled_job = session.get(Job, job_id)
+        assert cancelled_job is not None
+        cancelled_job.status = "cancelled"
+        cancelled_job.result = None
+        cancelled_job.progress = None
+        cancelled_job.error = None
+        cancelled_job.lease_until = None
+        jobs_service.restore_cancelled_domain_state_in_session(session, cancelled_job)
+        session.commit()
+        return
     except LlmReadinessUnavailableError as exc:
         session.rollback()
         failed_job = session.get(Job, job_id)
@@ -183,6 +197,14 @@ def reconcile_interrupted_jobs() -> int:
         for job in running_jobs:
             lease = ensure_utc(job.lease_until)
             if lease is not None and lease < now:
+                if job.cancel_requested_at is not None:
+                    job.status = "cancelled"
+                    job.progress = None
+                    job.error = None
+                    job.lease_until = None
+                    jobs_service.restore_cancelled_domain_state_in_session(session, job)
+                    count += 1
+                    continue
                 hook = ON_ORPHAN_HOOKS.get(job.type, default_on_orphan)
                 hook(session, job)
                 count += 1

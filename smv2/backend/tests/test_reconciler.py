@@ -20,6 +20,26 @@ def _insert_running_job(attempts: int, job_type: str = "noop") -> str:
         session.close()
 
 
+def _insert_cancel_requested_running_job(attempts: int, job_type: str = "noop") -> str:
+    session = get_session()
+    try:
+        past = datetime.now(timezone.utc) - timedelta(minutes=5)
+        job = Job(
+            type=job_type,
+            status="running",
+            lease_until=past,
+            cancel_requested_at=datetime.now(timezone.utc),
+            attempts=attempts,
+            progress={"stage": "generating"},
+            error="stale error",
+        )
+        session.add(job)
+        session.commit()
+        return job.id
+    finally:
+        session.close()
+
+
 def test_orphaned_job_under_attempt_limit_is_requeued(client):
     job_id = _insert_running_job(attempts=1)
 
@@ -30,6 +50,22 @@ def test_orphaned_job_under_attempt_limit_is_requeued(client):
         job = session.get(Job, job_id)
         assert job.status == "queued"
         assert job.lease_until is None
+        assert job.progress is None
+    finally:
+        session.close()
+
+
+def test_cancel_requested_orphaned_job_is_cancelled_instead_of_requeued(client):
+    job_id = _insert_cancel_requested_running_job(attempts=1)
+
+    reconcile_interrupted_jobs()
+
+    session = get_session()
+    try:
+        job = session.get(Job, job_id)
+        assert job.status == "cancelled"
+        assert job.lease_until is None
+        assert job.error is None
         assert job.progress is None
     finally:
         session.close()
