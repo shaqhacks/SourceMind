@@ -558,6 +558,50 @@ describe("InlinePracticeAssessment", () => {
     await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1));
   });
 
+  it("reports a refreshed failed parent state when a parent-triggered retry cannot restart", async () => {
+    const onStateChange = vi.fn();
+    const restartDetail: ApiErrorDetail = {
+      code: "invalid_model_output",
+      failure_category: "structured_output_invalid",
+      message: "The model returned an invalid question format.",
+    };
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),
+    );
+    mockedStartPracticeAssessment.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: restartDetail },
+    });
+
+    const view = renderPracticeChild({ retryVersion: 0, onStateChange });
+    await screen.findByText("Invalid format");
+    onStateChange.mockClear();
+
+    view.rerender(practiceChild({ retryVersion: 1, onStateChange }));
+
+    expect(
+      await screen.findByText("The model returned an invalid question format."),
+    ).toBeInTheDocument();
+    expect(onStateChange).toHaveBeenNthCalledWith(1, {
+      kind: "generating",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "Preparing questions.",
+      errorDetail: null,
+      retryKind: null,
+    });
+    expect(onStateChange).toHaveBeenNthCalledWith(2, {
+      kind: "failed",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "The model returned an invalid question format.",
+      errorDetail: restartDetail,
+      retryKind: "restart",
+    });
+    expect(screen.queryByText(/parser dump/i)).not.toBeInTheDocument();
+  });
+
   it("does not retry a failed extraction when retryVersion is unchanged", async () => {
     mockedGetPracticeAssessment.mockResolvedValue(
       ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),

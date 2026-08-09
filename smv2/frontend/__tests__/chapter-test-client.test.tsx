@@ -520,6 +520,46 @@ describe("ChapterTestClient", () => {
     expect(screen.getByRole("button", { name: "Retry failed (1)" })).toBeEnabled();
   });
 
+  it("re-enables aggregate retry with refreshed category when a parent retry restart fails", async () => {
+    mockedListChapters.mockResolvedValue(
+      ok([
+        makeChapter({
+          practice_section_ids: ["sec-invalid"],
+        }),
+      ]),
+    );
+    mockedGetSection.mockImplementation((id: string) =>
+      Promise.resolve(ok(makeSectionDetail({ id, body_md: `Source for ${id}` }))),
+    );
+    mockedListTests.mockResolvedValue(ok([]));
+
+    const user = userEvent.setup();
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+
+    await screen.findByText("Ready practice questions for sec-invalid");
+    emitPracticeState("sec-invalid", failedPracticeState("sec-invalid"));
+
+    await user.click(screen.getByRole("button", { name: "Retry failed (1)" }));
+    expect(screen.getByRole("button", { name: "Retry failed (1)" })).toBeDisabled();
+
+    emitPracticeState("sec-invalid", generatingPracticeState("sec-invalid"));
+    emitPracticeState(
+      "sec-invalid",
+      failedPracticeStateWithDetail("sec-invalid", {
+        message: "Parser dump: {\"questions\":\"bad\"}",
+        errorDetail: {
+          code: "invalid_model_output",
+          failure_category: "structured_output_invalid",
+          message: "The model returned an invalid question format.",
+        },
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Retry failed (1)" })).toBeEnabled();
+    expect(screen.getByText("1 section needs a valid model response")).toBeInTheDocument();
+    expect(screen.queryByText(/parser dump/i)).not.toBeInTheDocument();
+  });
+
   it("renders original pages inside the source disclosure when page metadata is available", async () => {
     mockedListChapters.mockResolvedValue(ok([makeChapter()]));
     mockedGetSection.mockImplementation((id: string) =>

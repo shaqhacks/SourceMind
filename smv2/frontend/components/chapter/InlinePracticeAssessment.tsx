@@ -272,6 +272,14 @@ export default function InlinePracticeAssessment({
     loadSeqRef.current = loadSeq;
     startedForRef.current = `${courseId}:${sectionId}`;
     setRetryError(null);
+    emitSectionState({
+      kind: "generating",
+      sectionId,
+      questionCount: 0,
+      message: "Preparing questions.",
+      errorDetail: null,
+      retryKind: null,
+    });
 
     const startResult = await startPracticeAssessment(courseId, sectionId);
     if (!isCurrentLoad(loadSeq)) {
@@ -281,15 +289,26 @@ export default function InlinePracticeAssessment({
 
     if (!startResult.ok || !startResult.data) {
       retryingFailedAssessmentRef.current = false;
-      setRetryError(
-        describeError(startResult.status, "Restarting practice questions", startResult.error),
+      const nextError = describeError(
+        startResult.status,
+        "Restarting practice questions",
+        startResult.error,
       );
+      setRetryError(nextError);
+      emitSectionState({
+        kind: "failed",
+        sectionId,
+        questionCount: 0,
+        message: nextError.message,
+        errorDetail: nextError.detail ?? null,
+        retryKind: "restart",
+      });
       return;
     }
 
     retryingFailedAssessmentRef.current = false;
     applyAssessment(startResult.data);
-  }, [applyAssessment, courseId, isCurrentLoad, sectionId]);
+  }, [applyAssessment, courseId, emitSectionState, isCurrentLoad, sectionId]);
 
   useEffect(() => {
     mountedRef.current = true;
