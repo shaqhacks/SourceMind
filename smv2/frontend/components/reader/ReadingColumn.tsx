@@ -702,7 +702,12 @@ export default function ReadingColumn({
           )}
           <div className="mt-8">
             <CardsCTA key={`cta-${section.id}`} sectionId={section.id} />
-            <SectionCards key={`cards-${section.id}`} sectionId={section.id} />
+            <SectionCards
+              key={`cards-${section.id}`}
+              courseId={courseId}
+              chapterLabel={section.chapter_label}
+              sectionId={section.id}
+            />
           </div>
           {(previousTitle !== null || nextTitle !== null) && (
             <nav

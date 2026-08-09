@@ -1,27 +1,53 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 import Markdown from "@/components/Markdown";
+import ReviewGradeControls from "@/components/review/ReviewGradeControls";
 import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
-import { deleteCard, listCards, patchCard, type CardOut } from "@/lib/api/client";
+import {
+  deleteCard,
+  getReviewQueue,
+  listCards,
+  patchCard,
+  type CardOut,
+  type ReviewQueueCardOut,
+} from "@/lib/api/client";
 import { subscribeCardsSettled } from "@/lib/cards/cardsBus";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface SectionCardsProps {
+  courseId: string;
+  chapterLabel: string | null;
   sectionId: string;
 }
+
+const REVIEW_QUEUE_LIMIT = 200;
 
 type LoadState =
   | { kind: "loading" }
   | { kind: "error"; error: FetchError }
-  | { kind: "loaded"; cards: CardOut[] };
+  | { kind: "loaded"; cards: CardOut[]; reviewCardsById: Map<string, ReviewQueueCardOut> };
 
-async function fetchCards(sectionId: string): Promise<LoadState> {
-  const { data, status } = await listCards(sectionId);
+async function fetchCards(
+  sectionId: string,
+  courseId: string,
+  chapterLabel: string | null,
+): Promise<LoadState> {
+  const cardsPromise = listCards(sectionId);
+  const reviewPromise =
+    chapterLabel === null
+      ? Promise.resolve(null)
+      : getReviewQueue(courseId, { scope: "all", chapterLabel, limit: REVIEW_QUEUE_LIMIT });
+
+  const [{ data, status }, reviewResult] = await Promise.all([cardsPromise, reviewPromise]);
   if (!data) return { kind: "error", error: describeError(status, "Loading flashcards") };
-  return { kind: "loaded", cards: data };
+  const reviewCardsById = new Map(
+    reviewResult?.data?.cards.map((card) => [card.id, card] as const) ?? [],
+  );
+  return { kind: "loaded", cards: data, reviewCardsById };
 }
 
 /**
@@ -30,7 +56,7 @@ async function fetchCards(sectionId: string): Promise<LoadState> {
  * empty state, this owns showing/editing/deleting the cards themselves.
  * Renders nothing at zero cards (CardsCTA already covers that).
  */
-export default function SectionCards({ sectionId }: SectionCardsProps) {
+export default function SectionCards({ courseId, chapterLabel, sectionId }: SectionCardsProps) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -43,18 +69,18 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const loadCards = useCallback(() => {
-    fetchCards(sectionId).then(setState);
-  }, [sectionId]);
+    fetchCards(sectionId, courseId, chapterLabel).then(setState);
+  }, [chapterLabel, courseId, sectionId]);
 
   useEffect(() => {
     let active = true;
-    fetchCards(sectionId).then((result) => {
+    fetchCards(sectionId, courseId, chapterLabel).then((result) => {
       if (active) setState(result);
     });
     return () => {
       active = false;
     };
-  }, [sectionId]);
+  }, [chapterLabel, courseId, sectionId]);
 
   // CardsCTA owns generation's job-watching; this just listens for "a job
   // for this section settled" and refetches — the core ask is cards
@@ -97,7 +123,10 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
         if (prev.kind !== "loaded") return prev;
         // The edit response carries a NEW, content-addressed id — swap
         // the old entry out entirely rather than patching it in place.
-        return { kind: "loaded", cards: prev.cards.map((c) => (c.id === cardId ? savedCard : c)) };
+        return {
+          ...prev,
+          cards: prev.cards.map((c) => (c.id === cardId ? savedCard : c)),
+        };
       });
       setEditingId(null);
       return;
@@ -121,7 +150,7 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
     if (ok) {
       setState((prev) => {
         if (prev.kind !== "loaded") return prev;
-        return { kind: "loaded", cards: prev.cards.filter((c) => c.id !== cardId) };
+        return { ...prev, cards: prev.cards.filter((c) => c.id !== cardId) };
       });
       setConfirmDeleteId(null);
       // The deleted card's review history goes with it — the due count
@@ -138,10 +167,21 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
 
   return (
     <div className="mt-4 flex flex-col gap-3">
+      {chapterLabel !== null && (
+        <Link
+          href={`/review?course=${encodeURIComponent(courseId)}&scope=all&chapter=${encodeURIComponent(
+            chapterLabel,
+          )}`}
+          className="self-start text-xs font-medium text-accent underline"
+        >
+          Review this chapter
+        </Link>
+      )}
       {state.cards.map((card) => {
         const isEditing = editingId === card.id;
         const isRevealed = revealed.has(card.id);
         const isConfirmingDelete = confirmDeleteId === card.id;
+        const reviewCard = state.reviewCardsById.get(card.id);
 
         return (
           <div key={card.id} className="rounded-lg border border-divider bg-surface-raised p-3 text-sm">
@@ -204,6 +244,9 @@ export default function SectionCards({ sectionId }: SectionCardsProps) {
                   <div className="border-t border-divider pt-2">
                     <Markdown>{card.back_md}</Markdown>
                   </div>
+                )}
+                {isRevealed && !isConfirmingDelete && reviewCard && (
+                  <ReviewGradeControls card={reviewCard} className="pt-1" />
                 )}
 
                 {deleteError && confirmDeleteId === null && (
