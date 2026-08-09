@@ -45,6 +45,9 @@ async function fetchCards(
   const cardsPromise = listCards(sectionId);
   const { data, status } = await cardsPromise;
   if (!data) return { kind: "error", error: describeError(status, "Loading flashcards") };
+  if (data.length === 0) {
+    return { kind: "loaded", cards: data, reviewCardsById: new Map(), reviewError: null };
+  }
   const reviewResult =
     chapterLabel === null
       ? await getReviewSelection(courseId, data.map((card) => card.id))

@@ -154,6 +154,18 @@ describe("SectionCards", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("does not request exact review metadata for an empty front-matter section", async () => {
+    mockedListCards.mockResolvedValue(ok([]));
+
+    const { container } = render(
+      <SectionCards courseId="course-1" chapterLabel={null} sectionId="sec-1" />,
+    );
+
+    await waitFor(() => expect(mockedListCards).toHaveBeenCalled());
+    expect(mockedGetReviewSelection).not.toHaveBeenCalled();
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("shows each card's front always, and reveals the back independently per card", async () => {
     mockedListCards.mockResolvedValue(
       ok([
