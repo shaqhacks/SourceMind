@@ -33,9 +33,7 @@ function makeQuestion(overrides: Partial<PracticeQuestionOut> = {}): PracticeQue
   };
 }
 
-function makeAssessment(
-  overrides: Partial<PracticeAssessmentOut & { error_detail: ApiErrorDetail | null }> = {},
-): PracticeAssessmentOut & { error_detail?: ApiErrorDetail | null } {
+function makeAssessment(overrides: Partial<PracticeAssessmentOut> = {}): PracticeAssessmentOut {
   return {
     section_id: "section-1",
     status: "ready",
@@ -146,6 +144,30 @@ describe("practice assessment state contract", () => {
       questionCount: 0,
       message: "Extraction failed.",
       errorDetail: extractionDetail,
+      retryKind: "restart",
+    });
+  });
+
+  it("normalizes generated error detail before storing parent state", () => {
+    expect(
+      practiceSectionStateFromAssessment(
+        "section-1",
+        makeAssessment({
+          status: "failed",
+          questions: [],
+          message: "Extraction failed.",
+          error_detail: {
+            code: 42,
+            message: ["raw parser output"],
+          },
+        }),
+      ),
+    ).toEqual({
+      kind: "failed",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "Extraction failed.",
+      errorDetail: null,
       retryKind: "restart",
     });
   });

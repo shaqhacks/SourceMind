@@ -1,5 +1,5 @@
 import type { ApiErrorDetail, PracticeAssessmentOut } from "@/lib/api/client";
-import type { FetchError } from "@/lib/api/errors";
+import { apiErrorDetail, type FetchError } from "@/lib/api/errors";
 
 export type PracticeSectionState =
   | {
@@ -44,10 +44,6 @@ export interface PracticeSectionsSummary {
   total: number;
 }
 
-type PracticeAssessmentWithErrorDetail = PracticeAssessmentOut & {
-  error_detail?: ApiErrorDetail | null;
-};
-
 export function loadingPracticeSectionState(sectionId: string): PracticeSectionState {
   return {
     kind: "loading",
@@ -75,7 +71,7 @@ export function practiceSectionStateFromLoadError(
 
 export function practiceSectionStateFromAssessment(
   sectionId: string,
-  assessment: PracticeAssessmentWithErrorDetail,
+  assessment: PracticeAssessmentOut,
 ): PracticeSectionState {
   if (assessment.status === "ready") {
     return {
@@ -89,12 +85,13 @@ export function practiceSectionStateFromAssessment(
   }
 
   if (assessment.status === "failed") {
+    const errorDetail = apiErrorDetail({ detail: assessment.error_detail });
     return {
       kind: "failed",
       sectionId,
       questionCount: 0,
       message: assessment.message ?? "Practice question extraction failed.",
-      errorDetail: assessment.error_detail ?? null,
+      errorDetail,
       retryKind: "restart",
     };
   }
