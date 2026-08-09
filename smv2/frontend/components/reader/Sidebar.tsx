@@ -210,38 +210,36 @@ export default function Sidebar({
                   </Link>
                 )}
               </div>
-              {open && (
-                <ul id={listId} className="flex flex-col gap-px pl-2.5">
-                  {contentSections.map((section, sectionIndex) => {
-                    const index = indexById.get(section.id);
-                    if (index === undefined) return null;
-                    const active = section.id === activeSectionId;
-                    const lessonDisplayStatus =
-                      lessonStatusOverrides?.[section.id] ?? section.lesson_status;
-                    return (
-                      <li key={section.id}>
-                        <button
-                          type="button"
-                          aria-current={active ? "true" : undefined}
-                          onClick={() => onSelect(index)}
-                          className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13.5px] transition-colors ${
-                            active
-                              ? "bg-surface-raised font-semibold shadow-sm"
-                              : "opacity-70 hover:bg-foreground/[0.05] hover:opacity-100"
-                          }`}
-                        >
-                          <PositionDot current={active} />
-                          <span className="shrink-0 text-muted-foreground">
-                            {sectionIndex + 1}.
-                          </span>
-                          <span className="min-w-0 flex-1 truncate">{section.title}</span>
-                          <LessonDot status={lessonDisplayStatus} />
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+              <ul id={listId} hidden={!open} className="flex flex-col gap-px pl-2.5">
+                {contentSections.map((section, sectionIndex) => {
+                  const index = indexById.get(section.id);
+                  if (index === undefined) return null;
+                  const active = section.id === activeSectionId;
+                  const lessonDisplayStatus =
+                    lessonStatusOverrides?.[section.id] ?? section.lesson_status;
+                  return (
+                    <li key={section.id}>
+                      <button
+                        type="button"
+                        aria-current={active ? "true" : undefined}
+                        onClick={() => onSelect(index)}
+                        className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13.5px] transition-colors ${
+                          active
+                            ? "bg-surface-raised font-semibold shadow-sm"
+                            : "opacity-70 hover:bg-foreground/[0.05] hover:opacity-100"
+                        }`}
+                      >
+                        <PositionDot current={active} />
+                        <span className="shrink-0 text-muted-foreground">
+                          {sectionIndex + 1}.
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{section.title}</span>
+                        <LessonDot status={lessonDisplayStatus} />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             </li>
           );
         })}

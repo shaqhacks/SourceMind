@@ -10,10 +10,10 @@ import type { ReaderSection } from "./types";
 
 export const FRONT_MATTER_LABEL = "Front matter";
 
-/** Stable Set/DOM-id key for a group — distinct from the null label itself
- * so a real chapter that happened to be titled "Front matter" can never
- * collide with the null-label sentinel group. */
-const FRONT_MATTER_KEY = "__front_matter__";
+/** Stable Set/DOM-id key prefix for a group. Namespacing by label kind
+ * keeps front matter distinct from real labels such as "__front_matter__". */
+const FRONT_MATTER_KEY = "front:null";
+const CHAPTER_LABEL_KEY_PREFIX = "chapter:";
 
 export interface ChapterGroup {
   /** Raw chapter_label, or null for front matter. */
@@ -27,7 +27,7 @@ export interface ChapterGroup {
 }
 
 export function chapterGroupKey(label: string | null): string {
-  return label ?? FRONT_MATTER_KEY;
+  return label === null ? FRONT_MATTER_KEY : `${CHAPTER_LABEL_KEY_PREFIX}${label}`;
 }
 
 /**

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Sidebar from "@/components/reader/Sidebar";
+import { chapterGroupKey } from "@/lib/reader/chapterGroups";
 import type { ReaderSection } from "@/lib/reader/types";
 
 function makeSection(overrides: Partial<ReaderSection> = {}): ReaderSection {
@@ -64,12 +65,12 @@ describe("Sidebar chapter grouping", () => {
     );
     expect(screen.getByText("Foundations")).toBeInTheDocument();
 
-    // Chapter 2 isn't active — collapsed, its row not in the document.
+    // Chapter 2 isn't active — collapsed, with its controlled list mounted but hidden.
     expect(screen.getByRole("button", { name: /chapter 2/i })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
-    expect(screen.queryByText("Structures")).not.toBeInTheDocument();
+    expect(screen.getByText("Structures")).not.toBeVisible();
   });
 
   it("expands and collapses a non-active group on click, aria-expanded tracks it", async () => {
@@ -84,15 +85,16 @@ describe("Sidebar chapter grouping", () => {
     );
 
     const chapter2Toggle = screen.getByRole("button", { name: /chapter 2/i });
-    expect(screen.queryByText("Structures")).not.toBeInTheDocument();
+    expect(screen.getByText("Structures")).not.toBeVisible();
 
     await user.click(chapter2Toggle);
     expect(chapter2Toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Structures")).toBeInTheDocument();
+    expect(screen.getByText("Structures")).toBeVisible();
 
     await user.click(chapter2Toggle);
     expect(chapter2Toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("Structures")).not.toBeInTheDocument();
+    expect(screen.getByText("Structures")).not.toBeVisible();
   });
 
   it("keeps the active group open — clicking its own toggle is a no-op", async () => {
@@ -127,6 +129,37 @@ describe("Sidebar chapter grouping", () => {
     const controlsId = toggle.getAttribute("aria-controls");
     expect(controlsId).toBeTruthy();
     expect(document.getElementById(controlsId!)).toContainElement(screen.getByText("Foundations"));
+  });
+
+  it("keeps a collapsed group's aria-controls target mounted until it opens", async () => {
+    const user = userEvent.setup();
+    render(
+      <Sidebar
+        courseId="course-1"
+        sections={SECTIONS}
+        activeSectionId="c1-content"
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const chapter2Toggle = screen.getByRole("button", { name: /chapter 2/i });
+    const controlsId = chapter2Toggle.getAttribute("aria-controls");
+    expect(controlsId).toBeTruthy();
+
+    const collapsedList = document.getElementById(controlsId!);
+    expect(collapsedList).toBeInTheDocument();
+    expect(collapsedList).toHaveAttribute("hidden");
+    expect(screen.getByText("Structures")).not.toBeVisible();
+
+    await user.click(chapter2Toggle);
+    expect(chapter2Toggle).toHaveAttribute("aria-expanded", "true");
+    expect(collapsedList).not.toHaveAttribute("hidden");
+    expect(screen.getByText("Structures")).toBeVisible();
+
+    await user.click(chapter2Toggle);
+    expect(chapter2Toggle).toHaveAttribute("aria-expanded", "false");
+    expect(collapsedList).toHaveAttribute("hidden");
+    expect(screen.getByText("Structures")).not.toBeVisible();
   });
 
   it("uses valid unique aria-control ids for special chapter labels", async () => {
@@ -276,7 +309,9 @@ describe("Sidebar chapter grouping", () => {
         sections={SECTIONS}
         activeSectionId="c1-content"
         onSelect={vi.fn()}
-        chapterStats={{ "Chapter 1": { attempts: 2, best_score: 0.75, latest_score: 0.5 } }}
+        chapterStats={{
+          [chapterGroupKey("Chapter 1")]: { attempts: 2, best_score: 0.75, latest_score: 0.5 },
+        }}
       />,
     );
 
