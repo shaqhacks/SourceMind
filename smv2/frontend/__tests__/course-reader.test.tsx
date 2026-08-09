@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CourseReader from "@/components/reader/CourseReader";
 import {
+  type CardOut,
   deleteHighlight,
   editOutline,
   findActiveCardsJob,
@@ -292,6 +293,16 @@ describe("CourseReader", () => {
         chapter_label: `Chapter ${index + 1}`,
       })),
     };
+    const sectionCard: CardOut = {
+      id: "card-1",
+      section_id: "sec-1",
+      front_md: "Front",
+      back_md: "Back",
+      position: 0,
+      origin: "generated",
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    mockedListCards.mockResolvedValue(ok([sectionCard]));
 
     render(<CourseReader course={courseWithChapterLabels} initialProgress={NO_PROGRESS} />);
 
