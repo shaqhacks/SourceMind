@@ -152,11 +152,10 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
   };
 }
 
-// Chapter 1 has three cards on sec-1: one due now, one new, one not due yet
-// (absent from the review queue — the backend only returns due/new cards).
+// Chapter 1 has three cards on sec-1: one due now, one new, one not due yet.
 // Chapter 2 (sec-2) starts with zero cards, rendering as the dashed
 // "Generate cards" affordance. Chapter 3 (sec-3) has one user-added card,
-// not due. A null-label chapter (front matter) must never render.
+// needing attention. A null-label chapter (front matter) must never render.
 const cardA = makeCard({ id: "card-a", section_id: "sec-1", front_md: "What is a mitochondria?" });
 const cardB = makeCard({ id: "card-b", section_id: "sec-1", front_md: "Define ATP." });
 const cardC = makeCard({ id: "card-c", section_id: "sec-1", front_md: "What is the Krebs cycle?" });
@@ -192,10 +191,36 @@ function setUpHappyPathMocks() {
           section_id: "sec-1",
           due_at: "2026-01-01T00:00:00Z",
           is_new: false,
+          is_due: true,
           interval_days: 1.0,
           reps: 1,
         }),
         makeQueueCard({ id: "card-b", section_id: "sec-1", due_at: null, is_new: true }),
+        makeQueueCard({
+          id: "card-c",
+          section_id: "sec-1",
+          front_md: "What is the Krebs cycle?",
+          back_md: "A series of reactions that releases stored energy.",
+          due_at: "2026-03-01T00:00:00Z",
+          is_new: false,
+          is_due: false,
+          interval_days: 8,
+          reps: 2,
+          last_grade: 3,
+        }),
+        makeQueueCard({
+          id: "card-d",
+          section_id: "sec-3",
+          front_md: "Why take breaks?",
+          back_md: "Breaks reduce fatigue and improve recall.",
+          due_at: "2026-03-01T00:00:00Z",
+          is_new: false,
+          is_due: false,
+          interval_days: 4,
+          reps: 1,
+          chapter_label: "Study Habits",
+          last_grade: 1,
+        }),
       ],
       due: 1,
       new: 1,
@@ -246,11 +271,20 @@ describe("FlashcardsClient", () => {
     render(<FlashcardsClient />);
 
     expect(await screen.findByRole("heading", { name: "Flashcards", level: 1 })).toBeInTheDocument();
-    expect(await screen.findByText("1 due now · 4 cards total")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /review all due \(1\)/i })).toHaveAttribute(
+    expect(await screen.findByText("4 total · 1 due · 1 new · 1 needs attention")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /review due/i })).toHaveAttribute(
       "href",
-      "/review?course=course-1&start=due",
+      "/review?course=course-1&scope=available&start=due",
     );
+    expect(screen.getByRole("link", { name: /review all/i })).toHaveAttribute(
+      "href",
+      "/review?course=course-1&scope=all",
+    );
+    expect(screen.getByRole("link", { name: /needs attention/i })).toHaveAttribute(
+      "href",
+      "/review?course=course-1&scope=needs_attention",
+    );
+    expect(mockedGetReviewQueue).toHaveBeenCalledWith("course-1", { scope: "all", limit: 200 });
 
     // Front matter (null chapter_label) never renders.
     expect(screen.queryByText(/front matter/i)).not.toBeInTheDocument();
@@ -270,18 +304,19 @@ describe("FlashcardsClient", () => {
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
 
     // Default browsed chapter is the first with cards (Chapter 1).
-    const table = await screen.findByRole("table");
-    expect(within(table).getByText("What is a mitochondria?")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    const list = await screen.findByRole("list", { name: /all cards — cell biology basics/i });
+    expect(within(list).getByText("What is a mitochondria?")).toBeInTheDocument();
     // card-a: due now (strict — has a past due_at, not new) -> accent badge.
-    const rowA = within(table).getByText("What is a mitochondria?").closest("tr")!;
-    expect(within(rowA).getByText("Due now")).toBeInTheDocument();
-    expect(within(rowA).getByText("Generated")).toBeInTheDocument();
+    const itemA = within(list).getByText("What is a mitochondria?").closest("li")!;
+    expect(within(itemA).getByText("Due now")).toBeInTheDocument();
+    expect(within(itemA).getByText("Generated")).toBeInTheDocument();
     // card-b: new (in the queue, is_new) -> "New", not "Due now".
-    const rowB = within(table).getByText("Define ATP.").closest("tr")!;
-    expect(within(rowB).getByText("New")).toBeInTheDocument();
-    // card-c: absent from the queue entirely (future due_at) -> "Not due yet".
-    const rowC = within(table).getByText("What is the Krebs cycle?").closest("tr")!;
-    expect(within(rowC).getByText("Not due yet")).toBeInTheDocument();
+    const itemB = within(list).getByText("Define ATP.").closest("li")!;
+    expect(within(itemB).getByText("New")).toBeInTheDocument();
+    // card-c: in the all-card queue but is_due=false -> "Not due yet".
+    const itemC = within(list).getByText("What is the Krebs cycle?").closest("li")!;
+    expect(within(itemC).getByText("Not due yet")).toBeInTheDocument();
   });
 
   it("clicking Browse on another chapter swaps the table", async () => {
@@ -297,9 +332,10 @@ describe("FlashcardsClient", () => {
     expect(await screen.findByText("Why take breaks?")).toBeInTheDocument();
     expect(screen.queryByText("What is a mitochondria?")).not.toBeInTheDocument();
     // card-d is a user-added card not present in the review queue at all.
-    const row = screen.getByText("Why take breaks?").closest("tr")!;
-    expect(within(row).getByText("User-added")).toBeInTheDocument();
-    expect(within(row).getByText("Not due yet")).toBeInTheDocument();
+    const item = screen.getByText("Why take breaks?").closest("li")!;
+    expect(within(item).getByText("User-added")).toBeInTheDocument();
+    expect(within(item).getByText("Not due yet")).toBeInTheDocument();
+    expect(within(item).getByText("Needs attention")).toBeInTheDocument();
   });
 
   it("generating cards for an empty chapter runs the job and the chapter gains cards on settle", async () => {

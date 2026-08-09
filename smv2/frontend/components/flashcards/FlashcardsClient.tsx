@@ -11,7 +11,6 @@ import Skeleton from "@/components/ui/Skeleton";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   getReviewQueue,
-  getReviewSummary,
   listCards,
   listChapters,
   listCourses,
@@ -20,7 +19,6 @@ import {
   type ChapterOut,
   type CourseOut,
   type ReviewQueueCardOut,
-  type ReviewSummaryOut,
 } from "@/lib/api/client";
 import { subscribeCardsSettled } from "@/lib/cards/cardsBus";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
@@ -38,6 +36,7 @@ type CourseDataState =
       chapters: ChapterOut[];
       cardsBySection: Record<string, CardOut[]>;
       dueCards: ReviewQueueCardOut[];
+      totalCards: number;
     };
 
 /** Cards live on a chapter's own content sections (ChapterOut.section_ids)
@@ -58,16 +57,13 @@ function dueCountForChapter(
   cards: CardOut[],
   dueById: Map<string, ReviewQueueCardOut>,
 ): number {
-  return cards.filter((card) => {
-    const queued = dueById.get(card.id);
-    return queued !== undefined && !queued.is_new;
-  }).length;
+  return cards.filter((card) => dueById.get(card.id)?.is_due === true).length;
 }
 
 async function loadCourseData(courseId: string): Promise<CourseDataState> {
   const [chaptersResult, queueResult] = await Promise.all([
     listChapters(courseId),
-    getReviewQueue(courseId, { limit: MAX_QUEUE_FETCH }),
+    getReviewQueue(courseId, { scope: "all", limit: MAX_QUEUE_FETCH }),
   ]);
   if (!chaptersResult.data) {
     return { kind: "error", error: describeError(chaptersResult.status, "Loading chapters") };
@@ -91,7 +87,13 @@ async function loadCourseData(courseId: string): Promise<CourseDataState> {
     cardsBySection[id] = cardsResults[index].data ?? [];
   });
 
-  return { kind: "ready", chapters, cardsBySection, dueCards: queueResult.data.cards };
+  return {
+    kind: "ready",
+    chapters,
+    cardsBySection,
+    dueCards: queueResult.data.cards,
+    totalCards: queueResult.data.total_count,
+  };
 }
 
 /** courseData tagged with the course it belongs to — the same "derive
@@ -110,7 +112,6 @@ export default function FlashcardsClient() {
   const [coursesState, setCoursesState] = useState<CoursesState>({ kind: "loading" });
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [courseDataEntry, setCourseDataEntry] = useState<CourseDataEntry | null>(null);
-  const [reviewSummary, setReviewSummary] = useState<ReviewSummaryOut | null>(null);
   const [browsedChapterLabel, setBrowsedChapterLabel] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus(headingRef);
@@ -142,9 +143,6 @@ export default function FlashcardsClient() {
   // synchronously, and it does so from a click handler, not an effect.
   useEffect(() => {
     fetchCourses();
-    getReviewSummary().then(({ data }) => {
-      if (data) setReviewSummary(data);
-    });
   }, []);
 
   // Shared by the course-change effect, the settle-bus subscription, and
@@ -254,19 +252,17 @@ export default function FlashcardsClient() {
     courseDataEntry && courseDataEntry.courseId === selectedCourse.id
       ? courseDataEntry.state
       : { kind: "loading" };
-  const selectedCourseReviewSummary = reviewSummary?.courses.find(
-    (c) => c.course_id === selectedCourse.id,
-  );
-  const courseDue = selectedCourseReviewSummary ? selectedCourseReviewSummary.overdue_count : null;
-  const totalCards =
-    courseData.kind === "ready"
-      ? Object.values(courseData.cardsBySection).reduce((sum, list) => sum + list.length, 0)
-      : null;
-
   const dueById =
     courseData.kind === "ready"
       ? new Map(courseData.dueCards.map((card) => [card.id, card]))
       : new Map<string, ReviewQueueCardOut>();
+  const cardMetadata = courseData.kind === "ready" ? courseData.dueCards : null;
+  const totalCards = courseData.kind === "ready" ? courseData.totalCards : null;
+  const dueCards = cardMetadata ? cardMetadata.filter((card) => card.is_due).length : null;
+  const newCards = cardMetadata ? cardMetadata.filter((card) => card.is_new).length : null;
+  const needsAttentionCards = cardMetadata
+    ? cardMetadata.filter((card) => card.last_grade === 1).length
+    : null;
 
   const browsedChapter =
     courseData.kind === "ready"
@@ -285,17 +281,31 @@ export default function FlashcardsClient() {
             Flashcards
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {courseDue === null || totalCards === null
+            {totalCards === null || dueCards === null || newCards === null || needsAttentionCards === null
               ? "Loading…"
-              : `${courseDue} due now · ${totalCards} card${totalCards === 1 ? "" : "s"} total`}
+              : `${totalCards} total · ${dueCards} due · ${newCards} new · ${needsAttentionCards} needs attention`}
           </p>
         </div>
-        <Link
-          href={`/review?course=${selectedCourse.id}&start=due`}
-          className="rounded-md bg-accent-700 px-4 py-2 font-heading text-sm text-background transition-colors hover:bg-accent-800 active:bg-accent-900"
-        >
-          Review all due{courseDue !== null ? ` (${courseDue})` : ""}
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={`/review?course=${encodeURIComponent(selectedCourse.id)}&scope=available&start=due`}
+            className="rounded-md bg-accent-700 px-4 py-2 font-heading text-sm text-background transition-colors hover:bg-accent-800 active:bg-accent-900"
+          >
+            Review due{dueCards !== null ? ` (${dueCards})` : ""}
+          </Link>
+          <Link
+            href={`/review?course=${encodeURIComponent(selectedCourse.id)}&scope=all`}
+            className="rounded-md border border-border bg-surface-raised px-4 py-2 font-heading text-sm transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14]"
+          >
+            Review all{totalCards !== null ? ` (${totalCards})` : ""}
+          </Link>
+          <Link
+            href={`/review?course=${encodeURIComponent(selectedCourse.id)}&scope=needs_attention`}
+            className="rounded-md border border-border bg-surface-raised px-4 py-2 font-heading text-sm transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14]"
+          >
+            Needs attention{needsAttentionCards !== null ? ` (${needsAttentionCards})` : ""}
+          </Link>
+        </div>
       </div>
 
       {courses.length > 1 && (

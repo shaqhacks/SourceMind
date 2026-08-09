@@ -171,10 +171,12 @@ export default function ChapterDeckCard({
            * styled Link instead (no asChild support, and <a> can't nest
            * inside <button>) — classes mirror Button's primary/sm variant. */}
           <Link
-            href={`/review?course=${courseId}&start=due`}
+            href={`/review?course=${encodeURIComponent(courseId)}&scope=all&chapter=${encodeURIComponent(
+              title,
+            )}`}
             className="rounded-md bg-accent-700 px-2 py-1 font-heading text-xs text-background transition-colors hover:bg-accent-800 active:bg-accent-900"
           >
-            Review
+            Review chapter
           </Link>
           <Button
             variant="secondary"

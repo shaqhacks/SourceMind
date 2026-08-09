@@ -1,13 +1,17 @@
+"use client";
+
+import { useState } from "react";
+
+import ReviewGradeControls from "@/components/review/ReviewGradeControls";
 import Badge from "@/components/ui/Badge";
 import type { CardOut, ReviewQueueCardOut } from "@/lib/api/client";
 
 export interface CardsTableProps {
   chapterTitle: string;
   cards: CardOut[];
-  /** This course's due/new queue (getReviewQueue, capped at 200), keyed by
-   * card id — the only source of a card's review state, since CardOut
-   * itself carries none. A card absent here has a future due_at we have no
-   * endpoint to read, so it renders as "Not due yet" rather than a guess. */
+  /** This course's all-card queue (getReviewQueue scope=all), keyed by card
+   * id — the only source of scheduler state, since CardOut itself carries
+   * none. */
   dueCardsById: Map<string, ReviewQueueCardOut>;
 }
 
@@ -19,6 +23,8 @@ function toPlainText(md: string): string {
 }
 
 export default function CardsTable({ chapterTitle, cards, dueCardsById }: CardsTableProps) {
+  const [revealedById, setRevealedById] = useState<Record<string, boolean>>({});
+
   if (cards.length === 0) return null;
 
   return (
@@ -26,44 +32,53 @@ export default function CardsTable({ chapterTitle, cards, dueCardsById }: CardsT
       <h2 id="cards-table-heading" className="font-heading text-lg">
         All cards — {chapterTitle}
       </h2>
-      <div className="overflow-x-auto rounded-lg border border-divider">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-divider text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-              <th className="px-4 py-2" style={{ width: "50%" }}>
-                Front
-              </th>
-              <th className="px-4 py-2">Next review</th>
-              <th className="px-4 py-2">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cards.map((card) => {
-              const queued = dueCardsById.get(card.id);
-              return (
-                <tr
-                  key={card.id}
-                  className="border-b border-divider last:border-b-0 hover:bg-foreground/[0.04]"
-                >
-                  <td className="max-w-md truncate px-4 py-2">{toPlainText(card.front_md)}</td>
-                  <td className="px-4 py-2">
-                    {queued && !queued.is_new ? (
+      <ul
+        aria-labelledby="cards-table-heading"
+        className="divide-y divide-divider rounded-lg border border-divider"
+      >
+        {cards.map((card) => {
+          const queued = dueCardsById.get(card.id);
+          const revealed = revealedById[card.id] === true;
+          return (
+            <li key={card.id} className="flex flex-col gap-3 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{toPlainText(card.front_md)}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {queued?.is_due ? (
                       <Badge tone="accent">Due now</Badge>
-                    ) : queued && queued.is_new ? (
+                    ) : queued?.is_new ? (
                       <Badge tone="neutral">New</Badge>
                     ) : (
                       <span className="text-xs text-muted-foreground">Not due yet</span>
                     )}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">
-                    {card.origin === "user" ? "User-added" : "Generated"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    {queued?.last_grade === 1 && <Badge tone="accent">Needs attention</Badge>}
+                    <span className="text-xs text-muted-foreground">
+                      {card.origin === "user" ? "User-added" : "Generated"}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRevealedById((current) => ({ ...current, [card.id]: !revealed }))
+                  }
+                  aria-expanded={revealed}
+                  className="self-start rounded-md border border-border bg-surface-raised px-3 py-1.5 font-heading text-xs transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14]"
+                >
+                  {revealed ? "Hide answer" : "Show answer"}
+                </button>
+              </div>
+              {revealed && (
+                <div className="rounded-md bg-foreground/[0.035] p-3">
+                  <p className="text-sm">{toPlainText(card.back_md)}</p>
+                  {queued && <ReviewGradeControls card={queued} className="mt-3" />}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }

@@ -55,6 +55,36 @@ describe("ChapterDeckCard", () => {
     globalThis.EventSource = originalEventSource;
   });
 
+  it("links directly to an all-card chapter review with the exact encoded chapter label", () => {
+    render(
+      <ChapterDeckCard
+        courseId="course-1"
+        chapterNumber={1}
+        title="Cell Biology & Basics"
+        sectionIds={["sec-1"]}
+        cards={[
+          {
+            id: "card-1",
+            section_id: "sec-1",
+            front_md: "Front",
+            back_md: "Back",
+            position: 0,
+            origin: "generated",
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ]}
+        dueCount={0}
+        isBrowsed={false}
+        onBrowse={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /review chapter/i })).toHaveAttribute(
+      "href",
+      "/review?course=course-1&scope=all&chapter=Cell%20Biology%20%26%20Basics",
+    );
+  });
+
   it("shows a no-content message and no Generate button for a chapter with no content sections", () => {
     render(
       <ChapterDeckCard
