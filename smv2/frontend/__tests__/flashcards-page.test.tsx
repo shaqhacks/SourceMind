@@ -7,7 +7,6 @@ import {
   findActiveCardsJob,
   generateCards,
   getJob,
-  getReviewQueue,
   getReviewSelection,
   getReviewSummary,
   listCards,
@@ -19,7 +18,6 @@ import {
   type CourseOut,
   type JobOut,
   type ReviewQueueCardOut,
-  type ReviewQueueOut,
   type ReviewSelectionOut,
   type ReviewSummaryOut,
 } from "@/lib/api/client";
@@ -36,7 +34,6 @@ vi.mock("@/lib/api/client", () => ({
   listCourses: vi.fn(),
   listChapters: vi.fn(),
   listCards: vi.fn(),
-  getReviewQueue: vi.fn(),
   getReviewSelection: vi.fn(),
   getReviewSummary: vi.fn(),
   generateCards: vi.fn(),
@@ -51,7 +48,6 @@ vi.mock("@/lib/review/gradeCardAndNotify", () => ({
 const mockedListCourses = vi.mocked(listCourses);
 const mockedListChapters = vi.mocked(listChapters);
 const mockedListCards = vi.mocked(listCards);
-const mockedGetReviewQueue = vi.mocked(getReviewQueue);
 const mockedGetReviewSummary = vi.mocked(getReviewSummary);
 const mockedGenerateCards = vi.mocked(generateCards);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
@@ -113,24 +109,6 @@ function makeQueueCard(overrides: Partial<ReviewQueueCardOut> = {}): ReviewQueue
     section_title: "Section 1",
     is_due: false,
     last_grade: null,
-    ...overrides,
-  };
-}
-
-function makeQueue(overrides: Partial<ReviewQueueOut> = {}): ReviewQueueOut {
-  const cards = overrides.cards ?? [];
-  const total = overrides.total ?? cards.length;
-  const due = overrides.due ?? 0;
-  const newCount = overrides.new ?? Math.max(total - due, 0);
-  return {
-    cards,
-    due,
-    new: newCount,
-    total,
-    overdue_count: due,
-    new_count: newCount,
-    available_count: due + newCount,
-    total_count: total,
     ...overrides,
   };
 }
@@ -211,54 +189,6 @@ function setUpHappyPathMocks() {
     if (sectionId === "sec-3") return Promise.resolve(ok([cardD]));
     return Promise.resolve(ok([]));
   });
-  mockedGetReviewQueue.mockResolvedValue(
-    ok(makeQueue({
-      cards: [
-        makeQueueCard({
-          id: "card-a",
-          section_id: "sec-1",
-          due_at: "2026-01-01T00:00:00Z",
-          is_new: false,
-          is_due: true,
-          interval_days: 1.0,
-          reps: 1,
-        }),
-        makeQueueCard({ id: "card-b", section_id: "sec-1", due_at: null, is_new: true }),
-        makeQueueCard({
-          id: "card-c",
-          section_id: "sec-1",
-          front_md: "What is the Krebs cycle?",
-          back_md: "A series of reactions that releases stored energy.",
-          due_at: "2026-03-01T00:00:00Z",
-          is_new: false,
-          is_due: false,
-          interval_days: 8,
-          reps: 2,
-          last_grade: 3,
-        }),
-        makeQueueCard({
-          id: "card-d",
-          section_id: "sec-3",
-          front_md: "Why take breaks?",
-          back_md: "Breaks reduce fatigue and improve recall.",
-          due_at: "2026-03-01T00:00:00Z",
-          is_new: false,
-          is_due: false,
-          interval_days: 4,
-          reps: 1,
-          chapter_label: "Study Habits",
-          last_grade: 1,
-        }),
-      ],
-      due: 1,
-      new: 1,
-      total: 4,
-      overdue_count: 1,
-      new_count: 1,
-      available_count: 2,
-      total_count: 4,
-    })),
-  );
   mockedGetReviewSelection.mockResolvedValue(
     ok(
       makeSelection({
@@ -367,7 +297,6 @@ describe("FlashcardsClient", () => {
       "card-c",
       "card-d",
     ]);
-    expect(mockedGetReviewQueue).not.toHaveBeenCalled();
 
     // Front matter (null chapter_label) never renders.
     expect(screen.queryByText(/front matter/i)).not.toBeInTheDocument();
@@ -394,10 +323,10 @@ describe("FlashcardsClient", () => {
     const itemA = within(list).getByText("What is a mitochondria?").closest("li")!;
     expect(within(itemA).getByText("Due now")).toBeInTheDocument();
     expect(within(itemA).getByText("Generated")).toBeInTheDocument();
-    // card-b: new (in the queue, is_new) -> "New", not "Due now".
+    // card-b: new (in exact selection metadata, is_new) -> "New", not "Due now".
     const itemB = within(list).getByText("Define ATP.").closest("li")!;
     expect(within(itemB).getByText("New")).toBeInTheDocument();
-    // card-c: in the all-card queue but is_due=false -> "Not due yet".
+    // card-c: in exact selection metadata but is_due=false -> "Not due yet".
     const itemC = within(list).getByText("What is the Krebs cycle?").closest("li")!;
     expect(within(itemC).getByText("Not due yet")).toBeInTheDocument();
   });
@@ -450,21 +379,6 @@ describe("FlashcardsClient", () => {
         }),
       ),
     );
-    mockedGetReviewQueue.mockResolvedValue(
-      ok(
-        makeQueue({
-          cards: manyCards.slice(0, 200).map((card) =>
-            makeQueueCard({
-              id: card.id,
-              front_md: card.front_md,
-              back_md: card.back_md,
-              is_new: true,
-            }),
-          ),
-          total_count: 201,
-        }),
-      ),
-    );
     mockedGetReviewSelection.mockImplementation((_courseId, cardIds) =>
       Promise.resolve(
         ok(
@@ -488,7 +402,6 @@ describe("FlashcardsClient", () => {
     render(<FlashcardsClient />);
 
     expect(await screen.findByText("201 total · 1 due · 200 new · 1 needs attention")).toBeInTheDocument();
-    expect(mockedGetReviewQueue).not.toHaveBeenCalled();
     await waitFor(() => expect(mockedGetReviewSelection).toHaveBeenCalledTimes(2));
     expect(mockedGetReviewSelection.mock.calls[0][1]).toHaveLength(200);
     expect(mockedGetReviewSelection.mock.calls[1][1]).toEqual(["card-201"]);
@@ -702,7 +615,7 @@ describe("FlashcardsClient", () => {
       if (sectionId === "sec-9") return Promise.resolve(ok([]));
       return Promise.resolve(ok([]));
     });
-    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue()));
+    mockedGetReviewSelection.mockResolvedValue(ok(makeSelection()));
     mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
 
     const user = userEvent.setup();
@@ -803,7 +716,9 @@ describe("FlashcardsClient", () => {
     mockedListCourses.mockResolvedValueOnce(err(500)).mockResolvedValueOnce(ok([makeCourse()]));
     mockedListChapters.mockResolvedValue(ok([chapter1]));
     mockedListCards.mockResolvedValue(ok([cardA]));
-    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1 })));
+    mockedGetReviewSelection.mockResolvedValue(
+      ok(makeSelection({ cards: [makeQueueCard({ id: "card-a" })] })),
+    );
     mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
 
     const user = userEvent.setup();
@@ -858,7 +773,9 @@ describe("FlashcardsClient", () => {
     mockedListCourses.mockResolvedValue(ok([makeCourse()]));
     mockedListChapters.mockResolvedValue(ok([chapter1]));
     mockedListCards.mockResolvedValueOnce(err(500)).mockResolvedValueOnce(ok([cardA]));
-    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1 })));
+    mockedGetReviewSelection.mockResolvedValue(
+      ok(makeSelection({ cards: [makeQueueCard({ id: "card-a" })] })),
+    );
     mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
 
     const user = userEvent.setup();
@@ -887,7 +804,9 @@ describe("FlashcardsClient", () => {
     mockedListCourses.mockResolvedValue(ok([makeCourse()]));
     mockedListChapters.mockResolvedValueOnce(err(500)).mockResolvedValueOnce(ok([chapter1]));
     mockedListCards.mockResolvedValue(ok([cardA]));
-    mockedGetReviewQueue.mockResolvedValue(ok(makeQueue({ total: 1 })));
+    mockedGetReviewSelection.mockResolvedValue(
+      ok(makeSelection({ cards: [makeQueueCard({ id: "card-a" })] })),
+    );
     mockedGetReviewSummary.mockResolvedValue(ok(makeSummary()));
 
     const user = userEvent.setup();
