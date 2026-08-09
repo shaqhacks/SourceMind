@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 export type ShortcutMap = Record<string, (event: KeyboardEvent) => void>;
 
@@ -15,6 +15,8 @@ interface Scope {
 // coordinate an `enabled` flag with every other caller.
 const scopes: Scope[] = [];
 let listenerInstalled = false;
+
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -64,7 +66,7 @@ export function useKeyboardShortcuts(map: ShortcutMap, enabled = true): void {
   // effect below, which keeps scope.map fresh in place instead of
   // re-registering the scope's stack position on every render (callers
   // typically pass a new object literal each render).
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (!enabled) return undefined;
     ensureListener();
     const scope: Scope = { map };
@@ -75,10 +77,9 @@ export function useKeyboardShortcuts(map: ShortcutMap, enabled = true): void {
       if (index !== -1) scopes.splice(index, 1);
       scopeRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (scopeRef.current) {
       scopeRef.current.map = map;
     }
