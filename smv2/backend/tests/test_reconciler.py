@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 from app.db.engine import get_session
 from app.db.models import Job
 from app.jobs import registry
-from app.jobs.worker import MAX_ORPHAN_ATTEMPTS, reconcile_interrupted_jobs
+from app.jobs.registry import MAX_ORPHAN_ATTEMPTS
+from app.jobs.worker import reconcile_interrupted_jobs
 
 
 def _insert_running_job(attempts: int, job_type: str = "noop") -> str:

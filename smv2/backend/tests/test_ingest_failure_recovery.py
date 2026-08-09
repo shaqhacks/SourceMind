@@ -34,7 +34,8 @@ def test_orphan_exhausted_ingest_job_marks_course_ingest_failed(client):
     """
     from app.db.engine import get_session
     from app.db.models import Job
-    from app.jobs.worker import MAX_ORPHAN_ATTEMPTS, reconcile_interrupted_jobs
+    from app.jobs.registry import MAX_ORPHAN_ATTEMPTS
+    from app.jobs.worker import reconcile_interrupted_jobs
     from app.services import courses_service
 
     resp = client.post("/api/courses", json={"title": "Orphaned Ingest Course"})

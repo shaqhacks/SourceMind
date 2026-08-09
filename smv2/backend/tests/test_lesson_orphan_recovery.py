@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 from app.db.engine import get_session
 from app.db.models import Job, Section
-from app.jobs.worker import MAX_ORPHAN_ATTEMPTS, reconcile_interrupted_jobs
+from app.jobs.registry import MAX_ORPHAN_ATTEMPTS
+from app.jobs.worker import reconcile_interrupted_jobs
 from conftest import _first_section_id
 
 
