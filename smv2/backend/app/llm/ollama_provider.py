@@ -10,6 +10,7 @@ import logging
 import httpx
 
 from app.config import embed_model, llm_model, ollama_base_url
+from app.llm.completion_control import CompletionOptions
 from app.llm.provider import CompletionResult, Provider
 from app.llm.retry import retry_transient
 
@@ -26,7 +27,12 @@ class OllamaProvider(Provider):
         self.base_url = ollama_base_url()
 
     def _complete_impl(
-        self, messages: list[dict], *, max_tokens: int, system: str | None = None
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int,
+        options: CompletionOptions,
+        system: str | None = None,
     ) -> CompletionResult:
         full_messages = [{"role": "system", "content": system}, *messages] if system is not None else messages
         response = httpx.post(

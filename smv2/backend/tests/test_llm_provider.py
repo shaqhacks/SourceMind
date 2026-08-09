@@ -337,7 +337,7 @@ def test_anthropic_provider_authentication_error_raises_friendly_error(monkeypat
     assert str(exc_info.value) == PROVIDER_NOT_CONFIGURED_MESSAGE
 
 
-def test_ollama_provider_prepends_system_as_its_own_message(monkeypatch):
+def test_ollama_provider_complete_prepends_system_as_its_own_message(client, monkeypatch):
     import httpx
 
     from app.llm.ollama_provider import OllamaProvider
@@ -360,8 +360,11 @@ def test_ollama_provider_prepends_system_as_its_own_message(monkeypatch):
 
     monkeypatch.setattr("app.llm.ollama_provider.httpx.post", _fake_post)
 
-    result = provider._complete_impl(
-        [{"role": "user", "content": "hello"}], max_tokens=50, system="be a helpful teacher"
+    result = provider.complete(
+        [{"role": "user", "content": "hello"}],
+        max_tokens=50,
+        purpose="test",
+        system="be a helpful teacher",
     )
 
     sent_messages = captured["json"]["messages"]

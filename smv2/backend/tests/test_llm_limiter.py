@@ -5,6 +5,7 @@ import threading
 import pytest
 
 from app.llm.limiter import LLMBusyError, reset_limiter
+from app.llm.completion_control import CompletionOptions
 from app.llm.provider import CompletionResult, Provider
 
 
@@ -18,7 +19,14 @@ class _BlockingProvider(Provider):
         self._entered_barrier = entered_barrier
         self._release_event = release_event
 
-    def _complete_impl(self, messages, *, max_tokens, system=None):
+    def _complete_impl(
+        self,
+        messages,
+        *,
+        max_tokens,
+        options: CompletionOptions,
+        system=None,
+    ):
         # Reaching this point proves the semaphore slot was already
         # acquired (llm_slot() wraps this call) — the barrier lets the main
         # thread know both workers are holding a slot before it tries a 3rd.
@@ -82,7 +90,14 @@ class _SimpleProvider(Provider):
     def __init__(self) -> None:
         self.model_name = "simple-stub"
 
-    def _complete_impl(self, messages, *, max_tokens, system=None):
+    def _complete_impl(
+        self,
+        messages,
+        *,
+        max_tokens,
+        options: CompletionOptions,
+        system=None,
+    ):
         return CompletionResult(text="ok", input_tokens=1, output_tokens=1, model=self.model_name)
 
 
