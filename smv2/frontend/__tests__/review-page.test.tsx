@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -184,6 +184,14 @@ function deferredGradeResponse() {
   return { promise, resolve };
 }
 
+function deferredSelectionResponse() {
+  let resolve!: (value: ReturnType<typeof ok<ReviewSelectionOut>>) => void;
+  const promise = new Promise<ReturnType<typeof ok<ReviewSelectionOut>>>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 async function completeOneCardSession(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: /review all \(1\)/i }));
   expect(await screen.findByText("1 of 1")).toBeInTheDocument();
@@ -195,6 +203,14 @@ async function completeOneCardSession(user: ReturnType<typeof userEvent.setup>) 
 describe("ReviewPage", () => {
   beforeEach(() => {
     mockSearchParams = new URLSearchParams();
+    mockPush.mockReset();
+    mockReplace.mockReset();
+    mockedGetReviewSummary.mockReset();
+    mockedGetReviewQueue.mockReset();
+    mockedGetReviewSelection.mockReset();
+    mockedGetAdaptiveStudyQueue.mockReset();
+    mockedGradeCard.mockReset();
+    mockedSubmitPracticeAnswer.mockReset();
     mockedGradeCard.mockResolvedValue(ok({ next_due_at: "2026-01-02T00:00:00Z", remaining_due: 0 }));
     mockedGetReviewSelection.mockResolvedValue(ok(makeSelection()));
     mockedGetAdaptiveStudyQueue.mockResolvedValue(ok(makeAdaptiveQueue()));
@@ -214,7 +230,6 @@ describe("ReviewPage", () => {
 
   afterEach(() => {
     cleanup();
-    vi.clearAllMocks();
     localStorage.clear();
   });
 
@@ -622,6 +637,124 @@ describe("ReviewPage", () => {
     expect(screen.getByText("Q3")).toBeInTheDocument();
   });
 
+  it("moves replay sessions off the completed URL and preserves them across refresh", async () => {
+    seedCompletedSession({ againCardIds: ["card-3", "card-1"], scope: "needs_attention" });
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    mockedGetReviewSelection.mockResolvedValue(
+      ok(
+        makeSelection({
+          cards: [
+            makeQueueCard({ id: "card-3", front_md: "Q3", back_md: "A3" }),
+            makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" }),
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+
+    const { unmount } = render(<ReviewPage />);
+    await user.click(await screen.findByRole("button", { name: "Review missed (2)" }));
+
+    expect(await screen.findByText("1 of 2")).toBeInTheDocument();
+    expect(mockReplace).toHaveBeenCalledWith("/review?course=course-1&scope=needs_attention");
+
+    mockSearchParams = new URLSearchParams({ course: "course-1", scope: "needs_attention" });
+    unmount();
+    mockedGetReviewQueue.mockResolvedValueOnce(
+      ok(
+        makeQueue({
+          total: 2,
+          cards: [
+            makeQueueCard({ id: "card-3", front_md: "Q3", back_md: "A3" }),
+            makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" }),
+          ],
+        }),
+      ),
+    );
+
+    render(<ReviewPage />);
+
+    expect(await screen.findByText(/resumed session — 2 left/i)).toBeInTheDocument();
+    expect(await screen.findByText("1 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Q3")).toBeInTheDocument();
+  });
+
+  it("returns browser back-forward from an active replay to completed state without applying stale active state", async () => {
+    seedCompletedSession({ againCardIds: ["card-3", "card-1"] });
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    mockedGetReviewSelection.mockResolvedValue(
+      ok(
+        makeSelection({
+          cards: [
+            makeQueueCard({ id: "card-3", front_md: "Q3", back_md: "A3" }),
+            makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" }),
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    const { rerender } = render(<ReviewPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Review missed (2)" }));
+    expect(await screen.findByText("1 of 2")).toBeInTheDocument();
+
+    mockedGetReviewQueue.mockResolvedValueOnce(
+      ok(
+        makeQueue({
+          total: 2,
+          cards: [
+            makeQueueCard({ id: "card-3", front_md: "Q3", back_md: "A3" }),
+            makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" }),
+          ],
+        }),
+      ),
+    );
+    mockSearchParams = new URLSearchParams({ course: "course-1" });
+    rerender(<ReviewPage />);
+
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    rerender(<ReviewPage />);
+
+    expect(await screen.findByText("Session complete")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review missed (2)" })).toBeInTheDocument();
+    expect(screen.queryByText("1 of 2")).not.toBeInTheDocument();
+  });
+
+  it("ignores a stale replay selection response after the completed session changes", async () => {
+    const pendingReplay = deferredSelectionResponse();
+    seedCompletedSession({ againCardIds: ["card-3"] });
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    mockedGetReviewSelection.mockReturnValueOnce(pendingReplay.promise);
+    const user = userEvent.setup();
+    const { rerender } = render(<ReviewPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Review missed (1)" }));
+    expect(await screen.findByRole("status")).toBeInTheDocument();
+
+    seedCompletedSession({
+      sessionId: "session-2",
+      gradedTally: { 1: 0, 4: 1 },
+      againCardIds: [],
+    });
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-2" });
+    rerender(<ReviewPage />);
+
+    expect(await screen.findByText("Session complete")).toBeInTheDocument();
+    expect(screen.getByText(/easy: 1/i)).toBeInTheDocument();
+    await act(async () => {
+      pendingReplay.resolve(
+        ok(
+          makeSelection({
+            cards: [makeQueueCard({ id: "card-3", front_md: "Q3", back_md: "A3" })],
+          }),
+        ),
+      );
+    });
+    expect(screen.queryByText("Q3")).not.toBeInTheDocument();
+    expect(screen.getByText("Session complete")).toBeInTheDocument();
+    expect(screen.getByText(/easy: 1/i)).toBeInTheDocument();
+  });
+
   it("reports missing replay cards once while continuing with the returned cards", async () => {
     seedCompletedSession({ againCardIds: ["card-3", "deleted-card", "card-1"] });
     mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
@@ -648,6 +781,52 @@ describe("ReviewPage", () => {
     await user.click(screen.getByRole("button", { name: /good/i }));
     expect(screen.queryAllByRole("alert")).toHaveLength(0);
     expect(await screen.findByText("2 of 2")).toBeInTheDocument();
+  });
+
+  it("reports all missing replay cards in the empty replay state", async () => {
+    seedCompletedSession({ againCardIds: ["deleted-1", "deleted-2"] });
+    mockSearchParams = new URLSearchParams({ course: "course-1", completed: "session-1" });
+    mockedGetReviewSelection.mockResolvedValue(
+      ok(makeSelection({ cards: [], missing_card_ids: ["deleted-1", "deleted-2"] })),
+    );
+
+    render(<ReviewPage />);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Review missed (2)" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/2 missed cards are no longer available/i);
+    expect(screen.getByText("All caught up")).toBeInTheDocument();
+  });
+
+  it("a new completion replaces the prior completed snapshot under the single storage key", async () => {
+    seedCompletedSession({
+      sessionId: "old-session",
+      gradedTally: { 1: 4 },
+      againCardIds: ["old-card"],
+    });
+    mockSearchParams = new URLSearchParams({ course: "course-1" });
+    mockedGetReviewQueue
+      .mockResolvedValueOnce(ok(makeQueue({ total: 1, due: 1 })))
+      .mockResolvedValueOnce(
+        ok(makeQueue({ total: 1, cards: [makeQueueCard({ id: "new-card", front_md: "New Q", back_md: "New A" })] })),
+      );
+    const user = userEvent.setup();
+
+    render(<ReviewPage />);
+
+    await user.click(await screen.findByRole("button", { name: /review all \(1\)/i }));
+    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /reveal/i }));
+    await user.click(screen.getByRole("button", { name: /good/i }));
+
+    const stored = JSON.parse(localStorage.getItem(COMPLETED_REVIEW_SESSION_STORAGE_KEY) ?? "null");
+    expect(stored).toMatchObject({
+      courseId: "course-1",
+      gradedTally: { 3: 1 },
+      againCardIds: [],
+    });
+    expect(stored.sessionId).not.toBe("old-session");
+    expect(JSON.stringify(stored)).not.toContain("old-card");
   });
 
   it("session: failed grade keeps the same card active without advancing tally or storage, then retry succeeds once", async () => {

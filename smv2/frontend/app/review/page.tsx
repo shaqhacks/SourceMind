@@ -39,6 +39,7 @@ import {
   readCompletedReviewSession,
   writeActiveReviewSession,
   writeCompletedReviewSession,
+  type ActiveReviewSession,
   type CompletedReviewSession,
   type ReviewScope,
 } from "@/lib/review/sessionStorage";
@@ -111,6 +112,28 @@ function newSessionId(): string {
   return `review-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function activeReviewUrl(courseId: string, scope: ReviewScope, chapterLabel: string | null): string {
+  const params = new URLSearchParams({ course: courseId });
+  if (scope !== "available") params.set("scope", scope);
+  if (chapterLabel) params.set("chapter", chapterLabel);
+  return `/review?${params.toString()}`;
+}
+
+function shouldResumeActiveReviewSession(
+  session: ActiveReviewSession | null,
+  courseId: string | null,
+  scope: ReviewScope | undefined,
+  chapterLabel: string | undefined,
+): session is ActiveReviewSession {
+  if (!session) return false;
+  if (!courseId) return true;
+  return (
+    session.courseId === courseId &&
+    session.scope === (scope ?? "available") &&
+    session.chapterLabel === (chapterLabel ?? null)
+  );
+}
+
 function ReviewPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -140,7 +163,11 @@ function ReviewPageInner() {
   >(() => {
     if (courseParam && completedParam) return "completed";
     if (courseParam && startParam === "due") return "bootstrapping-due";
-    return !hasExplicitSessionQuery && readActiveReviewSession() ? "resuming" : courseParam ? "chooser" : "hub";
+    return shouldResumeActiveReviewSession(readActiveReviewSession(), courseParam, reviewScope, chapterLabel)
+      ? "resuming"
+      : courseParam
+        ? "chooser"
+        : "hub";
   });
   const [courseId, setCourseId] = useState<string | null>(courseParam);
   // Only ever populated from the hub's already-loaded ReviewSummaryOut (see
@@ -176,7 +203,13 @@ function ReviewPageInner() {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const reconciledQueryRef = useRef(queryKey);
   const bootstrappedQueryRef = useRef<string | null>(null);
+  const replayRequestTokenRef = useRef(0);
+  const latestQueryRef = useRef({ courseParam, completedParam, queryKey });
   useRouteFocus(headingRef);
+
+  useEffect(() => {
+    latestQueryRef.current = { courseParam, completedParam, queryKey };
+  }, [courseParam, completedParam, queryKey]);
 
   useEffect(() => {
     if (reconciledQueryRef.current === queryKey) return;
@@ -205,7 +238,7 @@ function ReviewPageInner() {
       }
 
       if (courseParam) {
-        if (!hasExplicitSessionQuery && readActiveReviewSession()) {
+        if (shouldResumeActiveReviewSession(readActiveReviewSession(), courseParam, reviewScope, chapterLabel)) {
           setPhase("resuming");
           return;
         }
@@ -215,7 +248,7 @@ function ReviewPageInner() {
         return;
       }
 
-      if (!hasExplicitSessionQuery && readActiveReviewSession()) {
+      if (!hasExplicitSessionQuery && shouldResumeActiveReviewSession(readActiveReviewSession(), null, undefined, undefined)) {
         setPhase("resuming");
         return;
       }
@@ -226,7 +259,7 @@ function ReviewPageInner() {
     return () => {
       active = false;
     };
-  }, [queryKey, courseParam, completedParam, startParam, hasExplicitSessionQuery]);
+  }, [queryKey, courseParam, completedParam, startParam, hasExplicitSessionQuery, reviewScope, chapterLabel]);
 
   // Runs once, only when mount found a saved session: reconcile it
   // against a fresh queue fetch and either drop straight into the
@@ -511,10 +544,30 @@ function ReviewPageInner() {
 
   const startMissedReplay = useCallback(async () => {
     if (!completedSession || completedSession.againCardIds.length === 0) return;
+    const replaySource = {
+      courseId: completedSession.courseId,
+      sessionId: completedSession.sessionId,
+      scope: completedSession.scope,
+      chapterLabel: completedSession.chapterLabel,
+    };
+    const requestToken = replayRequestTokenRef.current + 1;
+    replayRequestTokenRef.current = requestToken;
     setPhase("session");
     setSessionState({ kind: "loading" });
     setReplayMissingMessage(null);
+    const activeUrl = activeReviewUrl(replaySource.courseId, replaySource.scope, replaySource.chapterLabel);
+    const activeQuery = activeUrl.split("?")[1] ?? "";
+    reconciledQueryRef.current = activeQuery;
+    router.replace(activeUrl);
     const { data, status } = await getReviewSelection(completedSession.courseId, completedSession.againCardIds);
+    const latest = latestQueryRef.current;
+    if (
+      replayRequestTokenRef.current !== requestToken ||
+      latest.courseParam !== replaySource.courseId ||
+      (latest.completedParam !== null && latest.completedParam !== replaySource.sessionId)
+    ) {
+      return;
+    }
     if (!data) {
       setSessionState({ kind: "error", error: describeError(status, "Loading missed cards") });
       return;
@@ -557,7 +610,7 @@ function ReviewPageInner() {
       startedAt,
     });
     setSessionState({ kind: "active" });
-  }, [completedSession]);
+  }, [completedSession, router]);
 
   const handleCardGraded = useCallback(
     (value: ReviewGrade) => {
@@ -847,7 +900,12 @@ function ReviewPageInner() {
     );
   } else if (sessionState.kind === "empty") {
     mainContent = (
-      <div className="flex flex-1 items-center justify-center p-8">
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
+        {replayMissingMessage && (
+          <p role="alert" className="rounded-md border border-accent/40 bg-accent-soft px-4 py-2 text-sm text-accent-800">
+            {replayMissingMessage}
+          </p>
+        )}
         <EmptyState
           icon="✨"
           title="All caught up"

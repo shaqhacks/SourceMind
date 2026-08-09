@@ -48,6 +48,7 @@ export default function ReviewGradeControls({
 }: ReviewGradeControlsProps) {
   const shownAtRef = useRef<number | null>(null);
   const handledRequestTokenRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
   const [submission, setSubmission] = useState<{
     cardId: string;
     pendingGrade: ReviewGrade | null;
@@ -66,8 +67,9 @@ export default function ReviewGradeControls({
 
   const submitGrade = useCallback(
     async (grade: ReviewGrade) => {
-      if (pendingGrade !== null || savedGrade !== null) return;
+      if (inFlightRef.current || pendingGrade !== null || savedGrade !== null) return;
 
+      inFlightRef.current = true;
       setSubmission({ cardId: card.id, pendingGrade: grade, savedGrade: null, error: null });
       onPendingChange?.(true);
       const elapsedMs = Date.now() - (shownAtRef.current ?? Date.now());
@@ -77,6 +79,7 @@ export default function ReviewGradeControls({
         setSubmission({ cardId: card.id, pendingGrade: null, savedGrade: grade, error: null });
         onGraded?.(grade, result);
       } else {
+        inFlightRef.current = false;
         setSubmission({
           cardId: card.id,
           pendingGrade: null,
@@ -91,6 +94,7 @@ export default function ReviewGradeControls({
   useEffect(() => {
     shownAtRef.current = Date.now();
     handledRequestTokenRef.current = null;
+    inFlightRef.current = false;
   }, [card.id]);
 
   useEffect(() => {

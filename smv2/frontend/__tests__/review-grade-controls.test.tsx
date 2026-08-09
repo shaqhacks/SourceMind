@@ -135,4 +135,19 @@ describe("ReviewGradeControls", () => {
 
     expect(mockGradeCardAndNotify).toHaveBeenCalledTimes(1);
   });
+
+  it("does not submit duplicate grades from same-tick clicks before pending state renders", () => {
+    const request = deferredGradeResponse();
+    mockGradeCardAndNotify.mockReturnValue(request.promise);
+
+    render(<ReviewGradeControls card={reviewCard()} onGraded={onGraded} />);
+    const good = screen.getByRole("button", { name: /good/i });
+    const easy = screen.getByRole("button", { name: /easy/i });
+
+    good.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    easy.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(mockGradeCardAndNotify).toHaveBeenCalledTimes(1);
+    expect(mockGradeCardAndNotify).toHaveBeenCalledWith("card-1", 3, expect.any(Number));
+  });
 });
