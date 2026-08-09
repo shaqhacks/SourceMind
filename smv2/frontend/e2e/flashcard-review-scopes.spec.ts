@@ -91,7 +91,7 @@ const courseCards = [
     "The future-due card must still appear in all scope.",
     {
       due_at: "2026-08-15T12:00:00.000Z",
-      last_grade: 4,
+      last_grade: 1,
       interval_days: 12,
       reps: 5,
     },
@@ -167,7 +167,7 @@ test.describe("unified flashcard review scopes", () => {
     await expect(page.getByText("2 due · 1 new")).toBeVisible();
     await expectNoCriticalViolations(page, "course-all-chooser");
 
-    const reviewAll = page.getByRole("button", { name: "Review All (3)" });
+    const reviewAll = page.getByRole("button", { name: "Review All (4)" });
     await reviewAll.focus();
     await page.keyboard.press("Enter");
 
@@ -188,17 +188,60 @@ test.describe("unified flashcard review scopes", () => {
     await expectNoCriticalViolations(page, "course-all-not-due-answer");
     await page.keyboard.press("3");
 
+    await expect(page.getByText("Which card should replay exactly?")).toBeVisible();
+    await page.keyboard.press(" ");
+    await expect(page.getByText("Only the card graded Again in the completed session.")).toBeVisible();
+    await page.keyboard.press("3");
+
     await expect(page.getByRole("heading", { name: "Session complete" })).toBeVisible();
 
     expect(harness.reviewRequests).toEqual([
       { scope: "all", chapter: null, limit: "200" },
       { scope: "all", chapter: null, limit: "200" },
-      { scope: "all", chapter: null, limit: "3" },
+      { scope: "all", chapter: null, limit: "4" },
     ]);
     expect(harness.graded.map((request) => request.cardId)).toEqual([
       "card-due",
       "card-new",
       "card-future",
+      "card-missed",
+    ]);
+    await expectCleanHarness(harness);
+  });
+
+  test("student reviews needs-attention cards including a future-due Again card", async ({ page }) => {
+    const harness = await installFlashcardReviewHarness(page);
+
+    await page.goto(`/review?course=${courseId}&scope=needs_attention`);
+    await expect(page.getByRole("heading", { name: "Ready to review" })).toBeVisible();
+    await expect(page.getByText("1 due · 0 new")).toBeVisible();
+    await expectNoCriticalViolations(page, "needs-attention-chooser");
+
+    const reviewAll = page.getByRole("button", { name: "Review All (2)" });
+    await reviewAll.focus();
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByText("Which card proves not-due inclusion?")).toBeVisible();
+    await page.keyboard.press(" ");
+    await expect(page.getByText("The future-due card must still appear in all scope.")).toBeVisible();
+    await expectNoCriticalViolations(page, "needs-attention-future-answer");
+    await page.keyboard.press("4");
+
+    await expect(page.getByText("Which card should replay exactly?")).toBeVisible();
+    await page.keyboard.press(" ");
+    await expect(page.getByText("Only the card graded Again in the completed session.")).toBeVisible();
+    await page.keyboard.press("3");
+
+    await expect(page.getByRole("heading", { name: "Session complete" })).toBeVisible();
+
+    expect(harness.reviewRequests).toEqual([
+      { scope: "needs_attention", chapter: null, limit: "200" },
+      { scope: "needs_attention", chapter: null, limit: "200" },
+      { scope: "needs_attention", chapter: null, limit: "2" },
+    ]);
+    expect(harness.graded).toEqual([
+      { cardId: "card-future", grade: 4 },
+      { cardId: "card-missed", grade: 3 },
     ]);
     await expectCleanHarness(harness);
   });
@@ -330,7 +373,7 @@ test.describe("unified flashcard review scopes", () => {
 
     await page.goto(`/review?course=${courseId}&scope=all`);
     await expect(page.getByRole("heading", { name: "Ready to review" })).toBeVisible();
-    const reviewAll = page.getByRole("button", { name: "Review All (3)" });
+    const reviewAll = page.getByRole("button", { name: "Review All (4)" });
     await reviewAll.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByText("Define a due card.")).toBeVisible();
@@ -423,7 +466,7 @@ async function installFlashcardReviewHarness(
             new_count: 1,
             available_count: 3,
             total_count: 4,
-            needs_attention_count: 1,
+            needs_attention_count: 2,
           },
         ],
       });

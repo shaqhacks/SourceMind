@@ -92,9 +92,10 @@ function summaryAvailableCount(summary: ReviewSummaryOut): number {
 function queueMetrics(
   queue: { cards: ReviewQueueCardOut[]; overdue_count: number; new_count: number; available_count: number },
   questionCount: number,
+  scope?: ReviewScope,
   chapterLabel?: string,
 ) {
-  if (!chapterLabel) {
+  if (!chapterLabel && (scope === undefined || scope === "available")) {
     return {
       due: queue.overdue_count,
       new: queue.new_count,
@@ -104,7 +105,7 @@ function queueMetrics(
   return {
     due: queue.cards.filter((card) => card.is_due).length,
     new: queue.cards.filter((card) => card.is_new).length,
-    total: queue.cards.length,
+    total: queue.cards.length + questionCount,
   };
 }
 
@@ -193,6 +194,8 @@ function ReviewPageInner() {
   const [gradeCounts, setGradeCounts] = useState<Record<number, number>>({});
   const [againCardIds, setAgainCardIds] = useState<string[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionScope, setActiveSessionScope] = useState<ReviewScope>(reviewScope ?? "available");
+  const [activeSessionChapterLabel, setActiveSessionChapterLabel] = useState<string | null>(chapterLabel ?? null);
   const [completedSession, setCompletedSession] = useState<CompletedReviewSession | null>(null);
   const [completedSessionChecked, setCompletedSessionChecked] = useState(!courseParam || !completedParam);
   const [replayMissingMessage, setReplayMissingMessage] = useState<string | null>(null);
@@ -298,30 +301,29 @@ function ReviewPageInner() {
       const storedCourseId = stored.courseId;
       if (active) setCourseId(storedCourseId);
 
-      const { data } = await getReviewQueue(storedCourseId, { limit: MAX_QUEUE_FETCH });
+      const { data, status } = await getReviewSelection(storedCourseId, stored.remainingCardIds);
       if (!active) return;
       if (!data) {
         // Couldn't reconcile (network) — don't lose the session over a
         // transient failure; land on the chooser instead of silently
         // discarding it.
+        setChooserState({ kind: "error", error: describeError(status, "Loading saved review session") });
         setPhase("chooser");
         return;
       }
-      const byId = new Map(data.cards.map((card) => [card.id, card]));
-      const reconciled = stored.remainingCardIds
-        .map((id) => byId.get(id))
-        .filter((card): card is ReviewQueueCardOut => card !== undefined);
-      if (reconciled.length === 0) {
+      if (data.cards.length === 0) {
         clearActiveReviewSession();
         setPhase("chooser");
         return;
       }
-      setCards(reconciled);
+      setCards(data.cards);
       setCardIndex(0);
       setRevealed(false);
       setGradeCounts(stored.gradedTally);
       setAgainCardIds(stored.againCardIds);
       setActiveSessionId(stored.sessionId);
+      setActiveSessionScope(stored.scope);
+      setActiveSessionChapterLabel(stored.chapterLabel);
       setSessionSize(stored.chosenSize);
       setSessionStartedAt(stored.startedAt);
       setIsResumedSession(true);
@@ -365,7 +367,7 @@ function ReviewPageInner() {
     ]).then(([review, adaptive]) => {
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
-        const metrics = queueMetrics(review.data, questionCount, chapterLabel);
+        const metrics = queueMetrics(review.data, questionCount, reviewScope, chapterLabel);
         setChooserState({
           kind: "ready",
           due: metrics.due,
@@ -388,7 +390,7 @@ function ReviewPageInner() {
       if (!active) return;
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
-        const metrics = queueMetrics(review.data, questionCount, chapterLabel);
+        const metrics = queueMetrics(review.data, questionCount, reviewScope, chapterLabel);
         setChooserState({
           kind: "ready",
           due: metrics.due,
@@ -419,6 +421,8 @@ function ReviewPageInner() {
       setSessionSize(size);
       setGradeCounts({});
       setIsResumedSession(false);
+      setActiveSessionScope(reviewScope ?? "available");
+      setActiveSessionChapterLabel(chapterLabel ?? null);
       Promise.all([
         getReviewQueue(courseId, { limit: size, scope: reviewScope, chapterLabel }),
         getAdaptiveStudyQueue(courseId, size),
@@ -487,7 +491,7 @@ function ReviewPageInner() {
         return;
       }
       const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
-      const metrics = queueMetrics(review.data, questionCount, chapterLabel);
+      const metrics = queueMetrics(review.data, questionCount, reviewScope, chapterLabel);
       if (metrics.due === 0) {
         setChooserState({
           kind: "ready",
@@ -533,8 +537,8 @@ function ReviewPageInner() {
         version: 1,
         sessionId: activeSessionId ?? newSessionId(),
         courseId,
-        scope: reviewScope ?? "available",
-        chapterLabel: chapterLabel ?? null,
+        scope: activeSessionScope,
+        chapterLabel: activeSessionChapterLabel,
         endedAt: Date.now(),
         gradedTally: tally,
         againCardIds: missedIds,
@@ -545,7 +549,7 @@ function ReviewPageInner() {
       setSessionState({ kind: "done" });
       router.replace(`/review?course=${courseId}&completed=${completed.sessionId}`);
     },
-    [activeSessionId, chapterLabel, courseId, reviewScope, router],
+    [activeSessionChapterLabel, activeSessionId, activeSessionScope, courseId, router],
   );
 
   const goBackToReview = useCallback(() => {
@@ -623,6 +627,8 @@ function ReviewPageInner() {
     setGradePending(false);
     setGradeCounts({});
     setAgainCardIds([]);
+    setActiveSessionScope(completedSession.scope);
+    setActiveSessionChapterLabel(completedSession.chapterLabel);
     setSessionSize(data.cards.length);
     setSessionStartedAt(startedAt);
     setIsResumedSession(false);
@@ -662,8 +668,8 @@ function ReviewPageInner() {
               version: 1,
               sessionId: activeSessionId ?? newSessionId(),
               courseId,
-              scope: reviewScope ?? "available",
-              chapterLabel: chapterLabel ?? null,
+              scope: activeSessionScope,
+              chapterLabel: activeSessionChapterLabel,
               chosenSize: sessionSize,
               remainingCardIds: [],
               gradedTally: nextTally,
@@ -679,8 +685,8 @@ function ReviewPageInner() {
             version: 1,
             sessionId: activeSessionId ?? newSessionId(),
             courseId,
-            scope: reviewScope ?? "available",
-            chapterLabel: chapterLabel ?? null,
+            scope: activeSessionScope,
+            chapterLabel: activeSessionChapterLabel,
             chosenSize: sessionSize,
             remainingCardIds: cards.slice(nextIndex).map((c) => c.id),
             gradedTally: nextTally,
@@ -695,14 +701,14 @@ function ReviewPageInner() {
     },
     [
       activeSessionId,
+      activeSessionChapterLabel,
+      activeSessionScope,
       againCardIds,
       cards,
       cardIndex,
-      chapterLabel,
       courseId,
       gradeCounts,
       questions.length,
-      reviewScope,
       completeSession,
       sessionSize,
       sessionStartedAt,
