@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
+from app.llm.structured_output import CURRICULUM_SCHEMA, InvalidModelOutputError, repair_messages
 from app.pipeline._common import report_progress as _report_progress
 from app.pipeline._common import (
     report_progress_in_session as _report_progress_in_session,
@@ -273,14 +275,18 @@ def run_concept_extraction(
     provider = get_provider()
     messages = [{"role": "user", "content": source_message}]
     _report_progress(job.id, stage="loading", pct=None, message="preparing curriculum draft")
-    completion_options = completion_options_for_job(job.id, artifact="curriculum")
+    completion_options = replace(
+        completion_options_for_job(job.id, artifact="curriculum"),
+        response_schema=CURRICULUM_SCHEMA,
+    )
 
     parsed = None
     last_error = None
+    current_messages = messages
     for attempt in range(2):
         ensure_spend_cap(course_id)
         result = provider.complete(
-            messages,
+            current_messages,
             max_tokens=_MAX_TOKENS,
             purpose="concept_extraction",
             course_id=course_id,
@@ -298,6 +304,7 @@ def run_concept_extraction(
                 _report_progress(
                     job.id, stage="retrying", pct=45, message="retrying invalid curriculum"
                 )
+                current_messages = repair_messages(messages, exc)
                 continue
             record_llm_call(
                 purpose="concept_extraction",
@@ -311,9 +318,8 @@ def run_concept_extraction(
                 course_id=course_id,
             )
     if parsed is None:
-        raise ValueError(
-            f"curriculum extraction produced invalid output after one retry: {last_error}"
-        )
+        assert last_error is not None
+        raise InvalidModelOutputError(last_error) from last_error
 
     concept_by_key: dict[str, Concept] = {}
     section_by_id = {section.id: section for section in sections}

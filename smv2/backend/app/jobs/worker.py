@@ -25,6 +25,7 @@ from app.jobs.registry import (
     default_on_orphan,
 )
 from app.llm.completion_control import ProviderCancelledError
+from app.llm.structured_output import InvalidModelOutputError
 from app.services import jobs_service
 from app.services.llm_readiness_service import LlmReadinessUnavailableError
 
@@ -131,6 +132,15 @@ def execute_job(session: Session, job: Job) -> None:
             message,
             {"code": "llm_readiness_unavailable", **exc.detail},
         )
+        session.commit()
+        return
+    except InvalidModelOutputError as exc:
+        session.rollback()
+        failed_job = session.get(Job, job_id)
+        assert failed_job is not None
+        failed_job.status = "failed"
+        message = exc.error_detail["message"]
+        failed_job.error = encode_job_error(message, exc.error_detail)
         session.commit()
         return
     except Exception as exc:  # noqa: BLE001 - any handler failure must be persisted

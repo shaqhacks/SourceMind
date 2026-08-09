@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -20,6 +21,11 @@ from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
+from app.llm.structured_output import (
+    CONCEPT_PRACTICE_SCHEMA,
+    InvalidModelOutputError,
+    repair_messages,
+)
 from app.pipeline._common import report_progress_in_session, strip_leading_fence
 from app.services import evidence_items_service
 
@@ -156,13 +162,17 @@ def run_concept_practice_generation(
         }
     ]
     provider = get_provider()
-    completion_options = completion_options_for_job(job.id, artifact="concept_practice")
+    completion_options = replace(
+        completion_options_for_job(job.id, artifact="concept_practice"),
+        response_schema=CONCEPT_PRACTICE_SCHEMA,
+    )
     questions = None
     result = None
+    current_messages = messages
     for attempt in range(2):
         ensure_spend_cap(course_id)
         result = provider.complete(
-            messages,
+            current_messages,
             max_tokens=_MAX_TOKENS,
             purpose="concept_practice",
             course_id=course_id,
@@ -175,6 +185,9 @@ def run_concept_practice_generation(
             questions = parse_concept_practice(result.text, set(options))
             break
         except (json.JSONDecodeError, ValueError) as exc:
+            if attempt == 0:
+                current_messages = repair_messages(messages, exc)
+                continue
             if attempt == 1:
                 record_llm_call(
                     purpose="concept_practice",
@@ -187,9 +200,7 @@ def run_concept_practice_generation(
                     status="parse_failure",
                     course_id=course_id,
                 )
-                raise ValueError(
-                    f"concept practice produced unparseable output after one retry: {exc}"
-                ) from exc
+                raise InvalidModelOutputError(exc) from exc
     assert questions is not None and result is not None
     created = 0
     for index, question_data in enumerate(questions):

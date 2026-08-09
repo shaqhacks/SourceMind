@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
+from app.llm.structured_output import CARDS_SCHEMA, InvalidModelOutputError, repair_messages
 from app.pipeline._common import report_progress as _report_progress
 from app.pipeline._common import (
     report_progress_in_session as _report_progress_in_session,
@@ -110,7 +112,10 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
     system_prompt, messages = _build_messages(section, claim_options)
     _, prompt_version = load_prompt("cards")
     provider = get_provider()
-    completion_options = completion_options_for_job(job.id, artifact="flashcards")
+    completion_options = replace(
+        completion_options_for_job(job.id, artifact="flashcards"),
+        response_schema=CARDS_SCHEMA,
+    )
 
     # Same cap discipline as lesson generation (app/llm/ledger.ensure_spend_cap):
     # checked immediately before the call, no yield points in between.
@@ -132,11 +137,12 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
 
     try:
         cards_data = _parse_cards(result.text, allowed_claim_ids)
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError) as exc:
         # Bounded: one retry on a whole-response parse failure, then give up.
         _report_progress(job.id, stage="retrying", pct=50, message="retrying malformed response")
+        repair_request = repair_messages(messages, exc)
         result = provider.complete(
-            messages,
+            repair_request,
             max_tokens=_MAX_TOKENS,
             purpose="cards",
             course_id=section.course_id,
@@ -165,7 +171,7 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
                 status="parse_failure",
                 course_id=section.course_id,
             )
-            raise ValueError(f"card generation produced unparseable output after one retry: {exc}") from exc
+            raise InvalidModelOutputError(exc) from exc
 
     if not cards_data:
         raise ValueError("card generation produced zero usable cards")

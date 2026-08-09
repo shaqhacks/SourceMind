@@ -7,6 +7,7 @@ from conftest import _first_section_id
 from app.db.engine import get_session
 from app.db.models import Card, Job, LlmCall, ReviewState
 from app.jobs.worker import run_due_jobs_once
+from app.llm.structured_output import CARDS_SCHEMA
 from app.llm.provider import (
     PROVIDER_NOT_CONFIGURED_MESSAGE,
     CompletionResult,
@@ -188,6 +189,32 @@ def test_generate_cards_retries_once_on_top_level_parse_failure(client, ingest_c
 
     cards = client.get(f"/api/sections/{section_id}/cards").json()
     assert len(cards) == 1
+
+
+def test_generate_cards_schema_sent_on_first_and_repair_completion(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(text="not json at all", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(
+            text=json.dumps([{"front": "Q", "back": "A"}]), input_tokens=1, output_tokens=1, model="stub-model"
+        ),
+    ]
+
+    client.post(f"/api/sections/{section_id}/cards")
+    assert run_due_jobs_once() is True
+
+    assert stub_provider.complete_call_count == 2
+    assert [option.response_schema for option in stub_provider.received_completion_options] == [
+        CARDS_SCHEMA,
+        CARDS_SCHEMA,
+    ]
+    repair_content = stub_provider.received_messages[1][-1]["content"]
+    assert "valid JSON" in repair_content
+    assert "not json at all" not in repair_content
 
 
 def test_generate_cards_job_reports_friendly_error_when_provider_not_configured(

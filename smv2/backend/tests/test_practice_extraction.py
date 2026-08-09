@@ -10,6 +10,7 @@ from app.db.models import (
     Concept,
     Course,
     Job,
+    LlmCall,
     PracticeExtractionRun,
     PracticeQuestion,
     Section,
@@ -17,6 +18,7 @@ from app.db.models import (
 from app.jobs.error_envelope import decode_job_error
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
+from app.llm.structured_output import PRACTICE_ASSESSMENT_SCHEMA
 from app.pipeline.practice_extraction import parse_practice_questions
 
 
@@ -245,6 +247,82 @@ def test_practice_extraction_job_dedupes_duplicate_source_fingerprints(client, s
         assert session.query(PracticeQuestion).count() == 1
     finally:
         session.close()
+
+
+def test_practice_extraction_repairs_one_invalid_response(client, stub_provider):
+    session = get_session()
+    try:
+        _course, _practice, _answers, _run, job = _seed_practice_run(session)
+    finally:
+        session.close()
+
+    stub_provider.responses = [
+        CompletionResult(text="", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(
+            text=json.dumps([_valid_question_payload()]),
+            input_tokens=1,
+            output_tokens=1,
+            model="stub-model",
+        ),
+    ]
+
+    assert run_due_jobs_once() is True
+
+    job_body = client.get(f"/api/jobs/{job.id}").json()
+    assert job_body["status"] == "succeeded"
+    assert stub_provider.complete_call_count == 2
+    assert [option.response_schema for option in stub_provider.received_completion_options] == [
+        PRACTICE_ASSESSMENT_SCHEMA,
+        PRACTICE_ASSESSMENT_SCHEMA,
+    ]
+    repair_content = stub_provider.received_messages[1][-1]["content"]
+    assert "valid JSON" in repair_content
+    assert "question format" in repair_content
+
+
+def test_practice_extraction_records_parse_failure_after_two_invalid_responses(
+    client, stub_provider
+):
+    session = get_session()
+    try:
+        course, _practice, _answers, _run, job = _seed_practice_run(session)
+        course_id = course.id
+    finally:
+        session.close()
+
+    stub_provider.responses = [
+        CompletionResult(text="", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(text="not json RAW_MODEL_SENTINEL", input_tokens=1, output_tokens=1, model="stub-model"),
+    ]
+
+    assert run_due_jobs_once() is True
+
+    job_body = client.get(f"/api/jobs/{job.id}").json()
+    assert job_body["status"] == "failed"
+    assert job_body["error_detail"] == {
+        "code": "invalid_model_output",
+        "message": "The model returned an invalid question format.",
+        "failure_category": "structured_output_invalid",
+    }
+    assert "RAW_MODEL_SENTINEL" not in json.dumps(job_body)
+    session = get_session()
+    try:
+        calls = (
+            session.query(LlmCall)
+            .filter(LlmCall.purpose == "practice_assessment", LlmCall.course_id == course_id)
+            .order_by(LlmCall.ts)
+            .all()
+        )
+    finally:
+        session.close()
+    assert [row.status for row in calls] == ["ok", "ok", "parse_failure"]
+
+
+def test_practice_extraction_unknown_claim_ids_still_fail_closed():
+    payload = {**_valid_question_payload(), "claim_id": "invented"}
+
+    with pytest.raises(ValueError, match="unknown claim id"):
+        parse_practice_questions(json.dumps([payload]), allowed_claim_ids={"allowed"})
 
 
 def test_practice_extraction_commits_progress_before_provider_call(client, stub_provider):

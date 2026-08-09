@@ -6,8 +6,11 @@ from datetime import timedelta
 
 from app.db.engine import get_session
 from app.db.models import Job, ensure_utc, utcnow
+from app.jobs import registry
+from app.jobs.error_envelope import decode_job_error
 from app.jobs.llm_job_control import completion_options_for_job
-from app.jobs.worker import job_progress
+from app.jobs.worker import execute_job, job_progress
+from app.llm.structured_output import InvalidModelOutputError
 from app.llm.completion_control import CompletionProgress
 
 
@@ -188,3 +191,37 @@ def test_job_completion_control_cancel_reads_committed_state(client, monkeypatch
 
     monkeypatch.setattr(jobs_service, "is_cancel_requested", raise_on_cancel_read)
     assert options.is_cancelled() is True
+
+
+def test_execute_job_invalid_model_output_uses_safe_error_detail(client, monkeypatch):
+    def invalid_model_handler(_session, _job):
+        raise InvalidModelOutputError(
+            ValueError("RAW_MODEL_SENTINEL parser text {\"secret\": true}")
+        )
+
+    monkeypatch.setitem(registry.JOB_HANDLERS, "invalid_model_test", invalid_model_handler)
+    session = get_session()
+    try:
+        job = Job(type="invalid_model_test", status="running")
+        session.add(job)
+        session.commit()
+        job_id = job.id
+        execute_job(session, job)
+    finally:
+        session.close()
+
+    session = get_session()
+    try:
+        stored = session.get(Job, job_id)
+        message, detail = decode_job_error(stored.error)
+    finally:
+        session.close()
+
+    assert stored.status == "failed"
+    assert message == "The model returned an invalid question format."
+    assert detail == {
+        "code": "invalid_model_output",
+        "message": "The model returned an invalid question format.",
+        "failure_category": "structured_output_invalid",
+    }
+    assert "RAW_MODEL_SENTINEL" not in stored.error
