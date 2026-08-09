@@ -101,6 +101,10 @@ function testLinkLabel(scoreLabel: string | null, practiceCount: number): string
   return "Test";
 }
 
+function chapterGroupListId(key: string): string {
+  return `chapter-group-${encodeURIComponent(key)}`;
+}
+
 /**
  * Reader sidebar: sections grouped by chapter for scannability (a real
  * book can have 100+ flat sections, one row each). Grouping is presentation
@@ -168,7 +172,7 @@ export default function Sidebar({
         {groups.map((group) => {
           const isActiveGroup = group.key === activeGroupKey;
           const open = isActiveGroup || openGroups.has(group.key);
-          const listId = `chapter-group-${group.key}`;
+          const listId = chapterGroupListId(group.key);
           const stats = chapterStats?.[group.key];
           const scoreLabel = stats ? formatScorePercent(stats.best_score) : null;
           const contentSections = group.sections.filter((section) => section.kind === "content");

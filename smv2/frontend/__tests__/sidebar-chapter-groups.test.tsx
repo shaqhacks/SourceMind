@@ -129,6 +129,72 @@ describe("Sidebar chapter grouping", () => {
     expect(document.getElementById(controlsId!)).toContainElement(screen.getByText("Foundations"));
   });
 
+  it("uses valid unique aria-control ids for special chapter labels", async () => {
+    const user = userEvent.setup();
+    const sections = [
+      makeSection({
+        id: "space-colon-amp",
+        order_index: 0,
+        title: "Special punctuation",
+        chapter_label: "Chapter 1: Basics & Setup",
+      }),
+      makeSection({
+        id: "unicode",
+        order_index: 1,
+        title: "Unicode title",
+        chapter_label: "第1章: 測定 & 分析",
+      }),
+      makeSection({
+        id: "collision-space",
+        order_index: 2,
+        title: "Collision from space",
+        chapter_label: "A B",
+      }),
+      makeSection({
+        id: "collision-dash",
+        order_index: 3,
+        title: "Collision from dash",
+        chapter_label: "A-B",
+      }),
+      makeSection({
+        id: "collision-amp",
+        order_index: 4,
+        title: "Collision from ampersand",
+        chapter_label: "A&B",
+      }),
+    ];
+
+    render(
+      <Sidebar
+        courseId="course-1"
+        sections={sections}
+        activeSectionId="space-colon-amp"
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const seenControlIds = new Set<string>();
+    for (const label of [
+      "Chapter 1: Basics & Setup",
+      "第1章: 測定 & 分析",
+      "A B",
+      "A-B",
+      "A&B",
+    ]) {
+      const toggle = screen.getByRole("button", { name: label });
+      if (toggle.getAttribute("aria-expanded") === "false") {
+        await user.click(toggle);
+      }
+
+      const controlsId = toggle.getAttribute("aria-controls");
+      expect(controlsId).toBeTruthy();
+      expect(controlsId).not.toMatch(/\s/);
+      expect(seenControlIds.has(controlsId!)).toBe(false);
+      seenControlIds.add(controlsId!);
+      expect(document.getElementById(controlsId!)).toBeInTheDocument();
+    }
+  });
+
   it("never lists practice/answers sections as reading rows, even in their expanded group", () => {
     render(
       <Sidebar
