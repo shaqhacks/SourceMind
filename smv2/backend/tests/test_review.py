@@ -5,10 +5,13 @@ import uuid
 from datetime import timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from app.db.engine import get_session
 from app.db.models import Card, Course, ReviewLog, ReviewState, Section, utcnow
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
+from app.services import srs_service
 
 
 def _generate_two_cards(client, ingest_course, stub_provider) -> tuple[str, str, str]:
@@ -292,6 +295,13 @@ def test_review_queue_unknown_scope_returns_422(client):
     )
 
     assert response.status_code == 422
+
+
+def test_get_review_queue_rejects_invalid_service_scope(client):
+    review_course = _review_scope_course(client)
+
+    with pytest.raises(ValueError, match="invalid review queue scope"):
+        srs_service.get_review_queue(review_course.id, scope="unknown")
 
 
 def test_review_queue_scope_response_includes_card_metadata(client):

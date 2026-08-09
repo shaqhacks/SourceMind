@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import and_, func
 
@@ -130,7 +130,7 @@ def get_review_queue(
     limit: int = 20,
     *,
     learner_id: str = learner_context.LEGACY_LOCAL_LEARNER_ID,
-    scope: str = "available",
+    scope: Literal["available", "all", "needs_attention"] = "available",
     chapter_label: str | None = None,
 ) -> dict[str, Any]:
     """due cards: ReviewState.due_at <= now OR no ReviewState yet (new).
@@ -165,8 +165,12 @@ def get_review_queue(
             query = query.filter(Section.chapter_label == chapter_label)
         if scope == "available":
             query = query.filter((ReviewState.card_id.is_(None)) | (ReviewState.due_at <= now))
+        elif scope == "all":
+            pass
         elif scope == "needs_attention":
             query = query.filter(ReviewState.last_grade == AGAIN)
+        else:
+            raise ValueError(f"invalid review queue scope: {scope}")
 
         rows = (
             query.with_entities(Card, Section, ReviewState)
