@@ -207,9 +207,12 @@ def run_practice_extraction(
 
     try:
         questions = parse_practice_questions(result.text, allowed_claim_ids)
+        if not questions:
+            raise ValueError("practice assessment extraction produced zero usable questions")
     except (json.JSONDecodeError, ValueError) as exc:
         _report_progress(job.id, stage="retrying", pct=50, message="retrying malformed response")
         repair_request = repair_messages(messages, exc)
+        ensure_spend_cap(course_id)
         result = provider.complete(
             repair_request,
             max_tokens=_MAX_TOKENS,
@@ -222,6 +225,8 @@ def run_practice_extraction(
         )
         try:
             questions = parse_practice_questions(result.text, allowed_claim_ids)
+            if not questions:
+                raise ValueError("practice assessment extraction produced zero usable questions")
         except (json.JSONDecodeError, ValueError) as retry_exc:
             record_llm_call(
                 purpose="practice_assessment",
@@ -235,9 +240,6 @@ def run_practice_extraction(
                 course_id=course_id,
             )
             raise InvalidModelOutputError(retry_exc) from retry_exc
-    if not questions:
-        raise ValueError("practice assessment extraction produced zero usable questions")
-
     answer_section = answer_sections[0]
     unique_items = _dedupe_by_source_fingerprint(section, questions, prompt_version)
     for source_fingerprint, item in unique_items:

@@ -5,7 +5,7 @@ import json
 import pytest
 
 from app.db.engine import get_session
-from app.db.models import EvidenceItemConceptLink, Job, PracticeQuestion
+from app.db.models import EvidenceItemConceptLink, Job, LlmCall, PracticeQuestion
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from app.llm.structured_output import CONCEPT_PRACTICE_SCHEMA
@@ -130,6 +130,72 @@ def test_concept_practice_schema_sent_on_first_and_repair_completion(
     repair_content = stub_provider.received_messages[1][-1]["content"]
     assert "valid JSON" in repair_content
     assert "not json" not in repair_content
+
+
+def test_concept_practice_repairs_empty_structured_array(client, stub_provider):
+    session = get_session()
+    try:
+        course_id, concept_id = _seed_mixed_queue(session)
+        claim_id = session.query(EvidenceItemConceptLink.learning_claim_id).first()[0]
+    finally:
+        session.close()
+    stub_provider.responses = [
+        CompletionResult(text="[]", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(
+            text=json.dumps([_generated_question(claim_id)]),
+            input_tokens=1,
+            output_tokens=1,
+            model="stub-model",
+        ),
+    ]
+
+    started = client.post(
+        f"/api/courses/{course_id}/study/concepts/{concept_id}/replenish"
+    )
+    assert started.status_code == 202
+    assert run_due_jobs_once() is True
+
+    session = get_session()
+    try:
+        completed = session.get(Job, started.json()["id"])
+        assert completed.status == "succeeded", completed.error
+    finally:
+        session.close()
+    assert stub_provider.complete_call_count == 2
+
+
+def test_concept_practice_records_parse_failure_after_two_empty_arrays(
+    client, stub_provider
+):
+    session = get_session()
+    try:
+        course_id, concept_id = _seed_mixed_queue(session)
+    finally:
+        session.close()
+    stub_provider.responses = [
+        CompletionResult(text="[]", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(text="[]", input_tokens=1, output_tokens=1, model="stub-model"),
+    ]
+
+    started = client.post(
+        f"/api/courses/{course_id}/study/concepts/{concept_id}/replenish"
+    )
+    assert started.status_code == 202
+    assert run_due_jobs_once() is True
+
+    session = get_session()
+    try:
+        completed = session.get(Job, started.json()["id"])
+        calls = (
+            session.query(LlmCall)
+            .filter(LlmCall.purpose == "concept_practice", LlmCall.course_id == course_id)
+            .order_by(LlmCall.ts)
+            .all()
+        )
+        assert completed.status == "failed"
+        assert [row.status for row in calls] == ["ok", "ok", "parse_failure"]
+    finally:
+        session.close()
 
 
 def test_replenish_concept_practice_unconfigured_provider_fails_before_job_creation(client):

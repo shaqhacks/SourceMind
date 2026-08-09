@@ -117,13 +117,12 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
         response_schema=CARDS_SCHEMA,
     )
 
-    # Same cap discipline as lesson generation (app/llm/ledger.ensure_spend_cap):
-    # checked immediately before the call, no yield points in between.
-    ensure_spend_cap(section.course_id)
-
     # wait_for_slot=True: durable job, not an interactive request — wait out
     # a busy limiter (bounded) rather than fail the job over transient chat
     # traffic saturating the same slots.
+    # Same cap discipline as lesson generation (app/llm/ledger.ensure_spend_cap):
+    # checked immediately before the call, no yield points in between.
+    ensure_spend_cap(section.course_id)
     result = provider.complete(
         messages,
         max_tokens=_MAX_TOKENS,
@@ -137,10 +136,13 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
 
     try:
         cards_data = _parse_cards(result.text, allowed_claim_ids)
+        if not cards_data:
+            raise ValueError("card generation produced zero usable cards")
     except (json.JSONDecodeError, ValueError) as exc:
         # Bounded: one retry on a whole-response parse failure, then give up.
         _report_progress(job.id, stage="retrying", pct=50, message="retrying malformed response")
         repair_request = repair_messages(messages, exc)
+        ensure_spend_cap(section.course_id)
         result = provider.complete(
             repair_request,
             max_tokens=_MAX_TOKENS,
@@ -153,6 +155,8 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
         )
         try:
             cards_data = _parse_cards(result.text, allowed_claim_ids)
+            if not cards_data:
+                raise ValueError("card generation produced zero usable cards")
         except (json.JSONDecodeError, ValueError) as exc:
             # The provider wrapper already recorded this same call as
             # status='ok' (the completion succeeded at the transport level);
@@ -172,9 +176,6 @@ def run_card_generation(session: Session, job: Job, section_id: str) -> dict[str
                 course_id=section.course_id,
             )
             raise InvalidModelOutputError(exc) from exc
-
-    if not cards_data:
-        raise ValueError("card generation produced zero usable cards")
 
     # Content-addressed diff, same pattern as re-ingest: unchanged
     # front/back -> same id -> ReviewState/ReviewLog survive untouched.

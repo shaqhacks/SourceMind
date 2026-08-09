@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import timedelta
+from pathlib import Path
 
 from app.db.engine import get_session
 from app.db.models import Job, ensure_utc, utcnow
@@ -225,3 +226,33 @@ def test_execute_job_invalid_model_output_uses_safe_error_detail(client, monkeyp
         "failure_category": "structured_output_invalid",
     }
     assert "RAW_MODEL_SENTINEL" not in stored.error
+
+
+def test_structured_generation_provider_calls_check_spend_cap_immediately_before():
+    backend_root = Path(__file__).resolve().parents[1]
+    relative_paths = [
+        "app/pipeline/cards_generation.py",
+        "app/pipeline/quiz_generation.py",
+        "app/pipeline/practice_extraction.py",
+        "app/pipeline/concept_extraction.py",
+        "app/pipeline/concept_practice_generation.py",
+    ]
+
+    violations = []
+    for relative_path in relative_paths:
+        lines = (backend_root / relative_path).read_text().splitlines()
+        for index, line in enumerate(lines):
+            if "provider.complete(" not in line:
+                continue
+            previous = next(
+                (
+                    candidate.strip()
+                    for candidate in reversed(lines[:index])
+                    if candidate.strip()
+                ),
+                "",
+            )
+            if not previous.startswith("ensure_spend_cap("):
+                violations.append(f"{relative_path}:{index + 1}")
+
+    assert violations == []

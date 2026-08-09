@@ -217,6 +217,56 @@ def test_generate_cards_schema_sent_on_first_and_repair_completion(
     assert "not json at all" not in repair_content
 
 
+def test_generate_cards_repairs_empty_structured_array(client, ingest_course, stub_provider):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(text="[]", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(
+            text=json.dumps([{"front": "Q", "back": "A"}]),
+            input_tokens=1,
+            output_tokens=1,
+            model="stub-model",
+        ),
+    ]
+
+    resp = client.post(f"/api/sections/{section_id}/cards")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "succeeded"
+    assert stub_provider.complete_call_count == 2
+
+
+def test_generate_cards_records_parse_failure_after_two_all_malformed_arrays(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+    malformed = [{"front": "", "back": ""}, "not an object"]
+
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(malformed), input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(text=json.dumps(malformed), input_tokens=1, output_tokens=1, model="stub-model"),
+    ]
+
+    resp = client.post(f"/api/sections/{section_id}/cards")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "failed"
+    assert job["error_detail"]["code"] == "invalid_model_output"
+    session = get_session()
+    try:
+        calls = session.query(LlmCall).filter(LlmCall.purpose == "cards").order_by(LlmCall.ts).all()
+    finally:
+        session.close()
+    assert [row.status for row in calls] == ["ok", "ok", "parse_failure"]
+
+
 def test_generate_cards_job_reports_friendly_error_when_provider_not_configured(
     client, ingest_course, stub_provider
 ):

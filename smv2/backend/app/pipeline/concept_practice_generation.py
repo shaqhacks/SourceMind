@@ -183,6 +183,8 @@ def run_concept_practice_generation(
         )
         try:
             questions = parse_concept_practice(result.text, set(options))
+            if not questions:
+                raise ValueError("concept practice produced zero usable questions")
             break
         except (json.JSONDecodeError, ValueError) as exc:
             if attempt == 0:

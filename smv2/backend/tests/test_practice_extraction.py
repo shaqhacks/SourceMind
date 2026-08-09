@@ -280,6 +280,63 @@ def test_practice_extraction_repairs_one_invalid_response(client, stub_provider)
     assert "question format" in repair_content
 
 
+def test_practice_extraction_repairs_empty_structured_array(client, stub_provider):
+    session = get_session()
+    try:
+        _course, _practice, _answers, _run, job = _seed_practice_run(session)
+    finally:
+        session.close()
+
+    stub_provider.responses = [
+        CompletionResult(text="[]", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(
+            text=json.dumps([_valid_question_payload()]),
+            input_tokens=1,
+            output_tokens=1,
+            model="stub-model",
+        ),
+    ]
+
+    assert run_due_jobs_once() is True
+
+    job_body = client.get(f"/api/jobs/{job.id}").json()
+    assert job_body["status"] == "succeeded"
+    assert stub_provider.complete_call_count == 2
+
+
+def test_practice_extraction_records_parse_failure_after_two_all_malformed_arrays(
+    client, stub_provider
+):
+    session = get_session()
+    try:
+        course, _practice, _answers, _run, job = _seed_practice_run(session)
+        course_id = course.id
+    finally:
+        session.close()
+    malformed = [{**_valid_question_payload(), "textbook_answer_md": ""}, "not an object"]
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(malformed), input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(text=json.dumps(malformed), input_tokens=1, output_tokens=1, model="stub-model"),
+    ]
+
+    assert run_due_jobs_once() is True
+
+    job_body = client.get(f"/api/jobs/{job.id}").json()
+    assert job_body["status"] == "failed"
+    assert job_body["error_detail"]["code"] == "invalid_model_output"
+    session = get_session()
+    try:
+        calls = (
+            session.query(LlmCall)
+            .filter(LlmCall.purpose == "practice_assessment", LlmCall.course_id == course_id)
+            .order_by(LlmCall.ts)
+            .all()
+        )
+    finally:
+        session.close()
+    assert [row.status for row in calls] == ["ok", "ok", "parse_failure"]
+
+
 def test_practice_extraction_records_parse_failure_after_two_invalid_responses(
     client, stub_provider
 ):
