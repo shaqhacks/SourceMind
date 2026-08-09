@@ -6,8 +6,10 @@ import { API_BASE, TERMINAL_JOB_STATUSES } from "@/lib/api/client";
 
 export interface JobProgress {
   stage: string;
-  pct: number;
+  pct: number | null;
   message: string;
+  elapsed_seconds?: number;
+  last_activity_seconds?: number;
 }
 
 export interface JobEvent {
@@ -53,10 +55,17 @@ export function asJobProgress(
   if (
     value &&
     typeof value.stage === "string" &&
-    typeof value.pct === "number" &&
+    (typeof value.pct === "number" || value.pct === null) &&
     typeof value.message === "string"
   ) {
-    return { stage: value.stage, pct: value.pct, message: value.message };
+    return {
+      stage: value.stage,
+      pct: value.pct,
+      message: value.message,
+      elapsed_seconds: typeof value.elapsed_seconds === "number" ? value.elapsed_seconds : undefined,
+      last_activity_seconds:
+        typeof value.last_activity_seconds === "number" ? value.last_activity_seconds : undefined,
+    };
   }
   return null;
 }

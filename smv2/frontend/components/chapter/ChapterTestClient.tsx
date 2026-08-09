@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import ChapterMasteryBar from "@/components/chapter/ChapterMasteryBar";
 import InlinePracticeAssessment from "@/components/chapter/InlinePracticeAssessment";
 import ErrorBanner from "@/components/ErrorBanner";
+import GenerationProgress from "@/components/jobs/GenerationProgress";
 import Markdown from "@/components/Markdown";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Badge from "@/components/ui/Badge";
@@ -16,6 +17,7 @@ import Card from "@/components/ui/Card";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   type ApiErrorDetail,
+  cancelJob,
   generateTest,
   getJob,
   getSection,
@@ -28,7 +30,6 @@ import {
 import { QUIZ_RETAKE_THRESHOLD } from "@/lib/dashboard/quizzes";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
-import { formatJobProgress } from "@/lib/jobs/format";
 
 const PagesView = dynamic(() => import("@/components/reader/PagesView"), { ssr: false });
 
@@ -298,9 +299,12 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
             />
           )}
           {isGenerating ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              {formatJobProgress(job, stalled)}
-            </p>
+            <GenerationProgress
+              job={stalled ? null : job}
+              quiet={stalled}
+              onCancel={jobId ? () => cancelJob(jobId).then(() => undefined) : undefined}
+              onContinue={() => router.push(`/course/${courseId}`)}
+            />
           ) : (
             !jobFailed && (
               <Button

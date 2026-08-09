@@ -108,7 +108,7 @@ export type OutlineOp =
  * below (a plain REST scan) agree on the same set instead of each keeping
  * its own copy of this literal.
  */
-export const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed"]);
+export const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
 /**
  * Normalized result shape for every API helper below. `status` is undefined
@@ -170,6 +170,12 @@ export function getJob(jobId: string) {
 export async function retryJob(jobId: string): Promise<ApiResult<JobOut>> {
   return request(
     client.POST("/api/jobs/{job_id}/retry", { params: { path: { job_id: jobId } } }),
+  );
+}
+
+export async function cancelJob(jobId: string): Promise<ApiResult<JobOut>> {
+  return request(
+    client.POST("/api/jobs/{job_id}/cancel", { params: { path: { job_id: jobId } } }),
   );
 }
 

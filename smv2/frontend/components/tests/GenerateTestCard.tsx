@@ -3,10 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import GenerationProgress from "@/components/jobs/GenerationProgress";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
+  cancelJob,
   generateTest,
   listJobs,
   listTests,
@@ -15,7 +17,6 @@ import {
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
-import { formatJobProgress } from "@/lib/jobs/format";
 
 import { findActiveChapterTestJob } from "./testsFormat";
 
@@ -123,9 +124,13 @@ export default function GenerateTestCard({
         />
       )}
       {isGenerating ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          {formatJobProgress(job, stalled)}
-        </p>
+        <GenerationProgress
+          job={stalled ? null : job}
+          quiet={stalled}
+          compact
+          onCancel={watchedJobId ? () => cancelJob(watchedJobId).then(() => undefined) : undefined}
+          onContinue={() => router.push(`/course/${courseId}`)}
+        />
       ) : (
         !jobFailed && (
           <Button

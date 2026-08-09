@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
+import GenerationProgress from "@/components/jobs/GenerationProgress";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
+  cancelJob,
   findActiveCardsJob,
   generateCards,
   type CardOut,
@@ -16,7 +18,6 @@ import {
 import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
-import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface ChapterDeckCardProps {
@@ -101,7 +102,12 @@ export default function ChapterDeckCard({
   // that do run synchronously aren't state, so they don't trigger React's
   // cascading-render warning either.
   useEffect(() => {
-    if (!done || job?.status === "failed" || !hasStartedRef.current) return;
+    if (!done || !hasStartedRef.current) return;
+    if (job?.status !== "succeeded") {
+      hasStartedRef.current = false;
+      remainingSectionsRef.current = [];
+      return;
+    }
     const next = remainingSectionsRef.current.shift();
     if (!next) {
       hasStartedRef.current = false;
@@ -197,9 +203,12 @@ export default function ChapterDeckCard({
           This chapter has no content section to generate cards from.
         </p>
       ) : isGenerating ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          {formatJobProgress(job, stalled)}
-        </p>
+        <GenerationProgress
+          job={stalled ? null : job}
+          quiet={stalled}
+          compact
+          onCancel={watchedJobId ? () => cancelJob(watchedJobId).then(() => undefined) : undefined}
+        />
       ) : justFinished ? (
         <p role="status" className="text-sm text-muted-foreground">
           Finishing up…

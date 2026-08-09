@@ -202,6 +202,7 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     error_detail: null,
     retryable: true,
     attempts: 0,
+    cancel_requested_at: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -401,7 +402,7 @@ describe("ChapterTestClient", () => {
     expect(mockedGenerateTest).toHaveBeenCalledWith("course-1", { chapterLabel: "Chapter 1" });
 
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-    expect(screen.getByText(/preparing/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Preparing")).toHaveLength(2);
 
     act(() => {
       FakeEventSource.instances[0].emit("update", {

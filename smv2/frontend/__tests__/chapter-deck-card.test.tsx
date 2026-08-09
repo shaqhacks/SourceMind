@@ -15,7 +15,8 @@ import { FakeEventSource } from "./support/fake-event-source";
 
 vi.mock("@/lib/api/client", () => ({
   API_BASE: "http://localhost:8000",
-  TERMINAL_JOB_STATUSES: new Set(["succeeded", "failed"]),
+  TERMINAL_JOB_STATUSES: new Set(["succeeded", "failed", "cancelled"]),
+  cancelJob: vi.fn(),
   findActiveCardsJob: vi.fn(),
   generateCards: vi.fn(),
   getJob: vi.fn(),
@@ -140,6 +141,38 @@ describe("ChapterDeckCard", () => {
     expect(mockedGetJob).not.toHaveBeenCalled();
   });
 
+  it("does not advance the section queue when the current generation is cancelled", async () => {
+    mockedGenerateCards.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-1" } });
+
+    const user = userEvent.setup();
+    render(
+      <ChapterDeckCard
+        courseId="course-1"
+        chapterNumber={3}
+        title="Multi-section Chapter"
+        sectionIds={["sec-1", "sec-2"]}
+        cards={[]}
+        dueCount={0}
+        isBrowsed={false}
+        onBrowse={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /generate cards/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      FakeEventSource.instances[0].emit("update", {
+        id: "job-1",
+        status: "cancelled",
+        progress: null,
+      });
+    });
+
+    expect(mockedGenerateCards).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("routes watched-job structured provider readiness failures to Settings and preserves job details", async () => {
     mockedGenerateCards.mockResolvedValue({ status: 202, ok: true, data: { job_id: "job-1" } });
     mockedGetJob.mockResolvedValue({
@@ -156,6 +189,7 @@ describe("ChapterDeckCard", () => {
         error_detail: providerReadinessError.error.detail,
         retryable: false,
         attempts: 1,
+        cancel_requested_at: null,
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-01T00:00:00Z",
       },

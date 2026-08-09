@@ -34,6 +34,7 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     error: "LLM unavailable",
     error_detail: null,
     attempts: 1,
+    cancel_requested_at: null,
     retryable: true,
     created_at: "2026-08-05T12:00:00Z",
     updated_at: "2026-08-05T12:03:00Z",

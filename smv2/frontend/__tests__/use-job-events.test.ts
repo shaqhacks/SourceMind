@@ -60,6 +60,19 @@ describe("useJobEvents", () => {
     expect(source.closed).toBe(true);
   });
 
+  it("treats cancelled as terminal and closes the stream", () => {
+    const { result } = renderHook(() => useJobEvents("job-1"));
+    const source = FakeEventSource.instances[0];
+
+    act(() => {
+      source.emit("update", { id: "job-1", status: "cancelled", progress: null });
+    });
+
+    expect(result.current.job?.status).toBe("cancelled");
+    expect(result.current.done).toBe(true);
+    expect(source.closed).toBe(true);
+  });
+
   it("surfaces a connection error, closes the stream, and never reconnects", () => {
     const { result } = renderHook(() => useJobEvents("job-1"));
     const source = FakeEventSource.instances[0];

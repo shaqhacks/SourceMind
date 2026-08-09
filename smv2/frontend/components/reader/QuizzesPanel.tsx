@@ -4,15 +4,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import GenerationProgress from "@/components/jobs/GenerationProgress";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
-import { generateTest, listTests, type TestSummaryOut } from "@/lib/api/client";
+import { cancelJob, generateTest, listTests, type TestSummaryOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
-import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface QuizzesPanelProps {
@@ -110,8 +110,22 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
             aria-live="polite"
             className="mb-3 w-full"
           >
-            {isGenerating ? formatJobProgress(job, stalled, { includeMessage: false }) : "Generate quiz"}
+            {isGenerating ? "Generating quiz" : "Generate quiz"}
           </Button>
+          {isGenerating && (
+            <div className="mb-3">
+              <GenerationProgress
+                job={stalled ? null : job}
+                quiet={stalled}
+                compact
+                onCancel={jobId ? () => cancelJob(jobId).then(() => undefined) : undefined}
+                onContinue={() => {
+                  setOpen(false);
+                  router.push(`/course/${courseId}`);
+                }}
+              />
+            </div>
+          )}
           {jobFailed && (
             <div className="mb-3">
               <RecoveryBanner

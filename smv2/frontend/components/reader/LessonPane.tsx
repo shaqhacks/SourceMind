@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import GenerationProgress from "@/components/jobs/GenerationProgress";
 import Markdown from "@/components/Markdown";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   type ApiErrorDetail,
+  cancelJob,
   findActiveLessonJob,
   generateLesson,
   getJob,
@@ -18,7 +20,6 @@ import {
   type SectionDetailOut,
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
-import { formatJobProgress } from "@/lib/jobs/format";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export type LessonDisplayStatus = "none" | "queued" | "generating" | "ready" | "failed" | "stale";
@@ -213,9 +214,11 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
 
   if (effectiveStatus === "generating") {
     return (
-      <div role="status" className="text-sm text-muted-foreground">
-        <p>{formatJobProgress(job, stalled)}</p>
-      </div>
+      <GenerationProgress
+        job={stalled ? null : job}
+        quiet={stalled}
+        onCancel={watchedJobId ? () => cancelJob(watchedJobId).then(() => undefined) : undefined}
+      />
     );
   }
 

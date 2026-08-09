@@ -6,6 +6,7 @@ import CardsCTA from "@/components/reader/CardsCTA";
 import {
   findActiveCardsJob,
   generateCards,
+  cancelJob,
   getJob,
   listCards,
   type ApiResult,
@@ -23,11 +24,13 @@ vi.mock("@/lib/api/client", () => ({
   listCards: vi.fn(),
   generateCards: vi.fn(),
   findActiveCardsJob: vi.fn(),
+  cancelJob: vi.fn(),
   getJob: vi.fn(),
 }));
 
 const mockedListCards = vi.mocked(listCards);
 const mockedGenerateCards = vi.mocked(generateCards);
+const mockedCancelJob = vi.mocked(cancelJob);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 const mockedGetJob = vi.mocked(getJob);
 
@@ -56,6 +59,7 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     error_detail: null,
     retryable: true,
     attempts: 0,
+    cancel_requested_at: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -242,5 +246,21 @@ describe("CardsCTA", () => {
     expect(await screen.findByRole("link", { name: /view job details/i })).toHaveAttribute("href", "/jobs?job=job-404");
     await user.click(screen.getByRole("button", { name: /retry/i }));
     expect(mockedGenerateCards).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels an in-flight generation job once from the shared progress control", async () => {
+    mockedListCards.mockResolvedValue(ok([]));
+    mockedGenerateCards.mockResolvedValue(ok({ job_id: "job-1" }, 202));
+    mockedCancelJob.mockResolvedValue(ok(makeJob({ id: "job-1", status: "cancelled" })));
+
+    const user = userEvent.setup();
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate flashcards/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: /cancel generation/i }));
+
+    expect(mockedCancelJob).toHaveBeenCalledWith("job-1");
+    expect(mockedCancelJob).toHaveBeenCalledTimes(1);
   });
 });

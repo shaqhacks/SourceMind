@@ -36,6 +36,7 @@ function makeJob(id: string, sectionId: string): JobOut {
     error_detail: null,
     retryable: true,
     attempts: 0,
+    cancel_requested_at: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };
@@ -78,7 +79,8 @@ describe("GenerateAllLessons", () => {
 
     expect(mockedGenerateAllLessons).toHaveBeenCalledWith("course-1");
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
-    expect(screen.getByRole("button", { name: /generating 0 of 2/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /generating lessons/i })).toBeInTheDocument();
+    expect(screen.getByText(/0 of 2 lesson jobs settled/i)).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[0].emit("update", {
@@ -89,7 +91,7 @@ describe("GenerateAllLessons", () => {
     });
 
     expect(onSectionSettled).toHaveBeenCalledWith("sec-1", "ready");
-    expect(screen.getByRole("button", { name: /generating 1 of 2/i })).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 lesson jobs settled/i)).toBeInTheDocument();
 
     act(() => {
       FakeEventSource.instances[1].emit("update", { id: "job-2", status: "failed", progress: null });

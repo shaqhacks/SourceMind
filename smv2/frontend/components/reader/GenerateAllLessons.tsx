@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 
+import GenerationProgress from "@/components/jobs/GenerationProgress";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { generateAllLessons, getJob } from "@/lib/api/client";
@@ -87,8 +88,16 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
         aria-live="polite"
         className="font-medium"
       >
-        {inProgress ? `Generating ${settledCount} of ${total}…` : "Generate all lessons"}
+        {inProgress ? "Generating lessons" : "Generate all lessons"}
       </Button>
+      {inProgress && (
+        <div className="min-w-72">
+          <GenerationProgress job={null} quiet={settledCount > 0} compact />
+          <p className="mt-1 text-xs text-muted-foreground">
+            {settledCount} of {total} lesson jobs settled.
+          </p>
+        </div>
+      )}
       {error && (
         <div className="min-w-72">
           <RecoveryBanner
