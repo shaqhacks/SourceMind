@@ -264,6 +264,7 @@ describe("FlashcardsClient", () => {
     originalEventSource = globalThis.EventSource;
     FakeEventSource.instances = [];
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    mockedFindActiveCardsJob.mockResolvedValue(null);
   });
 
   afterEach(() => {
