@@ -4,6 +4,8 @@ import {
   loadingPracticeSectionState,
   practiceSectionStateFromAssessment,
   practiceSectionStateFromLoadError,
+  summarizePracticeSections,
+  type PracticeSectionState,
 } from "@/components/chapter/practiceAssessmentState";
 import type {
   ApiErrorDetail,
@@ -43,6 +45,39 @@ function makeAssessment(
     run_id: "run-1",
     error_detail: null,
     ...overrides,
+  };
+}
+
+function readyState(sectionId: string, questionCount: number): PracticeSectionState {
+  return {
+    kind: "ready",
+    sectionId,
+    questionCount,
+    message: null,
+    errorDetail: null,
+    retryKind: null,
+  };
+}
+
+function generatingState(sectionId: string): PracticeSectionState {
+  return {
+    kind: "generating",
+    sectionId,
+    questionCount: 0,
+    message: "Preparing questions.",
+    errorDetail: null,
+    retryKind: null,
+  };
+}
+
+function failedState(sectionId: string, retryKind: "reload" | "restart"): PracticeSectionState {
+  return {
+    kind: "failed",
+    sectionId,
+    questionCount: 0,
+    message: "Practice question extraction failed.",
+    errorDetail: null,
+    retryKind,
   };
 }
 
@@ -128,6 +163,56 @@ describe("practice assessment state contract", () => {
       message: "Could not load practice questions.",
       errorDetail: extractionDetail,
       retryKind: "reload",
+    });
+  });
+
+  it("summarizes mixed practice states without treating missing callbacks as ready", () => {
+    const summary = summarizePracticeSections(
+      {
+        "sec-ready": readyState("sec-ready", 4),
+        "sec-running": generatingState("sec-running"),
+        "sec-failed": failedState("sec-failed", "restart"),
+      },
+      4,
+    );
+
+    expect(summary).toEqual({
+      ready: 1,
+      generating: 1,
+      loading: 1,
+      failed: 1,
+      questions: 4,
+      total: 4,
+    });
+  });
+
+  it("summarizes zero practice sections as empty", () => {
+    expect(summarizePracticeSections({}, 0)).toEqual({
+      ready: 0,
+      generating: 0,
+      loading: 0,
+      failed: 0,
+      questions: 0,
+      total: 0,
+    });
+  });
+
+  it("summarizes all ready practice sections with the total question count", () => {
+    expect(
+      summarizePracticeSections(
+        {
+          "sec-a": readyState("sec-a", 2),
+          "sec-b": readyState("sec-b", 3),
+        },
+        2,
+      ),
+    ).toEqual({
+      ready: 2,
+      generating: 0,
+      loading: 0,
+      failed: 0,
+      questions: 5,
+      total: 2,
     });
   });
 });

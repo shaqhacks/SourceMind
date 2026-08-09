@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChapterTestClient from "@/components/chapter/ChapterTestClient";
+import type { PracticeSectionState } from "@/components/chapter/practiceAssessmentState";
 import {
   generateTest,
   getJob,
@@ -78,16 +79,40 @@ vi.mock("@/components/reader/PagesView", () => ({
   ),
 }));
 
+const inlinePracticeMock = vi.hoisted(() => ({
+  callbacks: new Map<string, (state: PracticeSectionState) => void>(),
+  retryVersions: new Map<string, number>(),
+}));
+
 vi.mock("@/components/chapter/InlinePracticeAssessment", () => ({
-  default: ({ courseId, sectionId }: { courseId: string; sectionId: string }) => (
-    <div
-      data-testid="inline-practice-assessment"
-      data-course-id={courseId}
-      data-section-id={sectionId}
-    >
-      Inline practice assessment
-    </div>
-  ),
+  default: ({
+    courseId,
+    sectionId,
+    retryVersion = 0,
+    onStateChange,
+  }: {
+    courseId: string;
+    sectionId: string;
+    retryVersion?: number;
+    onStateChange?: (state: PracticeSectionState) => void;
+  }) => {
+    if (onStateChange) {
+      inlinePracticeMock.callbacks.set(sectionId, onStateChange);
+    } else {
+      inlinePracticeMock.callbacks.delete(sectionId);
+    }
+    inlinePracticeMock.retryVersions.set(sectionId, retryVersion);
+    return (
+      <div
+        data-testid="inline-practice-assessment"
+        data-course-id={courseId}
+        data-section-id={sectionId}
+        data-retry-version={retryVersion}
+      >
+        Ready practice questions for {sectionId}
+      </div>
+    );
+  },
 }));
 
 vi.mock("@/lib/api/client", () => ({
@@ -209,12 +234,57 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
   };
 }
 
+function readyPracticeState(sectionId: string, questionCount: number): PracticeSectionState {
+  return {
+    kind: "ready",
+    sectionId,
+    questionCount,
+    message: null,
+    errorDetail: null,
+    retryKind: null,
+  };
+}
+
+function generatingPracticeState(sectionId: string): PracticeSectionState {
+  return {
+    kind: "generating",
+    sectionId,
+    questionCount: 0,
+    message: "Preparing questions.",
+    errorDetail: null,
+    retryKind: null,
+  };
+}
+
+function failedPracticeState(sectionId: string): PracticeSectionState {
+  return {
+    kind: "failed",
+    sectionId,
+    questionCount: 0,
+    message: "Practice question extraction failed.",
+    errorDetail: null,
+    retryKind: "restart",
+  };
+}
+
+function emitPracticeState(sectionId: string, state: PracticeSectionState) {
+  act(() => {
+    inlinePracticeMock.callbacks.get(sectionId)?.(state);
+  });
+}
+
+function retryVersionFor(sectionId: string) {
+  return inlinePracticeMock.retryVersions.get(sectionId) ?? 0;
+}
+
 describe("ChapterTestClient", () => {
   let originalEventSource: typeof EventSource;
 
   beforeEach(() => {
     originalEventSource = globalThis.EventSource;
     FakeEventSource.instances = [];
+    inlinePracticeMock.callbacks.clear();
+    inlinePracticeMock.retryVersions.clear();
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
   });
 
@@ -241,6 +311,105 @@ describe("ChapterTestClient", () => {
     expect(details).not.toHaveAttribute("open");
     expect(screen.getByText("Practice question: what is 2+2?")).toBeInTheDocument();
     expect(mockedGetSection).toHaveBeenCalledWith("c1-practice");
+  });
+
+  it("aggregates mixed practice readiness and retries only failed sections", async () => {
+    mockedListChapters.mockResolvedValue(
+      ok([
+        makeChapter({
+          practice_section_ids: ["sec-ready", "sec-running", "sec-failed"],
+        }),
+      ]),
+    );
+    mockedGetSection.mockImplementation((id: string) =>
+      Promise.resolve(ok(makeSectionDetail({ id, body_md: `Source for ${id}` }))),
+    );
+    mockedListTests.mockResolvedValue(ok([]));
+
+    const user = userEvent.setup();
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+
+    await screen.findByText("Ready practice questions for sec-ready");
+    emitPracticeState("sec-ready", readyPracticeState("sec-ready", 4));
+    emitPracticeState("sec-running", generatingPracticeState("sec-running"));
+    emitPracticeState("sec-failed", failedPracticeState("sec-failed"));
+
+    expect(screen.getByRole("status", { name: "Practice readiness" })).toHaveTextContent(
+      "1 of 3 ready · 1 preparing · 1 needs retry",
+    );
+    expect(screen.getByText("Ready practice questions for sec-ready")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /take chapter test/i })).toBeEnabled();
+
+    const sourceToggle = screen.getAllByText("View textbook source")[0];
+    const details = sourceToggle.closest("details");
+    expect(details).not.toBeNull();
+    await user.click(sourceToggle);
+    expect(details).toHaveAttribute("open");
+
+    await user.click(screen.getByRole("button", { name: "Retry failed (1)" }));
+    expect(retryVersionFor("sec-failed")).toBe(1);
+    expect(retryVersionFor("sec-ready")).toBe(0);
+    expect(retryVersionFor("sec-running")).toBe(0);
+    expect(screen.getByRole("button", { name: "Retry failed (1)" })).toBeDisabled();
+
+    emitPracticeState("sec-failed", generatingPracticeState("sec-failed"));
+    expect(screen.queryByRole("button", { name: /retry failed/i })).not.toBeInTheDocument();
+  });
+
+  it("continues with ready practice by moving focus to the first ready section", async () => {
+    mockedListChapters.mockResolvedValue(
+      ok([
+        makeChapter({
+          practice_section_ids: ["sec-loading", "sec-ready"],
+        }),
+      ]),
+    );
+    mockedGetSection.mockImplementation((id: string) =>
+      Promise.resolve(ok(makeSectionDetail({ id, body_md: `Source for ${id}` }))),
+    );
+    mockedListTests.mockResolvedValue(ok([]));
+    const scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    const user = userEvent.setup();
+    render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+
+    await screen.findByText("Ready practice questions for sec-ready");
+    emitPracticeState("sec-ready", readyPracticeState("sec-ready", 4));
+
+    await user.click(screen.getByRole("button", { name: "Continue with ready (1)" }));
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+    expect(screen.getByRole("heading", { name: "Practice section 2" })).toHaveFocus();
+  });
+
+  it("ignores stale practice callbacks from a previous chapter", async () => {
+    mockedListChapters.mockResolvedValue(
+      ok([
+        makeChapter({ chapter_label: "Chapter 1", practice_section_ids: ["sec-old"] }),
+        makeChapter({ chapter_label: "Chapter 2", practice_section_ids: ["sec-new"] }),
+      ]),
+    );
+    mockedGetSection.mockImplementation((id: string) =>
+      Promise.resolve(ok(makeSectionDetail({ id, body_md: `Source for ${id}` }))),
+    );
+    mockedListTests.mockResolvedValue(ok([]));
+
+    const { rerender } = render(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 1" />);
+    await screen.findByText("Ready practice questions for sec-old");
+    const oldCallback = inlinePracticeMock.callbacks.get("sec-old");
+    expect(oldCallback).toBeDefined();
+
+    rerender(<ChapterTestClient courseId="course-1" chapterLabel="Chapter 2" />);
+    await screen.findByText("Ready practice questions for sec-new");
+    act(() => {
+      oldCallback?.(failedPracticeState("sec-old"));
+    });
+
+    expect(screen.getByRole("status", { name: "Practice readiness" })).toHaveTextContent(
+      "0 of 1 ready",
+    );
+    expect(screen.queryByRole("button", { name: /retry failed/i })).not.toBeInTheDocument();
   });
 
   it("renders original pages inside the source disclosure when page metadata is available", async () => {

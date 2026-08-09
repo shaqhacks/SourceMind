@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -14,6 +14,10 @@ import RecoveryBanner from "@/components/RecoveryBanner";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
+import {
+  summarizePracticeSections,
+  type PracticeSectionState,
+} from "@/components/chapter/practiceAssessmentState";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   type ApiErrorDetail,
@@ -45,6 +49,8 @@ interface PracticeSection {
   pageStart: number | null;
   pageEnd: number | null;
 }
+
+const EMPTY_PRACTICE_SECTIONS: PracticeSection[] = [];
 
 type LoadState =
   | { kind: "loading" }
@@ -114,6 +120,12 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
   const [failureInfo, setFailureInfo] = useState<
     { jobId: string; message: string | null; detail: ApiErrorDetail | null } | null
   >(null);
+  const [practiceSectionStates, setPracticeSectionStates] = useState<{
+    key: string;
+    states: Record<string, PracticeSectionState>;
+  }>({ key: "", states: {} });
+  const [practiceRetryVersions, setPracticeRetryVersions] = useState<Record<string, number>>({});
+  const [retryingPracticeSectionIds, setRetryingPracticeSectionIds] = useState<string[]>([]);
   // Attempt ids known before the current generation started, so the
   // settle handler can tell which attempt in the refetched list is the
   // new one to navigate into — generate_test's own response is just a
@@ -121,6 +133,8 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
   // the whole list rather than being told the new id directly).
   const knownAttemptIdsRef = useRef<Set<string>>(new Set());
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const practiceSectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const practiceHeadingRefs = useRef<Record<string, HTMLHeadingElement | null>>({});
   useRouteFocus(headingRef);
 
   const { job, done, stalled } = useJobEvents(jobId);
@@ -128,6 +142,86 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
   const jobFailed = done && job?.status === "failed";
   const failureMessage = failureInfo?.jobId === jobId ? failureInfo.message : null;
   const failureDetail = failureInfo?.jobId === jobId ? failureInfo.detail : null;
+  const readyChapter = state.kind === "ready" ? state.chapter : null;
+  const practiceSections =
+    state.kind === "ready" ? state.practiceSections : EMPTY_PRACTICE_SECTIONS;
+  const practiceChapterKey = `${courseId}:${readyChapter?.chapter_label ?? chapterLabel}`;
+  const practiceSectionIds = useMemo(
+    () => new Set(practiceSections.map((section) => section.id)),
+    [practiceSections],
+  );
+  const currentPracticeStates = useMemo(
+    () => (practiceSectionStates.key === practiceChapterKey ? practiceSectionStates.states : {}),
+    [practiceChapterKey, practiceSectionStates],
+  );
+  const practiceSummary = summarizePracticeSections(currentPracticeStates, practiceSections.length);
+  const failedPracticeSectionIds = useMemo(
+    () =>
+      practiceSections
+        .filter((section) => currentPracticeStates[section.id]?.kind === "failed")
+        .map((section) => section.id),
+    [currentPracticeStates, practiceSections],
+  );
+  const shouldShowContinueWithReady =
+    practiceSummary.ready > 0 &&
+    practiceSummary.ready < practiceSummary.total &&
+    (practiceSummary.loading > 0 || practiceSummary.generating > 0 || practiceSummary.failed > 0);
+  const retryingFailedPractice =
+    retryingPracticeSectionIds.length > 0 &&
+    retryingPracticeSectionIds.some(
+      (sectionId) => currentPracticeStates[sectionId]?.kind === "failed",
+    );
+
+  const handlePracticeSectionStateChange = useCallback(
+    (nextState: PracticeSectionState) => {
+      if (!practiceSectionIds.has(nextState.sectionId)) {
+        return;
+      }
+      setPracticeSectionStates((current) => {
+        const states = current.key === practiceChapterKey ? current.states : {};
+        return {
+          key: practiceChapterKey,
+          states: { ...states, [nextState.sectionId]: nextState },
+        };
+      });
+      setRetryingPracticeSectionIds((retryingIds) => {
+        if (!retryingIds.includes(nextState.sectionId)) {
+          return retryingIds;
+        }
+        const nextStates = { ...currentPracticeStates, [nextState.sectionId]: nextState };
+        return retryingIds.some((sectionId) => nextStates[sectionId]?.kind === "failed")
+          ? retryingIds
+          : [];
+      });
+    },
+    [currentPracticeStates, practiceChapterKey, practiceSectionIds],
+  );
+
+  const handleRetryFailedPractice = useCallback(() => {
+    const capturedFailedIds = failedPracticeSectionIds;
+    if (capturedFailedIds.length === 0) {
+      return;
+    }
+    setRetryingPracticeSectionIds(capturedFailedIds);
+    setPracticeRetryVersions((current) => {
+      const next = { ...current };
+      for (const sectionId of capturedFailedIds) {
+        next[sectionId] = (next[sectionId] ?? 0) + 1;
+      }
+      return next;
+    });
+  }, [failedPracticeSectionIds]);
+
+  const handleContinueWithReadyPractice = useCallback(() => {
+    const firstReadySection = practiceSections.find(
+      (section) => currentPracticeStates[section.id]?.kind === "ready",
+    );
+    if (!firstReadySection) {
+      return;
+    }
+    practiceSectionRefs.current[firstReadySection.id]?.scrollIntoView({ block: "start" });
+    practiceHeadingRefs.current[firstReadySection.id]?.focus();
+  }, [currentPracticeStates, practiceSections]);
 
   const retryLoad = useCallback(() => {
     setState({ kind: "loading" });
@@ -247,7 +341,11 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     );
   }
 
-  const { chapter, practiceSections } = state;
+  if (!readyChapter) {
+    return null;
+  }
+
+  const chapter = readyChapter;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -272,9 +370,59 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
             </p>
           ) : (
             <div className="flex flex-col gap-6">
-              {practiceSections.map((section) => (
-                <div key={section.id} className="flex flex-col gap-3">
-                  <InlinePracticeAssessment courseId={courseId} sectionId={section.id} />
+              <div className="flex flex-wrap items-center gap-2">
+                <p
+                  role="status"
+                  aria-label="Practice readiness"
+                  className="text-sm text-muted-foreground"
+                >
+                  {practiceSummary.ready} of {practiceSummary.total} ready
+                  {practiceSummary.generating > 0
+                    ? ` · ${practiceSummary.generating} preparing`
+                    : ""}
+                  {practiceSummary.failed > 0
+                    ? ` · ${practiceSummary.failed} needs retry`
+                    : ""}
+                </p>
+                {failedPracticeSectionIds.length > 0 && (
+                  <Button
+                    size="sm"
+                    onClick={handleRetryFailedPractice}
+                    disabled={retryingFailedPractice}
+                  >
+                    Retry failed ({failedPracticeSectionIds.length})
+                  </Button>
+                )}
+                {shouldShowContinueWithReady && (
+                  <Button size="sm" onClick={handleContinueWithReadyPractice}>
+                    Continue with ready ({practiceSummary.ready})
+                  </Button>
+                )}
+              </div>
+              {practiceSections.map((section, index) => (
+                <div
+                  key={section.id}
+                  id={`practice-section-${section.id}`}
+                  ref={(node) => {
+                    practiceSectionRefs.current[section.id] = node;
+                  }}
+                  className="flex flex-col gap-3"
+                >
+                  <h3
+                    ref={(node) => {
+                      practiceHeadingRefs.current[section.id] = node;
+                    }}
+                    tabIndex={-1}
+                    className="sr-only outline-none"
+                  >
+                    Practice section {index + 1}
+                  </h3>
+                  <InlinePracticeAssessment
+                    courseId={courseId}
+                    sectionId={section.id}
+                    retryVersion={practiceRetryVersions[section.id] ?? 0}
+                    onStateChange={handlePracticeSectionStateChange}
+                  />
                   <details className="rounded-md border border-border p-3">
                     <summary className="cursor-pointer text-sm font-medium">
                       View textbook source

@@ -35,6 +35,15 @@ export type PracticeSectionState =
       retryKind: "reload" | "restart";
     };
 
+export interface PracticeSectionsSummary {
+  ready: number;
+  generating: number;
+  loading: number;
+  failed: number;
+  questions: number;
+  total: number;
+}
+
 type PracticeAssessmentWithErrorDetail = PracticeAssessmentOut & {
   error_detail?: ApiErrorDetail | null;
 };
@@ -106,4 +115,40 @@ export function practiceSectionStateFromAssessment(
 
 export function practiceSectionStateSignature(state: PracticeSectionState) {
   return JSON.stringify(state);
+}
+
+export function summarizePracticeSections(
+  states: Record<string, PracticeSectionState>,
+  total: number,
+): PracticeSectionsSummary {
+  const summary: PracticeSectionsSummary = {
+    ready: 0,
+    generating: 0,
+    loading: 0,
+    failed: 0,
+    questions: 0,
+    total,
+  };
+
+  for (const state of Object.values(states)) {
+    if (state.kind === "ready") {
+      summary.ready += 1;
+      summary.questions += state.questionCount;
+      continue;
+    }
+    if (state.kind === "generating") {
+      summary.generating += 1;
+      continue;
+    }
+    if (state.kind === "failed") {
+      summary.failed += 1;
+      continue;
+    }
+    summary.loading += 1;
+  }
+
+  const missing = Math.max(0, total - Object.keys(states).length);
+  summary.loading += missing;
+
+  return summary;
 }
