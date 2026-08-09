@@ -130,6 +130,25 @@ function summaryAvailableCount(summary: ReviewSummaryOut): number {
   return summary.courses.reduce((total, course) => total + courseAvailableCount(course), 0);
 }
 
+function queueMetrics(
+  queue: { cards: ReviewQueueCardOut[]; overdue_count: number; new_count: number; available_count: number },
+  questionCount: number,
+  chapterLabel?: string,
+) {
+  if (!chapterLabel) {
+    return {
+      due: queue.overdue_count,
+      new: queue.new_count,
+      total: queue.available_count + questionCount,
+    };
+  }
+  return {
+    due: queue.cards.filter((card) => card.is_due).length,
+    new: queue.cards.filter((card) => card.is_new).length,
+    total: queue.cards.length,
+  };
+}
+
 function ReviewPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -265,11 +284,12 @@ function ReviewPageInner() {
     ]).then(([review, adaptive]) => {
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
+        const metrics = queueMetrics(review.data, questionCount, chapterLabel);
         setChooserState({
           kind: "ready",
-          due: review.data.overdue_count,
-          new: review.data.new_count,
-          total: review.data.available_count + questionCount,
+          due: metrics.due,
+          new: metrics.new,
+          total: metrics.total,
         });
       } else {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
@@ -287,11 +307,12 @@ function ReviewPageInner() {
       if (!active) return;
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
+        const metrics = queueMetrics(review.data, questionCount, chapterLabel);
         setChooserState({
           kind: "ready",
-          due: review.data.overdue_count,
-          new: review.data.new_count,
-          total: review.data.available_count + questionCount,
+          due: metrics.due,
+          new: metrics.new,
+          total: metrics.total,
         });
       } else {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
@@ -374,18 +395,18 @@ function ReviewPageInner() {
         return;
       }
       const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
-      const availableTotal = review.data.available_count + questionCount;
-      if (review.data.overdue_count === 0) {
+      const metrics = queueMetrics(review.data, questionCount, chapterLabel);
+      if (metrics.due === 0) {
         setChooserState({
           kind: "ready",
-          due: review.data.overdue_count,
-          new: review.data.new_count,
-          total: availableTotal,
+          due: metrics.due,
+          new: metrics.new,
+          total: metrics.total,
         });
         setPhase("chooser");
         return;
       }
-      startSession(review.data.overdue_count);
+      startSession(metrics.due);
     });
     return () => {
       active = false;

@@ -16,7 +16,7 @@ import {
   type AdaptiveStudyQueueOut,
 } from "@/lib/api/client";
 
-import { ok } from "./support/api-result";
+import { err, ok } from "./support/api-result";
 
 let mockSearchParams = new URLSearchParams();
 const mockPush = vi.fn();
@@ -254,6 +254,67 @@ describe("ReviewPage", () => {
     expect(screen.queryByRole("button", { name: /review all/i })).not.toBeInTheDocument();
   });
 
+  it("chooser: chapter-scoped review sizes itself from filtered chapter cards, not course-wide counts", async () => {
+    mockSearchParams = new URLSearchParams({ course: "course-1", chapter: "Chapter 1" });
+    mockedGetReviewQueue
+      .mockResolvedValueOnce(
+        ok(
+          makeQueue({
+            total: 30,
+            due: 25,
+            new: 5,
+            cards: [
+              makeQueueCard({ id: "chapter-card-1", chapter_label: "Chapter 1", is_due: true, is_new: false }),
+              makeQueueCard({
+                id: "chapter-card-2",
+                chapter_label: "Chapter 1",
+                is_due: false,
+                is_new: true,
+              }),
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        ok(
+          makeQueue({
+            total: 30,
+            due: 25,
+            new: 5,
+            cards: [
+              makeQueueCard({ id: "chapter-card-1", chapter_label: "Chapter 1", is_due: true, is_new: false }),
+              makeQueueCard({
+                id: "chapter-card-2",
+                chapter_label: "Chapter 1",
+                is_due: false,
+                is_new: true,
+              }),
+            ],
+          }),
+        ),
+      );
+    const user = userEvent.setup();
+
+    render(<ReviewPage />);
+
+    expect(await screen.findByText(/1 due · 1 new/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /review all \(2\)/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^review 10$/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /review all \(2\)/i }));
+
+    expect(await screen.findByText("1 of 2")).toBeInTheDocument();
+    expect(mockedGetReviewQueue).toHaveBeenNthCalledWith(2, "course-1", {
+      limit: 2,
+      scope: undefined,
+      chapterLabel: "Chapter 1",
+    });
+    expect(mockedGetReviewQueue).not.toHaveBeenCalledWith(
+      "course-1",
+      expect.objectContaining({ limit: 30 }),
+    );
+  });
+
   it("session: space reveals the back, grading keys 1-4 advance and capture elapsed_ms, and the summary tallies by grade", async () => {
     mockSearchParams = new URLSearchParams({ course: "course-1" });
     mockedGetReviewQueue
@@ -311,6 +372,54 @@ describe("ReviewPage", () => {
       expect(within(summary).getByText(/again: 0/i)).toBeInTheDocument();
       expect(within(summary).getByText(/hard: 0/i)).toBeInTheDocument();
     }
+  });
+
+  it("session: failed grade keeps the same card active without advancing tally or storage, then retry succeeds once", async () => {
+    const STORAGE_KEY = "smv2.review.session";
+    mockSearchParams = new URLSearchParams({ course: "course-1" });
+    mockedGetReviewQueue
+      .mockResolvedValueOnce(ok(makeQueue({ total: 2, due: 2 })))
+      .mockResolvedValueOnce(
+        ok(
+          makeQueue({
+            total: 2,
+            cards: [
+              makeQueueCard({ id: "card-1", front_md: "Q1", back_md: "A1" }),
+              makeQueueCard({ id: "card-2", front_md: "Q2", back_md: "A2" }),
+            ],
+          }),
+        ),
+      );
+    mockedGradeCard
+      .mockResolvedValueOnce(err(503))
+      .mockResolvedValueOnce(ok({ next_due_at: "2026-01-02T00:00:00Z", remaining_due: 1 }));
+    const user = userEvent.setup();
+
+    render(<ReviewPage />);
+
+    await user.click(await screen.findByRole("button", { name: /review all \(2\)/i }));
+    expect(await screen.findByText("1 of 2")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /reveal/i }));
+    await user.click(screen.getByRole("button", { name: /good/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not save this grade/i);
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Q1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /good/i })).toBeEnabled();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null")).toMatchObject({
+      remainingCardIds: ["card-1", "card-2"],
+      gradedTally: {},
+    });
+
+    await user.click(screen.getByRole("button", { name: /good/i }));
+
+    expect(mockedGradeCard).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("2 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Q2")).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null")).toMatchObject({
+      remainingCardIds: ["card-2"],
+      gradedTally: { 3: 1 },
+    });
   });
 
   it("session: includes concept questions, records the answer, and keeps answers out of the queue payload", async () => {
