@@ -77,9 +77,12 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
     setWatchList(entries);
   }, [courseId]);
 
-  const handleSettled = useCallback(
+  const handleSettled = useCallback(() => {
+    setSettledCount((count) => count + 1);
+  }, []);
+
+  const handleSectionSettled = useCallback(
     (sectionId: string, status: "ready" | "failed") => {
-      setSettledCount((count) => count + 1);
       onSectionSettled(sectionId, status);
       notifyReviewSettled();
     },
@@ -128,6 +131,7 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
           jobId={entry.jobId}
           sectionId={entry.sectionId}
           onSettled={handleSettled}
+          onSectionSettled={handleSectionSettled}
           onUpdate={handleJobUpdate}
         />
       ))}

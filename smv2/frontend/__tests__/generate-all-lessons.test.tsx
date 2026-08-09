@@ -101,7 +101,7 @@ describe("GenerateAllLessons", () => {
     expect(screen.getByRole("button", { name: /^generate all lessons$/i })).toBeInTheDocument();
   });
 
-  it("does not patch a cancelled batch lesson job to failed", async () => {
+  it("counts a cancelled batch lesson job terminal without patching it to failed", async () => {
     mockedGenerateAllLessons.mockResolvedValue({
       status: 202,
       ok: true,
@@ -130,6 +130,7 @@ describe("GenerateAllLessons", () => {
 
     expect(onSectionSettled).not.toHaveBeenCalled();
     expect(screen.queryByText(/failed/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^generate all lessons$/i })).toBeEnabled();
   });
 
   it("shows real active job phase, elapsed time, and recent activity while preserving batch counts", async () => {

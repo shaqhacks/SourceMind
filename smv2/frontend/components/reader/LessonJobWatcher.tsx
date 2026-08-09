@@ -7,7 +7,8 @@ import { useJobEvents, type JobEvent } from "@/lib/hooks/useJobEvents";
 export interface LessonJobWatcherProps {
   jobId: string;
   sectionId: string;
-  onSettled: (sectionId: string, status: "ready" | "failed") => void;
+  onSettled: () => void;
+  onSectionSettled: (sectionId: string, status: "ready" | "failed") => void;
   onUpdate?: (job: JobEvent) => void;
 }
 
@@ -21,6 +22,7 @@ export default function LessonJobWatcher({
   jobId,
   sectionId,
   onSettled,
+  onSectionSettled,
   onUpdate,
 }: LessonJobWatcherProps) {
   const { job, done } = useJobEvents(jobId);
@@ -34,9 +36,10 @@ export default function LessonJobWatcher({
   useEffect(() => {
     if (!done || !job || settledRef.current) return;
     settledRef.current = true;
+    onSettled();
     if (job.status === "cancelled") return;
-    onSettled(sectionId, job.status === "succeeded" ? "ready" : "failed");
-  }, [done, job, sectionId, onSettled]);
+    onSectionSettled(sectionId, job.status === "succeeded" ? "ready" : "failed");
+  }, [done, job, sectionId, onSettled, onSectionSettled]);
 
   return null;
 }
