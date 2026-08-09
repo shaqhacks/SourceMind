@@ -18,6 +18,16 @@ interface GradeRequest {
   grade: number;
 }
 
+interface FlashcardReviewHarness {
+  browserErrors: BrowserError[];
+  expectedBrowserErrors: BrowserError[];
+  providerCalls: string[];
+  reviewRequests: ReviewRequest[];
+  selectionRequests: string[][];
+  graded: GradeRequest[];
+  unmockedApiRequests: string[];
+}
+
 const courseId = "course-flashcard-review";
 const chapterOneSectionId = "section-chapter-one";
 const chapterTwoSectionId = "section-chapter-two";
@@ -118,6 +128,37 @@ const cardOutBySection = new Map(
 );
 
 test.describe("unified flashcard review scopes", () => {
+  test("provider guard records and blocks injected provider fetch before generic routing", async ({ page }) => {
+    const harness = await installFlashcardReviewHarness(page);
+
+    await page.goto(`/review?course=${courseId}&scope=all`);
+    await expect(page.getByRole("heading", { name: "Ready to review" })).toBeVisible();
+
+    const result = await page.evaluate(async () => {
+      try {
+        await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          mode: "no-cors",
+          body: "{}",
+        });
+        return "resolved";
+      } catch {
+        return "blocked";
+      }
+    });
+
+    expect(result).toBe("blocked");
+    expect(harness.providerCalls).toEqual(["POST https://api.openai.com/v1/chat/completions"]);
+    expect(harness.browserErrors, "provider probe should only emit the blocked-resource browser error").toHaveLength(1);
+    expect(harness.browserErrors[0]).toMatchObject({
+      kind: "console",
+      location: { url: "https://api.openai.com/v1/chat/completions" },
+      text: expect.stringContaining("ERR_BLOCKED_BY_CLIENT"),
+      type: "error",
+    });
+    expect(harness.unmockedApiRequests, "provider probe should not hit app API fallback").toEqual([]);
+  });
+
   test("student reviews every card in a course including not-due cards", async ({ page }) => {
     const harness = await installFlashcardReviewHarness(page);
 
@@ -133,20 +174,27 @@ test.describe("unified flashcard review scopes", () => {
     await expect(page.getByText("Define a due card.")).toBeVisible();
     await page.keyboard.press(" ");
     await expect(page.getByText("A due card is ready now.")).toBeVisible();
+    await expectNoCriticalViolations(page, "course-all-first-answer");
     await page.keyboard.press("3");
 
     await expect(page.getByText("Define a new card.")).toBeVisible();
     await page.keyboard.press(" ");
+    await expect(page.getByText("A new card has no review state.")).toBeVisible();
     await page.keyboard.press("3");
 
     await expect(page.getByText("Which card proves not-due inclusion?")).toBeVisible();
     await page.keyboard.press(" ");
     await expect(page.getByText("The future-due card must still appear in all scope.")).toBeVisible();
+    await expectNoCriticalViolations(page, "course-all-not-due-answer");
     await page.keyboard.press("3");
 
     await expect(page.getByRole("heading", { name: "Session complete" })).toBeVisible();
 
-    expect(harness.reviewRequests).toContainEqual({ scope: "all", chapter: null, limit: "3" });
+    expect(harness.reviewRequests).toEqual([
+      { scope: "all", chapter: null, limit: "200" },
+      { scope: "all", chapter: null, limit: "200" },
+      { scope: "all", chapter: null, limit: "3" },
+    ]);
     expect(harness.graded.map((request) => request.cardId)).toEqual([
       "card-due",
       "card-new",
@@ -175,18 +223,35 @@ test.describe("unified flashcard review scopes", () => {
     await expect(page).toHaveURL(/scope=all/);
     await expect(page).toHaveURL(/chapter=Chapter%202%3A%20Scope%20%26%20Replay/);
     await expect(page.getByRole("heading", { name: "Ready to review" })).toBeVisible();
-    await page.getByRole("button", { name: "Review All (2)" }).click();
+    const reviewAll = page.getByRole("button", { name: "Review All (2)" });
+    await reviewAll.focus();
+    await page.keyboard.press("Enter");
+
     await expect(page.getByText("Which card proves not-due inclusion?")).toBeVisible();
     await page.keyboard.press(" ");
+    await expect(page.getByText("The future-due card must still appear in all scope.")).toBeVisible();
+    await expectNoCriticalViolations(page, "chapter-review-first-answer");
     await page.keyboard.press("3");
-    await expect(page.getByText("Which card should replay exactly?")).toBeVisible();
 
-    expect(harness.reviewRequests).toContainEqual({
-      scope: "all",
-      chapter: "Chapter 2: Scope & Replay",
-      limit: "2",
-    });
-    expect(harness.graded).toEqual([{ cardId: "card-future", grade: 3 }]);
+    await expect(page.getByText("Which card should replay exactly?")).toBeVisible();
+    await expect(page.getByText("Define a due card.")).not.toBeVisible();
+    await expect(page.getByText("Define a new card.")).not.toBeVisible();
+    await page.keyboard.press(" ");
+    await expect(page.getByText("Only the card graded Again in the completed session.")).toBeVisible();
+    await expectNoCriticalViolations(page, "chapter-review-second-answer");
+    await page.keyboard.press("2");
+
+    await expect(page.getByRole("heading", { name: "Session complete" })).toBeVisible();
+
+    expect(harness.reviewRequests).toEqual([
+      { scope: "all", chapter: "Chapter 2: Scope & Replay", limit: "200" },
+      { scope: "all", chapter: "Chapter 2: Scope & Replay", limit: "200" },
+      { scope: "all", chapter: "Chapter 2: Scope & Replay", limit: "2" },
+    ]);
+    expect(harness.graded).toEqual([
+      { cardId: "card-future", grade: 3 },
+      { cardId: "card-missed", grade: 2 },
+    ]);
     await expectCleanHarness(harness);
   });
 
@@ -207,12 +272,12 @@ test.describe("unified flashcard review scopes", () => {
     await hard.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByText("Saved as Hard.")).toBeVisible();
+    await expectNoCriticalViolations(page, "inline-reader-saved-grade");
 
-    expect(harness.reviewRequests).toContainEqual({
-      scope: "all",
-      chapter: "Chapter 2: Scope & Replay",
-      limit: "200",
-    });
+    expect(harness.reviewRequests).toEqual([
+      { scope: "all", chapter: "Chapter 2: Scope & Replay", limit: "200" },
+      { scope: "all", chapter: "Chapter 2: Scope & Replay", limit: "200" },
+    ]);
     expect(harness.graded).toEqual([{ cardId: "card-future", grade: 2 }]);
     await expectCleanHarness(harness);
   });
@@ -230,18 +295,33 @@ test.describe("unified flashcard review scopes", () => {
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(`/review?course=${courseId}`);
     await expect(page.getByRole("heading", { name: "Ready to review" })).toBeVisible();
+    await expectNoCriticalViolations(page, "completed-back-to-review-chooser");
 
     await page.goto(`/review?course=${courseId}&completed=${completedSessionId}`);
     const missed = page.getByRole("button", { name: "Review missed (2)" });
     await missed.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByText("Which card should replay exactly?")).toBeVisible();
+    await expect(page.getByText("Define a due card.")).not.toBeVisible();
+    await expect(page.getByText("Define a new card.")).not.toBeVisible();
     await page.keyboard.press(" ");
+    await expect(page.getByText("Only the card graded Again in the completed session.")).toBeVisible();
+    await expectNoCriticalViolations(page, "missed-replay-first-answer");
     await page.keyboard.press("3");
-    await expect(page.getByText("Which card proves not-due inclusion?")).toBeVisible();
 
-    expect(harness.selectionRequests).toContainEqual(["card-missed", "card-future"]);
-    expect(harness.graded).toEqual([{ cardId: "card-missed", grade: 3 }]);
+    await expect(page.getByText("Which card proves not-due inclusion?")).toBeVisible();
+    await page.keyboard.press(" ");
+    await expect(page.getByText("The future-due card must still appear in all scope.")).toBeVisible();
+    await expectNoCriticalViolations(page, "missed-replay-second-answer");
+    await page.keyboard.press("4");
+
+    await expect(page.getByRole("heading", { name: "Session complete" })).toBeVisible();
+
+    expect(harness.selectionRequests).toEqual([["card-missed", "card-future"]]);
+    expect(harness.graded).toEqual([
+      { cardId: "card-missed", grade: 3 },
+      { cardId: "card-future", grade: 4 },
+    ]);
     await expectCleanHarness(harness);
   });
 
@@ -250,7 +330,9 @@ test.describe("unified flashcard review scopes", () => {
 
     await page.goto(`/review?course=${courseId}&scope=all`);
     await expect(page.getByRole("heading", { name: "Ready to review" })).toBeVisible();
-    await page.getByRole("button", { name: "Review All (3)" }).click();
+    const reviewAll = page.getByRole("button", { name: "Review All (3)" });
+    await reviewAll.focus();
+    await page.keyboard.press("Enter");
     await expect(page.getByText("Define a due card.")).toBeVisible();
     await page.keyboard.press(" ");
     await expectNoCriticalViolations(page, "failed-grade-revealed");
@@ -259,6 +341,7 @@ test.describe("unified flashcard review scopes", () => {
     await expect(page.getByText("Could not save this grade. Try again.")).toBeVisible();
     await expect(page.getByText("Define a due card.")).toBeVisible();
     await expect(page.getByText("A due card is ready now.")).toBeVisible();
+    await expectNoCriticalViolations(page, "failed-grade-retry-guidance");
 
     await page.keyboard.press("1");
     await expect(page.getByText("Define a new card.")).toBeVisible();
@@ -271,7 +354,10 @@ test.describe("unified flashcard review scopes", () => {
   });
 });
 
-async function installFlashcardReviewHarness(page: Page, options: { failNextGrade?: boolean } = {}) {
+async function installFlashcardReviewHarness(
+  page: Page,
+  options: { failNextGrade?: boolean } = {},
+): Promise<FlashcardReviewHarness> {
   const expectedBrowserErrors: BrowserError[] = [];
   const browserErrors = attachBrowserErrorGuard(page, (error) => {
     if (!options.failNextGrade || error.kind !== "console") return false;
@@ -280,7 +366,7 @@ async function installFlashcardReviewHarness(page: Page, options: { failNextGrad
       error.text === "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
     );
   }, expectedBrowserErrors);
-  const providerCalls = await installNoPaidProviderGuard(page);
+  const providerCalls: string[] = [];
   const unmockedApiRequests: string[] = [];
   const reviewRequests: ReviewRequest[] = [];
   const selectionRequests: string[][] = [];
@@ -290,6 +376,11 @@ async function installFlashcardReviewHarness(page: Page, options: { failNextGrad
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (isProviderUrl(url)) {
+      providerCalls.push(`${request.method()} ${request.url()}`);
+      await route.abort("blockedbyclient");
+      return;
+    }
     if (!url.pathname.startsWith("/api") && url.pathname !== "/health") {
       await route.continue();
       return;
@@ -431,15 +522,14 @@ function attachBrowserErrorGuard(
   return errors;
 }
 
-async function installNoPaidProviderGuard(page: Page) {
-  const calls: string[] = [];
-  for (const pattern of apiProviders) {
-    await page.route(pattern, (route) => {
-      calls.push(route.request().url());
-      return route.abort();
-    });
-  }
-  return calls;
+function isProviderUrl(url: URL): boolean {
+  return apiProviders.some((pattern) => {
+    if (pattern.includes("api.anthropic.com")) return url.hostname === "api.anthropic.com";
+    if (pattern.includes("api.openai.com")) return url.hostname === "api.openai.com";
+    if (pattern.includes("127.0.0.1:11434")) return url.hostname === "127.0.0.1" && url.port === "11434";
+    if (pattern.includes("localhost:11434")) return url.hostname === "localhost" && url.port === "11434";
+    return false;
+  });
 }
 
 async function expectNoCriticalViolations(page: Page, name: string) {
@@ -452,7 +542,7 @@ async function expectNoCriticalViolations(page: Page, name: string) {
   expect(critical).toEqual([]);
 }
 
-async function expectCleanHarness(harness: Awaited<ReturnType<typeof installFlashcardReviewHarness>>) {
+async function expectCleanHarness(harness: FlashcardReviewHarness) {
   expect(harness.browserErrors, "no uncaught page errors or console errors").toEqual([]);
   expect(harness.providerCalls, "no paid-provider or Ollama calls").toEqual([]);
   expect(harness.unmockedApiRequests, "all API calls are route-intercepted").toEqual([]);
