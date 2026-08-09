@@ -5,9 +5,17 @@ test_llm_sdk_imports_confined_to_llm_package.
 
 from __future__ import annotations
 
+import time
+
 import anthropic
 
 from app.config import anthropic_api_key, llm_model
+from app.llm.completion_control import (
+    CompletionOptions,
+    CompletionPhase,
+    CompletionProgress,
+    ProviderCancelledError,
+)
 from app.llm.provider import (
     PROVIDER_NOT_CONFIGURED_MESSAGE,
     CompletionResult,
@@ -50,8 +58,28 @@ class AnthropicProvider(Provider):
         self._client = anthropic.Anthropic(api_key=anthropic_api_key(), max_retries=0)
 
     def _complete_impl(
-        self, messages: list[dict], *, max_tokens: int, system: str | None = None
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int,
+        options: CompletionOptions,
+        system: str | None = None,
     ) -> CompletionResult:
+        started = time.monotonic()
+
+        def _emit_progress(phase: CompletionPhase) -> None:
+            if options.progress is None:
+                return
+            elapsed_seconds = max(0.0, time.monotonic() - started)
+            options.progress(
+                CompletionProgress(
+                    phase=phase, elapsed_seconds=elapsed_seconds, seconds_since_activity=0.0
+                )
+            )
+
+        if options.is_cancelled is not None and options.is_cancelled():
+            raise ProviderCancelledError()
+        _emit_progress("loading")
         kwargs: dict = {"model": self.model_name, "max_tokens": max_tokens, "messages": messages}
         if system is not None:
             kwargs["system"] = system
@@ -62,6 +90,7 @@ class AnthropicProvider(Provider):
                 raise ProviderNotConfiguredError(PROVIDER_NOT_CONFIGURED_MESSAGE) from exc
             raise
         text = "".join(block.text for block in response.content if block.type == "text")
+        _emit_progress("finalizing")
         return CompletionResult(
             text=text,
             input_tokens=response.usage.input_tokens,

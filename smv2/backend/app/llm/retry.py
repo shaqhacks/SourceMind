@@ -12,13 +12,23 @@ from typing import Callable, TypeVar
 
 import httpx
 
+from app.llm.completion_control import ProviderStreamError
+
 T = TypeVar("T")
 
 _MAX_ATTEMPTS = 2
 _BACKOFF_SECONDS = 0.5
+_RETRYABLE_NO_ACTIVITY_STREAM_CATEGORIES = {
+    "ollama_connect_error",
+    "ollama_first_activity_timeout",
+    "ollama_transport_error",
+}
 
 
 def _is_transient(exc: Exception) -> bool:
+    if isinstance(exc, ProviderStreamError):
+        return not exc.had_activity and exc.category in _RETRYABLE_NO_ACTIVITY_STREAM_CATEGORIES
+
     try:
         import anthropic
 

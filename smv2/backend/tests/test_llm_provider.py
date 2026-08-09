@@ -1,7 +1,35 @@
 from __future__ import annotations
 
+import pytest
+
 from app.db.engine import get_session
 from app.db.models import LlmCall
+from app.llm.completion_control import CompletionOptions, ProviderStreamError
+
+
+def test_completion_options_passes_progress_schema_and_cancel_controls(stub_provider):
+    seen = []
+    options = CompletionOptions(
+        progress=lambda event: seen.append(event.phase),
+        is_cancelled=lambda: False,
+        response_schema={"type": "array"},
+    )
+    stub_provider.complete(
+        [{"role": "user", "content": "hello"}],
+        max_tokens=8,
+        purpose="cards",
+        options=options,
+    )
+    assert stub_provider.received_completion_options[-1] is options
+
+
+def test_partial_stream_error_is_not_retried(stub_provider):
+    stub_provider.exceptions = [
+        ProviderStreamError("stream stopped", category="ollama_inactivity_timeout", had_activity=True)
+    ]
+    with pytest.raises(ProviderStreamError):
+        stub_provider.complete([{"role": "user", "content": "x"}], max_tokens=8, purpose="cards")
+    assert stub_provider.complete_call_count == 1
 
 
 def test_successful_call_writes_ok_ledger_row(client, stub_provider):
@@ -100,7 +128,7 @@ def test_embed_base_class_default_is_none_per_text(client):
     class _NoEmbedProvider(Provider):
         model_name = "no-embed-stub"
 
-        def _complete_impl(self, messages, *, max_tokens, system=None):
+        def _complete_impl(self, messages, *, max_tokens, options, system=None):
             raise NotImplementedError
 
     result = _NoEmbedProvider().embed(["a", "b", "c"])
@@ -179,7 +207,10 @@ def test_anthropic_provider_sends_system_separately_from_messages(monkeypatch):
     provider._client.messages.create = _fake_create
 
     result = provider._complete_impl(
-        [{"role": "user", "content": "hello"}], max_tokens=100, system="be a helpful teacher"
+        [{"role": "user", "content": "hello"}],
+        max_tokens=100,
+        options=CompletionOptions(),
+        system="be a helpful teacher",
     )
 
     assert captured["system"] == "be a helpful teacher"
@@ -212,7 +243,9 @@ def test_anthropic_provider_omits_system_kwarg_when_not_given(monkeypatch):
         return _FakeResponse()
 
     provider._client.messages.create = _fake_create
-    provider._complete_impl([{"role": "user", "content": "hi"}], max_tokens=10)
+    provider._complete_impl(
+        [{"role": "user", "content": "hi"}], max_tokens=10, options=CompletionOptions()
+    )
 
     assert "system" not in captured
 
@@ -242,7 +275,9 @@ def test_anthropic_provider_missing_credentials_raises_friendly_error(monkeypatc
     provider._client.messages.create = _fake_create
 
     with pytest.raises(ProviderNotConfiguredError) as exc_info:
-        provider._complete_impl([{"role": "user", "content": "hi"}], max_tokens=10)
+        provider._complete_impl(
+            [{"role": "user", "content": "hi"}], max_tokens=10, options=CompletionOptions()
+        )
     assert str(exc_info.value) == PROVIDER_NOT_CONFIGURED_MESSAGE
 
 
@@ -296,7 +331,9 @@ def test_anthropic_provider_authentication_error_raises_friendly_error(monkeypat
     provider._client.messages.create = _fake_create
 
     with pytest.raises(ProviderNotConfiguredError) as exc_info:
-        provider._complete_impl([{"role": "user", "content": "hi"}], max_tokens=10)
+        provider._complete_impl(
+            [{"role": "user", "content": "hi"}], max_tokens=10, options=CompletionOptions()
+        )
     assert str(exc_info.value) == PROVIDER_NOT_CONFIGURED_MESSAGE
 
 

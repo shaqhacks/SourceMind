@@ -122,8 +122,10 @@ class StubProvider(Provider):
         self.responses = list(responses) if responses else []
         self.exceptions = list(exceptions) if exceptions else []
         self.call_count = 0
+        self.complete_call_count = 0
         self.received_messages: list[list[dict]] = []
         self.received_systems: list[str | None] = []
+        self.received_completion_options = []
         # embed(): embed_responses, if given, is returned verbatim on every
         # call; embed_exception, if given, is raised every call (e.g. a
         # NotSupportedError stand-in). Otherwise a default fixed vector.
@@ -132,10 +134,12 @@ class StubProvider(Provider):
         self.embed_call_count = 0
         self.received_embed_texts: list[list[str]] = []
 
-    def _complete_impl(self, messages, *, max_tokens, system=None):
+    def _complete_impl(self, messages, *, max_tokens, options, system=None):
         self.call_count += 1
+        self.complete_call_count += 1
         self.received_messages.append(messages)
         self.received_systems.append(system)
+        self.received_completion_options.append(options)
         if self.exceptions:
             exc = self.exceptions.pop(0)
             if exc is not None:
