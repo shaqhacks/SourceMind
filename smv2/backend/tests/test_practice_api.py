@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.db.engine import get_session
 from app.db.models import Concept, Course, Job, PracticeExtractionRun, PracticeQuestion, Section
+from app.jobs.error_envelope import encode_job_error
 
 
 def _seed_practice_chapter(session):
@@ -97,6 +98,7 @@ def test_get_practice_assessment_reports_not_started_without_side_effect(client)
         "run_id": None,
         "job_id": None,
         "message": "Practice questions have not been extracted yet.",
+        "error_detail": None,
     }
 
     session = get_session()
@@ -127,6 +129,7 @@ def test_start_practice_assessment_starts_lazy_generation(client, stub_provider)
     assert body["run_id"]
     assert body["job_id"]
     assert body["questions"] == []
+    assert body["error_detail"] is None
 
     session = get_session()
     try:
@@ -228,6 +231,7 @@ def test_get_ready_practice_assessment_redacts_correct_index(client):
     assert body["run_id"] is None
     assert body["job_id"] is None
     assert body["message"] is None
+    assert body["error_detail"] is None
     assert len(body["questions"]) == 1
     assert body["questions"][0]["choices"] == ["$7/2$", "$2/7$", "$3/4$", "$14/3$"]
     assert body["questions"][0]["concept"] == {
@@ -285,6 +289,7 @@ def test_get_practice_assessment_reports_failed_linked_job_without_mutating_run(
     assert body["run_id"] == run_id
     assert body["job_id"] == job.id
     assert body["message"] == "Practice question extraction failed."
+    assert body["error_detail"] is None
     assert "set-cookie" not in response.headers
 
     session = get_session()
@@ -346,6 +351,77 @@ def test_start_practice_assessment_retries_failed_linked_job_with_new_job(client
         }
     finally:
         session.close()
+
+
+def test_failed_practice_assessment_exposes_safe_structured_error_detail(client):
+    session = get_session()
+    try:
+        course, practice, _answers, _content = _seed_practice_chapter(session)
+        job = Job(
+            type="generate_practice_assessment",
+            status="failed",
+            payload={"course_id": course.id, "section_id": practice.id},
+            error=encode_job_error(
+                "The model returned an invalid question format.",
+                {
+                    "code": "invalid_model_output",
+                    "message": "The model returned an invalid question format.",
+                    "failure_category": "structured_output_invalid",
+                },
+            ),
+        )
+        session.add(job)
+        session.flush()
+        run = PracticeExtractionRun(
+            course_id=course.id,
+            section_id=practice.id,
+            status="queued",
+            job_id=job.id,
+            input_fingerprint="fingerprint",
+        )
+        session.add(run)
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get(f"/api/courses/{course.id}/sections/{practice.id}/practice-assessment")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["error_detail"]["code"] == "invalid_model_output"
+    assert "Expecting value" not in response.text
+
+
+def test_legacy_failed_practice_assessment_has_no_error_detail(client):
+    session = get_session()
+    try:
+        course, practice, _answers, _content = _seed_practice_chapter(session)
+        job = Job(
+            type="generate_practice_assessment",
+            status="failed",
+            payload={"course_id": course.id, "section_id": practice.id},
+            error="Expecting value: line 1 column 1 (char 0)",
+        )
+        session.add(job)
+        session.flush()
+        run = PracticeExtractionRun(
+            course_id=course.id,
+            section_id=practice.id,
+            status="failed",
+            job_id=job.id,
+            input_fingerprint="fingerprint",
+            error="raw extraction parser trace",
+        )
+        session.add(run)
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get(f"/api/courses/{course.id}/sections/{practice.id}/practice-assessment")
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Practice question extraction failed."
+    assert response.json()["error_detail"] is None
 
 
 def test_start_practice_assessment_retries_failed_run_with_new_job(client, stub_provider):

@@ -689,6 +689,7 @@ class PracticeAssessmentOut(BaseModel):
     run_id: str | None = None
     job_id: str | None = None
     message: str | None = None
+    error_detail: dict[str, Any] | None = None
 
 
 class SubmitPracticeAnswerIn(BaseModel):

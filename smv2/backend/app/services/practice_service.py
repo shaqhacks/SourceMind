@@ -23,6 +23,7 @@ from app.db.models import (
     PracticeQuestion,
     Section,
 )
+from app.jobs.error_envelope import decode_job_error
 from app.services import evidence_items_service, evidence_service, learner_context
 from app.services import llm_readiness_service
 from app.services.jobs_service import create_job_in_session
@@ -377,7 +378,18 @@ def _latest_run(session: Session, course_id: str, section_id: str) -> PracticeEx
     )
 
 
-def _run_response(run: PracticeExtractionRun, status: str, message: str) -> dict[str, Any]:
+def _run_error_detail(status: str, job: Job | None) -> dict[str, Any] | None:
+    if status != "failed" or job is None or job.status != "failed":
+        return None
+    _message, detail = decode_job_error(job.error)
+    if isinstance(detail, dict):
+        return detail
+    return None
+
+
+def _run_response(
+    run: PracticeExtractionRun, status: str, message: str, job: Job | None = None
+) -> dict[str, Any]:
     return {
         "status": status,
         "section_id": run.section_id,
@@ -385,6 +397,7 @@ def _run_response(run: PracticeExtractionRun, status: str, message: str) -> dict
         "run_id": run.id,
         "job_id": run.job_id,
         "message": message,
+        "error_detail": _run_error_detail(status, job),
     }
 
 
@@ -404,6 +417,7 @@ def get_assessment(
                 "run_id": None,
                 "job_id": None,
                 "message": None,
+                "error_detail": None,
             }
 
         run = _latest_run(session, course_id, section_id)
@@ -415,15 +429,15 @@ def get_assessment(
                 "run_id": None,
                 "job_id": None,
                 "message": NOT_STARTED_MESSAGE,
+                "error_detail": None,
             }
 
+        job = session.get(Job, run.job_id) if run.job_id is not None else None
         if run.status == "failed":
-            return 200, _run_response(run, "failed", FAILED_MESSAGE)
+            return 200, _run_response(run, "failed", FAILED_MESSAGE, job)
 
-        if run.job_id is not None:
-            job = session.get(Job, run.job_id)
-            if job is not None and job.status == "failed":
-                return 200, _run_response(run, "failed", FAILED_MESSAGE)
+        if job is not None and job.status == "failed":
+            return 200, _run_response(run, "failed", FAILED_MESSAGE, job)
 
         return 202, _run_response(run, "generating", GENERATING_MESSAGE)
     finally:
