@@ -17,7 +17,6 @@ import Card from "@/components/ui/Card";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   type ApiErrorDetail,
-  cancelJob,
   generateTest,
   getJob,
   getSection,
@@ -30,6 +29,7 @@ import {
 import { QUIZ_RETAKE_THRESHOLD } from "@/lib/dashboard/quizzes";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
+import { cancelGenerationJob } from "@/lib/jobs/cancel";
 
 const PagesView = dynamic(() => import("@/components/reader/PagesView"), { ssr: false });
 
@@ -302,7 +302,7 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
             <GenerationProgress
               job={stalled ? null : job}
               quiet={stalled}
-              onCancel={jobId ? () => cancelJob(jobId).then(() => undefined) : undefined}
+              onCancel={jobId ? () => cancelGenerationJob(jobId) : undefined}
               onContinue={() => router.push(`/course/${courseId}`)}
             />
           ) : (

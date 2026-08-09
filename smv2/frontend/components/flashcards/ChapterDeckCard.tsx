@@ -10,7 +10,6 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
-  cancelJob,
   findActiveCardsJob,
   generateCards,
   type CardOut,
@@ -18,6 +17,7 @@ import {
 import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
+import { cancelGenerationJob } from "@/lib/jobs/cancel";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface ChapterDeckCardProps {
@@ -207,7 +207,7 @@ export default function ChapterDeckCard({
           job={stalled ? null : job}
           quiet={stalled}
           compact
-          onCancel={watchedJobId ? () => cancelJob(watchedJobId).then(() => undefined) : undefined}
+          onCancel={watchedJobId ? () => cancelGenerationJob(watchedJobId) : undefined}
         />
       ) : justFinished ? (
         <p role="status" className="text-sm text-muted-foreground">

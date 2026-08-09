@@ -263,4 +263,24 @@ describe("CardsCTA", () => {
     expect(mockedCancelJob).toHaveBeenCalledWith("job-1");
     expect(mockedCancelJob).toHaveBeenCalledTimes(1);
   });
+
+  it("shows a retryable cancel error when the cancel API returns a 500 result", async () => {
+    mockedListCards.mockResolvedValue(ok([]));
+    mockedGenerateCards.mockResolvedValue(ok({ job_id: "job-1" }, 202));
+    mockedCancelJob
+      .mockResolvedValueOnce(err<JobOut>(500))
+      .mockResolvedValueOnce(ok(makeJob({ id: "job-1", status: "cancelled" })));
+
+    const user = userEvent.setup();
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate flashcards/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: /cancel generation/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not cancel generation/i);
+    await user.click(screen.getByRole("button", { name: /retry cancel/i }));
+
+    expect(mockedCancelJob).toHaveBeenCalledTimes(2);
+  });
 });

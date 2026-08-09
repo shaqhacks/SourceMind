@@ -10,7 +10,6 @@ import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   type ApiErrorDetail,
-  cancelJob,
   findActiveLessonJob,
   generateLesson,
   getJob,
@@ -20,6 +19,7 @@ import {
   type SectionDetailOut,
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { cancelGenerationJob } from "@/lib/jobs/cancel";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export type LessonDisplayStatus = "none" | "queued" | "generating" | "ready" | "failed" | "stale";
@@ -217,7 +217,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
       <GenerationProgress
         job={stalled ? null : job}
         quiet={stalled}
-        onCancel={watchedJobId ? () => cancelJob(watchedJobId).then(() => undefined) : undefined}
+        onCancel={watchedJobId ? () => cancelGenerationJob(watchedJobId) : undefined}
       />
     );
   }

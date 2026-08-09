@@ -8,11 +8,12 @@ import GenerationProgress from "@/components/jobs/GenerationProgress";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
-import { cancelJob, generateTest, listTests, type TestSummaryOut } from "@/lib/api/client";
+import { generateTest, listTests, type TestSummaryOut } from "@/lib/api/client";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useDismissOnOutsideOrEscape } from "@/lib/hooks/useDismissOnOutsideOrEscape";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
+import { cancelGenerationJob } from "@/lib/jobs/cancel";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface QuizzesPanelProps {
@@ -118,7 +119,7 @@ export default function QuizzesPanel({ courseId }: QuizzesPanelProps) {
                 job={stalled ? null : job}
                 quiet={stalled}
                 compact
-                onCancel={jobId ? () => cancelJob(jobId).then(() => undefined) : undefined}
+                onCancel={jobId ? () => cancelGenerationJob(jobId) : undefined}
                 onContinue={() => {
                   setOpen(false);
                   router.push(`/course/${courseId}`);

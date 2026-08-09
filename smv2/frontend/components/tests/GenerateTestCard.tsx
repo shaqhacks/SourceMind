@@ -8,7 +8,6 @@ import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
-  cancelJob,
   generateTest,
   listJobs,
   listTests,
@@ -17,6 +16,7 @@ import {
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
+import { cancelGenerationJob } from "@/lib/jobs/cancel";
 
 import { findActiveChapterTestJob } from "./testsFormat";
 
@@ -128,7 +128,7 @@ export default function GenerateTestCard({
           job={stalled ? null : job}
           quiet={stalled}
           compact
-          onCancel={watchedJobId ? () => cancelJob(watchedJobId).then(() => undefined) : undefined}
+          onCancel={watchedJobId ? () => cancelGenerationJob(watchedJobId) : undefined}
           onContinue={() => router.push(`/course/${courseId}`)}
         />
       ) : (

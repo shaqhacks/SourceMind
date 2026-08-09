@@ -7,7 +7,6 @@ import GenerationProgress from "@/components/jobs/GenerationProgress";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
-  cancelJob,
   findActiveCardsJob,
   generateCards,
   listCards,
@@ -16,6 +15,7 @@ import {
 import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
+import { cancelGenerationJob } from "@/lib/jobs/cancel";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface CardsCTAProps {
@@ -121,7 +121,7 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
         job={stalled ? null : job}
         quiet={stalled}
         compact
-        onCancel={watchedJobId ? () => cancelJob(watchedJobId).then(() => undefined) : undefined}
+        onCancel={watchedJobId ? () => cancelGenerationJob(watchedJobId) : undefined}
       />
     );
   }
