@@ -12,6 +12,7 @@ import asyncio
 import logging
 import time
 from datetime import timedelta
+from typing import Final
 
 from sqlalchemy import DateTime, bindparam, text
 from sqlalchemy.orm import Session
@@ -42,8 +43,16 @@ RECONCILE_INTERVAL_SECONDS = 30.0
 
 logger = logging.getLogger(__name__)
 
+JOB_CLAIM_PRIORITY_SQL: Final[str] = """
+CASE
+    WHEN type = 'generate_test' THEN 0
+    WHEN type = 'generate_practice_assessment' THEN 20
+    ELSE 10
+END
+"""
+
 _CLAIM_SQL = text(
-    """
+    f"""
     UPDATE jobs
     SET status = 'running',
         lease_until = :lease_until,
@@ -51,7 +60,7 @@ _CLAIM_SQL = text(
     WHERE id = (
         SELECT id FROM jobs
         WHERE status = 'queued'
-        ORDER BY created_at
+        ORDER BY {JOB_CLAIM_PRIORITY_SQL}, created_at
         LIMIT 1
     )
     AND status = 'queued'
@@ -67,7 +76,7 @@ def claim_next_job(session: Session) -> Job | None:
     session.commit()
     if row is None:
         return None
-    return session.get(Job, row[0])
+    return session.get(Job, row[0], populate_existing=True)
 
 
 def job_progress(
