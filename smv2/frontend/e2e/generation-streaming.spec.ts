@@ -410,6 +410,7 @@ async function expectCancellationWithoutFailure(page: Page) {
 
 async function expectStructuredRetryGuidance(page: Page) {
   await openChapterPractice(page);
+  await page.getByRole("button", { name: "Generate practice questions" }).click();
 
   const banner = appAlerts(page);
   await expect(banner).toContainText("The model returned invalid practice questions. Retry generation.");

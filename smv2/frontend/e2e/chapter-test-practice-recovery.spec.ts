@@ -110,7 +110,8 @@ async function installFakeEventSource(page: Page) {
             const open = new Event("open");
             this.onopen?.(open);
             this.dispatchEvent(open);
-            window.setTimeout(() => this.emit("running"), 5);
+            this.emitQueued();
+            window.setTimeout(() => this.emitRunning(), 100);
           }, 0);
         }
 
@@ -118,12 +119,24 @@ async function installFakeEventSource(page: Page) {
           this.readyState = this.CLOSED;
         }
 
-        private emit(status: "running") {
+        private emitQueued() {
           if (this.readyState === this.CLOSED || !this.url.includes(generatedJobId)) return;
           const event = new MessageEvent("update", {
             data: JSON.stringify({
               id: generatedJobId,
-              status,
+              status: "running",
+              progress: null,
+            }),
+          });
+          this.dispatchEvent(event);
+        }
+
+        private emitRunning() {
+          if (this.readyState === this.CLOSED || !this.url.includes(generatedJobId)) return;
+          const event = new MessageEvent("update", {
+            data: JSON.stringify({
+              id: generatedJobId,
+              status: "running",
               progress: {
                 stage: "thinking",
                 pct: 40,
@@ -246,7 +259,6 @@ async function installChapterRoutes(
   options: {
     states: Record<string, ReturnType<typeof assessment>>;
     onPracticePost?: (sectionId: string, attempt: number) => ReturnType<typeof assessment>;
-    onTestPost?: () => void;
     practiceSectionIds?: string[];
     initialTests?: unknown[];
     generatedTests?: unknown[];
@@ -257,6 +269,10 @@ async function installChapterRoutes(
   const testPosts: TestPost[] = [];
   const getCounts = new Map<string, number>();
   const postCounts = new Map<string, number>();
+  const currentStates = new Map<string, ReturnType<typeof assessment>>(
+    Object.entries(options.states),
+  );
+  const queuedPracticeSectionIds = new Set<string>();
   let testsGenerated = false;
   const practiceSectionIds = options.practiceSectionIds ?? [
     readySectionId,
@@ -340,7 +356,16 @@ async function installChapterRoutes(
   await page.route(`**/api/courses/${courseId}/tests**`, async (route) => {
     if (route.request().method() === "POST") {
       testPosts.push({ url: route.request().url(), body: route.request().postDataJSON() });
-      options.onTestPost?.();
+      for (const sectionId of queuedPracticeSectionIds) {
+        currentStates.set(
+          sectionId,
+          assessment(sectionId, "not_started", {
+            message: "Practice has not been generated yet.",
+            run_id: null,
+          }),
+        );
+      }
+      queuedPracticeSectionIds.clear();
       testsGenerated = true;
       return route.fulfill({ status: 202, json: { job_id: generatedJobId } });
     }
@@ -376,15 +401,21 @@ async function installChapterRoutes(
           const nextAttempt = (postCounts.get(sectionId) ?? 0) + 1;
           postCounts.set(sectionId, nextAttempt);
           practicePosts.push({ sectionId, url: route.request().url() });
+          const body =
+            options.onPracticePost?.(sectionId, nextAttempt) ?? assessment(sectionId, "ready");
+          currentStates.set(sectionId, body);
+          if (body.status === "generating") {
+            queuedPracticeSectionIds.add(sectionId);
+          }
           return route.fulfill({
             status: 202,
-            json: options.onPracticePost?.(sectionId, nextAttempt) ?? assessment(sectionId, "ready"),
+            json: body,
           });
         }
 
         const nextGet = (getCounts.get(sectionId) ?? 0) + 1;
         getCounts.set(sectionId, nextGet);
-        const body = options.states[sectionId] ?? assessment(sectionId, "ready");
+        const body = currentStates.get(sectionId) ?? assessment(sectionId, "ready");
         practiceGets.push({ body, sectionId });
         return route.fulfill({
           json: body,
@@ -567,8 +598,78 @@ async function runIndependentTestGeneration({ page }: { page: Page }) {
   await expectCleanGuards(guards);
 }
 
+async function runLazyPracticeAndPriorityFlow({ page }: { page: Page }) {
+  const guards = await preparePage(page);
+  const posts = await installChapterRoutes(page, {
+    practiceSectionIds: [readySectionId, generatingSectionId, failedSectionId],
+    states: {
+      [readySectionId]: assessment(readySectionId, "not_started", {
+        message: "Practice has not been generated yet.",
+        run_id: null,
+      }),
+      [generatingSectionId]: assessment(generatingSectionId, "not_started", {
+        message: "Practice has not been generated yet.",
+        run_id: null,
+      }),
+      [failedSectionId]: assessment(failedSectionId, "generating"),
+    },
+    onPracticePost: (sectionId) => assessment(sectionId, "generating"),
+  });
+
+  await openChapterTest(page);
+  expect(posts.practicePosts).toHaveLength(0);
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: `${chapterLabel} — Chapter test` }),
+  ).toBeVisible();
+  expect(posts.practicePosts).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Generate practice questions" }).first().click();
+  expect(posts.practicePosts.map((post) => post.sectionId)).toEqual([readySectionId]);
+
+  await page.getByRole("button", { name: "Generate all practice" }).click();
+  expect(posts.practicePosts.map((post) => post.sectionId)).toEqual([
+    readySectionId,
+    generatingSectionId,
+  ]);
+  const startedSectionGetsAfterBulkStart = posts.practiceGets.filter(
+    (get) => get.sectionId === readySectionId || get.sectionId === generatingSectionId,
+  ).length;
+  await expect
+    .poll(() =>
+      posts.practiceGets.filter(
+        (get) => get.sectionId === readySectionId || get.sectionId === generatingSectionId,
+      ).length,
+    )
+    .toBeGreaterThanOrEqual(startedSectionGetsAfterBulkStart + 2);
+  await expect(page.getByRole("button", { name: "Generate practice questions" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Take chapter test" }).click();
+  expect(posts.testPosts).toHaveLength(1);
+  await expect(page.getByText("Queued").last()).toBeVisible();
+  await expect(page.getByText("Thinking · 6s")).toBeVisible();
+  await expect(page.getByText("Queued")).toHaveCount(0);
+  await expect(
+    page.locator(`#practice-section-${readySectionId}`).getByRole("button", {
+      name: "Generate practice questions",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.locator(`#practice-section-${generatingSectionId}`).getByRole("button", {
+      name: "Generate practice questions",
+    }),
+  ).toBeVisible();
+  await expect(page.locator(`#practice-section-${failedSectionId}`).getByRole("status")).toHaveText(
+    "Preparing practice questions...",
+  );
+  await expectNoCriticalViolations(page, "lazy-practice-priority");
+  await expectNoPrivateOutput(page);
+  await expectCleanGuards(guards);
+}
+
 test("ready practice remains usable while sibling sections are generating", runPartialReadiness);
 test("retry failed restarts only failed practice sections", runSelectiveRetry);
 test("invalid model output offers retry without exposing parser details", runInvalidOutputRecovery);
 test("missing Ollama model routes the student to Settings", runMissingModelRecovery);
 test("chapter test generation remains available during partial practice failure", runIndependentTestGeneration);
+test("chapter test page is read-only until explicit practice or test actions", runLazyPracticeAndPriorityFlow);
