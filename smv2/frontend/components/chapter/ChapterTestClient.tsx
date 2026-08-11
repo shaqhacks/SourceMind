@@ -15,6 +15,7 @@ import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import {
+  isPracticeSectionStartable,
   summarizePracticeSections,
   type PracticeSectionState,
 } from "@/components/chapter/practiceAssessmentState";
@@ -169,6 +170,8 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     states: Record<string, PracticeSectionState>;
   }>({ key: "", states: {} });
   const [practiceRetryVersions, setPracticeRetryVersions] = useState<Record<string, number>>({});
+  const [practiceStartVersions, setPracticeStartVersions] = useState<Record<string, number>>({});
+  const [pendingPracticeStartIds, setPendingPracticeStartIds] = useState<string[]>([]);
   const [retryingPracticeSectionIds, setRetryingPracticeSectionIds] = useState<string[]>([]);
   // Attempt ids known before the current generation started, so the
   // settle handler can tell which attempt in the refetched list is the
@@ -206,6 +209,9 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
   const currentPracticeStates = useMemo(
     () => (practiceSectionStates.key === practiceChapterKey ? practiceSectionStates.states : {}),
     [practiceChapterKey, practiceSectionStates],
+  );
+  const startingAllPractice = pendingPracticeStartIds.some((sectionId) =>
+    isPracticeSectionStartable(currentPracticeStates[sectionId]),
   );
   const practiceSummary = summarizePracticeSections(currentPracticeStates, practiceSections.length);
   const practiceGuidance = practiceFailureGuidance(currentPracticeStates);
@@ -246,6 +252,12 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
       practiceSectionStatesRef.current = nextCollectedState;
       setPracticeSectionStates(nextCollectedState);
 
+      if (!isPracticeSectionStartable(nextState)) {
+        setPendingPracticeStartIds((currentIds) =>
+          currentIds.filter((sectionId) => sectionId !== nextState.sectionId),
+        );
+      }
+
       const retryingIds = retryingPracticeSectionIdsRef.current;
       if (!retryingIds.includes(nextState.sectionId)) {
         return;
@@ -276,6 +288,24 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
       return next;
     });
   }, [failedPracticeSectionIds]);
+
+  const handleGenerateAllPractice = useCallback(() => {
+    const startableIds = practiceSections
+      .filter((section) => isPracticeSectionStartable(currentPracticeStates[section.id]))
+      .map((section) => section.id);
+    if (startableIds.length === 0 || startingAllPractice) {
+      return;
+    }
+
+    setPendingPracticeStartIds(startableIds);
+    setPracticeStartVersions((current) => {
+      const next = { ...current };
+      for (const sectionId of startableIds) {
+        next[sectionId] = (next[sectionId] ?? 0) + 1;
+      }
+      return next;
+    });
+  }, [currentPracticeStates, practiceSections, startingAllPractice]);
 
   const handleContinueWithReadyPractice = useCallback(() => {
     const firstReadySection = practiceSections.find(
@@ -458,6 +488,15 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
                     Retry failed ({failedPracticeSectionIds.length})
                   </Button>
                 )}
+                {practiceSummary.startable > 0 && (
+                  <Button
+                    size="sm"
+                    onClick={handleGenerateAllPractice}
+                    disabled={startingAllPractice}
+                  >
+                    {startingAllPractice ? "Starting practice..." : "Generate all practice"}
+                  </Button>
+                )}
                 {shouldShowContinueWithReady && (
                   <Button size="sm" onClick={handleContinueWithReadyPractice}>
                     Continue with ready ({practiceSummary.ready})
@@ -502,6 +541,7 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
                     courseId={courseId}
                     sectionId={section.id}
                     retryVersion={practiceRetryVersions[section.id] ?? 0}
+                    startVersion={practiceStartVersions[section.id] ?? 0}
                     onStateChange={handlePracticeSectionStateChange}
                   />
                   <details className="rounded-md border border-border p-3">

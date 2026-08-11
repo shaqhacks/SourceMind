@@ -48,6 +48,7 @@ export interface PracticeSectionsSummary {
   generating: number;
   loading: number;
   failed: number;
+  startable: number;
   questions: number;
   total: number;
 }
@@ -146,6 +147,7 @@ export function summarizePracticeSections(
     generating: 0,
     loading: 0,
     failed: 0,
+    startable: 0,
     questions: 0,
     total,
   };
@@ -162,6 +164,10 @@ export function summarizePracticeSections(
     }
     if (state.kind === "failed") {
       summary.failed += 1;
+      continue;
+    }
+    if (state.kind === "not_started") {
+      summary.startable += 1;
       continue;
     }
     summary.loading += 1;

@@ -31,16 +31,16 @@ export default function GenerationProgress({
   const [cancelError, setCancelError] = useState<string | null>(null);
   const phase = job?.progress?.stage ?? "preparing";
   const elapsed = currentElapsed(job);
-  const announcedPhase = formatPhaseLabel(phase);
+  const phaseLabel = job && !job.progress ? "Queued" : formatPhaseLabel(phase);
   const isTerminal = job?.status === "cancelled" || job?.status === "succeeded" || job?.status === "failed";
   const cancelKey = job?.id ?? NO_JOB_CANCEL_KEY;
   const cancelRequested = cancelRequestedFor === cancelKey;
 
   const headline = useMemo(() => {
     if (job?.status === "cancelled") return "Cancelled";
-    if (!job?.progress) return "Preparing";
-    return `${formatPhaseLabel(phase)} · ${formatElapsed(elapsed)}`;
-  }, [elapsed, job?.progress, job?.status, phase]);
+    if (!job?.progress) return phaseLabel;
+    return `${phaseLabel} · ${formatElapsed(elapsed)}`;
+  }, [elapsed, job?.progress, job?.status, phaseLabel]);
 
   const recentActivity = formatRecentActivity(job?.progress?.last_activity_seconds);
   const showQuiet = quiet || elapsed >= 30;
@@ -68,7 +68,7 @@ export default function GenerationProgress({
       ].join(" ")}
     >
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-        {announcedPhase}
+        {phaseLabel}
       </div>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">

@@ -229,8 +229,36 @@ describe("practice assessment state contract", () => {
       generating: 1,
       loading: 1,
       failed: 1,
+      startable: 0,
       questions: 4,
       total: 4,
+    });
+  });
+
+  it("counts explicit startable practice sections separately from loading work", () => {
+    const summary = summarizePracticeSections(
+      {
+        "sec-start": {
+          kind: "not_started",
+          sectionId: "sec-start",
+          questionCount: 0,
+          message: "Practice has not been generated yet.",
+          errorDetail: null,
+          retryKind: "start",
+        },
+        "sec-ready": readyState("sec-ready", 2),
+      },
+      3,
+    );
+
+    expect(summary).toEqual({
+      ready: 1,
+      generating: 0,
+      loading: 1,
+      failed: 0,
+      startable: 1,
+      questions: 2,
+      total: 3,
     });
   });
 
@@ -240,6 +268,7 @@ describe("practice assessment state contract", () => {
       generating: 0,
       loading: 0,
       failed: 0,
+      startable: 0,
       questions: 0,
       total: 0,
     });
@@ -259,6 +288,7 @@ describe("practice assessment state contract", () => {
       generating: 0,
       loading: 0,
       failed: 0,
+      startable: 0,
       questions: 5,
       total: 2,
     });

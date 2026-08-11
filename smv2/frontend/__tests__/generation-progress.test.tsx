@@ -21,6 +21,23 @@ function job(overrides: Partial<JobEvent> = {}): JobEvent {
 }
 
 describe("GenerationProgress", () => {
+  it("shows queued copy before execution progress starts", () => {
+    render(
+      <GenerationProgress
+        job={{
+          id: "job-queued",
+          status: "running",
+          progress: null,
+        }}
+        quiet={false}
+      />,
+    );
+
+    expect(screen.getAllByText("Queued")).toHaveLength(2);
+    expect(screen.getByRole("status")).toHaveTextContent("Queued");
+    expect(screen.queryByText(/Thinking/)).not.toBeInTheDocument();
+  });
+
   it("shows phase liveness without a fake percentage or reasoning text", () => {
     render(<GenerationProgress job={job()} quiet={false} />);
 

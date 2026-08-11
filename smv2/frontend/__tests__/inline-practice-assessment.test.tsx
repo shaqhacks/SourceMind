@@ -403,6 +403,29 @@ describe("InlinePracticeAssessment", () => {
     expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
   });
 
+  it("consumes a parent startVersion once and then owns POST state and polling", async () => {
+    vi.useFakeTimers();
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(
+        ok(makeAssessment({ status: "not_started", questions: [], run_id: null })),
+      )
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "ready", questions: [makeQuestion()] })));
+    mockedStartPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "generating", questions: [], job_id: "job-practice" })),
+    );
+
+    const view = renderPracticeChild({ startVersion: 0 });
+    await flushPracticeTasks();
+    expect(screen.getByRole("button", { name: "Generate practice questions" })).toBeEnabled();
+    view.rerender(practiceChild({ startVersion: 1 }));
+    view.rerender(practiceChild({ startVersion: 1 }));
+
+    await flushPracticeTasks();
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+    await advancePracticePoll();
+    expect(screen.getByText("Newton's second law")).toBeInTheDocument();
+  });
+
   it("routes immediate structured provider readiness failures to Settings when starting questions", async () => {
     mockedGetPracticeAssessment.mockResolvedValue(
       ok(makeAssessment({ status: "not_started", questions: undefined })),
