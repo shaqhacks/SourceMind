@@ -8,16 +8,21 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.db.models import Course, CourseLearningProfile, Job, Section, Test, TestAttempt
+from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
+from app.llm.structured_output import InvalidModelOutputError, QUIZ_SCHEMA, repair_messages
 from app.pipeline._common import report_progress as _report_progress
-from app.pipeline._common import report_progress_in_session as _report_progress_in_session
+from app.pipeline._common import (
+    report_progress_in_session as _report_progress_in_session,
+)
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 from app.services import evidence_items_service
 
@@ -146,7 +151,7 @@ def run_test_generation(
     if not sections:
         raise ValueError("no sections available to build a test from")
 
-    _report_progress(job.id, stage="generating", pct=10, message="generating quiz")
+    _report_progress(job.id, stage="loading", pct=None, message="preparing quiz")
 
     scoped_text = _build_scoped_text(sections)
     curriculum_version_id, claim_options = evidence_items_service.claim_options_for_sections(
@@ -166,14 +171,17 @@ def run_test_generation(
     ]
 
     provider = get_provider()
-
-    # Same cap discipline as lesson generation (app/llm/ledger.ensure_spend_cap):
-    # checked immediately before the call, no yield points in between.
-    ensure_spend_cap(course_id)
+    completion_options = replace(
+        completion_options_for_job(job.id, artifact="quiz"),
+        response_schema=QUIZ_SCHEMA,
+    )
 
     # wait_for_slot=True: durable job, not an interactive request — wait out
     # a busy limiter (bounded) rather than fail the job over transient chat
     # traffic saturating the same slots.
+    # Same cap discipline as lesson generation (app/llm/ledger.ensure_spend_cap):
+    # checked immediately before the call, no yield points in between.
+    ensure_spend_cap(course_id)
     result = provider.complete(
         messages,
         max_tokens=_MAX_TOKENS,
@@ -182,23 +190,31 @@ def run_test_generation(
         prompt_version=prompt_version,
         system=system_prompt,
         wait_for_slot=True,
+        options=completion_options,
     )
 
     try:
         questions = _parse_questions(result.text, allowed_claim_ids)
-    except (json.JSONDecodeError, ValueError):
+        if not questions:
+            raise ValueError("quiz generation produced zero usable questions")
+    except (json.JSONDecodeError, ValueError) as exc:
         _report_progress(job.id, stage="retrying", pct=50, message="retrying malformed response")
+        repair_request = repair_messages(messages, exc)
+        ensure_spend_cap(course_id)
         result = provider.complete(
-            messages,
+            repair_request,
             max_tokens=_MAX_TOKENS,
             purpose="quiz",
             course_id=course_id,
             prompt_version=prompt_version,
             system=system_prompt,
             wait_for_slot=True,
+            options=completion_options,
         )
         try:
             questions = _parse_questions(result.text, allowed_claim_ids)
+            if not questions:
+                raise ValueError("quiz generation produced zero usable questions")
         except (json.JSONDecodeError, ValueError) as exc:
             # The provider wrapper already recorded this same call as
             # status='ok' (the completion succeeded at the transport level);
@@ -217,10 +233,7 @@ def run_test_generation(
                 status="parse_failure",
                 course_id=course_id,
             )
-            raise ValueError(f"quiz generation produced unparseable output after one retry: {exc}") from exc
-
-    if not questions:
-        raise ValueError("quiz generation produced zero usable questions")
+            raise InvalidModelOutputError(exc) from exc
 
     questions = questions[:_QUESTION_COUNT]
     # ADR-022 deck/attempt split: Test is the persisted deck (questions,

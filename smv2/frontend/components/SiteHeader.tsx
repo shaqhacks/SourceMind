@@ -34,7 +34,6 @@ export default function SiteHeader() {
         type="button"
         onClick={transientNavigation ? openNavigation : toggle}
         aria-label={label}
-        aria-controls="app-sidebar"
         aria-expanded={transientNavigation ? open : !collapsed}
         className="flex min-h-11 min-w-11 items-center justify-center rounded-md transition-colors hover:bg-foreground/[0.07]"
       >

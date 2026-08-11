@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,43 @@ def _create_course(client, title: str = "Upload Test Course") -> str:
     resp = client.post("/api/courses", json={"title": title})
     assert resp.status_code == 201
     return resp.json()["id"]
+
+
+def _seed_asset_source(
+    client,
+    *,
+    filename: str,
+    content: bytes,
+    source_format: str,
+    media_type: str,
+) -> str:
+    course_id = _create_course(client, f"{source_format} source delivery")
+    from app.config import data_dir
+    from app.db.engine import get_session
+    from app.db.models import Asset
+
+    stored_path = data_dir() / "assets" / course_id / filename
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    stored_path.write_bytes(content)
+
+    session = get_session()
+    try:
+        asset = Asset(
+            course_id=course_id,
+            filename=filename,
+            content_type=media_type,
+            source_format=source_format,
+            media_type=media_type,
+            size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+            stored_path=str(stored_path),
+            status="stored",
+        )
+        session.add(asset)
+        session.commit()
+        return asset.id
+    finally:
+        session.close()
 
 
 def test_upload_valid_pdf_creates_asset(client):
@@ -237,8 +275,40 @@ def test_get_asset_file_serves_exact_bytes_and_content_type(client, ingest_cours
     resp = client.get(f"/api/assets/{asset_id}/file")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/pdf"
+    assert resp.headers["x-content-type-options"] == "nosniff"
     assert "inline" in resp.headers["content-disposition"]
     assert resp.content == (FIXTURES_DIR / "with_bookmarks.pdf").read_bytes()
+
+
+@pytest.mark.parametrize(
+    ("filename", "content", "source_format", "media_type"),
+    [
+        ("notes.md", b"# Notes\n\nKeep markdown as source.", "markdown", "text/markdown"),
+        ("notes.txt", b"Plain source notes.", "text", "text/plain"),
+    ],
+)
+def test_get_asset_file_downloads_non_pdf_original_sources(
+    client,
+    filename,
+    content,
+    source_format,
+    media_type,
+):
+    asset_id = _seed_asset_source(
+        client,
+        filename=filename,
+        content=content,
+        source_format=source_format,
+        media_type=media_type,
+    )
+
+    resp = client.get(f"/api/assets/{asset_id}/file")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].split(";")[0] == media_type
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert "attachment" in resp.headers["content-disposition"]
+    assert resp.content == content
 
 
 def test_upload_records_detected_format_even_when_client_header_is_wrong(client):

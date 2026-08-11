@@ -14,12 +14,15 @@ import Card from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import ProgressBar from "@/components/ui/ProgressBar";
 import Skeleton from "@/components/ui/Skeleton";
+import ReviewGradeControls, {
+  type ReviewGradeRequest,
+} from "@/components/review/ReviewGradeControls";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   getReviewQueue,
+  getReviewSelection,
   getAdaptiveStudyQueue,
   getReviewSummary,
-  gradeCard,
   submitPracticeAnswer,
   MAX_QUEUE_FETCH,
   type ReviewQueueCardOut,
@@ -29,8 +32,17 @@ import {
 } from "@/lib/api/client";
 import { useKeyboardShortcuts, type ShortcutMap } from "@/lib/hooks/useKeyboardShortcuts";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
-import { formatIntervalPreview, previewIntervalDays, type ReviewGrade } from "@/lib/review/intervalPreview";
-import { notifyReviewSettled } from "@/lib/review/reviewBus";
+import type { ReviewGrade } from "@/lib/review/intervalPreview";
+import {
+  clearActiveReviewSession,
+  readActiveReviewSession,
+  readCompletedReviewSession,
+  writeActiveReviewSession,
+  writeCompletedReviewSession,
+  type ActiveReviewSession,
+  type CompletedReviewSession,
+  type ReviewScope,
+} from "@/lib/review/sessionStorage";
 
 const SHORTCUT_HINTS: ShortcutHint[] = [
   { keys: "space", description: "Reveal answer" },
@@ -40,64 +52,8 @@ const SHORTCUT_HINTS: ShortcutHint[] = [
 
 const GRADE_LABELS: Record<number, string> = { 1: "Again", 2: "Hard", 3: "Good", 4: "Easy" };
 const GRADE_TONES: Record<number, BadgeTone> = { 1: "serious", 2: "warning", 3: "good", 4: "accent" };
-// Organic system: attention ramp for the two "didn't stick" grades, sage
-// ramp for the two "stuck" grades — see the redesign handoff §4.
-const GRADE_BUTTON_BG: Record<number, string> = {
-  1: "bg-accent-200",
-  2: "bg-accent-100",
-  3: "bg-sage-200",
-  4: "bg-sage-300",
-};
-const REVIEW_SESSION_STORAGE_KEY = "smv2.review.session";
-
-interface StoredReviewSession {
-  courseId: string | null;
-  chosenSize: number;
-  remainingCardIds: string[];
-  gradedTally: Record<number, number>;
-  startedAt: number;
-}
-
-function isStoredReviewSession(value: unknown): value is StoredReviewSession {
-  if (typeof value !== "object" || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    (typeof v.courseId === "string" || v.courseId === null) &&
-    typeof v.chosenSize === "number" &&
-    Array.isArray(v.remainingCardIds) &&
-    v.remainingCardIds.every((id) => typeof id === "string") &&
-    typeof v.gradedTally === "object" &&
-    v.gradedTally !== null &&
-    typeof v.startedAt === "number"
-  );
-}
-
-function readStoredSession(): StoredReviewSession | null {
-  try {
-    const raw = window.localStorage.getItem(REVIEW_SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return isStoredReviewSession(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredSession(session: StoredReviewSession): void {
-  try {
-    window.localStorage.setItem(REVIEW_SESSION_STORAGE_KEY, JSON.stringify(session));
-  } catch {
-    // localStorage unavailable/full — resume is a nicety, not critical;
-    // fail silently rather than breaking the review flow over it.
-  }
-}
-
-function clearStoredSession(): void {
-  try {
-    window.localStorage.removeItem(REVIEW_SESSION_STORAGE_KEY);
-  } catch {
-    // ignore
-  }
+function isReviewScope(value: string | null): value is ReviewScope {
+  return value === "available" || value === "all" || value === "needs_attention";
 }
 
 type HubState =
@@ -133,11 +89,63 @@ function summaryAvailableCount(summary: ReviewSummaryOut): number {
   return summary.courses.reduce((total, course) => total + courseAvailableCount(course), 0);
 }
 
+function queueMetrics(
+  queue: { cards: ReviewQueueCardOut[]; overdue_count: number; new_count: number; available_count: number },
+  questionCount: number,
+  scope?: ReviewScope,
+  chapterLabel?: string,
+) {
+  if (!chapterLabel && (scope === undefined || scope === "available")) {
+    return {
+      due: queue.overdue_count,
+      new: queue.new_count,
+      total: queue.available_count + questionCount,
+    };
+  }
+  return {
+    due: queue.cards.filter((card) => card.is_due).length,
+    new: queue.cards.filter((card) => card.is_new).length,
+    total: queue.cards.length + questionCount,
+  };
+}
+
+function newSessionId(): string {
+  return `review-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function activeReviewUrl(courseId: string, scope: ReviewScope, chapterLabel: string | null): string {
+  const params = new URLSearchParams({ course: courseId });
+  if (scope !== "available") params.set("scope", scope);
+  if (chapterLabel) params.set("chapter", chapterLabel);
+  return `/review?${params.toString()}`;
+}
+
+function shouldResumeActiveReviewSession(
+  session: ActiveReviewSession | null,
+  courseId: string | null,
+  scope: ReviewScope | undefined,
+  chapterLabel: string | undefined,
+): session is ActiveReviewSession {
+  if (!session) return false;
+  if (!courseId) return true;
+  return (
+    session.courseId === courseId &&
+    session.scope === (scope ?? "available") &&
+    session.chapterLabel === (chapterLabel ?? null)
+  );
+}
+
 function ReviewPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const courseParam = searchParams.get("course");
   const startParam = searchParams.get("start");
+  const scopeParam = searchParams.get("scope");
+  const completedParam = searchParams.get("completed");
+  const reviewScope = isReviewScope(scopeParam) ? scopeParam : undefined;
+  const chapterLabel = searchParams.get("chapter") ?? undefined;
+  const queryKey = searchParams.toString();
+  const hasExplicitSessionQuery = Boolean(startParam || completedParam || scopeParam || chapterLabel);
 
   // "resuming" is a brief transitional phase, only entered when a saved
   // session exists at mount: it reconciles remainingCardIds against a
@@ -152,10 +160,15 @@ function ReviewPageInner() {
   // entirely and takes priority over resuming a stale saved session,
   // which gets silently superseded rather than restored.
   const [phase, setPhase] = useState<
-    "hub" | "chooser" | "session" | "resuming" | "bootstrapping-due"
+    "hub" | "chooser" | "session" | "resuming" | "bootstrapping-due" | "completed"
   >(() => {
+    if (courseParam && completedParam) return "completed";
     if (courseParam && startParam === "due") return "bootstrapping-due";
-    return readStoredSession() ? "resuming" : courseParam ? "chooser" : "hub";
+    return shouldResumeActiveReviewSession(readActiveReviewSession(), courseParam, reviewScope, chapterLabel)
+      ? "resuming"
+      : courseParam
+        ? "chooser"
+        : "hub";
   });
   const [courseId, setCourseId] = useState<string | null>(courseParam);
   // Only ever populated from the hub's already-loaded ReviewSummaryOut (see
@@ -176,11 +189,99 @@ function ReviewPageInner() {
   const [questionResult, setQuestionResult] = useState<SubmitPracticeAnswerOut | null>(null);
   const [cardIndex, setCardIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
-  const [cardShownAt, setCardShownAt] = useState(0);
+  const [gradeRequest, setGradeRequest] = useState<ReviewGradeRequest | null>(null);
+  const [gradePending, setGradePending] = useState(false);
   const [gradeCounts, setGradeCounts] = useState<Record<number, number>>({});
+  const [againCardIds, setAgainCardIds] = useState<string[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionScope, setActiveSessionScope] = useState<ReviewScope>(reviewScope ?? "available");
+  const [activeSessionChapterLabel, setActiveSessionChapterLabel] = useState<string | null>(chapterLabel ?? null);
+  const [completedSession, setCompletedSession] = useState<CompletedReviewSession | null>(null);
+  const [completedSessionChecked, setCompletedSessionChecked] = useState(!courseParam || !completedParam);
+  const [replayMissingMessage, setReplayMissingMessage] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const reconciledQueryRef = useRef(queryKey);
+  const bootstrappedQueryRef = useRef<string | null>(null);
+  const replayRequestTokenRef = useRef(0);
+  const latestQueryRef = useRef({ courseParam, completedParam, queryKey });
   useRouteFocus(headingRef);
+
+  useEffect(() => {
+    latestQueryRef.current = { courseParam, completedParam, queryKey };
+  }, [courseParam, completedParam, queryKey]);
+
+  useEffect(() => {
+    if (!courseParam || !completedParam) return;
+    let active = true;
+
+    queueMicrotask(() => {
+      if (!active) return;
+      const stored = readCompletedReviewSession();
+      setCompletedSession(
+        stored && stored.courseId === courseParam && stored.sessionId === completedParam ? stored : null,
+      );
+      setCompletedSessionChecked(true);
+      setSessionState({ kind: "done" });
+      setPhase("completed");
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [courseParam, completedParam]);
+
+  useEffect(() => {
+    if (reconciledQueryRef.current === queryKey) return;
+    reconciledQueryRef.current = queryKey;
+    let active = true;
+
+    queueMicrotask(() => {
+      if (!active) return;
+      setCourseId(courseParam);
+      setReplayMissingMessage(null);
+
+      if (courseParam && completedParam) {
+        const stored = readCompletedReviewSession();
+        setCompletedSession(
+          stored && stored.courseId === courseParam && stored.sessionId === completedParam ? stored : null,
+        );
+        setCompletedSessionChecked(true);
+        setSessionState({ kind: "done" });
+        setPhase("completed");
+        return;
+      }
+
+      setCompletedSession(null);
+      setCompletedSessionChecked(true);
+      if (courseParam && startParam === "due") {
+        setPhase("bootstrapping-due");
+        return;
+      }
+
+      if (courseParam) {
+        if (shouldResumeActiveReviewSession(readActiveReviewSession(), courseParam, reviewScope, chapterLabel)) {
+          setPhase("resuming");
+          return;
+        }
+        if (hasExplicitSessionQuery) clearActiveReviewSession();
+        setChooserState({ kind: "loading" });
+        setPhase("chooser");
+        return;
+      }
+
+      if (!hasExplicitSessionQuery && shouldResumeActiveReviewSession(readActiveReviewSession(), null, undefined, undefined)) {
+        setPhase("resuming");
+        return;
+      }
+
+      setPhase("hub");
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [queryKey, courseParam, completedParam, startParam, hasExplicitSessionQuery, reviewScope, chapterLabel]);
 
   // Runs once, only when mount found a saved session: reconcile it
   // against a fresh queue fetch and either drop straight into the
@@ -191,38 +292,38 @@ function ReviewPageInner() {
     let active = true;
 
     async function reconcile() {
-      const stored = readStoredSession();
+      const stored = readActiveReviewSession();
       if (!stored || !stored.courseId || stored.remainingCardIds.length === 0) {
-        clearStoredSession();
+        clearActiveReviewSession();
         if (active) setPhase(courseParam ? "chooser" : "hub");
         return;
       }
       const storedCourseId = stored.courseId;
       if (active) setCourseId(storedCourseId);
 
-      const { data } = await getReviewQueue(storedCourseId, MAX_QUEUE_FETCH);
+      const { data, status } = await getReviewSelection(storedCourseId, stored.remainingCardIds);
       if (!active) return;
       if (!data) {
         // Couldn't reconcile (network) — don't lose the session over a
         // transient failure; land on the chooser instead of silently
         // discarding it.
+        setChooserState({ kind: "error", error: describeError(status, "Loading saved review session") });
         setPhase("chooser");
         return;
       }
-      const byId = new Map(data.cards.map((card) => [card.id, card]));
-      const reconciled = stored.remainingCardIds
-        .map((id) => byId.get(id))
-        .filter((card): card is ReviewQueueCardOut => card !== undefined);
-      if (reconciled.length === 0) {
-        clearStoredSession();
+      if (data.cards.length === 0) {
+        clearActiveReviewSession();
         setPhase("chooser");
         return;
       }
-      setCards(reconciled);
+      setCards(data.cards);
       setCardIndex(0);
       setRevealed(false);
-      setCardShownAt(Date.now());
       setGradeCounts(stored.gradedTally);
+      setAgainCardIds(stored.againCardIds);
+      setActiveSessionId(stored.sessionId);
+      setActiveSessionScope(stored.scope);
+      setActiveSessionChapterLabel(stored.chapterLabel);
       setSessionSize(stored.chosenSize);
       setSessionStartedAt(stored.startedAt);
       setIsResumedSession(true);
@@ -260,33 +361,41 @@ function ReviewPageInner() {
 
   const loadChooser = useCallback((id: string) => {
     setChooserState({ kind: "loading" });
-    Promise.all([getReviewQueue(id, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(id, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
+    Promise.all([
+      getReviewQueue(id, { limit: MAX_QUEUE_FETCH, scope: reviewScope, chapterLabel }),
+      getAdaptiveStudyQueue(id, MAX_QUEUE_FETCH),
+    ]).then(([review, adaptive]) => {
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
+        const metrics = queueMetrics(review.data, questionCount, reviewScope, chapterLabel);
         setChooserState({
           kind: "ready",
-          due: review.data.overdue_count,
-          new: review.data.new_count,
-          total: review.data.available_count + questionCount,
+          due: metrics.due,
+          new: metrics.new,
+          total: metrics.total,
         });
       } else {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
       }
     });
-  }, []);
+  }, [chapterLabel, reviewScope]);
 
   useEffect(() => {
     if (phase !== "chooser" || !courseId) return;
     let active = true;
-    Promise.all([getReviewQueue(courseId, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
+    Promise.all([
+      getReviewQueue(courseId, { limit: MAX_QUEUE_FETCH, scope: reviewScope, chapterLabel }),
+      getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH),
+    ]).then(([review, adaptive]) => {
       if (!active) return;
       if (review.data) {
         const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
+        const metrics = queueMetrics(review.data, questionCount, reviewScope, chapterLabel);
         setChooserState({
           kind: "ready",
-          due: review.data.overdue_count,
-          new: review.data.new_count,
-          total: review.data.available_count + questionCount,
+          due: metrics.due,
+          new: metrics.new,
+          total: metrics.total,
         });
       } else {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
@@ -295,7 +404,7 @@ function ReviewPageInner() {
     return () => {
       active = false;
     };
-  }, [phase, courseId]);
+  }, [phase, courseId, chapterLabel, reviewScope, queryKey]);
 
   function goToChooser(id: string, title: string) {
     setCourseId(id);
@@ -312,7 +421,12 @@ function ReviewPageInner() {
       setSessionSize(size);
       setGradeCounts({});
       setIsResumedSession(false);
-      Promise.all([getReviewQueue(courseId, size), getAdaptiveStudyQueue(courseId, size)]).then(([review, adaptive]) => {
+      setActiveSessionScope(reviewScope ?? "available");
+      setActiveSessionChapterLabel(chapterLabel ?? null);
+      Promise.all([
+        getReviewQueue(courseId, { limit: size, scope: reviewScope, chapterLabel }),
+        getAdaptiveStudyQueue(courseId, size),
+      ]).then(([review, adaptive]) => {
         if (!review.data) {
           setSessionState({ kind: "error", error: describeError(review.status, "Loading review queue") });
           return;
@@ -330,19 +444,28 @@ function ReviewPageInner() {
         setQuestionResult(null);
         setCardIndex(0);
         setRevealed(false);
-        setCardShownAt(startedAt);
+        setGradeRequest(null);
+        setGradePending(false);
         setSessionStartedAt(startedAt);
-        writeStoredSession({
+        const sessionId = newSessionId();
+        setActiveSessionId(sessionId);
+        setAgainCardIds([]);
+        writeActiveReviewSession({
+          version: 1,
+          sessionId,
           courseId,
+          scope: reviewScope ?? "available",
+          chapterLabel: chapterLabel ?? null,
           chosenSize: size,
           remainingCardIds: review.data.cards.map((card) => card.id),
           gradedTally: {},
+          againCardIds: [],
           startedAt,
         });
         setSessionState({ kind: "active" });
       });
     },
-    [courseId],
+    [chapterLabel, courseId, reviewScope],
   );
 
   // Runs once when the URL says start=due: discard whatever saved session
@@ -353,9 +476,14 @@ function ReviewPageInner() {
   // chooser if the lookup fails or nothing is actually due.
   useEffect(() => {
     if (phase !== "bootstrapping-due" || !courseId) return;
-    clearStoredSession();
+    if (bootstrappedQueryRef.current === queryKey) return;
+    bootstrappedQueryRef.current = queryKey;
+    clearActiveReviewSession();
     let active = true;
-    Promise.all([getReviewQueue(courseId, MAX_QUEUE_FETCH), getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH)]).then(([review, adaptive]) => {
+    Promise.all([
+      getReviewQueue(courseId, { limit: MAX_QUEUE_FETCH, scope: reviewScope, chapterLabel }),
+      getAdaptiveStudyQueue(courseId, MAX_QUEUE_FETCH),
+    ]).then(([review, adaptive]) => {
       if (!active) return;
       if (!review.data) {
         setChooserState({ kind: "error", error: describeError(review.status, "Loading review queue") });
@@ -363,26 +491,26 @@ function ReviewPageInner() {
         return;
       }
       const questionCount = adaptive.data?.activities.filter((item) => item.activity_type === "question").length ?? 0;
-      const availableTotal = review.data.available_count + questionCount;
-      if (review.data.overdue_count === 0) {
+      const metrics = queueMetrics(review.data, questionCount, reviewScope, chapterLabel);
+      if (metrics.due === 0) {
         setChooserState({
           kind: "ready",
-          due: review.data.overdue_count,
-          new: review.data.new_count,
-          total: availableTotal,
+          due: metrics.due,
+          new: metrics.new,
+          total: metrics.total,
         });
         setPhase("chooser");
         return;
       }
-      startSession(review.data.overdue_count);
+      startSession(metrics.due);
     });
     return () => {
       active = false;
     };
-  }, [phase, courseId, startSession]);
+  }, [phase, courseId, chapterLabel, queryKey, reviewScope, startSession]);
 
   const discardResumedSession = useCallback(() => {
-    clearStoredSession();
+    clearActiveReviewSession();
     setIsResumedSession(false);
     setCards([]);
     setCardIndex(0);
@@ -393,39 +521,198 @@ function ReviewPageInner() {
 
   const reveal = useCallback(() => setRevealed(true), []);
 
-  const grade = useCallback(
+  const requestGrade = useCallback(
     (value: number) => {
       const card = cards[cardIndex];
+      if (!card || !revealed || gradePending) return;
+      setGradeRequest({ grade: value as ReviewGrade, token: Date.now() });
+    },
+    [cards, cardIndex, gradePending, revealed],
+  );
+
+  const completeSession = useCallback(
+    (tally: Record<number, number>, missedIds: string[]) => {
+      if (!courseId) return;
+      const completed: CompletedReviewSession = {
+        version: 1,
+        sessionId: activeSessionId ?? newSessionId(),
+        courseId,
+        scope: activeSessionScope,
+        chapterLabel: activeSessionChapterLabel,
+        endedAt: Date.now(),
+        gradedTally: tally,
+        againCardIds: missedIds,
+      };
+      writeCompletedReviewSession(completed);
+      setCompletedSession(completed);
+      clearActiveReviewSession();
+      setSessionState({ kind: "done" });
+      router.replace(`/review?course=${courseId}&completed=${completed.sessionId}`);
+    },
+    [activeSessionChapterLabel, activeSessionId, activeSessionScope, courseId, router],
+  );
+
+  const goBackToReview = useCallback(() => {
+    clearActiveReviewSession();
+    setCompletedSession(null);
+    setIsResumedSession(false);
+    setCards([]);
+    setQuestions([]);
+    setCardIndex(0);
+    setQuestionIndex(0);
+    if (!courseId) {
+      setPhase("hub");
+      router.replace("/review");
+      return;
+    }
+    setSessionState({ kind: "loading" });
+    setChooserState({ kind: "loading" });
+    setReplayMissingMessage(null);
+    setPhase("chooser");
+    router.replace(`/review?course=${courseId}`);
+  }, [courseId, router]);
+
+  const startMissedReplay = useCallback(async () => {
+    if (!completedSession || completedSession.againCardIds.length === 0) return;
+    const replaySource = {
+      courseId: completedSession.courseId,
+      sessionId: completedSession.sessionId,
+      scope: completedSession.scope,
+      chapterLabel: completedSession.chapterLabel,
+    };
+    const requestToken = replayRequestTokenRef.current + 1;
+    replayRequestTokenRef.current = requestToken;
+    setPhase("session");
+    setSessionState({ kind: "loading" });
+    setReplayMissingMessage(null);
+    const activeUrl = activeReviewUrl(replaySource.courseId, replaySource.scope, replaySource.chapterLabel);
+    const activeQuery = activeUrl.split("?")[1] ?? "";
+    reconciledQueryRef.current = activeQuery;
+    router.replace(activeUrl);
+    const { data, status } = await getReviewSelection(completedSession.courseId, completedSession.againCardIds);
+    const latest = latestQueryRef.current;
+    const queryStillMatchesReplay =
+      latest.completedParam === replaySource.sessionId ||
+      (latest.completedParam === null && latest.queryKey === activeQuery);
+    if (
+      replayRequestTokenRef.current !== requestToken ||
+      latest.courseParam !== replaySource.courseId ||
+      !queryStillMatchesReplay
+    ) {
+      return;
+    }
+    if (!data) {
+      setSessionState({ kind: "error", error: describeError(status, "Loading missed cards") });
+      return;
+    }
+    if (data.missing_card_ids.length > 0) {
+      const count = data.missing_card_ids.length;
+      setReplayMissingMessage(
+        `${count} missed ${count === 1 ? "card is" : "cards are"} no longer available.`,
+      );
+    }
+    if (data.cards.length === 0) {
+      setSessionState({ kind: "empty" });
+      return;
+    }
+    const sessionId = newSessionId();
+    const startedAt = Date.now();
+    setCourseId(completedSession.courseId);
+    setActiveSessionId(sessionId);
+    setCards(data.cards);
+    setQuestions([]);
+    setCardIndex(0);
+    setRevealed(false);
+    setGradeRequest(null);
+    setGradePending(false);
+    setGradeCounts({});
+    setAgainCardIds([]);
+    setActiveSessionScope(completedSession.scope);
+    setActiveSessionChapterLabel(completedSession.chapterLabel);
+    setSessionSize(data.cards.length);
+    setSessionStartedAt(startedAt);
+    setIsResumedSession(false);
+    writeActiveReviewSession({
+      version: 1,
+      sessionId,
+      courseId: completedSession.courseId,
+      scope: completedSession.scope,
+      chapterLabel: completedSession.chapterLabel,
+      chosenSize: data.cards.length,
+      remainingCardIds: data.cards.map((card) => card.id),
+      gradedTally: {},
+      againCardIds: [],
+      startedAt,
+    });
+    setSessionState({ kind: "active" });
+  }, [completedSession, router]);
+
+  const handleCardGraded = useCallback(
+    (value: ReviewGrade) => {
+      const card = cards[cardIndex];
       if (!card) return;
-      const elapsedMs = Date.now() - cardShownAt;
       const nextTally = { ...gradeCounts, [value]: (gradeCounts[value] ?? 0) + 1 };
+      const nextAgainCardIds = value === 1 ? [...againCardIds, card.id] : againCardIds;
       setGradeCounts(nextTally);
-      // Fire-and-forget: grading must feel instant (keyboard-first is the
-      // law here), not wait on a network round trip before the next card.
-      void gradeCard(card.id, { grade: value, elapsed_ms: elapsedMs });
-      notifyReviewSettled();
+      setAgainCardIds(nextAgainCardIds);
+      setGradePending(false);
+      setReplayMissingMessage(null);
 
       const nextIndex = cardIndex + 1;
       if (nextIndex >= cards.length) {
-        clearStoredSession();
-        if (questions.length === 0) setSessionState({ kind: "done" });
-        else setCardIndex(nextIndex);
+        if (questions.length === 0) {
+          completeSession(nextTally, nextAgainCardIds);
+        } else {
+          if (courseId && sessionSize !== null) {
+            writeActiveReviewSession({
+              version: 1,
+              sessionId: activeSessionId ?? newSessionId(),
+              courseId,
+              scope: activeSessionScope,
+              chapterLabel: activeSessionChapterLabel,
+              chosenSize: sessionSize,
+              remainingCardIds: [],
+              gradedTally: nextTally,
+              againCardIds: nextAgainCardIds,
+              startedAt: sessionStartedAt,
+            });
+          }
+          setCardIndex(nextIndex);
+        }
       } else {
         if (courseId && sessionSize !== null) {
-          writeStoredSession({
+          writeActiveReviewSession({
+            version: 1,
+            sessionId: activeSessionId ?? newSessionId(),
             courseId,
+            scope: activeSessionScope,
+            chapterLabel: activeSessionChapterLabel,
             chosenSize: sessionSize,
             remainingCardIds: cards.slice(nextIndex).map((c) => c.id),
             gradedTally: nextTally,
+            againCardIds: nextAgainCardIds,
             startedAt: sessionStartedAt,
           });
         }
         setCardIndex(nextIndex);
         setRevealed(false);
-        setCardShownAt(Date.now());
+        setGradeRequest(null);
       }
     },
-    [cards, cardIndex, cardShownAt, courseId, sessionSize, sessionStartedAt, gradeCounts, questions.length],
+    [
+      activeSessionId,
+      activeSessionChapterLabel,
+      activeSessionScope,
+      againCardIds,
+      cards,
+      cardIndex,
+      courseId,
+      gradeCounts,
+      questions.length,
+      completeSession,
+      sessionSize,
+      sessionStartedAt,
+    ],
   );
 
   const answerQuestion = useCallback(async (choice: number) => {
@@ -439,13 +726,13 @@ function ReviewPageInner() {
   const advanceQuestion = useCallback(() => {
     const next = questionIndex + 1;
     if (next >= questions.length) {
-      setSessionState({ kind: "done" });
+      completeSession(gradeCounts, againCardIds);
       return;
     }
     setQuestionIndex(next);
     setSelectedChoice(null);
     setQuestionResult(null);
-  }, [questionIndex, questions.length]);
+  }, [againCardIds, completeSession, gradeCounts, questionIndex, questions.length]);
 
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
@@ -453,13 +740,15 @@ function ReviewPageInner() {
   const shortcutMap: ShortcutMap =
     phase === "session" && sessionState.kind === "active" && cards[cardIndex]
       ? revealed
-        ? {
-            "1": () => grade(1),
-            "2": () => grade(2),
-            "3": () => grade(3),
-            "4": () => grade(4),
+        ? gradePending
+          ? { "?": openShortcuts }
+          : {
+            "1": () => requestGrade(1),
+            "2": () => requestGrade(2),
+            "3": () => requestGrade(3),
+            "4": () => requestGrade(4),
             "?": openShortcuts,
-          }
+            }
         : { " ": reveal, "?": openShortcuts }
       : { "?": openShortcuts };
 
@@ -541,6 +830,48 @@ function ReviewPageInner() {
         </div>
       );
     }
+  } else if (phase === "completed") {
+    if (!completedSessionChecked) {
+      mainContent = (
+        <div role="status" className="p-8">
+          <span className="sr-only">Loading…</span>
+          <Skeleton className="mx-auto mt-8 h-40 w-full max-w-2xl" />
+        </div>
+      );
+    } else if (!completedSession) {
+      mainContent = (
+        <div className="flex flex-1 items-center justify-center p-8">
+          <EmptyState
+            icon="✨"
+            title="Review session unavailable"
+            body="This completed session is no longer available."
+          />
+        </div>
+      );
+    } else {
+      mainContent = (
+        <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 p-8 text-center">
+          <h2 className="text-lg font-semibold">Session complete</h2>
+          <ul className="flex flex-col gap-2">
+            {[1, 2, 3, 4].map((value) => (
+              <li key={value}>
+                <Badge tone={GRADE_TONES[value]}>
+                  {GRADE_LABELS[value]}: {completedSession.gradedTally[value] ?? 0}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+          {completedSession.againCardIds.length > 0 && (
+            <Button variant="primary" onClick={() => void startMissedReplay()}>
+              Review missed ({completedSession.againCardIds.length})
+            </Button>
+          )}
+          <Button variant="secondary" onClick={goBackToReview}>
+            Back to review
+          </Button>
+        </div>
+      );
+    }
   } else if (phase === "chooser") {
     if (chooserState.kind === "loading") {
       mainContent = (
@@ -611,7 +942,12 @@ function ReviewPageInner() {
     );
   } else if (sessionState.kind === "empty") {
     mainContent = (
-      <div className="flex flex-1 items-center justify-center p-8">
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
+        {replayMissingMessage && (
+          <p role="alert" className="rounded-md border border-accent/40 bg-accent-soft px-4 py-2 text-sm text-accent-800">
+            {replayMissingMessage}
+          </p>
+        )}
         <EmptyState
           icon="✨"
           title="All caught up"
@@ -620,6 +956,7 @@ function ReviewPageInner() {
       </div>
     );
   } else if (sessionState.kind === "done") {
+    const snapshot = completedSession;
     mainContent = (
       <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 p-8 text-center">
         <h2 className="text-lg font-semibold">Session complete</h2>
@@ -632,9 +969,14 @@ function ReviewPageInner() {
             </li>
           ))}
         </ul>
-        <Link href="/review" className="text-sm font-medium text-accent underline">
+        {snapshot && snapshot.againCardIds.length > 0 && (
+          <Button variant="primary" onClick={() => void startMissedReplay()}>
+            Review missed ({snapshot.againCardIds.length})
+          </Button>
+        )}
+        <Button variant="secondary" onClick={goBackToReview}>
           Back to review
-        </Link>
+        </Button>
       </div>
     );
   } else {
@@ -660,6 +1002,11 @@ function ReviewPageInner() {
               Discard
             </button>
           </div>
+        )}
+        {replayMissingMessage && (
+          <p role="alert" className="rounded-md border border-accent/40 bg-accent-soft px-4 py-2 text-sm text-accent-800">
+            {replayMissingMessage}
+          </p>
         )}
 
         <div className="flex items-center gap-3.5">
@@ -703,31 +1050,12 @@ function ReviewPageInner() {
             Reveal (space)
           </Button>
         ) : (
-          <div className="grid grid-cols-4 gap-3">
-            {([1, 2, 3, 4] as ReviewGrade[]).map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => grade(value)}
-                aria-label={`${GRADE_LABELS[value]} (${value})`}
-                className={`flex flex-col items-center gap-1 rounded-md py-3 text-foreground transition-opacity hover:opacity-80 ${GRADE_BUTTON_BG[value]}`}
-              >
-                <span aria-hidden="true" className="text-[15px] font-semibold">
-                  {GRADE_LABELS[value]}
-                </span>
-                <span aria-hidden="true" className="font-mono text-[11px] opacity-70">
-                  {value} ·{" "}
-                  {formatIntervalPreview(
-                    previewIntervalDays(value, {
-                      intervalDays: card.interval_days,
-                      ease: card.ease,
-                      reps: card.reps,
-                    }),
-                  )}
-                </span>
-              </button>
-            ))}
-          </div>
+          <ReviewGradeControls
+            card={card}
+            request={gradeRequest}
+            onPendingChange={setGradePending}
+            onGraded={handleCardGraded}
+          />
         )}</> : question ? (
           <Card className="flex min-h-[320px] flex-col gap-4 p-10 shadow-md">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-accent">
@@ -783,7 +1111,7 @@ function ReviewPageInner() {
   const headerLabel = courseId ? (courseTitle ? `Review session · ${courseTitle}` : "Review session") : "Review";
 
   const endSession = () => {
-    clearStoredSession();
+    clearActiveReviewSession();
     router.push("/");
   };
 

@@ -15,6 +15,7 @@ export const API_BASE = process.env.NEXT_PUBLIC_SMV2_API_URL ?? "http://localhos
 export const client = createClient<paths>({ baseUrl: API_BASE });
 
 export interface ApiErrorDetail {
+  [key: string]: unknown;
   code?: string | null;
   failure_category?: string | null;
   message?: string | null;
@@ -38,11 +39,15 @@ export type LlmStatusOut = components["schemas"]["LlmStatusOut"];
 export type SettingsOut = components["schemas"]["SettingsOut"];
 export type SettingsUpdateIn = components["schemas"]["SettingsUpdateIn"];
 export type SettingsClearIn = components["schemas"]["SettingsClearIn"];
+export type OllamaModelsDiscoverIn = components["schemas"]["OllamaModelsDiscoverIn"];
+export type OllamaModelsDiscoverOut = components["schemas"]["OllamaModelsDiscoverOut"];
 export type CardOut = components["schemas"]["CardOut"];
 export type UpdateCardIn = components["schemas"]["UpdateCardIn"];
 export type GenerateCardsOut = components["schemas"]["GenerateCardsOut"];
 export type ReviewQueueOut = components["schemas"]["ReviewQueueOut"];
 export type ReviewQueueCardOut = components["schemas"]["ReviewQueueCardOut"];
+export type ReviewSelectionIn = components["schemas"]["ReviewSelectionIn"];
+export type ReviewSelectionOut = components["schemas"]["ReviewSelectionOut"];
 export type AdaptiveStudyActivityOut = components["schemas"]["AdaptiveStudyActivityOut"];
 export type AdaptiveStudyQueueOut = components["schemas"]["AdaptiveStudyQueueOut"];
 export type GradeCardIn = components["schemas"]["GradeCardIn"];
@@ -106,7 +111,7 @@ export type OutlineOp =
  * below (a plain REST scan) agree on the same set instead of each keeping
  * its own copy of this literal.
  */
-export const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed"]);
+export const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
 /**
  * Normalized result shape for every API helper below. `status` is undefined
@@ -171,6 +176,15 @@ export async function retryJob(jobId: string): Promise<ApiResult<JobOut>> {
   );
 }
 
+export async function cancelJob(jobId: string): Promise<ApiResult<JobOut>> {
+  return request(
+    client.POST("/api/jobs/{job_id}/cancel", {
+      params: { path: { job_id: jobId } },
+      headers: await csrfHeaders(),
+    }),
+  );
+}
+
 export function getLlmStatus(): Promise<ApiResult<LlmStatusOut>> {
   return request(client.GET("/api/llm/status"));
 }
@@ -201,6 +215,15 @@ export async function clearProviderSecret(
   return request(client.DELETE("/api/settings", {
     headers: await csrfHeaders(),
     body: { provider, confirmation },
+  }));
+}
+
+export async function discoverOllamaModels(
+  body: OllamaModelsDiscoverIn,
+): Promise<ApiResult<OllamaModelsDiscoverOut>> {
+  return request(client.POST("/api/settings/ollama/models", {
+    headers: await csrfHeaders(),
+    body,
   }));
 }
 
@@ -677,10 +700,33 @@ export async function findActiveCardsJob(sectionId: string): Promise<JobOut | nu
 // define their own identical constant.
 export const MAX_QUEUE_FETCH = 200;
 
-export function getReviewQueue(courseId: string, limit?: number) {
+export interface ReviewQueueOptions {
+  limit?: number;
+  scope?: "available" | "all" | "needs_attention";
+  chapterLabel?: string;
+}
+
+export function getReviewQueue(courseId: string, options: ReviewQueueOptions = {}) {
+  const query: {
+    limit?: number;
+    scope?: ReviewQueueOptions["scope"];
+    chapter_label?: string;
+  } = {};
+  if (options.limit !== undefined) query.limit = options.limit;
+  if (options.scope !== undefined) query.scope = options.scope;
+  if (options.chapterLabel !== undefined) query.chapter_label = options.chapterLabel;
   return request(
     client.GET("/api/courses/{course_id}/review/queue", {
-      params: { path: { course_id: courseId }, query: limit === undefined ? {} : { limit } },
+      params: { path: { course_id: courseId }, query },
+    }),
+  );
+}
+
+export function getReviewSelection(courseId: string, cardIds: string[]) {
+  return request(
+    client.POST("/api/courses/{course_id}/review/selection", {
+      params: { path: { course_id: courseId } },
+      body: { card_ids: cardIds },
     }),
   );
 }
@@ -791,7 +837,7 @@ export function retakeTest(testId: string) {
  * used, not the cards themselves.
  */
 export async function getDueCountForCourse(courseId: string): Promise<number> {
-  const { data } = await getReviewQueue(courseId, 1);
+  const { data } = await getReviewQueue(courseId, { limit: 1 });
   return data?.due ?? 0;
 }
 

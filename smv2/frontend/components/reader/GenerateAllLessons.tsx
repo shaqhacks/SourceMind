@@ -2,9 +2,12 @@
 
 import { useCallback, useState } from "react";
 
+import GenerationProgress from "@/components/jobs/GenerationProgress";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
 import { generateAllLessons, getJob } from "@/lib/api/client";
+import { describeError, type FetchError } from "@/lib/api/errors";
+import type { JobEvent } from "@/lib/hooks/useJobEvents";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 import LessonJobWatcher from "./LessonJobWatcher";
@@ -34,28 +37,31 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
   const [settledCount, setSettledCount] = useState(0);
   const [skipped, setSkipped] = useState(0);
   const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<FetchError | null>(null);
+  const [jobEvents, setJobEvents] = useState<Record<string, JobEvent>>({});
 
   const total = watchList?.length ?? 0;
   const inProgress = watchList !== null && settledCount < total;
+  const representativeJob =
+    watchList
+      ?.map((entry) => jobEvents[entry.jobId])
+      .find((job) => job && job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled") ??
+    null;
 
   const handleStart = useCallback(async () => {
     setStarting(true);
     setError(null);
-    const { data, status } = await generateAllLessons(courseId);
+    const { data, status, error } = await generateAllLessons(courseId);
     setStarting(false);
 
     if (!data) {
-      setError(
-        status === undefined
-          ? "Could not reach the API."
-          : `Starting generation failed (HTTP ${status}).`,
-      );
+      setError(describeError(status, "Starting generation", error));
       return;
     }
 
     setSkipped(data.skipped);
     setSettledCount(0);
+    setJobEvents({});
 
     if (data.job_ids.length === 0) {
       setWatchList([]);
@@ -71,14 +77,21 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
     setWatchList(entries);
   }, [courseId]);
 
-  const handleSettled = useCallback(
+  const handleSettled = useCallback(() => {
+    setSettledCount((count) => count + 1);
+  }, []);
+
+  const handleSectionSettled = useCallback(
     (sectionId: string, status: "ready" | "failed") => {
-      setSettledCount((count) => count + 1);
       onSectionSettled(sectionId, status);
       notifyReviewSettled();
     },
     [onSectionSettled],
   );
+
+  const handleJobUpdate = useCallback((job: JobEvent) => {
+    setJobEvents((current) => ({ ...current, [job.id]: job }));
+  }, []);
 
   return (
     <div className="flex items-center gap-2">
@@ -90,11 +103,23 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
         aria-live="polite"
         className="font-medium"
       >
-        {inProgress ? `Generating ${settledCount} of ${total}…` : "Generate all lessons"}
+        {inProgress ? "Generating lessons" : "Generate all lessons"}
       </Button>
+      {inProgress && (
+        <div className="min-w-72">
+          <GenerationProgress job={representativeJob} quiet={settledCount > 0} compact />
+          <p className="mt-1 text-xs text-muted-foreground">
+            {settledCount} of {total} lesson jobs settled.
+          </p>
+        </div>
+      )}
       {error && (
         <div className="min-w-72">
-          <RecoveryBanner message={error} onRetry={() => void handleStart()} />
+          <RecoveryBanner
+            message={error.message}
+            errorDetail={error.detail}
+            onRetry={() => void handleStart()}
+          />
         </div>
       )}
       {!inProgress && watchList !== null && skipped > 0 && (
@@ -106,6 +131,8 @@ export default function GenerateAllLessons({ courseId, onSectionSettled }: Gener
           jobId={entry.jobId}
           sectionId={entry.sectionId}
           onSettled={handleSettled}
+          onSectionSettled={handleSectionSettled}
+          onUpdate={handleJobUpdate}
         />
       ))}
     </div>

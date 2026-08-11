@@ -40,6 +40,9 @@ fi
 echo "== frontend: generate API client =="
 (cd frontend && npm run gen:api)
 
+echo "== generated artifacts: drift check =="
+git diff --exit-code -- openapi.json frontend/lib/api/schema.d.ts
+
 echo "== frontend: typecheck =="
 (cd frontend && npm run typecheck)
 

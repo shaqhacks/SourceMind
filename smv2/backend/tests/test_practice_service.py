@@ -8,11 +8,14 @@ from app.db.engine import get_session
 from app.db.models import (
     Concept,
     Course,
+    Job,
     LearnerEvidenceEvent,
     PracticeAnswer,
+    PracticeExtractionRun,
     PracticeQuestion,
     Section,
 )
+from app.jobs.error_envelope import encode_job_error
 from app.services import practice_service
 
 
@@ -138,6 +141,55 @@ def seed_two_ready_practice_questions_same_concept() -> tuple[str, str, str]:
         session.close()
 
 
+def seed_practice_run(
+    *,
+    run_status: str = "queued",
+    job_status: str = "queued",
+    job_error: str | None = None,
+    run_error: str | None = None,
+) -> tuple[str, str]:
+    session = get_session()
+    try:
+        course = Course(title="Practice Course")
+        session.add(course)
+        session.flush()
+
+        practice = Section(
+            id=f"practice-{uuid.uuid4()}",
+            course_id=course.id,
+            order_index=1,
+            title="0.2 Practice - Fractions",
+            body_md="1. Simplify 42/12.",
+            content_hash="practice-hash",
+            kind="practice",
+            chapter_label="Chapter 0 : Pre-Algebra",
+        )
+        session.add(practice)
+        session.flush()
+
+        job = Job(
+            type="generate_practice_assessment",
+            status=job_status,
+            payload={"course_id": course.id, "section_id": practice.id},
+            error=job_error,
+        )
+        session.add(job)
+        session.flush()
+        run = PracticeExtractionRun(
+            course_id=course.id,
+            section_id=practice.id,
+            status=run_status,
+            job_id=job.id,
+            input_fingerprint="fingerprint",
+            error=run_error,
+        )
+        session.add(run)
+        session.commit()
+        return course.id, practice.id
+    finally:
+        session.close()
+
+
 def test_submit_wrong_answer_records_evidence_without_legacy_mastery(client):
     question_id, course_id = seed_ready_practice_question(correct_index=0)
 
@@ -258,3 +310,54 @@ def test_submit_answer_rejects_cross_course_question(client):
 
     with pytest.raises(practice_service.PracticeQuestionNotFoundError):
         practice_service.submit_answer(other_course_id, question_id, "learner-1", 0)
+
+
+def test_failed_practice_assessment_exposes_safe_structured_error_detail(client):
+    course_id, section_id = seed_practice_run(
+        job_status="failed",
+        job_error=encode_job_error(
+            "The model returned an invalid question format.",
+            {
+                "code": "invalid_model_output",
+                "message": "The model returned an invalid question format.",
+                "failure_category": "structured_output_invalid",
+            },
+        ),
+    )
+
+    status_code, body = practice_service.get_assessment(course_id, section_id, None)
+
+    assert status_code == 200
+    assert body["status"] == "failed"
+    assert body["message"] == "Practice question extraction failed."
+    assert body["error_detail"] == {
+        "code": "invalid_model_output",
+        "message": "The model returned an invalid question format.",
+        "failure_category": "structured_output_invalid",
+    }
+
+
+def test_legacy_failed_practice_assessment_has_no_error_detail(client):
+    course_id, section_id = seed_practice_run(
+        run_status="failed",
+        job_status="failed",
+        job_error="Expecting value: line 1 column 1 (char 0)",
+        run_error="raw extraction parser trace",
+    )
+
+    status_code, body = practice_service.get_assessment(course_id, section_id, None)
+
+    assert status_code == 200
+    assert body["status"] == "failed"
+    assert body["message"] == "Practice question extraction failed."
+    assert body["error_detail"] is None
+
+
+def test_generating_practice_assessment_has_no_error_detail(client):
+    course_id, section_id = seed_practice_run()
+
+    status_code, body = practice_service.get_assessment(course_id, section_id, None)
+
+    assert status_code == 202
+    assert body["status"] == "generating"
+    assert body["error_detail"] is None

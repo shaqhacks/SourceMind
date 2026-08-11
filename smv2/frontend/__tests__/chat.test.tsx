@@ -3,6 +3,21 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import Chat, { type ChatSendResult, type ChatTurn } from "@/components/Chat";
+import type { ApiErrorDetail } from "@/lib/api/client";
+
+const readinessDetail: ApiErrorDetail = {
+  code: "llm_readiness_unavailable",
+  failure_category: "ollama_model_unavailable",
+  message: "Your configured Ollama model is not present.",
+  remediation: "Open Settings and select a currently installed model.",
+};
+
+const workerFailureDetail: ApiErrorDetail = {
+  code: "worker_failed",
+  failure_category: "generation_failed",
+  message: "The assistant worker failed.",
+  remediation: "Retry the request or inspect the job.",
+};
 
 describe("Chat", () => {
   afterEach(() => {
@@ -133,6 +148,63 @@ describe("Chat", () => {
     await user.click(screen.getByRole("button", { name: /retry/i }));
     expect(sendFn).toHaveBeenLastCalledWith("Retry me");
     expect(await screen.findByText(/now it works/i)).toBeInTheDocument();
+  });
+
+  it("on structured readiness send failure, routes to Settings without retry or duplicate pending text", async () => {
+    const loadHistory = vi.fn<() => Promise<ChatTurn[]>>().mockResolvedValue([]);
+    const sendFn = vi.fn<(message: string) => Promise<ChatSendResult>>().mockResolvedValue({
+      ok: false,
+      message: "Your configured Ollama model is not present.",
+      retryable: true,
+      errorDetail: readinessDetail,
+    });
+    const user = userEvent.setup();
+
+    render(<Chat loadHistory={loadHistory} sendFn={sendFn} />);
+    await waitFor(() => expect(loadHistory).toHaveBeenCalled());
+
+    await user.type(screen.getByLabelText(/message/i), "Explain this model");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Explain this model")).not.toBeInTheDocument();
+  });
+
+  it("on structured non-readiness send failure, keeps retry and Jobs recovery", async () => {
+    const loadHistory = vi.fn<() => Promise<ChatTurn[]>>().mockResolvedValue([]);
+    const sendFn = vi
+      .fn<(message: string) => Promise<ChatSendResult>>()
+      .mockResolvedValueOnce({
+        ok: false,
+        message: "The assistant worker failed.",
+        retryable: true,
+        errorDetail: workerFailureDetail,
+      })
+      .mockResolvedValueOnce({ ok: true, content: "Recovered.", citations: [] });
+    const user = userEvent.setup();
+
+    render(<Chat loadHistory={loadHistory} sendFn={sendFn} />);
+    await waitFor(() => expect(loadHistory).toHaveBeenCalled());
+
+    await user.type(screen.getByLabelText(/message/i), "Retry this worker failure");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("The assistant worker failed.");
+    expect(screen.getByRole("link", { name: /view job details/i })).toHaveAttribute(
+      "href",
+      "/jobs",
+    );
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(sendFn).toHaveBeenLastCalledWith("Retry this worker failure");
+    expect(await screen.findByText("Recovered.")).toBeInTheDocument();
   });
 
   it("does not reset the transcript when loadHistory/sendFn keep stable references across re-renders", async () => {

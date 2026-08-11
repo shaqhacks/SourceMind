@@ -435,7 +435,7 @@ h4 {
 
 /* Selectable pdf.js text layer overlaid on PdfPagesView's canvas
    (components/reader/PdfPagesView.tsx). Faithful copy of the
-   `.textLayer`-scoped rules from pdfjs-dist/web/pdf_viewer.css (6.1.200,
+   `.textLayer`-scoped rules from pdfjs-dist/web/pdf_viewer.css (6.2.108,
    lines ~615-762) — that stylesheet can't be imported directly (Next App
    Router rejects deep global CSS from node_modules) — kept bounded to
    `.textLayer` itself rather than importing the whole file. This is not

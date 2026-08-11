@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import GenerationProgress from "@/components/jobs/GenerationProgress";
 import Markdown from "@/components/Markdown";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import Button from "@/components/ui/Button";
@@ -18,7 +19,7 @@ import {
   type SectionDetailOut,
 } from "@/lib/api/client";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
-import { formatJobProgress } from "@/lib/jobs/format";
+import { cancelGenerationJob } from "@/lib/jobs/cancel";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export type LessonDisplayStatus = "none" | "queued" | "generating" | "ready" | "failed" | "stale";
@@ -70,7 +71,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   const [estimate, setEstimate] = useState<LessonEstimateOut | null>(null);
   const [localJobId, setLocalJobId] = useState<string | null>(null);
   const [discoveredJobId, setDiscoveredJobId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<FetchError | null>(null);
   const [confirmingRegenerate, setConfirmingRegenerate] = useState(false);
   // Tagged with the jobId it was fetched for (same idiom as useJobEvents'
   // own internal state) so staleness is a render-time comparison rather
@@ -183,7 +184,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
   const handleGenerate = useCallback(
     async (force: boolean) => {
       setActionError(null);
-      const { data, status } = await generateLesson(sectionId, force);
+      const { data, status, error } = await generateLesson(sectionId, force);
       if (data) {
         setLocalJobId(data.job_id);
         return;
@@ -194,7 +195,7 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
         retryLoad();
         return;
       }
-      setActionError(describeError(status, "Starting lesson generation").message);
+      setActionError(describeError(status, "Starting lesson generation", error));
     },
     [sectionId, retryLoad],
   );
@@ -213,9 +214,11 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
 
   if (effectiveStatus === "generating") {
     return (
-      <div role="status" className="text-sm text-muted-foreground">
-        <p>{formatJobProgress(job, stalled)}</p>
-      </div>
+      <GenerationProgress
+        job={stalled ? null : job}
+        quiet={stalled}
+        onCancel={watchedJobId ? () => cancelGenerationJob(watchedJobId) : undefined}
+      />
     );
   }
 
@@ -228,7 +231,13 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
           jobId={watchedJobId}
           errorDetail={failureDetail}
         />
-        {actionError && <p className="text-xs text-status-serious">{actionError}</p>}
+        {actionError && (
+          <RecoveryBanner
+            message={actionError.message}
+            errorDetail={actionError.detail}
+            onRetry={() => handleGenerate(true)}
+          />
+        )}
       </div>
     );
   }
@@ -282,7 +291,13 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
           </div>
         )}
 
-        {actionError && <p className="text-xs text-status-serious">{actionError}</p>}
+        {actionError && (
+          <RecoveryBanner
+            message={actionError.message}
+            errorDetail={actionError.detail}
+            onRetry={() => handleGenerate(true)}
+          />
+        )}
 
         <Markdown>{detail?.lesson_md ?? ""}</Markdown>
       </div>
@@ -298,7 +313,13 @@ export default function LessonPane({ sectionId, onStatusChange }: LessonPaneProp
       <Button variant="primary" size="md" onClick={() => void handleGenerate(false)} className="self-start">
         Generate lesson
       </Button>
-      {actionError && <p className="text-xs text-status-serious">{actionError}</p>}
+      {actionError && (
+        <RecoveryBanner
+          message={actionError.message}
+          errorDetail={actionError.detail}
+          onRetry={() => handleGenerate(false)}
+        />
+      )}
     </div>
   );
 }

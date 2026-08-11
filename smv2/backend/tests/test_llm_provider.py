@@ -1,7 +1,88 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
+import pytest
 from app.db.engine import get_session
 from app.db.models import LlmCall
+from app.llm.completion_control import (
+    CompletionOptions,
+    ProviderCancelledError,
+    ProviderStreamError,
+)
+from app.llm.pricing import estimate_cost
+
+
+def test_completion_options_passes_progress_schema_and_cancel_controls(stub_provider):
+    seen = []
+    options = CompletionOptions(
+        progress=lambda event: seen.append(event.phase),
+        is_cancelled=lambda: False,
+        response_schema={"type": "array"},
+    )
+    stub_provider.complete(
+        [{"role": "user", "content": "hello"}],
+        max_tokens=8,
+        purpose="cards",
+        options=options,
+    )
+    assert stub_provider.received_completion_options[-1] is options
+
+
+def test_complete_checks_cancellation_after_synchronous_provider_returns(client):
+    from app.llm.provider import CompletionResult, Provider
+
+    course_id = client.post("/api/courses", json={"title": "Cancelled Ledger Course"}).json()["id"]
+    cancelled = False
+
+    class _CancelsDuringCompletionProvider(Provider):
+        model_name = "claude-sonnet-5"
+
+        def _complete_impl(self, messages, *, max_tokens, options, system=None):
+            nonlocal cancelled
+            cancelled = True
+            return CompletionResult(
+                text="late success",
+                input_tokens=100,
+                output_tokens=20,
+                model=self.model_name,
+            )
+
+    options = CompletionOptions(is_cancelled=lambda: cancelled)
+
+    with pytest.raises(ProviderCancelledError):
+        _CancelsDuringCompletionProvider().complete(
+            [{"role": "user", "content": "hello"}],
+            max_tokens=8,
+            purpose="lesson",
+            course_id=course_id,
+            prompt_version="v-cancel",
+            options=options,
+        )
+
+    session = get_session()
+    try:
+        rows = session.query(LlmCall).filter(LlmCall.course_id == course_id).all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.status == "ok"
+        assert row.purpose == "lesson"
+        assert row.model == "claude-sonnet-5"
+        assert row.input_tokens == 100
+        assert row.output_tokens == 20
+        assert row.prompt_version == "v-cancel"
+        assert row.cost_estimate == pytest.approx(estimate_cost("claude-sonnet-5", 100, 20))
+    finally:
+        session.close()
+
+
+def test_partial_stream_error_is_not_retried(stub_provider):
+    stub_provider.exceptions = [
+        ProviderStreamError("stream stopped", category="ollama_inactivity_timeout", had_activity=True)
+    ]
+    with pytest.raises(ProviderStreamError):
+        stub_provider.complete([{"role": "user", "content": "x"}], max_tokens=8, purpose="cards")
+    assert stub_provider.complete_call_count == 1
 
 
 def test_successful_call_writes_ok_ledger_row(client, stub_provider):
@@ -81,7 +162,6 @@ def test_get_provider_returns_ollama_when_configured(client, monkeypatch):
 
 def test_get_provider_rejects_unknown_backend(client, monkeypatch):
     import pytest
-
     from app.llm.provider import get_provider
 
     monkeypatch.setenv("SMV2_LLM_PROVIDER", "not-a-real-provider")
@@ -100,7 +180,7 @@ def test_embed_base_class_default_is_none_per_text(client):
     class _NoEmbedProvider(Provider):
         model_name = "no-embed-stub"
 
-        def _complete_impl(self, messages, *, max_tokens, system=None):
+        def _complete_impl(self, messages, *, max_tokens, options, system=None):
             raise NotImplementedError
 
     result = _NoEmbedProvider().embed(["a", "b", "c"])
@@ -168,7 +248,7 @@ def test_anthropic_provider_sends_system_separately_from_messages(monkeypatch):
         text = "a response"
 
     class _FakeResponse:
-        content = [_FakeBlock()]
+        content: ClassVar = [_FakeBlock()]
         usage = _FakeUsage()
         model = "claude-sonnet-5"
 
@@ -179,7 +259,10 @@ def test_anthropic_provider_sends_system_separately_from_messages(monkeypatch):
     provider._client.messages.create = _fake_create
 
     result = provider._complete_impl(
-        [{"role": "user", "content": "hello"}], max_tokens=100, system="be a helpful teacher"
+        [{"role": "user", "content": "hello"}],
+        max_tokens=100,
+        options=CompletionOptions(),
+        system="be a helpful teacher",
     )
 
     assert captured["system"] == "be a helpful teacher"
@@ -203,7 +286,7 @@ def test_anthropic_provider_omits_system_kwarg_when_not_given(monkeypatch):
         text = "ok"
 
     class _FakeResponse:
-        content = [_FakeBlock()]
+        content: ClassVar = [_FakeBlock()]
         usage = _FakeUsage()
         model = "claude-sonnet-5"
 
@@ -212,7 +295,9 @@ def test_anthropic_provider_omits_system_kwarg_when_not_given(monkeypatch):
         return _FakeResponse()
 
     provider._client.messages.create = _fake_create
-    provider._complete_impl([{"role": "user", "content": "hi"}], max_tokens=10)
+    provider._complete_impl(
+        [{"role": "user", "content": "hi"}], max_tokens=10, options=CompletionOptions()
+    )
 
     assert "system" not in captured
 
@@ -226,9 +311,11 @@ def test_anthropic_provider_missing_credentials_raises_friendly_error(monkeypatc
     letting the raw SDK message reach job.error or a chat response.
     """
     import pytest
-
     from app.llm.anthropic_provider import AnthropicProvider
-    from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, ProviderNotConfiguredError
+    from app.llm.provider import (
+        PROVIDER_NOT_CONFIGURED_MESSAGE,
+        ProviderNotConfiguredError,
+    )
 
     monkeypatch.setenv("SMV2_LLM_MODEL", "claude-sonnet-5")
     provider = AnthropicProvider()
@@ -242,7 +329,9 @@ def test_anthropic_provider_missing_credentials_raises_friendly_error(monkeypatc
     provider._client.messages.create = _fake_create
 
     with pytest.raises(ProviderNotConfiguredError) as exc_info:
-        provider._complete_impl([{"role": "user", "content": "hi"}], max_tokens=10)
+        provider._complete_impl(
+            [{"role": "user", "content": "hi"}], max_tokens=10, options=CompletionOptions()
+        )
     assert str(exc_info.value) == PROVIDER_NOT_CONFIGURED_MESSAGE
 
 
@@ -281,9 +370,11 @@ def test_anthropic_provider_authentication_error_raises_friendly_error(monkeypat
     import anthropic
     import httpx
     import pytest
-
     from app.llm.anthropic_provider import AnthropicProvider
-    from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, ProviderNotConfiguredError
+    from app.llm.provider import (
+        PROVIDER_NOT_CONFIGURED_MESSAGE,
+        ProviderNotConfiguredError,
+    )
 
     monkeypatch.setenv("SMV2_LLM_MODEL", "claude-sonnet-5")
     provider = AnthropicProvider()
@@ -296,13 +387,16 @@ def test_anthropic_provider_authentication_error_raises_friendly_error(monkeypat
     provider._client.messages.create = _fake_create
 
     with pytest.raises(ProviderNotConfiguredError) as exc_info:
-        provider._complete_impl([{"role": "user", "content": "hi"}], max_tokens=10)
+        provider._complete_impl(
+            [{"role": "user", "content": "hi"}], max_tokens=10, options=CompletionOptions()
+        )
     assert str(exc_info.value) == PROVIDER_NOT_CONFIGURED_MESSAGE
 
 
-def test_ollama_provider_prepends_system_as_its_own_message(monkeypatch):
-    import httpx
+def test_ollama_provider_complete_prepends_system_as_its_own_message(client, monkeypatch):
+    import json
 
+    import httpx
     from app.llm.ollama_provider import OllamaProvider
 
     monkeypatch.setenv("SMV2_LLM_MODEL", "some-ollama-model")
@@ -311,23 +405,42 @@ def test_ollama_provider_prepends_system_as_its_own_message(monkeypatch):
 
     captured: dict = {}
 
-    def _fake_post(url, json, timeout):
-        captured["url"] = url
-        captured["json"] = json
-        request = httpx.Request("POST", url)
-        return httpx.Response(
-            200,
-            json={"message": {"content": "hi there"}, "prompt_eval_count": 5, "eval_count": 7},
-            request=request,
-        )
+    class _Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield (
+                json.dumps(
+                    {
+                        "message": {"content": "hi there"},
+                        "done": False,
+                    }
+                ).encode("utf-8")
+                + b"\n"
+            )
+            yield json.dumps({"done": True, "prompt_eval_count": 5, "eval_count": 7}).encode(
+                "utf-8"
+            ) + b"\n"
 
-    monkeypatch.setattr("app.llm.ollama_provider.httpx.post", _fake_post)
+    async def _handler(request):
+        captured["url"] = str(request.url)
+        captured["json"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(200, stream=_Stream(), request=request)
 
-    result = provider._complete_impl(
-        [{"role": "user", "content": "hello"}], max_tokens=50, system="be a helpful teacher"
+    class _MockedAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(_handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("app.llm.ollama_provider.httpx.AsyncClient", _MockedAsyncClient)
+
+    result = provider.complete(
+        [{"role": "user", "content": "hello"}],
+        max_tokens=50,
+        purpose="test",
+        system="be a helpful teacher",
     )
 
     sent_messages = captured["json"]["messages"]
     assert sent_messages[0] == {"role": "system", "content": "be a helpful teacher"}
     assert sent_messages[1] == {"role": "user", "content": "hello"}
+    assert captured["json"]["stream"] is True
     assert result.text == "hi there"

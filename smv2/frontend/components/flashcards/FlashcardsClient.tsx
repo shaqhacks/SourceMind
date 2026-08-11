@@ -10,20 +10,21 @@ import EmptyState from "@/components/ui/EmptyState";
 import Skeleton from "@/components/ui/Skeleton";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
-  getReviewQueue,
+  getReviewSelection,
   getReviewSummary,
   listCards,
   listChapters,
   listCourses,
   MAX_QUEUE_FETCH,
   type CardOut,
+  type CourseReviewSummaryOut,
   type ChapterOut,
   type CourseOut,
   type ReviewQueueCardOut,
-  type ReviewSummaryOut,
 } from "@/lib/api/client";
 import { subscribeCardsSettled } from "@/lib/cards/cardsBus";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
+import { subscribeReviewSettled } from "@/lib/review/reviewBus";
 
 type CoursesState =
   | { kind: "loading" }
@@ -37,7 +38,8 @@ type CourseDataState =
       kind: "ready";
       chapters: ChapterOut[];
       cardsBySection: Record<string, CardOut[]>;
-      dueCards: ReviewQueueCardOut[];
+      reviewCards: ReviewQueueCardOut[];
+      reviewSummary: CourseReviewSummaryOut | null;
     };
 
 /** Cards live on a chapter's own content sections (ChapterOut.section_ids)
@@ -58,22 +60,19 @@ function dueCountForChapter(
   cards: CardOut[],
   dueById: Map<string, ReviewQueueCardOut>,
 ): number {
-  return cards.filter((card) => {
-    const queued = dueById.get(card.id);
-    return queued !== undefined && !queued.is_new;
-  }).length;
+  return cards.filter((card) => dueById.get(card.id)?.is_due === true).length;
 }
 
 async function loadCourseData(courseId: string): Promise<CourseDataState> {
-  const [chaptersResult, queueResult] = await Promise.all([
+  const [chaptersResult, summaryResult] = await Promise.all([
     listChapters(courseId),
-    getReviewQueue(courseId, MAX_QUEUE_FETCH),
+    getReviewSummary(),
   ]);
   if (!chaptersResult.data) {
     return { kind: "error", error: describeError(chaptersResult.status, "Loading chapters") };
   }
-  if (!queueResult.data) {
-    return { kind: "error", error: describeError(queueResult.status, "Loading review queue") };
+  if (!summaryResult.data) {
+    return { kind: "error", error: describeError(summaryResult.status, "Loading review summary") };
   }
 
   // Front matter (null chapter_label) has nothing to study/link, same
@@ -90,8 +89,34 @@ async function loadCourseData(courseId: string): Promise<CourseDataState> {
   sectionIds.forEach((id, index) => {
     cardsBySection[id] = cardsResults[index].data ?? [];
   });
+  const cardIds = Object.values(cardsBySection).flatMap((cards) => cards.map((card) => card.id));
+  const selectionResults = await Promise.all(
+    chunk(cardIds, MAX_QUEUE_FETCH).map((ids) => getReviewSelection(courseId, ids)),
+  );
+  const failedSelection = selectionResults.find((result) => !result.data);
+  if (failedSelection) {
+    return {
+      kind: "error",
+      error: describeError(failedSelection.status, "Loading review metadata"),
+    };
+  }
 
-  return { kind: "ready", chapters, cardsBySection, dueCards: queueResult.data.cards };
+  return {
+    kind: "ready",
+    chapters,
+    cardsBySection,
+    reviewCards: selectionResults.flatMap((result) => result.data?.cards ?? []),
+    reviewSummary:
+      summaryResult.data.courses.find((course) => course.course_id === courseId) ?? null,
+  };
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 /** courseData tagged with the course it belongs to — the same "derive
@@ -110,7 +135,6 @@ export default function FlashcardsClient() {
   const [coursesState, setCoursesState] = useState<CoursesState>({ kind: "loading" });
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [courseDataEntry, setCourseDataEntry] = useState<CourseDataEntry | null>(null);
-  const [reviewSummary, setReviewSummary] = useState<ReviewSummaryOut | null>(null);
   const [browsedChapterLabel, setBrowsedChapterLabel] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useRouteFocus(headingRef);
@@ -142,9 +166,6 @@ export default function FlashcardsClient() {
   // synchronously, and it does so from a click handler, not an effect.
   useEffect(() => {
     fetchCourses();
-    getReviewSummary().then(({ data }) => {
-      if (data) setReviewSummary(data);
-    });
   }, []);
 
   // Shared by the course-change effect, the settle-bus subscription, and
@@ -194,6 +215,12 @@ export default function FlashcardsClient() {
   // unlike the two calls above, this one isn't flagged.
   useEffect(() => {
     return subscribeCardsSettled(() => {
+      if (selectedCourseId) reloadCourseData(selectedCourseId);
+    });
+  }, [selectedCourseId]);
+
+  useEffect(() => {
+    return subscribeReviewSettled(() => {
       if (selectedCourseId) reloadCourseData(selectedCourseId);
     });
   }, [selectedCourseId]);
@@ -254,19 +281,16 @@ export default function FlashcardsClient() {
     courseDataEntry && courseDataEntry.courseId === selectedCourse.id
       ? courseDataEntry.state
       : { kind: "loading" };
-  const selectedCourseReviewSummary = reviewSummary?.courses.find(
-    (c) => c.course_id === selectedCourse.id,
-  );
-  const courseDue = selectedCourseReviewSummary ? selectedCourseReviewSummary.overdue_count : null;
-  const totalCards =
-    courseData.kind === "ready"
-      ? Object.values(courseData.cardsBySection).reduce((sum, list) => sum + list.length, 0)
-      : null;
-
   const dueById =
     courseData.kind === "ready"
-      ? new Map(courseData.dueCards.map((card) => [card.id, card]))
+      ? new Map(courseData.reviewCards.map((card) => [card.id, card]))
       : new Map<string, ReviewQueueCardOut>();
+  const selectedCourseReviewSummary =
+    courseData.kind === "ready" ? courseData.reviewSummary : null;
+  const totalCards = selectedCourseReviewSummary?.total_count ?? null;
+  const dueCards = selectedCourseReviewSummary?.overdue_count ?? null;
+  const newCards = selectedCourseReviewSummary?.new_count ?? null;
+  const needsAttentionCards = selectedCourseReviewSummary?.needs_attention_count ?? null;
 
   const browsedChapter =
     courseData.kind === "ready"
@@ -285,17 +309,31 @@ export default function FlashcardsClient() {
             Flashcards
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {courseDue === null || totalCards === null
+            {totalCards === null || dueCards === null || newCards === null || needsAttentionCards === null
               ? "Loading…"
-              : `${courseDue} due now · ${totalCards} card${totalCards === 1 ? "" : "s"} total`}
+              : `${totalCards} total · ${dueCards} due · ${newCards} new · ${needsAttentionCards} needs attention`}
           </p>
         </div>
-        <Link
-          href={`/review?course=${selectedCourse.id}&start=due`}
-          className="rounded-md bg-accent-700 px-4 py-2 font-heading text-sm text-background transition-colors hover:bg-accent-800 active:bg-accent-900"
-        >
-          Review all due{courseDue !== null ? ` (${courseDue})` : ""}
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={`/review?course=${encodeURIComponent(selectedCourse.id)}&scope=available&start=due`}
+            className="rounded-md bg-accent-700 px-4 py-2 font-heading text-sm text-background transition-colors hover:bg-accent-800 active:bg-accent-900"
+          >
+            Review due{dueCards !== null ? ` (${dueCards})` : ""}
+          </Link>
+          <Link
+            href={`/review?course=${encodeURIComponent(selectedCourse.id)}&scope=all`}
+            className="rounded-md border border-border bg-surface-raised px-4 py-2 font-heading text-sm transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14]"
+          >
+            Review all{totalCards !== null ? ` (${totalCards})` : ""}
+          </Link>
+          <Link
+            href={`/review?course=${encodeURIComponent(selectedCourse.id)}&scope=needs_attention`}
+            className="rounded-md border border-border bg-surface-raised px-4 py-2 font-heading text-sm transition-colors hover:bg-foreground/[0.07] active:bg-foreground/[0.14]"
+          >
+            Needs attention{needsAttentionCards !== null ? ` (${needsAttentionCards})` : ""}
+          </Link>
+        </div>
       </div>
 
       {courses.length > 1 && (

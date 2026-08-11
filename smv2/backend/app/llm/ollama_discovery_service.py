@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any
+
+import httpx
+
+_MAX_RESPONSE_BYTES = 1024 * 1024
+_MAX_TAGS = 100
+_MAX_CONCURRENT_SHOW_REQUESTS = 4
+_TOTAL_DISCOVERY_TIMEOUT = 5.0
+_HTTP_TIMEOUT = httpx.Timeout(5.0, connect=1.0, read=5.0)
+
+
+class OllamaDiscoveryError(RuntimeError):
+    def __init__(self, category: str, message: str, *, status_code: int):
+        super().__init__(message)
+        self.category = category
+        self.status_code = status_code
+
+
+async def discover_ollama_models(
+    base_url: str, *, transport: httpx.AsyncBaseTransport | None = None
+) -> list[str]:
+    try:
+        async with asyncio.timeout(_TOTAL_DISCOVERY_TIMEOUT):
+            async with httpx.AsyncClient(
+                base_url=base_url,
+                follow_redirects=False,
+                timeout=_HTTP_TIMEOUT,
+                transport=transport,
+            ) as client:
+                tags = await _request_json(client, "GET", "/api/tags")
+                tag_names = _parse_tag_names(tags)
+
+                async def is_completion_model(name: str) -> bool:
+                    show = await _request_json(
+                        client, "POST", "/api/show", json={"name": name}
+                    )
+                    capabilities = (
+                        show.get("capabilities") if isinstance(show, dict) else None
+                    )
+                    if not isinstance(capabilities, list) or not all(
+                        isinstance(item, str) for item in capabilities
+                    ):
+                        raise OllamaDiscoveryError(
+                            "ollama_invalid_response",
+                            "Ollama returned an invalid model metadata response.",
+                            status_code=502,
+                        )
+                    return "completion" in {item.lower() for item in capabilities}
+
+                checks: list[bool] = []
+                for batch_start in range(
+                    0, len(tag_names), _MAX_CONCURRENT_SHOW_REQUESTS
+                ):
+                    batch_names = tag_names[
+                        batch_start : batch_start + _MAX_CONCURRENT_SHOW_REQUESTS
+                    ]
+                    checks.extend(
+                        await asyncio.gather(
+                            *(is_completion_model(name) for name in batch_names)
+                        )
+                    )
+    except TimeoutError:
+        raise OllamaDiscoveryError(
+            "ollama_timeout",
+            "Ollama did not respond before the request timed out.",
+            status_code=503,
+        ) from None
+
+    models_by_key = {}
+    for name, compatible in zip(tag_names, checks, strict=True):
+        if compatible:
+            models_by_key.setdefault(name.lower(), name)
+    if not models_by_key:
+        raise OllamaDiscoveryError(
+            "ollama_no_completion_models",
+            "Ollama did not report any completion-capable models.",
+            status_code=503,
+        )
+    return sorted(models_by_key.values(), key=str.lower)
+
+
+async def _request_json(
+    client: httpx.AsyncClient, method: str, path: str, **kwargs: Any
+) -> Any:
+    try:
+        async with client.stream(method, path, **kwargs) as response:
+            if response.is_redirect:
+                raise OllamaDiscoveryError(
+                    "ollama_invalid_response",
+                    "Ollama returned an unsupported redirect response.",
+                    status_code=502,
+                )
+            if response.status_code >= 400:
+                raise OllamaDiscoveryError(
+                    "ollama_unreachable",
+                    "Ollama returned an unsuccessful response.",
+                    status_code=503,
+                )
+
+            raw = await _read_limited(response)
+    except httpx.TimeoutException:
+        raise OllamaDiscoveryError(
+            "ollama_timeout",
+            "Ollama did not respond before the request timed out.",
+            status_code=503,
+        ) from None
+    except httpx.ConnectError:
+        raise OllamaDiscoveryError(
+            "ollama_unreachable",
+            "Ollama could not be reached.",
+            status_code=503,
+        ) from None
+    except httpx.HTTPError:
+        raise OllamaDiscoveryError(
+            "ollama_unreachable",
+            "Ollama could not be reached.",
+            status_code=503,
+        ) from None
+
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise OllamaDiscoveryError(
+            "ollama_invalid_response",
+            "Ollama returned an invalid JSON response.",
+            status_code=502,
+        ) from None
+
+
+async def _read_limited(response: httpx.Response) -> bytes:
+    total = 0
+    chunks: list[bytes] = []
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > _MAX_RESPONSE_BYTES:
+            raise OllamaDiscoveryError(
+                "ollama_invalid_response",
+                "Ollama returned a response that was too large.",
+                status_code=502,
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _parse_tag_names(payload: Any) -> list[str]:
+    models = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(models, list):
+        raise OllamaDiscoveryError(
+            "ollama_invalid_response",
+            "Ollama returned an invalid models response.",
+            status_code=502,
+        )
+    if len(models) > _MAX_TAGS:
+        raise OllamaDiscoveryError(
+            "ollama_invalid_response",
+            "Ollama returned too many models.",
+            status_code=502,
+        )
+    if not models:
+        raise OllamaDiscoveryError(
+            "ollama_no_models",
+            "Ollama did not report any models.",
+            status_code=503,
+        )
+
+    names: list[str] = []
+    for item in models:
+        name = item.get("name") if isinstance(item, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            raise OllamaDiscoveryError(
+                "ollama_invalid_response",
+                "Ollama returned an invalid model entry.",
+                status_code=502,
+            )
+        names.append(name.strip())
+    return names

@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from app.config import llm_provider
+from app.llm.completion_control import CompletionOptions, ProviderCancelledError
 from app.llm.ledger import record_llm_call
 from app.llm.limiter import llm_slot
 from app.llm.pricing import estimate_cost
@@ -77,6 +78,7 @@ class Provider(ABC):
         prompt_version: str | None = None,
         system: str | None = None,
         wait_for_slot: bool = False,
+        options: CompletionOptions | None = None,
     ) -> CompletionResult:
         """wait_for_slot=True makes a saturated limiter block (bounded) for a
         slot instead of fast-failing — durable job-context callers (lesson/
@@ -85,13 +87,20 @@ class Provider(ABC):
         callers keep the default fast-fail so a busy limiter turns into an
         immediate, honest 429 rather than a hung request.
         """
+        completion_options = options if options is not None else CompletionOptions()
+
         with llm_slot(wait=wait_for_slot):
             started = time.monotonic()
             try:
                 result = retry_transient(
-                    lambda: self._complete_impl(messages, max_tokens=max_tokens, system=system)
+                    lambda: self._complete_impl(
+                        messages,
+                        max_tokens=max_tokens,
+                        options=completion_options,
+                        system=system,
+                    )
                 )
-            except Exception as exc:
+            except Exception:
                 latency_ms = int((time.monotonic() - started) * 1000)
                 self._record_call_safely(
                     purpose=purpose,
@@ -104,7 +113,7 @@ class Provider(ABC):
                     status="error",
                     course_id=course_id,
                 )
-                raise exc
+                raise
 
             latency_ms = int((time.monotonic() - started) * 1000)
             cost = estimate_cost(result.model, result.input_tokens, result.output_tokens)
@@ -119,7 +128,13 @@ class Provider(ABC):
                 status="ok",
                 course_id=course_id,
             )
+            self._raise_if_cancelled(completion_options)
             return result
+
+    @staticmethod
+    def _raise_if_cancelled(options: CompletionOptions) -> None:
+        if options.is_cancelled is not None and options.is_cancelled():
+            raise ProviderCancelledError()
 
     @staticmethod
     def _record_call_safely(**kwargs) -> None:
@@ -135,7 +150,12 @@ class Provider(ABC):
 
     @abstractmethod
     def _complete_impl(
-        self, messages: list[dict], *, max_tokens: int, system: str | None = None
+        self,
+        messages: list[dict],
+        *,
+        max_tokens: int,
+        options: CompletionOptions,
+        system: str | None = None,
     ) -> CompletionResult: ...
 
     def embed(
@@ -157,7 +177,7 @@ class Provider(ABC):
             started = time.monotonic()
             try:
                 results = self._embed_impl(texts)
-            except Exception as exc:
+            except Exception:
                 latency_ms = int((time.monotonic() - started) * 1000)
                 self._record_call_safely(
                     purpose=purpose,
@@ -170,7 +190,7 @@ class Provider(ABC):
                     status="error",
                     course_id=course_id,
                 )
-                raise exc
+                raise
 
             latency_ms = int((time.monotonic() - started) * 1000)
             input_tokens_est = sum(len(t) for t in texts) // 4

@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from app.llm.structured_output import CURRICULUM_SCHEMA
 from app.pipeline.concept_extraction import build_curriculum_source_message, parse_curriculum
 
 
@@ -82,6 +83,47 @@ def test_parse_curriculum_accepts_grounded_typed_output():
     assert parsed["concepts"][0]["stable_key"] == "fractions"
     assert parsed["claims"][0]["concept_key"] == "fractions"
     assert parsed["relations"][0]["kind"] == "requires"
+
+
+def test_curriculum_schema_contains_required_parser_fields():
+    schema = CURRICULUM_SCHEMA
+    assert schema["type"] == "object"
+    assert set(schema["required"]) == {"concepts", "claims", "relations"}
+
+    concept_required = set(schema["properties"]["concepts"]["items"]["required"])
+    assert {
+        "stable_key",
+        "label",
+        "description_md",
+        "aliases",
+        "chapter_label",
+        "sources",
+        "confidence",
+        "rationale_md",
+    } <= concept_required
+
+    claim_required = set(schema["properties"]["claims"]["items"]["required"])
+    assert {
+        "stable_key",
+        "concept_key",
+        "statement",
+        "success_criteria_md",
+        "aliases",
+        "cognitive_demand",
+        "sources",
+        "confidence",
+        "rationale_md",
+    } <= claim_required
+
+    relation_required = set(schema["properties"]["relations"]["items"]["required"])
+    assert {
+        "from_key",
+        "to_key",
+        "kind",
+        "external_ref",
+        "confidence",
+        "rationale_md",
+    } <= relation_required
 
 
 @pytest.mark.parametrize(

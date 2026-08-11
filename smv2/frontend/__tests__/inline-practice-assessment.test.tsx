@@ -1,9 +1,12 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import InlinePracticeAssessment from "@/components/chapter/InlinePracticeAssessment";
+import type { PracticeSectionState } from "@/components/chapter/practiceAssessmentState";
 import {
+  type ApiErrorDetail,
   getPracticeAssessment,
   startPracticeAssessment,
   submitPracticeAnswer,
@@ -24,6 +27,13 @@ vi.mock("@/lib/api/client", () => ({
 const mockedGetPracticeAssessment = vi.mocked(getPracticeAssessment);
 const mockedStartPracticeAssessment = vi.mocked(startPracticeAssessment);
 const mockedSubmitPracticeAnswer = vi.mocked(submitPracticeAnswer);
+
+const readinessDetail: ApiErrorDetail = {
+  code: "llm_readiness_unavailable",
+  failure_category: "ollama_model_unavailable",
+  message: "Your configured Ollama model is not present.",
+  remediation: "Open Settings and select a currently installed model.",
+};
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -88,6 +98,69 @@ function makeAssessment(overrides: Partial<PracticeAssessmentOut> = {}): Practic
     run_id: "run-1",
     ...overrides,
   };
+}
+
+function practiceChild({
+  onStateChange,
+  retryVersion = 0,
+  startVersion,
+  sectionId = "section-1",
+}: {
+  onStateChange?: (state: PracticeSectionState) => void;
+  retryVersion?: number;
+  startVersion?: number;
+  sectionId?: string;
+}) {
+  return (
+    <InlinePracticeAssessment
+      courseId="course-1"
+      sectionId={sectionId}
+      retryVersion={retryVersion}
+      startVersion={startVersion}
+      onStateChange={onStateChange}
+    />
+  );
+}
+
+function renderPracticeChild(options: Parameters<typeof practiceChild>[0] = {}) {
+  return render(practiceChild(options));
+}
+
+function CallbackIdentityWrapper({
+  onStateChange,
+}: {
+  onStateChange: (state: PracticeSectionState) => void;
+}) {
+  const [rerenderCount, setRerenderCount] = useState(0);
+
+  return (
+    <>
+      <button type="button" onClick={() => setRerenderCount((count) => count + 1)}>
+        Rerender parent {rerenderCount}
+      </button>
+      <InlinePracticeAssessment
+        courseId="course-1"
+        sectionId="section-1"
+        retryVersion={0}
+        onStateChange={(state) => onStateChange(state)}
+      />
+    </>
+  );
+}
+
+async function flushPracticeTasks() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+async function advancePracticePoll() {
+  await act(async () => {
+    vi.advanceTimersByTime(1500);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 describe("InlinePracticeAssessment", () => {
@@ -206,7 +279,110 @@ describe("InlinePracticeAssessment", () => {
     expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(3);
   });
 
-  it("starts extraction with POST when read-only status is not_started", async () => {
+  it("reports generating and ready transitions to its parent", async () => {
+    vi.useFakeTimers();
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "generating", questions: [] })))
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "ready", questions: [makeQuestion()] })));
+
+    renderPracticeChild({ retryVersion: 0, onStateChange });
+
+    await flushPracticeTasks();
+    await advancePracticePoll();
+
+    expect(onStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "generating", sectionId: "section-1" }),
+    );
+    expect(onStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "ready", sectionId: "section-1", questionCount: 1 }),
+    );
+  });
+
+  it("does not restart loading when a parent rerender changes onStateChange identity", async () => {
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValue(ok(makeAssessment()));
+
+    const user = userEvent.setup();
+    render(<CallbackIdentityWrapper onStateChange={onStateChange} />);
+
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: /rerender parent/i }));
+    await flushPracticeTasks();
+
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
+    expect(mockedStartPracticeAssessment).not.toHaveBeenCalled();
+  });
+
+  it("does not notify the parent again for repeated generating poll payloads", async () => {
+    vi.useFakeTimers();
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "generating", questions: [], message: "Still working." })),
+    );
+
+    renderPracticeChild({ onStateChange });
+
+    await flushPracticeTasks();
+    await advancePracticePoll();
+
+    expect(
+      onStateChange.mock.calls.filter(([state]) => state.kind === "generating"),
+    ).toHaveLength(1);
+    expect(onStateChange).toHaveBeenCalledWith({
+      kind: "generating",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "Still working.",
+      errorDetail: null,
+      retryKind: null,
+    });
+  });
+
+  it("does not start generation when a not-started section mounts", async () => {
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "not_started", questions: [], run_id: null })),
+    );
+
+    renderPracticeChild({ onStateChange });
+
+    expect(
+      await screen.findByRole("button", { name: "Generate practice questions" }),
+    ).toBeEnabled();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1");
+    expect(mockedStartPracticeAssessment).not.toHaveBeenCalled();
+    expect(onStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "not_started", sectionId: "section-1" }),
+    );
+  });
+
+  it("starts only its own not-started section and guards duplicate clicks", async () => {
+    const user = userEvent.setup();
+    const started = deferred<ReturnType<typeof ok<PracticeAssessmentOut>>>();
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "not_started", questions: [], run_id: null })),
+    );
+    mockedStartPracticeAssessment.mockReturnValue(started.promise);
+
+    renderPracticeChild({ sectionId: "section-explicit" });
+    const button = await screen.findByRole("button", { name: "Generate practice questions" });
+
+    await user.click(button);
+    await user.click(button);
+    started.resolve(
+      ok(makeAssessment({ section_id: "section-explicit", status: "generating", questions: [] })),
+    );
+    await flushPracticeTasks();
+
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-explicit");
+    expect(await screen.findByRole("status")).toHaveTextContent(/preparing practice questions/i);
+  });
+
+  it("starts extraction with POST when startVersion increases for a not-started section", async () => {
     mockedGetPracticeAssessment.mockResolvedValue(
       ok(makeAssessment({ status: "not_started", questions: undefined })),
     );
@@ -214,12 +390,88 @@ describe("InlinePracticeAssessment", () => {
       ok(makeAssessment({ status: "generating", questions: undefined })),
     );
 
-    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+    const view = renderPracticeChild({ startVersion: 0 });
+    expect(
+      await screen.findByRole("button", { name: "Generate practice questions" }),
+    ).toBeEnabled();
+
+    view.rerender(practiceChild({ startVersion: 1 }));
 
     await waitFor(() =>
       expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1"),
     );
     expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+  });
+
+  it("consumes a parent startVersion once and then owns POST state and polling", async () => {
+    vi.useFakeTimers();
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(
+        ok(makeAssessment({ status: "not_started", questions: [], run_id: null })),
+      )
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "ready", questions: [makeQuestion()] })));
+    mockedStartPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "generating", questions: [], job_id: "job-practice" })),
+    );
+
+    const view = renderPracticeChild({ startVersion: 0 });
+    await flushPracticeTasks();
+    expect(screen.getByRole("button", { name: "Generate practice questions" })).toBeEnabled();
+    view.rerender(practiceChild({ startVersion: 1 }));
+    view.rerender(practiceChild({ startVersion: 1 }));
+
+    await flushPracticeTasks();
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+    await advancePracticePoll();
+    expect(screen.getByText("Newton's second law")).toBeInTheDocument();
+  });
+
+  it("routes immediate structured provider readiness failures to Settings when starting questions", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "not_started", questions: undefined })),
+    );
+    mockedStartPracticeAssessment.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+
+    const user = userEvent.setup();
+    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+
+    await user.click(await screen.findByRole("button", { name: "Generate practice questions" }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps a failed assessment visible when retry hits a structured provider readiness failure", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "failed", questions: undefined, message: "Extraction failed." })),
+    );
+    mockedStartPracticeAssessment.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+
+    const user = userEvent.setup();
+    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+
+    expect(await screen.findByText("Extraction failed.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(await screen.findByText("Extraction failed.")).toBeInTheDocument();
+    expect(screen.getByText("Your configured Ollama model is not present.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
   });
 
   it("ignores a stale not_started start after props change", async () => {
@@ -232,10 +484,12 @@ describe("InlinePracticeAssessment", () => {
     const { rerender } = render(
       <InlinePracticeAssessment courseId="course-1" sectionId="section-1" />,
     );
+    const user = userEvent.setup();
 
-    await waitFor(() =>
-      expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1"),
+    await user.click(
+      await screen.findByRole("button", { name: "Generate practice questions" }),
     );
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1");
 
     rerender(<InlinePracticeAssessment courseId="course-1" sectionId="section-2" />);
     expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
@@ -257,11 +511,13 @@ describe("InlinePracticeAssessment", () => {
     );
     mockedStartPracticeAssessment.mockReturnValue(oldStart.promise);
 
+    const user = userEvent.setup();
     const { unmount } = render(
       <InlinePracticeAssessment courseId="course-1" sectionId="section-1" />,
     );
 
-    await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1));
+    await user.click(await screen.findByRole("button", { name: "Generate practice questions" }));
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
     unmount();
 
     oldStart.resolve(ok(makeAssessment({ status: "generating", questions: undefined })));
@@ -271,6 +527,55 @@ describe("InlinePracticeAssessment", () => {
 
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  it("does not notify the parent after unmount during start", async () => {
+    const oldStart = deferred<Awaited<ReturnType<typeof startPracticeAssessment>>>();
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "not_started", questions: undefined })),
+    );
+    mockedStartPracticeAssessment.mockReturnValue(oldStart.promise);
+
+    const user = userEvent.setup();
+    const { unmount } = renderPracticeChild({ onStateChange });
+
+    await user.click(await screen.findByRole("button", { name: "Generate practice questions" }));
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+    onStateChange.mockClear();
+    unmount();
+
+    oldStart.resolve(ok(makeAssessment({ status: "generating", questions: undefined })));
+    await flushPracticeTasks();
+
+    expect(onStateChange).not.toHaveBeenCalled();
+  });
+
+  it("does not notify the parent for a stale start response after props change", async () => {
+    const oldStart = deferred<Awaited<ReturnType<typeof startPracticeAssessment>>>();
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "not_started", questions: undefined })))
+      .mockResolvedValueOnce(ok(makeAssessment({ section_id: "section-2" })));
+    mockedStartPracticeAssessment.mockReturnValueOnce(oldStart.promise);
+
+    const user = userEvent.setup();
+    const { rerender } = renderPracticeChild({ onStateChange, sectionId: "section-1" });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Generate practice questions" }),
+    );
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1");
+    rerender(practiceChild({ onStateChange, sectionId: "section-2" }));
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
+    onStateChange.mockClear();
+
+    oldStart.resolve(ok(makeAssessment({ status: "generating", questions: undefined })));
+    await flushPracticeTasks();
+
+    expect(onStateChange).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sectionId: "section-1" }),
+    );
   });
 
   it("shows failed extraction through ErrorBanner and retries with POST", async () => {
@@ -297,6 +602,209 @@ describe("InlinePracticeAssessment", () => {
     expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
     expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
     expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1");
+  });
+
+  it("shows invalid model output as a retryable section failure", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(
+        makeAssessment({
+          status: "failed",
+          questions: [],
+          message: "Parser dump: {\"raw\":\"not learner safe\"}",
+          error_detail: {
+            code: "invalid_model_output",
+            failure_category: "structured_output_invalid",
+            message: "The model returned an invalid question format.",
+          },
+        }),
+      ),
+    );
+
+    renderPracticeChild({ retryVersion: 0 });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/invalid question format/i);
+    expect(banner).not.toHaveTextContent(/parser dump/i);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
+  it("retries a failed extraction once when retryVersion increases", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),
+    );
+    mockedStartPracticeAssessment.mockResolvedValue(ok(makeAssessment()));
+
+    const view = renderPracticeChild({ retryVersion: 0 });
+    await screen.findByText("Invalid format");
+    view.rerender(practiceChild({ retryVersion: 1 }));
+
+    await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1));
+  });
+
+  it("reports a refreshed failed parent state when a parent-triggered retry cannot restart", async () => {
+    const onStateChange = vi.fn();
+    const restartDetail: ApiErrorDetail = {
+      code: "invalid_model_output",
+      failure_category: "structured_output_invalid",
+      message: "The model returned an invalid question format.",
+    };
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),
+    );
+    mockedStartPracticeAssessment.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: restartDetail },
+    });
+
+    const view = renderPracticeChild({ retryVersion: 0, onStateChange });
+    await screen.findByText("Invalid format");
+    onStateChange.mockClear();
+
+    view.rerender(practiceChild({ retryVersion: 1, onStateChange }));
+
+    expect(
+      await screen.findByText("The model returned an invalid question format."),
+    ).toBeInTheDocument();
+    expect(onStateChange).toHaveBeenNthCalledWith(1, {
+      kind: "generating",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "Preparing questions.",
+      errorDetail: null,
+      retryKind: null,
+    });
+    expect(onStateChange).toHaveBeenNthCalledWith(2, {
+      kind: "failed",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "The model returned an invalid question format.",
+      errorDetail: restartDetail,
+      retryKind: "restart",
+    });
+    expect(screen.queryByText(/parser dump/i)).not.toBeInTheDocument();
+  });
+
+  it("does not retry a failed extraction when retryVersion is unchanged", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),
+    );
+
+    const view = renderPracticeChild({ retryVersion: 0 });
+    await screen.findByText("Invalid format");
+    view.rerender(practiceChild({ retryVersion: 0 }));
+    await flushPracticeTasks();
+
+    expect(mockedStartPracticeAssessment).not.toHaveBeenCalled();
+  });
+
+  it("ignores retryVersion increases while ready", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(ok(makeAssessment()));
+
+    const view = renderPracticeChild({ retryVersion: 0 });
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
+    view.rerender(practiceChild({ retryVersion: 1 }));
+    await flushPracticeTasks();
+
+    expect(mockedStartPracticeAssessment).not.toHaveBeenCalled();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores retryVersion increases while generating", async () => {
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "generating", questions: [] })),
+    );
+
+    const view = renderPracticeChild({ retryVersion: 0 });
+    expect(await screen.findByRole("status")).toHaveTextContent(/preparing practice questions/i);
+    view.rerender(practiceChild({ retryVersion: 1 }));
+    await flushPracticeTasks();
+
+    expect(mockedStartPracticeAssessment).not.toHaveBeenCalled();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports load transport failures as reloadable parent state", async () => {
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValueOnce(err(503));
+
+    renderPracticeChild({ onStateChange });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/practice questions/i);
+    expect(onStateChange).toHaveBeenCalledWith({
+      kind: "failed",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "Could not load practice questions.",
+      errorDetail: null,
+      retryKind: "reload",
+    });
+  });
+
+  it("returns to explicit generation after a parent reload retry when a start fails", async () => {
+    mockedGetPracticeAssessment
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "not_started", questions: [] })))
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "not_started", questions: [] })));
+    mockedStartPracticeAssessment
+      .mockResolvedValueOnce(err(503))
+      .mockResolvedValueOnce(ok(makeAssessment({ status: "generating", questions: [] })));
+
+    const user = userEvent.setup();
+    const view = renderPracticeChild({ retryVersion: 0 });
+
+    await user.click(await screen.findByRole("button", { name: "Generate practice questions" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/starting practice questions/i);
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+
+    view.rerender(practiceChild({ retryVersion: 1 }));
+
+    expect(
+      await screen.findByRole("button", { name: "Generate practice questions" }),
+    ).toBeEnabled();
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Generate practice questions" }));
+    await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("status")).toHaveTextContent(/preparing practice questions/i);
+  });
+
+  it("reports extraction failures as restartable parent state", async () => {
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValueOnce(
+      ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),
+    );
+
+    renderPracticeChild({ onStateChange });
+
+    await screen.findByText("Invalid format");
+    expect(onStateChange).toHaveBeenCalledWith({
+      kind: "failed",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "Invalid format",
+      errorDetail: null,
+      retryKind: "restart",
+    });
+  });
+
+  it("runs local and parent failed extraction retries through one active request guard", async () => {
+    const restart = deferred<Awaited<ReturnType<typeof startPracticeAssessment>>>();
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "failed", questions: [], message: "Invalid format" })),
+    );
+    mockedStartPracticeAssessment.mockReturnValueOnce(restart.promise);
+
+    const user = userEvent.setup();
+    const view = renderPracticeChild({ retryVersion: 0 });
+    await screen.findByText("Invalid format");
+
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+    view.rerender(practiceChild({ retryVersion: 1 }));
+    await flushPracticeTasks();
+
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+    restart.resolve(ok(makeAssessment()));
+    expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
   });
 
   it("renders answered summaries as locked without resubmitting", async () => {

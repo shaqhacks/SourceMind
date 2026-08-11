@@ -34,7 +34,9 @@ function isReadinessFailure(errorDetail?: ApiErrorDetail | null): boolean {
     errorDetail?.code === "llm_readiness_unavailable" ||
     errorDetail?.failure_category === "missing_credentials" ||
     errorDetail?.failure_category === "unknown_provider" ||
-    errorDetail?.failure_category === "unreachable"
+    errorDetail?.failure_category === "unreachable" ||
+    errorDetail?.failure_category === "ollama_model_unavailable" ||
+    errorDetail?.failure_category === "ollama_embed_model_unavailable"
   );
 }
 

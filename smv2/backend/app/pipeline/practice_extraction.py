@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import math
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -23,11 +24,19 @@ from app.db.models import (
     PracticeQuestion,
     Section,
 )
-from app.llm.ledger import ensure_spend_cap
+from app.jobs.llm_job_control import completion_options_for_job
+from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
 from app.llm.provider import get_provider
+from app.llm.structured_output import (
+    InvalidModelOutputError,
+    PRACTICE_ASSESSMENT_SCHEMA,
+    repair_messages,
+)
 from app.pipeline._common import report_progress as _report_progress
-from app.pipeline._common import report_progress_in_session as _report_progress_in_session
+from app.pipeline._common import (
+    report_progress_in_session as _report_progress_in_session,
+)
 from app.pipeline._common import strip_leading_fence as _strip_leading_fence
 from app.services import evidence_items_service
 
@@ -160,7 +169,7 @@ def run_practice_extraction(
         .all()
     )
 
-    _report_progress(job.id, stage="extracting", pct=10, message="extracting practice")
+    _report_progress(job.id, stage="loading", pct=None, message="preparing practice questions")
     run.status = "running"
     run.error = None
 
@@ -179,6 +188,10 @@ def run_practice_extraction(
         }
     ]
     provider = get_provider()
+    completion_options = replace(
+        completion_options_for_job(job.id, artifact="practice_assessment"),
+        response_schema=PRACTICE_ASSESSMENT_SCHEMA,
+    )
 
     ensure_spend_cap(course_id)
     result = provider.complete(
@@ -189,12 +202,44 @@ def run_practice_extraction(
         prompt_version=prompt_version,
         system=system_prompt,
         wait_for_slot=True,
+        options=completion_options,
     )
 
-    questions = parse_practice_questions(result.text, allowed_claim_ids)
-    if not questions:
-        raise ValueError("practice assessment extraction produced zero usable questions")
-
+    try:
+        questions = parse_practice_questions(result.text, allowed_claim_ids)
+        if not questions:
+            raise ValueError("practice assessment extraction produced zero usable questions")
+    except (json.JSONDecodeError, ValueError) as exc:
+        _report_progress(job.id, stage="retrying", pct=50, message="retrying malformed response")
+        repair_request = repair_messages(messages, exc)
+        ensure_spend_cap(course_id)
+        result = provider.complete(
+            repair_request,
+            max_tokens=_MAX_TOKENS,
+            purpose="practice_assessment",
+            course_id=course_id,
+            prompt_version=prompt_version,
+            system=system_prompt,
+            wait_for_slot=True,
+            options=completion_options,
+        )
+        try:
+            questions = parse_practice_questions(result.text, allowed_claim_ids)
+            if not questions:
+                raise ValueError("practice assessment extraction produced zero usable questions")
+        except (json.JSONDecodeError, ValueError) as retry_exc:
+            record_llm_call(
+                purpose="practice_assessment",
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                latency_ms=0,
+                cost_estimate=None,
+                prompt_version=prompt_version,
+                status="parse_failure",
+                course_id=course_id,
+            )
+            raise InvalidModelOutputError(retry_exc) from retry_exc
     answer_section = answer_sections[0]
     unique_items = _dedupe_by_source_fingerprint(section, questions, prompt_version)
     for source_fingerprint, item in unique_items:

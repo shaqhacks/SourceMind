@@ -15,7 +15,7 @@ from app.db.models import Job, utcnow
 PROGRESS_LEASE_EXTENSION_SECONDS = 60
 
 
-def report_progress(job_id: str, stage: str, pct: int, message: str) -> None:
+def report_progress(job_id: str, stage: str, pct: float | None, message: str) -> None:
     """Progress is observability, never a transaction boundary for pipeline
     data — this uses its OWN short-lived session rather than the caller's,
     so a mid-pipeline progress heartbeat can never accidentally commit

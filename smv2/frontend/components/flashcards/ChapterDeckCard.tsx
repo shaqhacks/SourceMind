@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
-import ErrorBanner from "@/components/ErrorBanner";
+import GenerationProgress from "@/components/jobs/GenerationProgress";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
-import { describeError } from "@/lib/api/errors";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import {
   findActiveCardsJob,
   generateCards,
@@ -15,8 +16,8 @@ import {
 } from "@/lib/api/client";
 import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
-import { useJobFailureMessage } from "@/lib/hooks/useJobFailureMessage";
-import { formatJobProgress } from "@/lib/jobs/format";
+import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
+import { cancelGenerationJob } from "@/lib/jobs/cancel";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface ChapterDeckCardProps {
@@ -63,7 +64,7 @@ export default function ChapterDeckCard({
   const hasStartedRef = useRef(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [discoveredJobId, setDiscoveredJobId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<FetchError | null>(null);
 
   const hasCards = cards.length > 0;
   const firstSectionId = sectionIds[0] ?? null;
@@ -93,7 +94,7 @@ export default function ChapterDeckCard({
   // brief "finishing up" status instead of flashing back to the "Generate
   // cards" button in that gap.
   const justFinished = done && watchedJobId !== null && job?.status === "succeeded" && !hasCards;
-  const failureMessage = useJobFailureMessage(jobFailed, watchedJobId);
+  const failureInfo = useJobFailure(jobFailed, watchedJobId);
 
   // Advances the generation queue. Every setState call here happens inside
   // an async continuation (after an await, or in a .then()) rather than
@@ -101,7 +102,12 @@ export default function ChapterDeckCard({
   // that do run synchronously aren't state, so they don't trigger React's
   // cascading-render warning either.
   useEffect(() => {
-    if (!done || job?.status === "failed" || !hasStartedRef.current) return;
+    if (!done || !hasStartedRef.current) return;
+    if (job?.status !== "succeeded") {
+      hasStartedRef.current = false;
+      remainingSectionsRef.current = [];
+      return;
+    }
     const next = remainingSectionsRef.current.shift();
     if (!next) {
       hasStartedRef.current = false;
@@ -109,7 +115,7 @@ export default function ChapterDeckCard({
       for (const id of sectionIds) notifyCardsSettled(id);
       return;
     }
-    generateCards(next).then(({ data, status }) => {
+    generateCards(next).then(({ data, status, error }) => {
       if (data) {
         setActiveJobId(data.job_id);
         setDiscoveredJobId(null);
@@ -119,7 +125,7 @@ export default function ChapterDeckCard({
         findActiveCardsJob(next).then((found) => setDiscoveredJobId(found?.id ?? null));
         return;
       }
-      setActionError(describeError(status, "Starting flashcard generation").message);
+      setActionError(describeError(status, "Starting flashcard generation", error));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [done, job?.status]);
@@ -130,7 +136,7 @@ export default function ChapterDeckCard({
     const [first, ...rest] = sectionIds;
     remainingSectionsRef.current = rest;
     hasStartedRef.current = true;
-    const { data, status } = await generateCards(first);
+    const { data, status, error } = await generateCards(first);
     if (data) {
       setActiveJobId(data.job_id);
       return;
@@ -140,7 +146,7 @@ export default function ChapterDeckCard({
       setDiscoveredJobId(found?.id ?? null);
       return;
     }
-    setActionError(describeError(status, "Starting flashcard generation").message);
+    setActionError(describeError(status, "Starting flashcard generation", error));
   }
 
   if (hasCards) {
@@ -165,10 +171,12 @@ export default function ChapterDeckCard({
            * styled Link instead (no asChild support, and <a> can't nest
            * inside <button>) — classes mirror Button's primary/sm variant. */}
           <Link
-            href={`/review?course=${courseId}&start=due`}
+            href={`/review?course=${encodeURIComponent(courseId)}&scope=all&chapter=${encodeURIComponent(
+              title,
+            )}`}
             className="rounded-md bg-accent-700 px-2 py-1 font-heading text-xs text-background transition-colors hover:bg-accent-800 active:bg-accent-900"
           >
-            Review
+            Review chapter
           </Link>
           <Button
             variant="secondary"
@@ -197,17 +205,22 @@ export default function ChapterDeckCard({
           This chapter has no content section to generate cards from.
         </p>
       ) : isGenerating ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          {formatJobProgress(job, stalled)}
-        </p>
+        <GenerationProgress
+          job={stalled ? null : job}
+          quiet={stalled}
+          compact
+          onCancel={watchedJobId ? () => cancelGenerationJob(watchedJobId) : undefined}
+        />
       ) : justFinished ? (
         <p role="status" className="text-sm text-muted-foreground">
           Finishing up…
         </p>
       ) : jobFailed ? (
-        <ErrorBanner
-          message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
+        <RecoveryBanner
+          message={`Generation failed${failureInfo.message ? `: ${failureInfo.message}` : "."}`}
           onRetry={() => void handleGenerate()}
+          jobId={watchedJobId}
+          errorDetail={failureInfo.detail}
         />
       ) : (
         <>
@@ -224,7 +237,13 @@ export default function ChapterDeckCard({
           </Button>
         </>
       )}
-      {actionError && <span className="text-xs text-red-600 dark:text-red-400">{actionError}</span>}
+      {actionError && (
+        <RecoveryBanner
+          message={actionError.message}
+          onRetry={() => void handleGenerate()}
+          errorDetail={actionError.detail}
+        />
+      )}
     </div>
   );
 }

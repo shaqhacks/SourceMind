@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
-
-from sqlalchemy import inspect
-from fastapi.testclient import TestClient
+from datetime import timedelta
 
 from app.db.engine import get_engine, get_session
 from app.db.models import (
@@ -22,10 +20,12 @@ from app.db.models import (
     TestAttempt,
     utcnow,
 )
-from app.main import create_app
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
+from app.main import create_app
 from app.services.learner_context import ensure_course_learning_profile
+from fastapi.testclient import TestClient
+from sqlalchemy import inspect
 
 
 def _seed_card() -> tuple[str, str]:
@@ -208,6 +208,108 @@ def test_review_queue_is_scoped_to_requesting_learner(client):
         assert second_queue.json()["cards"][0]["is_new"] is True
 
 
+def test_review_selection_uses_requesting_learners_scheduler_fields(client):
+    course_id, card_id = _seed_card()
+    learner_a = str(uuid.uuid4())
+    learner_b = str(uuid.uuid4())
+    now = utcnow()
+    session = get_session()
+    try:
+        profile_a = ensure_course_learning_profile(session, learner_a, course_id)
+        profile_b = ensure_course_learning_profile(session, learner_b, course_id)
+        session.add_all(
+            [
+                ReviewState(
+                    course_learning_profile_id=profile_a.id,
+                    card_id=card_id,
+                    course_id=course_id,
+                    due_at=now - timedelta(hours=1),
+                    interval_days=1.0,
+                    ease=2.1,
+                    reps=1,
+                    lapses=0,
+                    last_grade=3,
+                ),
+                ReviewState(
+                    course_learning_profile_id=profile_b.id,
+                    card_id=card_id,
+                    course_id=course_id,
+                    due_at=now + timedelta(days=10),
+                    interval_days=10.0,
+                    ease=2.9,
+                    reps=5,
+                    lapses=2,
+                    last_grade=4,
+                ),
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    client.cookies.set("smv2_learner", learner_a)
+    response_a = client.post(
+        f"/api/courses/{course_id}/review/selection",
+        json={"card_ids": [card_id]},
+    )
+    with TestClient(create_app(), cookies={"smv2_learner": learner_b}) as other_learner:
+        response_b = other_learner.post(
+            f"/api/courses/{course_id}/review/selection",
+            json={"card_ids": [card_id]},
+        )
+
+    assert response_a.status_code == 200
+    assert response_b.status_code == 200
+    card_a = response_a.json()["cards"][0]
+    card_b = response_b.json()["cards"][0]
+    assert card_a["is_due"] is True
+    assert card_a["interval_days"] == 1.0
+    assert card_a["ease"] == 2.1
+    assert card_a["reps"] == 1
+    assert card_a["last_grade"] == 3
+    assert card_b["is_due"] is False
+    assert card_b["interval_days"] == 10.0
+    assert card_b["ease"] == 2.9
+    assert card_b["reps"] == 5
+    assert card_b["last_grade"] == 4
+
+
+def test_review_queue_needs_attention_scope_ignores_other_learners_again_state(client):
+    course_id, card_id = _seed_card()
+
+    with TestClient(create_app()) as other_learner:
+        assert other_learner.post(
+            f"/api/cards/{card_id}/grade", json={"grade": 1}
+        ).status_code == 200
+        assert other_learner.cookies.get("smv2_learner") != client.cookies.get("smv2_learner")
+
+    response = client.get(
+        f"/api/courses/{course_id}/review/queue",
+        params={"scope": "needs_attention"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["cards"] == []
+
+
+def test_review_summary_needs_attention_count_ignores_other_learners_again_state(client):
+    course_id, card_id = _seed_card()
+
+    with TestClient(create_app()) as other_learner:
+        assert other_learner.post(
+            f"/api/cards/{card_id}/grade", json={"grade": 1}
+        ).status_code == 200
+        assert other_learner.cookies.get("smv2_learner") != client.cookies.get("smv2_learner")
+
+    response = client.get("/api/review/summary")
+
+    assert response.status_code == 200
+    course_summary = next(
+        course for course in response.json()["courses"] if course["course_id"] == course_id
+    )
+    assert course_summary["needs_attention_count"] == 0
+
+
 def test_two_learners_create_independently_owned_quiz_attempts(client):
     _course_id, test_id = _seed_test()
 
@@ -377,7 +479,7 @@ def test_skill_map_ignores_legacy_mastery_rows_for_every_learner(client):
 
 
 def test_practice_submission_uses_shared_course_learning_profile(client):
-    course_id, section_id, question_id = _seed_practice_question()
+    course_id, _section_id, question_id = _seed_practice_question()
 
     response = client.post(
         f"/api/courses/{course_id}/practice-questions/{question_id}/answer",

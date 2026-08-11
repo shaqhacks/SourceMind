@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -8,12 +8,20 @@ import { useRouter } from "next/navigation";
 import ChapterMasteryBar from "@/components/chapter/ChapterMasteryBar";
 import InlinePracticeAssessment from "@/components/chapter/InlinePracticeAssessment";
 import ErrorBanner from "@/components/ErrorBanner";
+import GenerationProgress from "@/components/jobs/GenerationProgress";
 import Markdown from "@/components/Markdown";
+import RecoveryBanner from "@/components/RecoveryBanner";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
+import {
+  isPracticeSectionStartable,
+  summarizePracticeSections,
+  type PracticeSectionState,
+} from "@/components/chapter/practiceAssessmentState";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
+  type ApiErrorDetail,
   generateTest,
   getJob,
   getSection,
@@ -26,7 +34,7 @@ import {
 import { QUIZ_RETAKE_THRESHOLD } from "@/lib/dashboard/quizzes";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useRouteFocus } from "@/lib/hooks/useRouteFocus";
-import { formatJobProgress } from "@/lib/jobs/format";
+import { cancelGenerationJob } from "@/lib/jobs/cancel";
 
 const PagesView = dynamic(() => import("@/components/reader/PagesView"), { ssr: false });
 
@@ -42,6 +50,15 @@ interface PracticeSection {
   pageStart: number | null;
   pageEnd: number | null;
 }
+
+const EMPTY_PRACTICE_SECTIONS: PracticeSection[] = [];
+const PRACTICE_SETTINGS_FAILURE_CATEGORIES = new Set([
+  "missing_credentials",
+  "unknown_provider",
+  "unreachable",
+  "ollama_model_unavailable",
+  "ollama_embed_model_unavailable",
+]);
 
 type LoadState =
   | { kind: "loading" }
@@ -68,6 +85,43 @@ async function loadSections(ids: string[]): Promise<PracticeSection[]> {
     }
   });
   return sections;
+}
+
+function practiceFailureGuidance(states: Record<string, PracticeSectionState>) {
+  let invalidModelOutput = 0;
+  let settings = 0;
+
+  for (const state of Object.values(states)) {
+    if (state.kind !== "failed") {
+      continue;
+    }
+    if (
+      state.errorDetail?.code === "invalid_model_output" ||
+      state.errorDetail?.failure_category === "structured_output_invalid" ||
+      state.errorDetail?.failure_category === "llm_response_invalid"
+    ) {
+      invalidModelOutput += 1;
+      continue;
+    }
+    if (
+      state.errorDetail?.code === "llm_readiness_unavailable" ||
+      (state.errorDetail?.failure_category
+        ? PRACTICE_SETTINGS_FAILURE_CATEGORIES.has(state.errorDetail.failure_category)
+        : false)
+    ) {
+      settings += 1;
+    }
+  }
+
+  return { invalidModelOutput, settings };
+}
+
+function pluralizeSections(count: number) {
+  return `${count} section${count === 1 ? "" : "s"}`;
+}
+
+function sectionNeedsVerb(count: number) {
+  return count === 1 ? "needs" : "need";
 }
 
 function PracticeMaterial({ courseId, section }: { courseId: string; section: PracticeSection }) {
@@ -105,12 +159,20 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
   const [tests, setTests] = useState<TestSummaryOut[] | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<FetchError | null>(null);
   const [retakingTestId, setRetakingTestId] = useState<string | null>(null);
   const [retakeError, setRetakeError] = useState<string | null>(null);
-  const [failureInfo, setFailureInfo] = useState<{ jobId: string; message: string | null } | null>(
-    null,
-  );
+  const [failureInfo, setFailureInfo] = useState<
+    { jobId: string; message: string | null; detail: ApiErrorDetail | null } | null
+  >(null);
+  const [practiceSectionStates, setPracticeSectionStates] = useState<{
+    key: string;
+    states: Record<string, PracticeSectionState>;
+  }>({ key: "", states: {} });
+  const [practiceRetryVersions, setPracticeRetryVersions] = useState<Record<string, number>>({});
+  const [practiceStartVersions, setPracticeStartVersions] = useState<Record<string, number>>({});
+  const [pendingPracticeStartIds, setPendingPracticeStartIds] = useState<string[]>([]);
+  const [retryingPracticeSectionIds, setRetryingPracticeSectionIds] = useState<string[]>([]);
   // Attempt ids known before the current generation started, so the
   // settle handler can tell which attempt in the refetched list is the
   // new one to navigate into — generate_test's own response is just a
@@ -118,12 +180,143 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
   // the whole list rather than being told the new id directly).
   const knownAttemptIdsRef = useRef<Set<string>>(new Set());
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const practiceSectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const practiceHeadingRefs = useRef<Record<string, HTMLHeadingElement | null>>({});
+  const practiceContextRef = useRef<{ key: string; sectionIds: Set<string> }>({
+    key: "",
+    sectionIds: new Set(),
+  });
+  const practiceSectionStatesRef = useRef<{
+    key: string;
+    states: Record<string, PracticeSectionState>;
+  }>({ key: "", states: {} });
+  const retryingPracticeSectionIdsRef = useRef<string[]>([]);
   useRouteFocus(headingRef);
 
   const { job, done, stalled } = useJobEvents(jobId);
   const isGenerating = jobId !== null && !done;
   const jobFailed = done && job?.status === "failed";
   const failureMessage = failureInfo?.jobId === jobId ? failureInfo.message : null;
+  const failureDetail = failureInfo?.jobId === jobId ? failureInfo.detail : null;
+  const readyChapter = state.kind === "ready" ? state.chapter : null;
+  const practiceSections =
+    state.kind === "ready" ? state.practiceSections : EMPTY_PRACTICE_SECTIONS;
+  const practiceChapterKey = `${courseId}:${readyChapter?.chapter_label ?? chapterLabel}`;
+  const practiceSectionIds = useMemo(
+    () => new Set(practiceSections.map((section) => section.id)),
+    [practiceSections],
+  );
+  const currentPracticeStates = useMemo(
+    () => (practiceSectionStates.key === practiceChapterKey ? practiceSectionStates.states : {}),
+    [practiceChapterKey, practiceSectionStates],
+  );
+  const startingAllPractice = pendingPracticeStartIds.some((sectionId) =>
+    isPracticeSectionStartable(currentPracticeStates[sectionId]),
+  );
+  const practiceSummary = summarizePracticeSections(currentPracticeStates, practiceSections.length);
+  const practiceGuidance = practiceFailureGuidance(currentPracticeStates);
+  const failedPracticeSectionIds = useMemo(
+    () =>
+      practiceSections
+        .filter((section) => currentPracticeStates[section.id]?.kind === "failed")
+        .map((section) => section.id),
+    [currentPracticeStates, practiceSections],
+  );
+  const shouldShowContinueWithReady =
+    practiceSummary.ready > 0 &&
+    practiceSummary.ready < practiceSummary.total &&
+    (practiceSummary.loading > 0 || practiceSummary.generating > 0 || practiceSummary.failed > 0);
+  const retryingFailedPractice =
+    retryingPracticeSectionIds.length > 0 &&
+    retryingPracticeSectionIds.some(
+      (sectionId) => currentPracticeStates[sectionId]?.kind === "failed",
+    );
+
+  useLayoutEffect(() => {
+    practiceContextRef.current = { key: practiceChapterKey, sectionIds: practiceSectionIds };
+    practiceSectionStatesRef.current = practiceSectionStates;
+    retryingPracticeSectionIdsRef.current = retryingPracticeSectionIds;
+  }, [practiceChapterKey, practiceSectionIds, practiceSectionStates, retryingPracticeSectionIds]);
+
+  const handlePracticeSectionStateChange = useCallback(
+    (nextState: PracticeSectionState) => {
+      const context = practiceContextRef.current;
+      if (!context.sectionIds.has(nextState.sectionId)) {
+        return;
+      }
+
+      const current = practiceSectionStatesRef.current;
+      const states = current.key === context.key ? current.states : {};
+      const nextStates = { ...states, [nextState.sectionId]: nextState };
+      const nextCollectedState = { key: context.key, states: nextStates };
+      practiceSectionStatesRef.current = nextCollectedState;
+      setPracticeSectionStates(nextCollectedState);
+
+      if (!isPracticeSectionStartable(nextState)) {
+        setPendingPracticeStartIds((currentIds) =>
+          currentIds.filter((sectionId) => sectionId !== nextState.sectionId),
+        );
+      }
+
+      const retryingIds = retryingPracticeSectionIdsRef.current;
+      if (!retryingIds.includes(nextState.sectionId)) {
+        return;
+      }
+      const nextRetryingIds = retryingIds.some(
+        (sectionId) => nextStates[sectionId]?.kind === "failed",
+      )
+        ? retryingIds
+        : [];
+      retryingPracticeSectionIdsRef.current = nextRetryingIds;
+      setRetryingPracticeSectionIds(nextRetryingIds);
+    },
+    [],
+  );
+
+  const handleRetryFailedPractice = useCallback(() => {
+    const capturedFailedIds = failedPracticeSectionIds;
+    if (capturedFailedIds.length === 0) {
+      return;
+    }
+    retryingPracticeSectionIdsRef.current = capturedFailedIds;
+    setRetryingPracticeSectionIds(capturedFailedIds);
+    setPracticeRetryVersions((current) => {
+      const next = { ...current };
+      for (const sectionId of capturedFailedIds) {
+        next[sectionId] = (next[sectionId] ?? 0) + 1;
+      }
+      return next;
+    });
+  }, [failedPracticeSectionIds]);
+
+  const handleGenerateAllPractice = useCallback(() => {
+    const startableIds = practiceSections
+      .filter((section) => isPracticeSectionStartable(currentPracticeStates[section.id]))
+      .map((section) => section.id);
+    if (startableIds.length === 0 || startingAllPractice) {
+      return;
+    }
+
+    setPendingPracticeStartIds(startableIds);
+    setPracticeStartVersions((current) => {
+      const next = { ...current };
+      for (const sectionId of startableIds) {
+        next[sectionId] = (next[sectionId] ?? 0) + 1;
+      }
+      return next;
+    });
+  }, [currentPracticeStates, practiceSections, startingAllPractice]);
+
+  const handleContinueWithReadyPractice = useCallback(() => {
+    const firstReadySection = practiceSections.find(
+      (section) => currentPracticeStates[section.id]?.kind === "ready",
+    );
+    if (!firstReadySection) {
+      return;
+    }
+    practiceSectionRefs.current[firstReadySection.id]?.scrollIntoView({ block: "start" });
+    practiceHeadingRefs.current[firstReadySection.id]?.focus();
+  }, [currentPracticeStates, practiceSections]);
 
   const retryLoad = useCallback(() => {
     setState({ kind: "loading" });
@@ -193,7 +386,11 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     if (!jobFailed || !jobId) return;
     let active = true;
     getJob(jobId).then(({ data }) => {
-      if (active) setFailureInfo({ jobId, message: data?.error ?? null });
+      if (active) {
+        const detail =
+          (data as { error_detail?: ApiErrorDetail | null } | undefined)?.error_detail ?? null;
+        setFailureInfo({ jobId, message: data?.error ?? null, detail });
+      }
     });
     return () => {
       active = false;
@@ -206,13 +403,13 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     knownAttemptIdsRef.current = new Set(
       (tests ?? []).flatMap((test) => test.attempts.map((attempt) => attempt.id)),
     );
-    const { data, status } = await generateTest(courseId, { chapterLabel });
+    const { data, status, error } = await generateTest(courseId, { chapterLabel });
     setStarting(false);
     if (data) {
       setJobId(data.job_id);
       return;
     }
-    setStartError(describeError(status, "Starting chapter test generation").message);
+    setStartError(describeError(status, "Starting chapter test generation", error));
   }
 
   if (state.kind === "loading") {
@@ -239,7 +436,11 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
     );
   }
 
-  const { chapter, practiceSections } = state;
+  if (!readyChapter) {
+    return null;
+  }
+
+  const chapter = readyChapter;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -264,9 +465,85 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
             </p>
           ) : (
             <div className="flex flex-col gap-6">
-              {practiceSections.map((section) => (
-                <div key={section.id} className="flex flex-col gap-3">
-                  <InlinePracticeAssessment courseId={courseId} sectionId={section.id} />
+              <div className="flex flex-wrap items-center gap-2">
+                <p
+                  role="status"
+                  aria-label="Practice readiness"
+                  className="text-sm text-muted-foreground"
+                >
+                  {practiceSummary.ready} of {practiceSummary.total} ready
+                  {practiceSummary.generating > 0
+                    ? ` · ${practiceSummary.generating} preparing`
+                    : ""}
+                  {practiceSummary.failed > 0
+                    ? ` · ${practiceSummary.failed} needs retry`
+                    : ""}
+                </p>
+                {failedPracticeSectionIds.length > 0 && (
+                  <Button
+                    size="sm"
+                    onClick={handleRetryFailedPractice}
+                    disabled={retryingFailedPractice}
+                  >
+                    Retry failed ({failedPracticeSectionIds.length})
+                  </Button>
+                )}
+                {practiceSummary.startable > 0 && (
+                  <Button
+                    size="sm"
+                    onClick={handleGenerateAllPractice}
+                    disabled={startingAllPractice}
+                  >
+                    {startingAllPractice ? "Starting practice..." : "Generate all practice"}
+                  </Button>
+                )}
+                {shouldShowContinueWithReady && (
+                  <Button size="sm" onClick={handleContinueWithReadyPractice}>
+                    Continue with ready ({practiceSummary.ready})
+                  </Button>
+                )}
+              </div>
+              {practiceGuidance.invalidModelOutput > 0 || practiceGuidance.settings > 0 ? (
+                <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+                  {practiceGuidance.invalidModelOutput > 0 ? (
+                    <li>
+                      {pluralizeSections(practiceGuidance.invalidModelOutput)}{" "}
+                      {sectionNeedsVerb(practiceGuidance.invalidModelOutput)} a valid model response
+                    </li>
+                  ) : null}
+                  {practiceGuidance.settings > 0 ? (
+                    <li>
+                      {pluralizeSections(practiceGuidance.settings)}{" "}
+                      {sectionNeedsVerb(practiceGuidance.settings)} model settings
+                    </li>
+                  ) : null}
+                </ul>
+              ) : null}
+              {practiceSections.map((section, index) => (
+                <div
+                  key={section.id}
+                  id={`practice-section-${section.id}`}
+                  ref={(node) => {
+                    practiceSectionRefs.current[section.id] = node;
+                  }}
+                  className="flex flex-col gap-3"
+                >
+                  <h3
+                    ref={(node) => {
+                      practiceHeadingRefs.current[section.id] = node;
+                    }}
+                    tabIndex={-1}
+                    className="text-sm font-semibold focus-visible:ring-2 focus-visible:ring-accent-700 focus-visible:ring-offset-2"
+                  >
+                    Practice section {index + 1}
+                  </h3>
+                  <InlinePracticeAssessment
+                    courseId={courseId}
+                    sectionId={section.id}
+                    retryVersion={practiceRetryVersions[section.id] ?? 0}
+                    startVersion={practiceStartVersions[section.id] ?? 0}
+                    onStateChange={handlePracticeSectionStateChange}
+                  />
                   <details className="rounded-md border border-border p-3">
                     <summary className="cursor-pointer text-sm font-medium">
                       View textbook source
@@ -283,15 +560,20 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
 
         <div className="flex flex-col gap-2">
           {jobFailed && (
-            <ErrorBanner
+            <RecoveryBanner
               message={`Generation failed${failureMessage ? `: ${failureMessage}` : "."}`}
               onRetry={() => void handleGenerate()}
+              jobId={jobId}
+              errorDetail={failureDetail}
             />
           )}
           {isGenerating ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              {formatJobProgress(job, stalled)}
-            </p>
+            <GenerationProgress
+              job={stalled ? null : job}
+              quiet={stalled}
+              onCancel={jobId ? () => cancelGenerationJob(jobId) : undefined}
+              onContinue={() => router.push(`/course/${courseId}`)}
+            />
           ) : (
             !jobFailed && (
               <Button
@@ -309,7 +591,13 @@ export default function ChapterTestClient({ courseId, chapterLabel }: ChapterTes
               </Button>
             )
           )}
-          {startError && <p className="text-xs text-red-600 dark:text-red-400">{startError}</p>}
+          {startError && (
+            <RecoveryBanner
+              message={startError.message}
+              errorDetail={startError.detail}
+              onRetry={() => void handleGenerate()}
+            />
+          )}
         </div>
 
         <div className="flex flex-col gap-2">

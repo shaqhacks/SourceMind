@@ -82,6 +82,32 @@ describe("groupSectionsByChapter", () => {
     expect(chapterGroupKey(null)).not.toBe(chapterGroupKey("Front matter"));
   });
 
+  it("keeps null, empty, and sentinel-like chapter labels in distinct groups", () => {
+    const sections = [
+      makeSection({ id: "null-label", order_index: 0, chapter_label: null }),
+      makeSection({ id: "empty-label", order_index: 1, chapter_label: "" }),
+      makeSection({ id: "literal-sentinel", order_index: 2, chapter_label: "__front_matter__" }),
+    ];
+
+    const groups = groupSectionsByChapter(sections);
+
+    expect(groups.map((g) => g.label)).toEqual([null, "", "__front_matter__"]);
+    expect(groups.map((g) => g.displayLabel)).toEqual([
+      FRONT_MATTER_LABEL,
+      "",
+      "__front_matter__",
+    ]);
+    expect(groups.map((g) => g.sections.map((section) => section.id))).toEqual([
+      ["null-label"],
+      ["empty-label"],
+      ["literal-sentinel"],
+    ]);
+    expect(new Set(groups.map((g) => g.key)).size).toBe(3);
+    expect(chapterGroupKey(null)).not.toBe(chapterGroupKey(""));
+    expect(chapterGroupKey(null)).not.toBe(chapterGroupKey("__front_matter__"));
+    expect(chapterGroupKey("")).not.toBe(chapterGroupKey("__front_matter__"));
+  });
+
   it("merges by label rather than by contiguous run, even if a label reappears non-contiguously", () => {
     // Not a realistic ingest output (chapter_label runs should always be
     // contiguous in order_index) — asserted explicitly since it's not

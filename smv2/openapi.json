@@ -585,6 +585,10 @@
             "title": "Due Count",
             "type": "integer"
           },
+          "needs_attention_count": {
+            "title": "Needs Attention Count",
+            "type": "integer"
+          },
           "new_count": {
             "title": "New Count",
             "type": "integer"
@@ -609,7 +613,8 @@
           "overdue_count",
           "new_count",
           "available_count",
-          "total_count"
+          "total_count",
+          "needs_attention_count"
         ],
         "title": "CourseReviewSummaryOut",
         "type": "object"
@@ -2053,6 +2058,18 @@
             "title": "Attempts",
             "type": "integer"
           },
+          "cancel_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Requested At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -2150,6 +2167,7 @@
           "error",
           "error_detail",
           "attempts",
+          "cancel_requested_at",
           "created_at",
           "updated_at",
           "retryable"
@@ -2451,6 +2469,70 @@
         "title": "NoteUpdateIn",
         "type": "object"
       },
+      "OllamaModelsDiscoverIn": {
+        "properties": {
+          "base_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          },
+          "configured_model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured Model"
+          }
+        },
+        "title": "OllamaModelsDiscoverIn",
+        "type": "object"
+      },
+      "OllamaModelsDiscoverOut": {
+        "properties": {
+          "configured_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured Model"
+          },
+          "configured_model_available": {
+            "title": "Configured Model Available",
+            "type": "boolean"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models",
+          "configured_model",
+          "configured_model_available"
+        ],
+        "title": "OllamaModelsDiscoverOut",
+        "type": "object"
+      },
       "OutlineEditRequest": {
         "properties": {
           "operations": {
@@ -2551,6 +2633,18 @@
       },
       "PracticeAssessmentOut": {
         "properties": {
+          "error_detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Detail"
+          },
           "job_id": {
             "anyOf": [
               {
@@ -3079,6 +3173,17 @@
             "title": "Back Md",
             "type": "string"
           },
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
           "due_at": {
             "anyOf": [
               {
@@ -3107,9 +3212,24 @@
             "title": "Interval Days",
             "type": "number"
           },
+          "is_due": {
+            "title": "Is Due",
+            "type": "boolean"
+          },
           "is_new": {
             "title": "Is New",
             "type": "boolean"
+          },
+          "last_grade": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Grade"
           },
           "reps": {
             "title": "Reps",
@@ -3118,15 +3238,23 @@
           "section_id": {
             "title": "Section Id",
             "type": "string"
+          },
+          "section_title": {
+            "title": "Section Title",
+            "type": "string"
           }
         },
         "required": [
           "id",
           "section_id",
+          "chapter_label",
+          "section_title",
           "front_md",
           "back_md",
           "due_at",
           "is_new",
+          "is_due",
+          "last_grade",
           "interval_days",
           "ease",
           "reps"
@@ -3183,6 +3311,48 @@
           "total_count"
         ],
         "title": "ReviewQueueOut",
+        "type": "object"
+      },
+      "ReviewSelectionIn": {
+        "properties": {
+          "card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Card Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "card_ids"
+        ],
+        "title": "ReviewSelectionIn",
+        "type": "object"
+      },
+      "ReviewSelectionOut": {
+        "properties": {
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewQueueCardOut"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "missing_card_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Card Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cards",
+          "missing_card_ids"
+        ],
+        "title": "ReviewSelectionOut",
         "type": "object"
       },
       "ReviewSummaryOut": {
@@ -4850,7 +5020,7 @@
   "paths": {
     "/api/assets/{asset_id}/file": {
       "get": {
-        "description": "Serves the original uploaded source as-is, for the reader's\noriginal-source page view. Inline disposition keeps browser-viewable\nsources embedded where supported instead of forcing a download.",
+        "description": "Serves the original uploaded source as-is, for the reader's\noriginal-source page view. PDFs stay inline for the reader; every\nother source is downloaded to avoid browser execution.",
         "operationId": "get_asset_file",
         "parameters": [
           {
@@ -6674,6 +6844,37 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "available",
+              "enum": [
+                "available",
+                "all",
+                "needs_attention"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "chapter_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Chapter Label"
+            }
           }
         ],
         "responses": {
@@ -6699,6 +6900,58 @@
           }
         },
         "summary": "Review Queue",
+        "tags": [
+          "review"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/review/selection": {
+      "post": {
+        "operationId": "review_selection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewSelectionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSelectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Selection",
         "tags": [
           "review"
         ]
@@ -8049,6 +8302,48 @@
         ]
       }
     },
+    "/api/jobs/{job_id}/cancel": {
+      "post": {
+        "operationId": "cancel_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
     "/api/jobs/{job_id}/events": {
       "get": {
         "operationId": "job_events",
@@ -8665,6 +8960,47 @@
           }
         },
         "summary": "Bootstrap",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/ollama/models": {
+      "post": {
+        "operationId": "discover_models_api_settings_ollama_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OllamaModelsDiscoverIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OllamaModelsDiscoverOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Discover Models",
         "tags": [
           "settings"
         ]

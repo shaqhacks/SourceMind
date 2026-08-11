@@ -6,9 +6,12 @@ import CardsCTA from "@/components/reader/CardsCTA";
 import {
   findActiveCardsJob,
   generateCards,
+  cancelJob,
   getJob,
   listCards,
+  type ApiResult,
   type CardOut,
+  type GenerateCardsOut,
   type JobOut,
 } from "@/lib/api/client";
 
@@ -21,11 +24,13 @@ vi.mock("@/lib/api/client", () => ({
   listCards: vi.fn(),
   generateCards: vi.fn(),
   findActiveCardsJob: vi.fn(),
+  cancelJob: vi.fn(),
   getJob: vi.fn(),
 }));
 
 const mockedListCards = vi.mocked(listCards);
 const mockedGenerateCards = vi.mocked(generateCards);
+const mockedCancelJob = vi.mocked(cancelJob);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 const mockedGetJob = vi.mocked(getJob);
 
@@ -54,6 +59,7 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     error_detail: null,
     retryable: true,
     attempts: 0,
+    cancel_requested_at: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -143,6 +149,34 @@ describe("CardsCTA", () => {
     expect(screen.queryByText(/failed/i)).not.toBeInTheDocument();
   });
 
+  it("routes immediate structured provider readiness failures to Settings without starting a job stream", async () => {
+    mockedListCards.mockResolvedValue(ok([]));
+    mockedGenerateCards.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: {
+        detail: {
+          code: "llm_readiness_unavailable",
+          failure_category: "missing_credentials",
+          message: "LLM provider is not ready",
+          remediation: "Configure an available model in Settings.",
+        },
+      },
+    } satisfies ApiResult<GenerateCardsOut>);
+
+    const user = userEvent.setup();
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate flashcards/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("LLM provider is not ready");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(mockedGetJob).not.toHaveBeenCalled();
+  });
+
   it("routes structured provider readiness failures to Settings and hides retry", async () => {
     mockedListCards.mockResolvedValue(ok([]));
     mockedGenerateCards.mockResolvedValueOnce(ok({ job_id: "job-1" }, 202));
@@ -212,5 +246,41 @@ describe("CardsCTA", () => {
     expect(await screen.findByRole("link", { name: /view job details/i })).toHaveAttribute("href", "/jobs?job=job-404");
     await user.click(screen.getByRole("button", { name: /retry/i }));
     expect(mockedGenerateCards).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels an in-flight generation job once from the shared progress control", async () => {
+    mockedListCards.mockResolvedValue(ok([]));
+    mockedGenerateCards.mockResolvedValue(ok({ job_id: "job-1" }, 202));
+    mockedCancelJob.mockResolvedValue(ok(makeJob({ id: "job-1", status: "cancelled" })));
+
+    const user = userEvent.setup();
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate flashcards/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: /cancel generation/i }));
+
+    expect(mockedCancelJob).toHaveBeenCalledWith("job-1");
+    expect(mockedCancelJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a retryable cancel error when the cancel API returns a 500 result", async () => {
+    mockedListCards.mockResolvedValue(ok([]));
+    mockedGenerateCards.mockResolvedValue(ok({ job_id: "job-1" }, 202));
+    mockedCancelJob
+      .mockResolvedValueOnce(err<JobOut>(500))
+      .mockResolvedValueOnce(ok(makeJob({ id: "job-1", status: "cancelled" })));
+
+    const user = userEvent.setup();
+    render(<CardsCTA sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate flashcards/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: /cancel generation/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not cancel generation/i);
+    await user.click(screen.getByRole("button", { name: /retry cancel/i }));
+
+    expect(mockedCancelJob).toHaveBeenCalledTimes(2);
   });
 });

@@ -12,7 +12,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, StrictInt, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StrictInt,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from app.jobs.error_envelope import decode_job_error
 
@@ -32,6 +39,7 @@ class JobOut(BaseModel):
     error: str | None
     error_detail: dict[str, Any] | None
     attempts: int
+    cancel_requested_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -55,6 +63,7 @@ class JobOut(BaseModel):
                 "error": decoded_error,
                 "error_detail": detail,
                 "attempts": value.attempts,
+                "cancel_requested_at": value.cancel_requested_at,
                 "created_at": value.created_at,
                 "updated_at": value.updated_at,
             }
@@ -65,6 +74,8 @@ class JobOut(BaseModel):
     def retryable(self) -> bool:
         from app.jobs.registry import RETRYABLE_JOB_TYPES
 
+        if self.status == "cancelled":
+            return False
         return self.type in RETRYABLE_JOB_TYPES
 
 
@@ -419,6 +430,17 @@ class SettingsClearIn(BaseModel):
     confirmation: str
 
 
+class OllamaModelsDiscoverIn(BaseModel):
+    base_url: str | None = Field(default=None, max_length=2048)
+    configured_model: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class OllamaModelsDiscoverOut(BaseModel):
+    models: list[str]
+    configured_model: str | None
+    configured_model_available: bool
+
+
 class SettingsOut(BaseModel):
     provider: str
     model: str
@@ -458,10 +480,14 @@ class UpdateCardIn(BaseModel):
 class ReviewQueueCardOut(BaseModel):
     id: str
     section_id: str
+    chapter_label: str | None
+    section_title: str
     front_md: str
     back_md: str
     due_at: datetime | None
     is_new: bool
+    is_due: bool
+    last_grade: int | None
     # Scheduler state going INTO the next grade (srs_service.schedule_next's
     # own convention) — a new card (is_new=True) gets the same bootstrap
     # values grade_card() uses when it has no ReviewState yet. Exposed so
@@ -481,6 +507,22 @@ class ReviewQueueOut(BaseModel):
     new_count: int
     available_count: int
     total_count: int
+
+
+class ReviewSelectionIn(BaseModel):
+    card_ids: list[str] = Field(min_length=1, max_length=200)
+
+    @field_validator("card_ids")
+    @classmethod
+    def _card_ids_are_unique(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("card_ids must be unique")
+        return value
+
+
+class ReviewSelectionOut(BaseModel):
+    cards: list[ReviewQueueCardOut]
+    missing_card_ids: list[str]
 
 
 class AdaptiveStudyActivityOut(BaseModel):
@@ -522,6 +564,7 @@ class CourseReviewSummaryOut(BaseModel):
     new_count: int
     available_count: int
     total_count: int
+    needs_attention_count: int
 
 
 class ReviewSummaryOut(BaseModel):
@@ -646,6 +689,7 @@ class PracticeAssessmentOut(BaseModel):
     run_id: str | None = None
     job_id: str | None = None
     message: str | None = None
+    error_detail: dict[str, Any] | None = None
 
 
 class SubmitPracticeAnswerIn(BaseModel):

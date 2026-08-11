@@ -1,0 +1,180 @@
+import type { ApiErrorDetail, PracticeAssessmentOut } from "@/lib/api/client";
+import { apiErrorDetail, type FetchError } from "@/lib/api/errors";
+
+export type PracticeSectionState =
+  | {
+      kind: "loading";
+      sectionId: string;
+      questionCount: 0;
+      message: null;
+      errorDetail: null;
+      retryKind: null;
+    }
+  | {
+      kind: "generating";
+      sectionId: string;
+      questionCount: 0;
+      message: string | null;
+      errorDetail: null;
+      retryKind: null;
+    }
+  | {
+      kind: "not_started";
+      sectionId: string;
+      questionCount: 0;
+      message: string | null;
+      errorDetail: null;
+      retryKind: "start";
+    }
+  | {
+      kind: "ready";
+      sectionId: string;
+      questionCount: number;
+      message: null;
+      errorDetail: null;
+      retryKind: null;
+    }
+  | {
+      kind: "failed";
+      sectionId: string;
+      questionCount: 0;
+      message: string;
+      errorDetail: ApiErrorDetail | null;
+      retryKind: "reload" | "restart";
+    };
+
+export interface PracticeSectionsSummary {
+  ready: number;
+  generating: number;
+  loading: number;
+  failed: number;
+  startable: number;
+  questions: number;
+  total: number;
+}
+
+export function loadingPracticeSectionState(sectionId: string): PracticeSectionState {
+  return {
+    kind: "loading",
+    sectionId,
+    questionCount: 0,
+    message: null,
+    errorDetail: null,
+    retryKind: null,
+  };
+}
+
+export function practiceSectionStateFromLoadError(
+  sectionId: string,
+  error: Pick<FetchError, "message" | "detail">,
+): PracticeSectionState {
+  return {
+    kind: "failed",
+    sectionId,
+    questionCount: 0,
+    message: error.message,
+    errorDetail: error.detail ?? null,
+    retryKind: "reload",
+  };
+}
+
+export function practiceSectionStateFromAssessment(
+  sectionId: string,
+  assessment: PracticeAssessmentOut,
+): PracticeSectionState {
+  if (assessment.status === "not_started") {
+    return {
+      kind: "not_started",
+      sectionId,
+      questionCount: 0,
+      message: assessment.message ?? null,
+      errorDetail: null,
+      retryKind: "start",
+    };
+  }
+
+  if (assessment.status === "ready") {
+    return {
+      kind: "ready",
+      sectionId,
+      questionCount: assessment.questions?.length ?? 0,
+      message: null,
+      errorDetail: null,
+      retryKind: null,
+    };
+  }
+
+  if (assessment.status === "failed") {
+    const errorDetail = apiErrorDetail({ detail: assessment.error_detail });
+    return {
+      kind: "failed",
+      sectionId,
+      questionCount: 0,
+      message: assessment.message ?? "Practice question extraction failed.",
+      errorDetail,
+      retryKind: "restart",
+    };
+  }
+
+  if (assessment.status === "generating") {
+    return {
+      kind: "generating",
+      sectionId,
+      questionCount: 0,
+      message: assessment.message ?? null,
+      errorDetail: null,
+      retryKind: null,
+    };
+  }
+
+  return loadingPracticeSectionState(sectionId);
+}
+
+export function isPracticeSectionStartable(state: PracticeSectionState | undefined) {
+  return state?.kind === "not_started";
+}
+
+export function practiceSectionStateSignature(state: PracticeSectionState) {
+  return JSON.stringify(state);
+}
+
+export function summarizePracticeSections(
+  states: Record<string, PracticeSectionState>,
+  total: number,
+): PracticeSectionsSummary {
+  const summary: PracticeSectionsSummary = {
+    ready: 0,
+    generating: 0,
+    loading: 0,
+    failed: 0,
+    startable: 0,
+    questions: 0,
+    total,
+  };
+
+  for (const state of Object.values(states)) {
+    if (state.kind === "ready") {
+      summary.ready += 1;
+      summary.questions += state.questionCount;
+      continue;
+    }
+    if (state.kind === "generating") {
+      summary.generating += 1;
+      continue;
+    }
+    if (state.kind === "failed") {
+      summary.failed += 1;
+      continue;
+    }
+    if (state.kind === "not_started") {
+      summary.startable += 1;
+      continue;
+    }
+    summary.loading += 1;
+  }
+
+  const missing = Math.max(0, total - Object.keys(states).length);
+  summary.loading += missing;
+
+  return summary;
+}

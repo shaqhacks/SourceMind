@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import Chat, { type ChatCitation, type ChatSendResult, type ChatTurn } from "@/components/Chat";
+import { recoveryAllowsRetry } from "@/components/RecoveryBanner";
 import SelectionContextPill from "@/components/reader/SelectionContextPill";
 import { getChatHistory, sendChat, type ChatSelectionIn, type ChatTurnOut } from "@/lib/api/client";
+import { describeError, type FetchError } from "@/lib/api/errors";
 import { useDialogFocus } from "@/lib/hooks/useDialogFocus";
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
 import { useShellLayout } from "@/lib/hooks/useShellLayout";
@@ -55,7 +57,17 @@ function mapTurn(turn: ChatTurnOut): ChatTurn {
   };
 }
 
-function describeSendError(status: number | undefined): { message: string; retryable: boolean } {
+function describeSendError(
+  status: number | undefined,
+  error?: unknown,
+): FetchError & { retryable: boolean } {
+  const described = describeError(status, "The assistant", error);
+  if (described.detail) {
+    return {
+      ...described,
+      retryable: recoveryAllowsRetry(described.detail) && (status === undefined || status >= 500),
+    };
+  }
   if (status === 429) {
     return { message: "Assistant is busy — try again in a moment.", retryable: true };
   }
@@ -65,7 +77,7 @@ function describeSendError(status: number | undefined): { message: string; retry
   if (status === undefined) {
     return { message: "Could not reach the assistant.", retryable: true };
   }
-  return { message: `The assistant failed (HTTP ${status}).`, retryable: status >= 500 };
+  return { ...described, retryable: status >= 500 };
 }
 
 /**
@@ -125,7 +137,7 @@ export default function CourseChatDrawer({
   const sendFn = useCallback(
     async (message: string): Promise<ChatSendResult> => {
       const sentSelection = pendingSelection;
-      const { data, status } = sentSelection
+      const { data, status, error } = sentSelection
         ? await sendChat(courseId, message, sentSelection)
         : await sendChat(courseId, message);
       if (data) {
@@ -146,7 +158,13 @@ export default function CourseChatDrawer({
           })),
         };
       }
-      return { ok: false, ...describeSendError(status) };
+      const described = describeSendError(status, error);
+      return {
+        ok: false,
+        message: described.message,
+        retryable: described.retryable,
+        errorDetail: described.detail,
+      };
     },
     [courseId, pendingSelection, onConsumeSelection],
   );

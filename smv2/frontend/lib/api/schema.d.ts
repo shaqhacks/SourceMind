@@ -14,8 +14,8 @@ export interface paths {
         /**
          * Get Asset File
          * @description Serves the original uploaded source as-is, for the reader's
-         *     original-source page view. Inline disposition keeps browser-viewable
-         *     sources embedded where supported instead of forcing a download.
+         *     original-source page view. PDFs stay inline for the reader; every
+         *     other source is downloaded to avoid browser execution.
          */
         get: operations["get_asset_file"];
         put?: never;
@@ -544,6 +544,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/review/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Review Selection */
+        post: operations["review_selection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/search": {
         parameters: {
             query?: never;
@@ -922,6 +939,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Job */
+        post: operations["cancel_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}/events": {
         parameters: {
             query?: never;
@@ -1141,6 +1175,23 @@ export interface paths {
         get: operations["bootstrap_api_settings_bootstrap_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/ollama/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discover Models */
+        post: operations["discover_models_api_settings_ollama_models_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1444,6 +1495,8 @@ export interface components {
             course_id: string;
             /** Due Count */
             due_count: number;
+            /** Needs Attention Count */
+            needs_attention_count: number;
             /** New Count */
             new_count: number;
             /** Overdue Count */
@@ -1931,6 +1984,8 @@ export interface components {
         JobOut: {
             /** Attempts */
             attempts: number;
+            /** Cancel Requested At */
+            cancel_requested_at: string | null;
             /**
              * Created At
              * Format: date-time
@@ -2084,6 +2139,22 @@ export interface components {
             /** Note Md */
             note_md?: string | null;
         };
+        /** OllamaModelsDiscoverIn */
+        OllamaModelsDiscoverIn: {
+            /** Base Url */
+            base_url?: string | null;
+            /** Configured Model */
+            configured_model?: string | null;
+        };
+        /** OllamaModelsDiscoverOut */
+        OllamaModelsDiscoverOut: {
+            /** Configured Model */
+            configured_model: string | null;
+            /** Configured Model Available */
+            configured_model_available: boolean;
+            /** Models */
+            models: string[];
+        };
         /** OutlineEditRequest */
         OutlineEditRequest: {
             /** Operations */
@@ -2113,6 +2184,10 @@ export interface components {
         };
         /** PracticeAssessmentOut */
         PracticeAssessmentOut: {
+            /** Error Detail */
+            error_detail?: {
+                [key: string]: unknown;
+            } | null;
             /** Job Id */
             job_id?: string | null;
             /** Message */
@@ -2321,6 +2396,8 @@ export interface components {
         ReviewQueueCardOut: {
             /** Back Md */
             back_md: string;
+            /** Chapter Label */
+            chapter_label: string | null;
             /** Due At */
             due_at: string | null;
             /** Ease */
@@ -2331,12 +2408,18 @@ export interface components {
             id: string;
             /** Interval Days */
             interval_days: number;
+            /** Is Due */
+            is_due: boolean;
             /** Is New */
             is_new: boolean;
+            /** Last Grade */
+            last_grade: number | null;
             /** Reps */
             reps: number;
             /** Section Id */
             section_id: string;
+            /** Section Title */
+            section_title: string;
         };
         /** ReviewQueueOut */
         ReviewQueueOut: {
@@ -2356,6 +2439,18 @@ export interface components {
             total: number;
             /** Total Count */
             total_count: number;
+        };
+        /** ReviewSelectionIn */
+        ReviewSelectionIn: {
+            /** Card Ids */
+            card_ids: string[];
+        };
+        /** ReviewSelectionOut */
+        ReviewSelectionOut: {
+            /** Cards */
+            cards: components["schemas"]["ReviewQueueCardOut"][];
+            /** Missing Card Ids */
+            missing_card_ids: string[];
         };
         /** ReviewSummaryOut */
         ReviewSummaryOut: {
@@ -4155,6 +4250,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                scope?: "available" | "all" | "needs_attention";
+                chapter_label?: string | null;
             };
             header?: never;
             path: {
@@ -4171,6 +4268,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewQueueOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_selection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewSelectionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSelectionOut"];
                 };
             };
             /** @description Validation Error */
@@ -5049,6 +5181,37 @@ export interface operations {
             };
         };
     };
+    cancel_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     job_events: {
         parameters: {
             query?: never;
@@ -5525,6 +5688,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsBootstrapOut"];
+                };
+            };
+        };
+    };
+    discover_models_api_settings_ollama_models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OllamaModelsDiscoverIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OllamaModelsDiscoverOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

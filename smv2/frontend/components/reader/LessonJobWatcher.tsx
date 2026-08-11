@@ -2,12 +2,14 @@
 
 import { useEffect, useRef } from "react";
 
-import { useJobEvents } from "@/lib/hooks/useJobEvents";
+import { useJobEvents, type JobEvent } from "@/lib/hooks/useJobEvents";
 
 export interface LessonJobWatcherProps {
   jobId: string;
   sectionId: string;
-  onSettled: (sectionId: string, status: "ready" | "failed") => void;
+  onSettled: () => void;
+  onSectionSettled: (sectionId: string, status: "ready" | "failed") => void;
+  onUpdate?: (job: JobEvent) => void;
 }
 
 /**
@@ -16,15 +18,28 @@ export interface LessonJobWatcherProps {
  * rather than needing a bespoke multi-job SSE hook — each just reuses the
  * existing single-job useJobEvents.
  */
-export default function LessonJobWatcher({ jobId, sectionId, onSettled }: LessonJobWatcherProps) {
+export default function LessonJobWatcher({
+  jobId,
+  sectionId,
+  onSettled,
+  onSectionSettled,
+  onUpdate,
+}: LessonJobWatcherProps) {
   const { job, done } = useJobEvents(jobId);
   const settledRef = useRef(false);
 
   useEffect(() => {
+    if (!job) return;
+    onUpdate?.(job);
+  }, [job, onUpdate]);
+
+  useEffect(() => {
     if (!done || !job || settledRef.current) return;
     settledRef.current = true;
-    onSettled(sectionId, job.status === "succeeded" ? "ready" : "failed");
-  }, [done, job, sectionId, onSettled]);
+    onSettled();
+    if (job.status === "cancelled") return;
+    onSectionSettled(sectionId, job.status === "succeeded" ? "ready" : "failed");
+  }, [done, job, sectionId, onSettled, onSectionSettled]);
 
   return null;
 }

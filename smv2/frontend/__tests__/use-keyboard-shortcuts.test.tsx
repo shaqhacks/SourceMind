@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useLayoutEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useKeyboardShortcuts } from "@/lib/hooks/useKeyboardShortcuts";
@@ -12,6 +13,23 @@ function ShortcutProbe({ onTrigger }: { onTrigger: () => void }) {
       <div aria-label="editable" contentEditable suppressContentEditableWarning />
       <button aria-label="plain button">click</button>
     </div>
+  );
+}
+
+function MapRefreshProbe({ onInitial, onNext }: { onInitial: () => void; onNext: () => void }) {
+  const [phase, setPhase] = useState<"initial" | "next">("initial");
+  useKeyboardShortcuts(phase === "initial" ? { a: onInitial } : { b: onNext });
+
+  useLayoutEffect(() => {
+    if (phase === "next") {
+      fireEvent.keyDown(window, { key: "b" });
+    }
+  }, [phase]);
+
+  return (
+    <button type="button" onClick={() => setPhase("next")}>
+      {phase}
+    </button>
   );
 }
 
@@ -64,6 +82,17 @@ describe("useKeyboardShortcuts", () => {
     fireEvent.keyDown(window, { key: "a" });
 
     expect(onTrigger).not.toHaveBeenCalled();
+  });
+
+  it("publishes a changed shortcut map before same-commit layout effects can handle keys", () => {
+    const onInitial = vi.fn();
+    const onNext = vi.fn();
+    render(<MapRefreshProbe onInitial={onInitial} onNext={onNext} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "initial" }));
+
+    expect(onInitial).not.toHaveBeenCalled();
+    expect(onNext).toHaveBeenCalledTimes(1);
   });
 
   it("lets a scope registered later suppress an earlier one, restoring it on unmount", () => {

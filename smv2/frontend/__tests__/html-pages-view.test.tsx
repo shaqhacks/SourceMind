@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -48,29 +48,39 @@ describe("HtmlPagesView", () => {
   it("calls getAssetHtmlManifest for the asset", async () => {
     mockedGetAssetHtmlManifest.mockResolvedValue(ok(makeManifest()));
 
-    render(<HtmlPagesView assetId="asset-1" pageStart={1} pageEnd={1} />);
+    render(<HtmlPagesView assetId="asset-manifest-call" pageStart={1} pageEnd={1} />);
 
-    await waitFor(() => expect(mockedGetAssetHtmlManifest).toHaveBeenCalledWith("asset-1"));
+    await waitFor(() =>
+      expect(mockedGetAssetHtmlManifest).toHaveBeenCalledWith("asset-manifest-call"),
+    );
   });
 
   it("renders one sandboxed iframe per page in the range, with the correct src and aspect-ratio sizing", async () => {
     mockedGetAssetHtmlManifest.mockResolvedValue(ok(makeManifest({ width_px: 800, height_px: 1000 })));
 
-    render(<HtmlPagesView assetId="asset-1" pageStart={1} pageEnd={2} />);
+    render(<HtmlPagesView assetId="asset-range-rendering" pageStart={1} pageEnd={2} />);
 
     await waitFor(() => expect(FakeIntersectionObserver.instances).toHaveLength(2));
     // jsdom has no real IntersectionObserver support in this test, but a
     // fake one IS installed above, so pages start hidden behind their
     // placeholder — trigger both to inspect the actual iframes.
-    for (const observer of FakeIntersectionObserver.instances) {
-      for (const el of observer.observed) observer.triggerIntersect(el);
-    }
+    act(() => {
+      for (const observer of FakeIntersectionObserver.instances) {
+        for (const el of observer.observed) observer.triggerIntersect(el);
+      }
+    });
 
     const iframe1 = (await screen.findByTitle("Page 1")) as HTMLIFrameElement;
     const iframe2 = screen.getByTitle("Page 2") as HTMLIFrameElement;
 
-    expect(iframe1).toHaveAttribute("src", "https://mock/api/assets/asset-1/html/1");
-    expect(iframe2).toHaveAttribute("src", "https://mock/api/assets/asset-1/html/2");
+    expect(iframe1).toHaveAttribute(
+      "src",
+      "https://mock/api/assets/asset-range-rendering/html/1",
+    );
+    expect(iframe2).toHaveAttribute(
+      "src",
+      "https://mock/api/assets/asset-range-rendering/html/2",
+    );
     // sandbox="" (present, empty) — the most restrictive sandboxing:
     // scripts/forms/top-navigation/etc. all blocked. This is the
     // security-relevant assertion the feature depends on.
@@ -84,7 +94,7 @@ describe("HtmlPagesView", () => {
   it("lazily mounts only a page that has scrolled near the viewport", async () => {
     mockedGetAssetHtmlManifest.mockResolvedValue(ok(makeManifest()));
 
-    render(<HtmlPagesView assetId="asset-1" pageStart={1} pageEnd={2} />);
+    render(<HtmlPagesView assetId="asset-lazy-mount" pageStart={1} pageEnd={2} />);
 
     await waitFor(() => expect(FakeIntersectionObserver.instances).toHaveLength(2));
     expect(screen.queryByTitle("Page 1")).not.toBeInTheDocument();
@@ -102,7 +112,9 @@ describe("HtmlPagesView", () => {
       if (!found) throw new Error("page observer not registered yet");
       return found;
     });
-    observerForPage1.triggerIntersect(page1Container);
+    act(() => {
+      observerForPage1.triggerIntersect(page1Container);
+    });
 
     expect(await screen.findByTitle("Page 1")).toBeInTheDocument();
     // Page 2's own observer never fired — still just its placeholder.
@@ -126,18 +138,35 @@ describe("HtmlPagesView", () => {
 
   it("shows a per-page error when that page's iframe fails to load, without affecting other pages", async () => {
     mockedGetAssetHtmlManifest.mockResolvedValue(ok(makeManifest()));
+    const addEventListenerSpy = vi.spyOn(HTMLIFrameElement.prototype, "addEventListener");
 
-    render(<HtmlPagesView assetId="asset-1" pageStart={1} pageEnd={2} />);
-    await waitFor(() => expect(FakeIntersectionObserver.instances).toHaveLength(2));
-    for (const observer of FakeIntersectionObserver.instances) {
-      for (const el of observer.observed) observer.triggerIntersect(el);
+    try {
+      render(<HtmlPagesView assetId="asset-iframe-error" pageStart={1} pageEnd={2} />);
+      await waitFor(() => expect(FakeIntersectionObserver.instances).toHaveLength(2));
+      act(() => {
+        for (const observer of FakeIntersectionObserver.instances) {
+          for (const el of observer.observed) observer.triggerIntersect(el);
+        }
+      });
+
+      const iframe1 = await screen.findByTitle("Page 1");
+      await waitFor(() => {
+        const listenerAttached = addEventListenerSpy.mock.calls.some(
+          (call, index) =>
+            addEventListenerSpy.mock.contexts[index] === iframe1 && call[0] === "error",
+        );
+        expect(listenerAttached).toBe(true);
+      });
+
+      act(() => {
+        fireEvent.error(iframe1);
+      });
+
+      expect(await screen.findByText(/could not render page 1/i)).toBeInTheDocument();
+      expect(screen.getByTitle("Page 2")).toBeInTheDocument();
+    } finally {
+      addEventListenerSpy.mockRestore();
     }
-
-    const iframe1 = await screen.findByTitle("Page 1");
-    fireEvent.error(iframe1);
-
-    expect(await screen.findByText(/could not render page 1/i)).toBeInTheDocument();
-    expect(screen.getByTitle("Page 2")).toBeInTheDocument();
   });
 
   // Text selection inside the sandbox="" iframe is intentionally not

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import ErrorBanner from "@/components/ErrorBanner";
+import GenerationProgress from "@/components/jobs/GenerationProgress";
 import RecoveryBanner from "@/components/RecoveryBanner";
 import { describeError, type FetchError } from "@/lib/api/errors";
 import {
@@ -15,7 +15,7 @@ import {
 import { notifyCardsSettled } from "@/lib/cards/cardsBus";
 import { useJobEvents } from "@/lib/hooks/useJobEvents";
 import { useJobFailure } from "@/lib/hooks/useJobFailureMessage";
-import { formatJobProgress } from "@/lib/jobs/format";
+import { cancelGenerationJob } from "@/lib/jobs/cancel";
 import { notifyReviewSettled } from "@/lib/review/reviewBus";
 
 export interface CardsCTAProps {
@@ -44,7 +44,7 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [localJobId, setLocalJobId] = useState<string | null>(null);
   const [discoveredJobId, setDiscoveredJobId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<FetchError | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -89,7 +89,7 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
 
   async function handleGenerate() {
     setActionError(null);
-    const { data, status } = await generateCards(sectionId);
+    const { data, status, error } = await generateCards(sectionId);
     if (data) {
       setLocalJobId(data.job_id);
       return;
@@ -100,7 +100,7 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
       setDiscoveredJobId(found?.id ?? null);
       return;
     }
-    setActionError(describeError(status, "Starting flashcard generation").message);
+    setActionError(describeError(status, "Starting flashcard generation", error));
   }
 
   if (state.kind === "loading") {
@@ -117,9 +117,12 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
 
   if (isGenerating) {
     return (
-      <p role="status" className="text-xs text-muted-foreground">
-        {formatJobProgress(job, stalled)}
-      </p>
+      <GenerationProgress
+        job={stalled ? null : job}
+        quiet={stalled}
+        compact
+        onCancel={watchedJobId ? () => cancelGenerationJob(watchedJobId) : undefined}
+      />
     );
   }
 
@@ -176,7 +179,13 @@ export default function CardsCTA({ sectionId }: CardsCTAProps) {
         {hasCards ? "Generate more flashcards" : "Generate flashcards"}
       </button>
       {actionError && (
-        <span className="w-full text-xs text-status-serious">{actionError}</span>
+        <div className="w-full">
+          <RecoveryBanner
+            message={actionError.message}
+            onRetry={() => void handleGenerate()}
+            errorDetail={actionError.detail}
+          />
+        </div>
       )}
     </div>
   );

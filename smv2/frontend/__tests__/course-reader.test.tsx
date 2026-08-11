@@ -5,12 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CourseReader from "@/components/reader/CourseReader";
 import {
+  type CardOut,
   deleteHighlight,
   editOutline,
   findActiveCardsJob,
   findActiveLessonJob,
   getLessonEstimate,
   getLlmUsage,
+  getReviewQueue,
   getSection,
   listAssets,
   listCards,
@@ -37,6 +39,7 @@ vi.mock("@/lib/api/client", () => ({
   findActiveLessonJob: vi.fn(),
   generateLesson: vi.fn(),
   getLlmUsage: vi.fn(),
+  getReviewQueue: vi.fn(),
   getChatHistory: vi.fn(),
   sendChat: vi.fn(),
   listCards: vi.fn(),
@@ -75,6 +78,7 @@ const mockedSaveProgress = vi.mocked(saveProgress);
 const mockedGetLessonEstimate = vi.mocked(getLessonEstimate);
 const mockedFindActiveLessonJob = vi.mocked(findActiveLessonJob);
 const mockedGetLlmUsage = vi.mocked(getLlmUsage);
+const mockedGetReviewQueue = vi.mocked(getReviewQueue);
 const mockedListCards = vi.mocked(listCards);
 const mockedFindActiveCardsJob = vi.mocked(findActiveCardsJob);
 const mockedListSections = vi.mocked(listSections);
@@ -225,6 +229,18 @@ describe("CourseReader", () => {
     mockedGetLlmUsage.mockResolvedValue(
       ok({ calls: 0, input_tokens: 0, output_tokens: 0, est_cost_usd: 0 }),
     );
+    mockedGetReviewQueue.mockResolvedValue(
+      ok({
+        cards: [],
+        due: 0,
+        new: 0,
+        total: 0,
+        overdue_count: 0,
+        new_count: 0,
+        available_count: 0,
+        total_count: 0,
+      }),
+    );
     mockedListCards.mockResolvedValue(ok([]));
     // Default: no assets have an enhanced (html) view yet, so "pages"
     // mode falls back to plain PdfPagesView — matches existing
@@ -267,6 +283,36 @@ describe("CourseReader", () => {
     expect(screen.getByRole("heading", { level: 2, name: /chapter one/i })).toHaveFocus();
 
     await screen.findByText(/first body/i);
+  });
+
+  it("loads all-card review metadata for the active chapter's section cards", async () => {
+    const courseWithChapterLabels: ReaderCourse = {
+      ...COURSE,
+      sections: COURSE.sections.map((section, index) => ({
+        ...section,
+        chapter_label: `Chapter ${index + 1}`,
+      })),
+    };
+    const sectionCard: CardOut = {
+      id: "card-1",
+      section_id: "sec-1",
+      front_md: "Front",
+      back_md: "Back",
+      position: 0,
+      origin: "generated",
+      created_at: "2026-01-01T00:00:00Z",
+    };
+    mockedListCards.mockResolvedValue(ok([sectionCard]));
+
+    render(<CourseReader course={courseWithChapterLabels} initialProgress={NO_PROGRESS} />);
+
+    await waitFor(() =>
+      expect(mockedGetReviewQueue).toHaveBeenCalledWith("course-1", {
+        scope: "all",
+        chapterLabel: "Chapter 1",
+        limit: 200,
+      }),
+    );
   });
 
   it("moves to the next chapter on ArrowRight and focuses its heading", async () => {
@@ -759,6 +805,7 @@ describe("CourseReader", () => {
       } as unknown as ReturnType<typeof getDocument>);
 
       const user = userEvent.setup();
+      window.localStorage.setItem("smv2.readerView.course-pdf", "source");
       render(<CourseReader course={pdfCourse} initialProgress={NO_PROGRESS} />);
       await screen.findByText(/pdf source body/i);
 
@@ -1057,6 +1104,33 @@ describe("CourseReader", () => {
       ],
     };
 
+    function makePdfCourse(courseId: string, sectionId: string, assetId: string): ReaderCourse {
+      return {
+        id: courseId,
+        title: "PDF Course",
+        sections: [{ ...COURSE_WITH_ASSET.sections[0], id: sectionId, asset_id: assetId }],
+      };
+    }
+
+    function mockSinglePdfSection(course: ReaderCourse): void {
+      const section = course.sections[0];
+      mockedGetSection.mockResolvedValue(
+        ok({
+          ...section,
+          course_id: course.id,
+          body_md: "# Chapter One\n\nSource body.",
+          content_hash: "hash",
+          lesson_md: null,
+          lesson_stale: false,
+          lesson_model: null,
+          lesson_prompt_version: null,
+          extractor_version: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        }),
+      );
+    }
+
     beforeEach(() => {
       mockedGetSection.mockImplementation((id: string) => {
         // Some of this block's own tests render the plain COURSE fixture
@@ -1175,6 +1249,7 @@ describe("CourseReader", () => {
         "aria-pressed",
         "true",
       );
+      expect(window.localStorage.getItem("smv2.readerView.course-text")).toBe("pages");
 
       await user.keyboard("s");
 
@@ -1192,6 +1267,68 @@ describe("CourseReader", () => {
       expect(await screen.findByRole("button", { name: /generate lesson/i })).toBeInTheDocument();
     });
 
+    it("opens a PDF course in Pages when no view preference is stored, without writing the derived default", async () => {
+      const pdfCourse = makePdfCourse("course-pdf-default", "sec-pdf-default", "asset-default");
+      mockSinglePdfSection(pdfCourse);
+      const doc = makeFakeDocument({ 1: makeFakePage(), 2: makeFakePage() });
+      mockedGetDocument.mockReturnValue({
+        promise: Promise.resolve(doc),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      render(<CourseReader course={pdfCourse} initialProgress={NO_PROGRESS} />);
+
+      expect(await screen.findByLabelText("Page 1")).toBeInTheDocument();
+      expect(screen.getByLabelText("Page 2")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Pages" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(window.localStorage.getItem("smv2.readerView.course-pdf-default")).toBeNull();
+    });
+
+    it("honors an explicit Source preference for a PDF course", async () => {
+      window.localStorage.setItem("smv2.readerView.course-asset", "source");
+
+      render(<CourseReader course={COURSE_WITH_ASSET} initialProgress={NO_PROGRESS} />);
+
+      expect(await screen.findByText(/source body/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Source" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(mockedGetDocument).not.toHaveBeenCalled();
+    });
+
+    it("honors an explicit Pages preference for a PDF course", async () => {
+      const pdfCourse = makePdfCourse("course-pdf-pages", "sec-pdf-pages", "asset-pages");
+      mockSinglePdfSection(pdfCourse);
+      const doc = makeFakeDocument({ 1: makeFakePage(), 2: makeFakePage() });
+      mockedGetDocument.mockReturnValue({
+        promise: Promise.resolve(doc),
+      } as unknown as ReturnType<typeof getDocument>);
+      window.localStorage.setItem("smv2.readerView.course-pdf-pages", "pages");
+
+      render(<CourseReader course={pdfCourse} initialProgress={NO_PROGRESS} />);
+
+      expect(await screen.findByLabelText("Page 1")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Pages" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    it("opens a text course in Source when no view preference is stored, without writing fallback state", async () => {
+      render(<CourseReader course={COURSE} initialProgress={NO_PROGRESS} />);
+
+      expect(await screen.findByText(/first body/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Source" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByRole("button", { name: "Pages" })).toBeDisabled();
+      expect(window.localStorage.getItem("smv2.readerView.course-1")).toBeNull();
+    });
+
     it("clicking Pages switches to the original-PDF view and renders its pages", async () => {
       const doc = makeFakeDocument({ 1: makeFakePage(), 2: makeFakePage() });
       mockedGetDocument.mockReturnValue({
@@ -1199,6 +1336,7 @@ describe("CourseReader", () => {
       } as unknown as ReturnType<typeof getDocument>);
 
       const user = userEvent.setup();
+      window.localStorage.setItem("smv2.readerView.course-asset", "source");
       render(<CourseReader course={COURSE_WITH_ASSET} initialProgress={NO_PROGRESS} />);
       await screen.findByText(/source body/i);
 
@@ -1223,6 +1361,7 @@ describe("CourseReader", () => {
       } as unknown as ReturnType<typeof getDocument>);
 
       const user = userEvent.setup();
+      window.localStorage.setItem("smv2.readerView.course-asset", "source");
       const { unmount } = render(
         <CourseReader course={COURSE_WITH_ASSET} initialProgress={NO_PROGRESS} />,
       );

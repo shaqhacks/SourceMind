@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from app.db.engine import get_session
 from app.db.models import Card, Job, LlmCall, ReviewState
 from app.jobs.worker import run_due_jobs_once
-from app.llm.provider import PROVIDER_NOT_CONFIGURED_MESSAGE, CompletionResult, ProviderNotConfiguredError
+from app.llm.pricing import estimate_cost
+from app.llm.provider import (
+    PROVIDER_NOT_CONFIGURED_MESSAGE,
+    CompletionResult,
+    ProviderNotConfiguredError,
+)
+from app.llm.structured_output import CARDS_SCHEMA
 from conftest import _first_section_id
 
 
@@ -177,9 +184,141 @@ def test_generate_cards_retries_once_on_top_level_parse_failure(client, ingest_c
     job = client.get(f"/api/jobs/{job_id}").json()
     assert job["status"] == "succeeded"
     assert stub_provider.call_count == 2
+    assert len(stub_provider.received_completion_options) == 2
+    assert all(option.progress is not None for option in stub_provider.received_completion_options)
+    assert all(option.is_cancelled is not None for option in stub_provider.received_completion_options)
 
     cards = client.get(f"/api/sections/{section_id}/cards").json()
     assert len(cards) == 1
+
+
+def test_generate_cards_cancellation_after_invalid_completion_prevents_repair_and_artifacts(
+    client, ingest_course, stub_provider, monkeypatch
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+    cancel_after_first_completion = {"value": False}
+
+    def _complete_impl(messages, *, max_tokens, options, system=None):
+        stub_provider.call_count += 1
+        stub_provider.complete_call_count += 1
+        stub_provider.received_messages.append(messages)
+        stub_provider.received_systems.append(system)
+        stub_provider.received_completion_options.append(options)
+        cancel_after_first_completion["value"] = True
+        return CompletionResult(
+            text="not json at all",
+            input_tokens=100,
+            output_tokens=20,
+            model="claude-sonnet-5",
+        )
+
+    stub_provider._complete_impl = _complete_impl
+    monkeypatch.setattr(
+        "app.services.jobs_service.is_cancel_requested",
+        lambda job_id: cancel_after_first_completion["value"],
+    )
+
+    response = client.post(f"/api/sections/{section_id}/cards")
+    job_id = response.json()["job_id"]
+
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "cancelled"
+    assert stub_provider.complete_call_count == 1
+    assert client.get(f"/api/sections/{section_id}/cards").json() == []
+
+    session = get_session()
+    try:
+        assert session.query(Card).filter(Card.section_id == section_id).count() == 0
+        calls = session.query(LlmCall).filter(LlmCall.course_id == course_id).all()
+        assert len(calls) == 1
+        call = calls[0]
+        assert call.status == "ok"
+        assert call.purpose == "cards"
+        assert call.model == "claude-sonnet-5"
+        assert call.input_tokens == 100
+        assert call.output_tokens == 20
+        assert call.cost_estimate == pytest.approx(estimate_cost("claude-sonnet-5", 100, 20))
+    finally:
+        session.close()
+
+
+def test_generate_cards_schema_sent_on_first_and_repair_completion(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(text="not json at all", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(
+            text=json.dumps([{"front": "Q", "back": "A"}]), input_tokens=1, output_tokens=1, model="stub-model"
+        ),
+    ]
+
+    client.post(f"/api/sections/{section_id}/cards")
+    assert run_due_jobs_once() is True
+
+    assert stub_provider.complete_call_count == 2
+    assert [option.response_schema for option in stub_provider.received_completion_options] == [
+        CARDS_SCHEMA,
+        CARDS_SCHEMA,
+    ]
+    repair_content = stub_provider.received_messages[1][-1]["content"]
+    assert "valid JSON" in repair_content
+    assert "not json at all" not in repair_content
+
+
+def test_generate_cards_repairs_empty_structured_array(client, ingest_course, stub_provider):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+
+    stub_provider.responses = [
+        CompletionResult(text="[]", input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(
+            text=json.dumps([{"front": "Q", "back": "A"}]),
+            input_tokens=1,
+            output_tokens=1,
+            model="stub-model",
+        ),
+    ]
+
+    resp = client.post(f"/api/sections/{section_id}/cards")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "succeeded"
+    assert stub_provider.complete_call_count == 2
+
+
+def test_generate_cards_records_parse_failure_after_two_all_malformed_arrays(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("with_bookmarks.pdf")
+    section_id = _first_section_id(client, course_id)
+    malformed = [{"front": "", "back": ""}, "not an object"]
+
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(malformed), input_tokens=1, output_tokens=1, model="stub-model"),
+        CompletionResult(text=json.dumps(malformed), input_tokens=1, output_tokens=1, model="stub-model"),
+    ]
+
+    resp = client.post(f"/api/sections/{section_id}/cards")
+    job_id = resp.json()["job_id"]
+    assert run_due_jobs_once() is True
+
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "failed"
+    assert job["error_detail"]["code"] == "invalid_model_output"
+    session = get_session()
+    try:
+        calls = session.query(LlmCall).filter(LlmCall.purpose == "cards").order_by(LlmCall.ts).all()
+    finally:
+        session.close()
+    assert [row.status for row in calls] == ["ok", "ok", "parse_failure"]
 
 
 def test_generate_cards_job_reports_friendly_error_when_provider_not_configured(

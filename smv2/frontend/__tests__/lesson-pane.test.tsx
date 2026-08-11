@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import LessonPane from "@/components/reader/LessonPane";
 import {
+  type ApiErrorDetail,
+  cancelJob,
   findActiveLessonJob,
   generateLesson,
   getJob,
@@ -22,6 +24,7 @@ vi.mock("@/lib/api/client", () => ({
   getSection: vi.fn(),
   getLessonEstimate: vi.fn(),
   generateLesson: vi.fn(),
+  cancelJob: vi.fn(),
   findActiveLessonJob: vi.fn(),
   getJob: vi.fn(),
 }));
@@ -29,8 +32,16 @@ vi.mock("@/lib/api/client", () => ({
 const mockedGetSection = vi.mocked(getSection);
 const mockedGetLessonEstimate = vi.mocked(getLessonEstimate);
 const mockedGenerateLesson = vi.mocked(generateLesson);
+const mockedCancelJob = vi.mocked(cancelJob);
 const mockedFindActiveLessonJob = vi.mocked(findActiveLessonJob);
 const mockedGetJob = vi.mocked(getJob);
+
+const readinessDetail: ApiErrorDetail = {
+  code: "llm_readiness_unavailable",
+  failure_category: "ollama_model_unavailable",
+  message: "Your configured Ollama model is not present.",
+  remediation: "Open Settings and select a currently installed model.",
+};
 
 function makeDetail(overrides: Partial<SectionDetailOut> = {}): SectionDetailOut {
   return {
@@ -69,6 +80,7 @@ function makeJob(overrides: Partial<JobOut> = {}): JobOut {
     error_detail: null,
     retryable: true,
     attempts: 1,
+    cancel_requested_at: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -147,8 +159,8 @@ describe("LessonPane", () => {
       });
     });
 
-    expect(screen.getByText(/generating/)).toBeInTheDocument();
-    expect(screen.getByText(/10%/)).toBeInTheDocument();
+    expect(screen.getByText("Generating · 0s")).toBeInTheDocument();
+    expect(screen.queryByText(/10%/)).not.toBeInTheDocument();
   });
 
   it("shows the stalled message after 120s with no SSE event", async () => {
@@ -176,8 +188,27 @@ describe("LessonPane", () => {
       vi.advanceTimersByTime(120_000);
     });
 
-    expect(screen.getByText(/still working/i)).toBeInTheDocument();
+    expect(screen.getByText(/this can take a little while/i)).toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it("cancels an in-flight lesson generation job once from the shared progress control", async () => {
+    mockedGetSection.mockResolvedValue(ok(makeDetail()));
+    mockedGetLessonEstimate.mockResolvedValue(
+      ok({ est_seconds: 30, est_cost_usd: 0.01, based_on_calls: 1 }),
+    );
+    mockedGenerateLesson.mockResolvedValue(ok({ job_id: "job-1" }, 202));
+    mockedCancelJob.mockResolvedValue(ok(makeJob({ id: "job-1", status: "cancelled" })));
+
+    const user = userEvent.setup();
+    render(<LessonPane sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate lesson/i }));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: /cancel generation/i }));
+
+    expect(mockedCancelJob).toHaveBeenCalledWith("job-1");
+    expect(mockedCancelJob).toHaveBeenCalledTimes(1);
   });
 
   it("renders the ready lesson with the full 'Generated · model · prompt version' label, and Regenerate confirms before sending force=true", async () => {
@@ -313,6 +344,34 @@ describe("LessonPane", () => {
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent(/generation failed: anthropic_api_key is not configured/i);
     expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
+  });
+
+  it("routes immediate structured provider readiness failures to Settings without starting a job stream", async () => {
+    mockedGenerateLesson.mockReset();
+    mockedGetSection.mockResolvedValue(ok(makeDetail()));
+    mockedGetLessonEstimate.mockResolvedValue(
+      ok({ est_seconds: 30, est_cost_usd: 0.01, based_on_calls: 1 }),
+    );
+    mockedGenerateLesson.mockResolvedValue({
+      status: 503,
+      ok: false,
+      error: { detail: readinessDetail },
+    });
+
+    const user = userEvent.setup();
+    render(<LessonPane sectionId="sec-1" />);
+
+    await user.click(await screen.findByRole("button", { name: /generate lesson/i }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
+    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(mockedGetJob).not.toHaveBeenCalled();
   });
 
   it("bubbles the effective status up via onStatusChange", async () => {

@@ -12,6 +12,7 @@ import asyncio
 import logging
 import time
 from datetime import timedelta
+from typing import Final
 
 from sqlalchemy import DateTime, bindparam, text
 from sqlalchemy.orm import Session
@@ -21,10 +22,12 @@ from app.db.models import Job, ensure_utc, utcnow
 from app.jobs.error_envelope import encode_job_error
 from app.jobs.registry import (
     JOB_HANDLERS,
-    MAX_ORPHAN_ATTEMPTS,
     ON_ORPHAN_HOOKS,
     default_on_orphan,
 )
+from app.llm.completion_control import ProviderCancelledError
+from app.llm.structured_output import InvalidModelOutputError
+from app.services import jobs_service
 from app.services.llm_readiness_service import LlmReadinessUnavailableError
 
 LEASE_SECONDS = 60
@@ -40,8 +43,16 @@ RECONCILE_INTERVAL_SECONDS = 30.0
 
 logger = logging.getLogger(__name__)
 
+JOB_CLAIM_PRIORITY_SQL: Final[str] = """
+CASE
+    WHEN type = 'generate_test' THEN 0
+    WHEN type = 'generate_practice_assessment' THEN 20
+    ELSE 10
+END
+"""
+
 _CLAIM_SQL = text(
-    """
+    f"""
     UPDATE jobs
     SET status = 'running',
         lease_until = :lease_until,
@@ -49,7 +60,7 @@ _CLAIM_SQL = text(
     WHERE id = (
         SELECT id FROM jobs
         WHERE status = 'queued'
-        ORDER BY created_at
+        ORDER BY {JOB_CLAIM_PRIORITY_SQL}, created_at
         LIMIT 1
     )
     AND status = 'queued'
@@ -65,10 +76,19 @@ def claim_next_job(session: Session) -> Job | None:
     session.commit()
     if row is None:
         return None
-    return session.get(Job, row[0])
+    return session.get(Job, row[0], populate_existing=True)
 
 
-def job_progress(session: Session, job_id: str, stage: str, pct: float, message: str) -> None:
+def job_progress(
+    session: Session,
+    job_id: str,
+    stage: str,
+    pct: float | None,
+    message: str,
+    *,
+    elapsed_seconds: int | None = None,
+    last_activity_seconds: int | None = None,
+) -> None:
     """Heartbeat: handlers call this to report progress and renew their lease.
 
     Renewing the lease here (not just at claim time) means a legitimately
@@ -77,7 +97,12 @@ def job_progress(session: Session, job_id: str, stage: str, pct: float, message:
     job = session.get(Job, job_id)
     if job is None:
         return
-    job.progress = {"stage": stage, "pct": pct, "message": message}
+    progress = {"stage": stage, "pct": pct, "message": message}
+    if elapsed_seconds is not None:
+        progress["elapsed_seconds"] = elapsed_seconds
+    if last_activity_seconds is not None:
+        progress["last_activity_seconds"] = last_activity_seconds
+    job.progress = progress
     job.lease_until = utcnow() + timedelta(seconds=LEASE_SECONDS)
     session.commit()
 
@@ -94,6 +119,18 @@ def execute_job(session: Session, job: Job) -> None:
 
     try:
         result = handler(session, job)
+    except ProviderCancelledError:
+        session.rollback()
+        cancelled_job = session.get(Job, job_id)
+        assert cancelled_job is not None
+        cancelled_job.status = "cancelled"
+        cancelled_job.result = None
+        cancelled_job.progress = None
+        cancelled_job.error = None
+        cancelled_job.lease_until = None
+        jobs_service.restore_cancelled_domain_state_in_session(session, cancelled_job)
+        session.commit()
+        return
     except LlmReadinessUnavailableError as exc:
         session.rollback()
         failed_job = session.get(Job, job_id)
@@ -104,6 +141,15 @@ def execute_job(session: Session, job: Job) -> None:
             message,
             {"code": "llm_readiness_unavailable", **exc.detail},
         )
+        session.commit()
+        return
+    except InvalidModelOutputError as exc:
+        session.rollback()
+        failed_job = session.get(Job, job_id)
+        assert failed_job is not None
+        failed_job.status = "failed"
+        message = exc.error_detail["message"]
+        failed_job.error = encode_job_error(message, exc.error_detail)
         session.commit()
         return
     except Exception as exc:  # noqa: BLE001 - any handler failure must be persisted
@@ -183,6 +229,14 @@ def reconcile_interrupted_jobs() -> int:
         for job in running_jobs:
             lease = ensure_utc(job.lease_until)
             if lease is not None and lease < now:
+                if job.cancel_requested_at is not None:
+                    job.status = "cancelled"
+                    job.progress = None
+                    job.error = None
+                    job.lease_until = None
+                    jobs_service.restore_cancelled_domain_state_in_session(session, job)
+                    count += 1
+                    continue
                 hook = ON_ORPHAN_HOOKS.get(job.type, default_on_orphan)
                 hook(session, job)
                 count += 1
