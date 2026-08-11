@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isPracticeSectionStartable,
   loadingPracticeSectionState,
   practiceSectionStateFromAssessment,
   practiceSectionStateFromLoadError,
@@ -109,6 +110,31 @@ describe("practice assessment state contract", () => {
       errorDetail: null,
       retryKind: null,
     });
+  });
+
+  it("reports not-started assessments as explicitly startable", () => {
+    const state = practiceSectionStateFromAssessment(
+      "section-1",
+      makeAssessment({
+        status: "not_started",
+        questions: [],
+        message: "Practice has not been generated yet.",
+        run_id: null,
+      }),
+    );
+
+    expect(state).toEqual({
+      kind: "not_started",
+      sectionId: "section-1",
+      questionCount: 0,
+      message: "Practice has not been generated yet.",
+      errorDetail: null,
+      retryKind: "start",
+    });
+    expect(isPracticeSectionStartable(state)).toBe(true);
+    expect(isPracticeSectionStartable(generatingState("section-2"))).toBe(false);
+    expect(isPracticeSectionStartable(readyState("section-3", 4))).toBe(false);
+    expect(isPracticeSectionStartable(failedState("section-4", "restart"))).toBe(false);
   });
 
   it("reports ready assessments with the ready question count", () => {

@@ -19,6 +19,14 @@ export type PracticeSectionState =
       retryKind: null;
     }
   | {
+      kind: "not_started";
+      sectionId: string;
+      questionCount: 0;
+      message: string | null;
+      errorDetail: null;
+      retryKind: "start";
+    }
+  | {
       kind: "ready";
       sectionId: string;
       questionCount: number;
@@ -73,6 +81,17 @@ export function practiceSectionStateFromAssessment(
   sectionId: string,
   assessment: PracticeAssessmentOut,
 ): PracticeSectionState {
+  if (assessment.status === "not_started") {
+    return {
+      kind: "not_started",
+      sectionId,
+      questionCount: 0,
+      message: assessment.message ?? null,
+      errorDetail: null,
+      retryKind: "start",
+    };
+  }
+
   if (assessment.status === "ready") {
     return {
       kind: "ready",
@@ -108,6 +127,10 @@ export function practiceSectionStateFromAssessment(
   }
 
   return loadingPracticeSectionState(sectionId);
+}
+
+export function isPracticeSectionStartable(state: PracticeSectionState | undefined) {
+  return state?.kind === "not_started";
 }
 
 export function practiceSectionStateSignature(state: PracticeSectionState) {

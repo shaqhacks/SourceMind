@@ -32,6 +32,7 @@ interface InlinePracticeAssessmentProps {
   courseId: string;
   sectionId: string;
   retryVersion?: number;
+  startVersion?: number;
   onStateChange?: (state: PracticeSectionState) => void;
 }
 
@@ -127,6 +128,7 @@ export default function InlinePracticeAssessment({
   courseId,
   sectionId,
   retryVersion = 0,
+  startVersion,
   onStateChange,
 }: InlinePracticeAssessmentProps) {
   const [assessment, setAssessment] = useState<PracticeAssessmentOut | null>(null);
@@ -137,14 +139,15 @@ export default function InlinePracticeAssessment({
   const [answers, setAnswers] = useState<AnswerMap>({});
   const [submitting, setSubmitting] = useState<Record<string, boolean>>({});
   const [submitErrors, setSubmitErrors] = useState<SubmitErrorMap>({});
-  const startedForRef = useRef<string | null>(null);
   const loadSeqRef = useRef(0);
   const mountedRef = useRef(false);
   const onStateChangeRef = useRef(onStateChange);
   const lastEmittedStateRef = useRef<string | null>(null);
   const currentSectionStateRef = useRef<PracticeSectionState | null>(null);
   const consumedRetryVersionRef = useRef(retryVersion);
+  const consumedStartVersionRef = useRef(startVersion);
   const retryingFailedAssessmentRef = useRef(false);
+  const startingAssessmentRef = useRef(false);
 
   useEffect(() => {
     onStateChangeRef.current = onStateChange;
@@ -197,7 +200,7 @@ export default function InlinePracticeAssessment({
       const loadSeq = loadSeqRef.current + 1;
       loadSeqRef.current = loadSeq;
       if (resetStart) {
-        startedForRef.current = null;
+        startingAssessmentRef.current = false;
       }
       if (resetState) {
         setAssessment(null);
@@ -228,40 +231,54 @@ export default function InlinePracticeAssessment({
         return;
       }
 
-      if (result.data.status !== "not_started") {
-        applyAssessment(result.data);
-        return;
-      }
-
-      const startKey = `${courseId}:${sectionId}`;
-      if (startedForRef.current === startKey) {
-        applyAssessment(result.data);
-        return;
-      }
-
-      startedForRef.current = startKey;
-      setStarting(true);
-      const startResult = await startPracticeAssessment(courseId, sectionId);
-      if (!isCurrentLoad(loadSeq)) {
-        return;
-      }
-      setStarting(false);
-
-      if (!startResult.ok || !startResult.data) {
-        const nextError = describeError(
-          startResult.status,
-          "Starting practice questions",
-          startResult.error,
-        );
-        setLoadError(nextError);
-        emitSectionState(practiceSectionStateFromLoadError(sectionId, nextError));
-        return;
-      }
-
-      applyAssessment(startResult.data);
+      applyAssessment(result.data);
     },
     [applyAssessment, courseId, emitSectionState, isCurrentLoad, sectionId],
   );
+
+  const startNotStartedAssessment = useCallback(async () => {
+    if (startingAssessmentRef.current) {
+      return;
+    }
+    const currentState = currentSectionStateRef.current;
+    if (currentState?.kind !== "not_started") {
+      return;
+    }
+
+    const loadSeq = loadSeqRef.current + 1;
+    loadSeqRef.current = loadSeq;
+    startingAssessmentRef.current = true;
+    setStarting(true);
+    setLoadError(null);
+    emitSectionState({
+      kind: "generating",
+      sectionId,
+      questionCount: 0,
+      message: "Preparing questions.",
+      errorDetail: null,
+      retryKind: null,
+    });
+
+    const startResult = await startPracticeAssessment(courseId, sectionId);
+    startingAssessmentRef.current = false;
+    if (!isCurrentLoad(loadSeq)) {
+      return;
+    }
+    setStarting(false);
+
+    if (!startResult.ok || !startResult.data) {
+      const nextError = describeError(
+        startResult.status,
+        "Starting practice questions",
+        startResult.error,
+      );
+      setLoadError(nextError);
+      emitSectionState(practiceSectionStateFromLoadError(sectionId, nextError));
+      return;
+    }
+
+    applyAssessment(startResult.data);
+  }, [applyAssessment, courseId, emitSectionState, isCurrentLoad, sectionId]);
 
   const retryFailedAssessment = useCallback(async () => {
     if (retryingFailedAssessmentRef.current) {
@@ -270,7 +287,6 @@ export default function InlinePracticeAssessment({
     retryingFailedAssessmentRef.current = true;
     const loadSeq = loadSeqRef.current + 1;
     loadSeqRef.current = loadSeq;
-    startedForRef.current = `${courseId}:${sectionId}`;
     setRetryError(null);
     emitSectionState({
       kind: "generating",
@@ -316,6 +332,7 @@ export default function InlinePracticeAssessment({
       mountedRef.current = false;
       loadSeqRef.current += 1;
       retryingFailedAssessmentRef.current = false;
+      startingAssessmentRef.current = false;
     };
   }, []);
 
@@ -349,6 +366,14 @@ export default function InlinePracticeAssessment({
     }
     void retryFailedAssessment();
   }, [loadAssessment, retryFailedAssessment, retryVersion]);
+
+  useEffect(() => {
+    if (startVersion === undefined || startVersion <= (consumedStartVersionRef.current ?? 0)) {
+      return;
+    }
+    consumedStartVersionRef.current = startVersion;
+    void startNotStartedAssessment();
+  }, [startNotStartedAssessment, startVersion]);
 
   useEffect(() => {
     if (assessment?.status !== "generating") {
@@ -441,6 +466,14 @@ export default function InlinePracticeAssessment({
 
   if (!assessment) {
     return null;
+  }
+
+  if (assessment.status === "not_started") {
+    return (
+      <section className="rounded-md border border-border px-4 py-3">
+        <Button onClick={() => void startNotStartedAssessment()}>Generate practice questions</Button>
+      </section>
+    );
   }
 
   if (assessment.status === "generating") {

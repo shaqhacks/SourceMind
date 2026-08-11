@@ -103,10 +103,12 @@ function makeAssessment(overrides: Partial<PracticeAssessmentOut> = {}): Practic
 function practiceChild({
   onStateChange,
   retryVersion = 0,
+  startVersion,
   sectionId = "section-1",
 }: {
   onStateChange?: (state: PracticeSectionState) => void;
   retryVersion?: number;
+  startVersion?: number;
   sectionId?: string;
 }) {
   return (
@@ -114,6 +116,7 @@ function practiceChild({
       courseId="course-1"
       sectionId={sectionId}
       retryVersion={retryVersion}
+      startVersion={startVersion}
       onStateChange={onStateChange}
     />
   );
@@ -338,7 +341,48 @@ describe("InlinePracticeAssessment", () => {
     });
   });
 
-  it("starts extraction with POST when read-only status is not_started", async () => {
+  it("does not start generation when a not-started section mounts", async () => {
+    const onStateChange = vi.fn();
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "not_started", questions: [], run_id: null })),
+    );
+
+    renderPracticeChild({ onStateChange });
+
+    expect(
+      await screen.findByRole("button", { name: "Generate practice questions" }),
+    ).toBeEnabled();
+    expect(mockedGetPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1");
+    expect(mockedStartPracticeAssessment).not.toHaveBeenCalled();
+    expect(onStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "not_started", sectionId: "section-1" }),
+    );
+  });
+
+  it("starts only its own not-started section and guards duplicate clicks", async () => {
+    const user = userEvent.setup();
+    const started = deferred<ReturnType<typeof ok<PracticeAssessmentOut>>>();
+    mockedGetPracticeAssessment.mockResolvedValue(
+      ok(makeAssessment({ status: "not_started", questions: [], run_id: null })),
+    );
+    mockedStartPracticeAssessment.mockReturnValue(started.promise);
+
+    renderPracticeChild({ sectionId: "section-explicit" });
+    const button = await screen.findByRole("button", { name: "Generate practice questions" });
+
+    await user.click(button);
+    await user.click(button);
+    started.resolve(
+      ok(makeAssessment({ section_id: "section-explicit", status: "generating", questions: [] })),
+    );
+    await flushPracticeTasks();
+
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-explicit");
+    expect(await screen.findByRole("status")).toHaveTextContent(/preparing practice questions/i);
+  });
+
+  it("starts extraction with POST when startVersion increases for a not-started section", async () => {
     mockedGetPracticeAssessment.mockResolvedValue(
       ok(makeAssessment({ status: "not_started", questions: undefined })),
     );
@@ -346,7 +390,12 @@ describe("InlinePracticeAssessment", () => {
       ok(makeAssessment({ status: "generating", questions: undefined })),
     );
 
-    render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+    const view = renderPracticeChild({ startVersion: 0 });
+    expect(
+      await screen.findByRole("button", { name: "Generate practice questions" }),
+    ).toBeEnabled();
+
+    view.rerender(practiceChild({ startVersion: 1 }));
 
     await waitFor(() =>
       expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1"),
@@ -364,7 +413,10 @@ describe("InlinePracticeAssessment", () => {
       error: { detail: readinessDetail },
     });
 
+    const user = userEvent.setup();
     render(<InlinePracticeAssessment courseId="course-1" sectionId="section-1" />);
+
+    await user.click(await screen.findByRole("button", { name: "Generate practice questions" }));
 
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent("Your configured Ollama model is not present.");
@@ -409,10 +461,12 @@ describe("InlinePracticeAssessment", () => {
     const { rerender } = render(
       <InlinePracticeAssessment courseId="course-1" sectionId="section-1" />,
     );
+    const user = userEvent.setup();
 
-    await waitFor(() =>
-      expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1"),
+    await user.click(
+      await screen.findByRole("button", { name: "Generate practice questions" }),
     );
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1");
 
     rerender(<InlinePracticeAssessment courseId="course-1" sectionId="section-2" />);
     expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
@@ -434,11 +488,13 @@ describe("InlinePracticeAssessment", () => {
     );
     mockedStartPracticeAssessment.mockReturnValue(oldStart.promise);
 
+    const user = userEvent.setup();
     const { unmount } = render(
       <InlinePracticeAssessment courseId="course-1" sectionId="section-1" />,
     );
 
-    await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1));
+    await user.click(await screen.findByRole("button", { name: "Generate practice questions" }));
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
     unmount();
 
     oldStart.resolve(ok(makeAssessment({ status: "generating", questions: undefined })));
@@ -458,9 +514,11 @@ describe("InlinePracticeAssessment", () => {
     );
     mockedStartPracticeAssessment.mockReturnValue(oldStart.promise);
 
+    const user = userEvent.setup();
     const { unmount } = renderPracticeChild({ onStateChange });
 
-    await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1));
+    await user.click(await screen.findByRole("button", { name: "Generate practice questions" }));
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
     onStateChange.mockClear();
     unmount();
 
@@ -478,11 +536,13 @@ describe("InlinePracticeAssessment", () => {
       .mockResolvedValueOnce(ok(makeAssessment({ section_id: "section-2" })));
     mockedStartPracticeAssessment.mockReturnValueOnce(oldStart.promise);
 
+    const user = userEvent.setup();
     const { rerender } = renderPracticeChild({ onStateChange, sectionId: "section-1" });
 
-    await waitFor(() =>
-      expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1"),
+    await user.click(
+      await screen.findByRole("button", { name: "Generate practice questions" }),
     );
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledWith("course-1", "section-1");
     rerender(practiceChild({ onStateChange, sectionId: "section-2" }));
     expect(await screen.findByText("Newton's second law")).toBeInTheDocument();
     onStateChange.mockClear();
@@ -658,7 +718,7 @@ describe("InlinePracticeAssessment", () => {
     });
   });
 
-  it("restarts extraction after a parent reload retry when the first not_started POST fails", async () => {
+  it("returns to explicit generation after a parent reload retry when a start fails", async () => {
     mockedGetPracticeAssessment
       .mockResolvedValueOnce(ok(makeAssessment({ status: "not_started", questions: [] })))
       .mockResolvedValueOnce(ok(makeAssessment({ status: "not_started", questions: [] })));
@@ -666,13 +726,21 @@ describe("InlinePracticeAssessment", () => {
       .mockResolvedValueOnce(err(503))
       .mockResolvedValueOnce(ok(makeAssessment({ status: "generating", questions: [] })));
 
+    const user = userEvent.setup();
     const view = renderPracticeChild({ retryVersion: 0 });
 
+    await user.click(await screen.findByRole("button", { name: "Generate practice questions" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/starting practice questions/i);
     expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
 
     view.rerender(practiceChild({ retryVersion: 1 }));
 
+    expect(
+      await screen.findByRole("button", { name: "Generate practice questions" }),
+    ).toBeEnabled();
+    expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Generate practice questions" }));
     await waitFor(() => expect(mockedStartPracticeAssessment).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole("status")).toHaveTextContent(/preparing practice questions/i);
   });
