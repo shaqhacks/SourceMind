@@ -23,12 +23,18 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import update as sa_update
+from sqlalchemy.orm import Session
+
 from app.db.engine import get_session
 from app.db.identity import card_id_for
 from app.db.models import (
     Card,
     Course,
     CourseLearningProfile,
+    Job,
+    PracticeExtractionRun,
     ReviewState,
     Section,
     Test,
@@ -45,6 +51,8 @@ from app.services import (
 )
 from app.services.srs_service import DEFAULT_EASE, GOOD, schedule_next
 
+ACTIVE_JOB_STATUSES = ("queued", "running")
+
 
 class CourseNotFoundError(ValueError):
     pass
@@ -56,6 +64,131 @@ class ChapterNotFoundError(ValueError):
 
 class TestAlreadySubmittedError(ValueError):
     pass
+
+
+def _test_scope_payload(
+    course_id: str,
+    resolved_section_ids: list[str] | None,
+    chapter_label: str | None,
+    course_learning_profile_id: str,
+) -> dict[str, Any]:
+    return {
+        "course_id": course_id,
+        "section_ids": resolved_section_ids,
+        "chapter_label": chapter_label,
+        "course_learning_profile_id": course_learning_profile_id,
+    }
+
+
+def _canonical_section_ids(
+    session: Session,
+    course_id: str,
+    section_ids: list[str] | None,
+) -> list[str] | None:
+    if section_ids is None:
+        return None
+    if not section_ids:
+        return []
+
+    requested = set(section_ids)
+    ordered_ids = [
+        section_id
+        for (section_id,) in session.query(Section.id)
+        .filter(Section.course_id == course_id, Section.id.in_(requested))
+        .order_by(Section.order_index)
+        .all()
+    ]
+    matched_ids = set(ordered_ids)
+    missing_ids = [section_id for section_id in section_ids if section_id not in matched_ids]
+    return ordered_ids + missing_ids
+
+
+def _same_test_scope(payload: dict[str, Any] | None, expected: dict[str, Any]) -> bool:
+    payload = payload or {}
+    return (
+        payload.get("course_id") == expected["course_id"]
+        and payload.get("section_ids") == expected["section_ids"]
+        and payload.get("chapter_label") == expected["chapter_label"]
+        and payload.get("course_learning_profile_id") == expected["course_learning_profile_id"]
+    )
+
+
+def _active_test_job_for_scope_in_session(
+    session: Session,
+    expected_payload: dict[str, Any],
+) -> Job | None:
+    candidates = (
+        session.query(Job)
+        .filter(Job.type == "generate_test", Job.status.in_(ACTIVE_JOB_STATUSES))
+        .order_by(Job.created_at.desc())
+        .all()
+    )
+    for job in candidates:
+        if _same_test_scope(job.payload, expected_payload):
+            return job
+    return None
+
+
+def session_execute_returning_cancelled_job_ids(session: Session, statement) -> set[str]:
+    return set(session.execute(statement).scalars().all())
+
+
+def _cancel_queued_practice_for_sections_in_session(
+    session: Session,
+    course_id: str,
+    section_ids: list[str],
+) -> int:
+    if not section_ids:
+        return 0
+
+    candidates = (
+        session.query(PracticeExtractionRun.id, PracticeExtractionRun.job_id)
+        .join(Job, Job.id == PracticeExtractionRun.job_id)
+        .filter(
+            PracticeExtractionRun.course_id == course_id,
+            PracticeExtractionRun.section_id.in_(section_ids),
+            PracticeExtractionRun.status == "queued",
+            PracticeExtractionRun.job_id.is_not(None),
+            Job.type == "generate_practice_assessment",
+            Job.status == "queued",
+        )
+        .all()
+    )
+    candidate_job_ids = [job_id for _, job_id in candidates if job_id is not None]
+    if not candidate_job_ids:
+        return 0
+
+    now = utcnow()
+    cancelled_job_ids = session_execute_returning_cancelled_job_ids(
+        session,
+        sa_update(Job)
+        .where(
+            Job.id.in_(candidate_job_ids),
+            Job.type == "generate_practice_assessment",
+            Job.status == "queued",
+        )
+        .values(
+            status="cancelled",
+            result=None,
+            progress=None,
+            error=None,
+            lease_until=None,
+            cancel_requested_at=now,
+        )
+        .returning(Job.id),
+    )
+    if not cancelled_job_ids:
+        return 0
+
+    cancelled_run_ids = [
+        run_id for run_id, job_id in candidates if job_id in cancelled_job_ids
+    ]
+    session.execute(
+        sa_delete(PracticeExtractionRun).where(
+            PracticeExtractionRun.id.in_(cancelled_run_ids)
+        )
+    )
+    return len(cancelled_run_ids)
 
 
 def start_test_generation(
@@ -92,25 +225,36 @@ def start_test_generation(
                 raise ChapterNotFoundError(
                     f"no practice/content sections found for chapter {chapter_label!r}"
                 )
-        llm_readiness_service.assert_ready_for_generation()
+        else:
+            resolved_section_ids = _canonical_section_ids(
+                session,
+                course_id,
+                resolved_section_ids,
+            )
         course_profile = learner_context.ensure_course_learning_profile(
             session, learner_id, course_id
         )
+        session.flush()
+        payload = _test_scope_payload(
+            course_id,
+            resolved_section_ids,
+            chapter_label,
+            course_profile.id,
+        )
+        active_job = _active_test_job_for_scope_in_session(session, payload)
+        if active_job is not None:
+            return active_job.id
+        llm_readiness_service.assert_ready_for_generation()
+        _cancel_queued_practice_for_sections_in_session(
+            session,
+            course_id,
+            resolved_section_ids or [],
+        )
+        job = jobs_service.create_job_in_session(session, "generate_test", payload)
         session.commit()
-        course_learning_profile_id = course_profile.id
+        return job.id
     finally:
         session.close()
-
-    job = jobs_service.create_job(
-        "generate_test",
-        {
-            "course_id": course_id,
-            "section_ids": resolved_section_ids,
-            "chapter_label": chapter_label,
-            "course_learning_profile_id": course_learning_profile_id,
-        },
-    )
-    return job.id
 
 
 def _get_owned_attempt(session, attempt_id: str, learner_id: str) -> TestAttempt | None:

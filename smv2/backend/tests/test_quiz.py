@@ -3,12 +3,25 @@ from __future__ import annotations
 import json
 from datetime import timedelta
 
+import pytest
+
 from app.db.engine import get_session
-from app.db.models import Card, Job, LlmCall, ReviewState, Test, TestAttempt, ensure_utc, utcnow
+from app.db.models import (
+    Card,
+    Job,
+    LlmCall,
+    PracticeExtractionRun,
+    ReviewState,
+    Test,
+    TestAttempt,
+    ensure_utc,
+    utcnow,
+)
 from app.jobs.worker import run_due_jobs_once
 from app.llm.provider import CompletionResult
 from app.llm.structured_output import QUIZ_SCHEMA
 from app.pipeline.quiz_generation import _build_scoped_text
+from app.services import tests_service
 
 
 def _make_questions(n: int = 8) -> list[dict]:
@@ -23,8 +36,388 @@ def _make_questions(n: int = 8) -> list[dict]:
     ]
 
 
+def _practice_section_by_title(client, course_id: str, title: str) -> dict:
+    sections = client.get(f"/api/courses/{course_id}/sections").json()
+    return next(section for section in sections if section["title"] == title)
+
+
+def _seed_practice_run_for_section(
+    section_id: str,
+    *,
+    course_id: str,
+    status: str,
+    job_status: str,
+    fingerprint_suffix: str,
+) -> tuple[str, str]:
+    session = get_session()
+    try:
+        job = Job(
+            type="generate_practice_assessment",
+            status=job_status,
+            payload={"course_id": course_id, "section_id": section_id, "run_id": "seeded-later"},
+            progress={"stage": "thinking", "message": "Preparing practice."},
+            lease_until=utcnow() + timedelta(seconds=60) if job_status == "running" else None,
+        )
+        session.add(job)
+        session.flush()
+        run = PracticeExtractionRun(
+            course_id=course_id,
+            section_id=section_id,
+            status=status,
+            job_id=job.id,
+            input_fingerprint=f"fingerprint-{section_id}-{fingerprint_suffix}",
+            question_count=2 if status == "ready" else 0,
+            error="learner-facing practice error" if status == "failed" else None,
+        )
+        session.add(run)
+        session.flush()
+        job.payload = {"course_id": course_id, "section_id": section_id, "run_id": run.id}
+        session.commit()
+        return job.id, run.id
+    finally:
+        session.close()
+
+
 def _attempt_profile_id(session, attempt_id: str) -> str:
     return session.get(TestAttempt, attempt_id).course_learning_profile_id
+
+
+def test_generate_test_cancels_queued_practice_by_deleting_runs_for_same_chapter(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    other_course_id, *_ = ingest_course("headings_no_bookmarks.pdf", title="Other Course")
+    same_chapter = _practice_section_by_title(client, course_id, "0.1 Practice - Foundations")
+    other_chapter = _practice_section_by_title(client, course_id, "Chapter 2: Structures")
+    other_course_same_chapter = _practice_section_by_title(
+        client, other_course_id, "0.1 Practice - Foundations"
+    )
+    cancelled_job_id, cancelled_run_id = _seed_practice_run_for_section(
+        same_chapter["id"],
+        course_id=course_id,
+        status="queued",
+        job_status="queued",
+        fingerprint_suffix="queued-same",
+    )
+    other_job_id, other_run_id = _seed_practice_run_for_section(
+        other_chapter["id"],
+        course_id=course_id,
+        status="queued",
+        job_status="queued",
+        fingerprint_suffix="queued-other",
+    )
+    other_course_job_id, other_course_run_id = _seed_practice_run_for_section(
+        other_course_same_chapter["id"],
+        course_id=other_course_id,
+        status="queued",
+        job_status="queued",
+        fingerprint_suffix="queued-other-course",
+    )
+    ready_job_id, ready_run_id = _seed_practice_run_for_section(
+        same_chapter["id"],
+        course_id=course_id,
+        status="ready",
+        job_status="succeeded",
+        fingerprint_suffix="ready-same",
+    )
+    running_job_id, running_run_id = _seed_practice_run_for_section(
+        same_chapter["id"],
+        course_id=course_id,
+        status="queued",
+        job_status="running",
+        fingerprint_suffix="running-same",
+    )
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(_make_questions()), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+
+    resp = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"chapter_label": "Chapter 1: Foundations"},
+    )
+
+    assert resp.status_code == 202
+    test_job_id = resp.json()["job_id"]
+    session = get_session()
+    try:
+        cancelled_job = session.get(Job, cancelled_job_id)
+        other_job = session.get(Job, other_job_id)
+        other_run = session.get(PracticeExtractionRun, other_run_id)
+        other_course_job = session.get(Job, other_course_job_id)
+        other_course_run = session.get(PracticeExtractionRun, other_course_run_id)
+        ready_job = session.get(Job, ready_job_id)
+        ready_run = session.get(PracticeExtractionRun, ready_run_id)
+        running_job = session.get(Job, running_job_id)
+        running_run = session.get(PracticeExtractionRun, running_run_id)
+        test_job = session.get(Job, test_job_id)
+
+        assert cancelled_job.status == "cancelled"
+        assert cancelled_job.progress is None
+        assert cancelled_job.lease_until is None
+        assert session.get(PracticeExtractionRun, cancelled_run_id) is None
+        assert other_job.status == "queued"
+        assert other_run.status == "queued"
+        assert other_course_job.status == "queued"
+        assert other_course_run.status == "queued"
+        assert ready_job.status == "succeeded"
+        assert ready_run.status == "ready"
+        assert ready_run.job_id == ready_job_id
+        assert running_job.status == "running"
+        assert running_run.status == "queued"
+        assert test_job.status == "queued"
+    finally:
+        session.close()
+
+
+def test_practice_post_after_test_cancellation_creates_fresh_run_and_job(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    same_chapter = _practice_section_by_title(client, course_id, "0.1 Practice - Foundations")
+    old_job_id, old_run_id = _seed_practice_run_for_section(
+        same_chapter["id"],
+        course_id=course_id,
+        status="queued",
+        job_status="queued",
+        fingerprint_suffix="queued-before-test",
+    )
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(_make_questions()), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+
+    test_resp = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"chapter_label": "Chapter 1: Foundations"},
+    )
+    assert test_resp.status_code == 202
+    practice_resp = client.post(
+        f"/api/courses/{course_id}/sections/{same_chapter['id']}/practice-assessment"
+    )
+
+    assert practice_resp.status_code == 202
+    body = practice_resp.json()
+    assert body["run_id"] != old_run_id
+    assert body["job_id"] != old_job_id
+    session = get_session()
+    try:
+        assert session.get(PracticeExtractionRun, old_run_id) is None
+        fresh_run = session.get(PracticeExtractionRun, body["run_id"])
+        fresh_job = session.get(Job, body["job_id"])
+        assert fresh_run is not None
+        assert fresh_run.status == "queued"
+        assert fresh_job is not None
+        assert fresh_job.status == "queued"
+    finally:
+        session.close()
+
+
+def test_generate_test_preserves_practice_job_claimed_during_cancellation(
+    client, ingest_course, monkeypatch, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    same_chapter = _practice_section_by_title(client, course_id, "0.1 Practice - Foundations")
+    claimed_job_id, claimed_run_id = _seed_practice_run_for_section(
+        same_chapter["id"],
+        course_id=course_id,
+        status="queued",
+        job_status="queued",
+        fingerprint_suffix="claimed-race",
+    )
+    original_execute = tests_service.session_execute_returning_cancelled_job_ids
+
+    def claim_before_update(session, statement):
+        job = session.get(Job, claimed_job_id)
+        assert job is not None
+        job.status = "running"
+        job.lease_until = utcnow() + timedelta(seconds=60)
+        session.flush()
+        return original_execute(session, statement)
+
+    monkeypatch.setattr(
+        tests_service,
+        "session_execute_returning_cancelled_job_ids",
+        claim_before_update,
+    )
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(_make_questions()), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+
+    resp = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"chapter_label": "Chapter 1: Foundations"},
+    )
+
+    assert resp.status_code == 202
+    session = get_session()
+    try:
+        job = session.get(Job, claimed_job_id)
+        run = session.get(PracticeExtractionRun, claimed_run_id)
+        assert job.status == "running"
+        assert job.lease_until is not None
+        assert run is not None
+        assert run.status == "queued"
+        assert run.job_id == claimed_job_id
+    finally:
+        session.close()
+
+
+def test_generate_test_reuses_active_same_scope_job_without_repeated_cancellation(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    same_chapter = _practice_section_by_title(client, course_id, "0.1 Practice - Foundations")
+    queued_practice_job_id, queued_run_id = _seed_practice_run_for_section(
+        same_chapter["id"],
+        course_id=course_id,
+        status="queued",
+        job_status="queued",
+        fingerprint_suffix="idempotency-cancel-once",
+    )
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(_make_questions()), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+
+    first = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"chapter_label": "Chapter 1: Foundations"},
+    )
+    second = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"chapter_label": "Chapter 1: Foundations"},
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert second.json()["job_id"] == first.json()["job_id"]
+    session = get_session()
+    try:
+        assert session.query(Job).filter(Job.type == "generate_test").count() == 1
+        assert session.get(Job, queued_practice_job_id).status == "cancelled"
+        assert session.get(PracticeExtractionRun, queued_run_id) is None
+    finally:
+        session.close()
+
+
+def test_generate_test_reuses_active_same_scope_job_without_readiness(
+    client, ingest_course, monkeypatch, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(_make_questions()), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+    first = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"chapter_label": "Chapter 1: Foundations"},
+    )
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    second = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"chapter_label": "Chapter 1: Foundations"},
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert second.json()["job_id"] == first.json()["job_id"]
+
+
+def test_generate_test_reuses_active_job_for_reversed_section_ids(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    sections = client.get(f"/api/courses/{course_id}/sections").json()
+    target_ids = [sections[0]["id"], sections[1]["id"]]
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(_make_questions()), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+
+    first = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"section_ids": target_ids},
+    )
+    second = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"section_ids": list(reversed(target_ids))},
+    )
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert second.json()["job_id"] == first.json()["job_id"]
+
+
+def test_generate_test_creates_new_job_after_same_scope_job_is_terminal(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    stub_provider.responses = [
+        CompletionResult(text=json.dumps(_make_questions()), input_tokens=1, output_tokens=1, model="stub-model")
+    ]
+
+    first = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"chapter_label": "Chapter 1: Foundations"},
+    )
+    session = get_session()
+    try:
+        first_job = session.get(Job, first.json()["job_id"])
+        first_job.status = "succeeded"
+        session.commit()
+    finally:
+        session.close()
+
+    second = client.post(
+        f"/api/courses/{course_id}/tests",
+        json={"chapter_label": "Chapter 1: Foundations"},
+    )
+
+    assert second.status_code == 202
+    assert second.json()["job_id"] != first.json()["job_id"]
+
+
+def test_generate_test_rolls_back_practice_cancellation_when_test_job_creation_fails(
+    client, ingest_course, monkeypatch, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    same_chapter = _practice_section_by_title(client, course_id, "0.1 Practice - Foundations")
+    queued_job_id, queued_run_id = _seed_practice_run_for_section(
+        same_chapter["id"],
+        course_id=course_id,
+        status="queued",
+        job_status="queued",
+        fingerprint_suffix="rollback-create-test",
+    )
+    original_create_job_in_session = tests_service.jobs_service.create_job_in_session
+
+    def fail_generate_test_job(session, job_type, payload):
+        if job_type == "generate_test":
+            raise RuntimeError("synthetic generate_test creation failure")
+        return original_create_job_in_session(session, job_type, payload)
+
+    monkeypatch.setattr(
+        tests_service.jobs_service,
+        "create_job_in_session",
+        fail_generate_test_job,
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic generate_test creation failure"):
+        tests_service.start_test_generation(
+            course_id,
+            chapter_label="Chapter 1: Foundations",
+        )
+
+    session = get_session()
+    try:
+        queued_job = session.get(Job, queued_job_id)
+        queued_run = session.get(PracticeExtractionRun, queued_run_id)
+        assert queued_job is not None
+        assert queued_job.status == "queued"
+        assert queued_job.progress == {"stage": "thinking", "message": "Preparing practice."}
+        assert queued_run is not None
+        assert queued_run.status == "queued"
+        assert queued_run.job_id == queued_job_id
+        assert session.query(Job).filter(Job.type == "generate_test").count() == 0
+    finally:
+        session.close()
 
 
 def test_generate_test_happy_path(client, ingest_course, stub_provider):
