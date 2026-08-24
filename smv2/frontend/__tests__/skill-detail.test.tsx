@@ -81,6 +81,7 @@ function makeDetail(overrides: Partial<SkillDetailOut> = {}): SkillDetailOut {
         attempted_at: "2026-01-02T00:00:00Z",
       },
     ],
+    linked_items: [],
     cards_count: 5,
     quiz_correct: 2,
     quiz_wrong: 3,
@@ -120,8 +121,8 @@ describe("CompetencyDetailView", () => {
     // above is sec-2 then sec-1.
     const reReadLinks = screen.getAllByRole("link", { name: "Re-read" });
     expect(reReadLinks.length).toBe(2);
-    expect(reReadLinks[0]).toHaveAttribute("href", "/course/course-1?section=sec-2");
-    expect(reReadLinks[1]).toHaveAttribute("href", "/course/course-1?section=sec-1");
+    expect(reReadLinks[0]).toHaveAttribute("href", "/course/course-1/read?section=sec-2");
+    expect(reReadLinks[1]).toHaveAttribute("href", "/course/course-1/read?section=sec-1");
 
     // Two missed questions, one with a null your_answer rendered as "Skipped"
     expect(screen.getByText(/3,000-word document/)).toBeInTheDocument();
@@ -131,7 +132,7 @@ describe("CompetencyDetailView", () => {
 
     // The next step points to reviewed source material rather than asserting a cause.
     const startWith = screen.getByRole("link", { name: "Start with Counting and budgeting tokens" });
-    expect(startWith).toHaveAttribute("href", "/course/course-1?section=sec-2");
+    expect(startWith).toHaveAttribute("href", "/course/course-1/read?section=sec-2");
     const practice = screen.getByRole("link", { name: "Practice and review" });
     expect(practice).toHaveAttribute("href", "/review?course=course-1");
   });

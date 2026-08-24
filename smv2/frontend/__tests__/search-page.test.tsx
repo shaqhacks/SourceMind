@@ -110,7 +110,7 @@ describe("CourseSearchClient", () => {
     expect(result.innerHTML).not.toContain("<script>");
     expect(within(result).getByRole("link", { name: "Open section" })).toHaveAttribute(
       "href",
-      "/course/course-1?section=sec-1#transport-proteins",
+      "/course/course-1/read?section=sec-1#transport-proteins",
     );
   });
 

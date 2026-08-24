@@ -1,15 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
 import Badge from "@/components/ui/Badge";
+import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import EmptyState from "@/components/ui/EmptyState";
 import ProgressBar from "@/components/ui/ProgressBar";
 import Skeleton from "@/components/ui/Skeleton";
-import type { SkillEdgeOut } from "@/lib/api/client";
+import {
+  getSkillStatus,
+  startCurriculumExtraction,
+  type SkillEdgeOut,
+  type SkillStatusOut,
+} from "@/lib/api/client";
 import { useSkillMap } from "@/lib/hooks/useSkillMap";
 import { describeNode, mostNeedsReview } from "@/lib/skills/derive";
 
@@ -34,8 +41,36 @@ const EDGE_COLOR: Record<SkillEdgeOut["kind"], string> = {
  * layout and display labels are derived client-side from whichever resolves.
  */
 export default function SkillMapView({ courseId }: SkillMapViewProps) {
+  const router = useRouter();
   const { title: courseTitle, error: titleError, reload: reloadTitle } = useCourseTitle(courseId);
   const { map, error: mapError, reload: reloadMap } = useSkillMap(courseId);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenMessage, setRegenMessage] = useState<string | null>(null);
+  const [status, setStatus] = useState<SkillStatusOut | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getSkillStatus(courseId).then(({ data }) => {
+      if (active && data) setStatus(data);
+    });
+    return () => {
+      active = false;
+    };
+  }, [courseId]);
+
+  const locked = status?.locked === true;
+
+  async function handleRegenerate() {
+    setRegenMessage(null);
+    setRegenerating(true);
+    const result = await startCurriculumExtraction(courseId);
+    setRegenerating(false);
+    if (result.ok) {
+      router.push(`/course/${courseId}/skills/edit`);
+    } else {
+      setRegenMessage("Regeneration failed — check the LLM provider is configured and ready.");
+    }
+  }
 
   const error = titleError ?? mapError;
   if (error) {
@@ -68,7 +103,12 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
         <EmptyState
           icon="🧭"
           title="No skill graph yet"
-          body="Run backend/prompts/v1/prereq_extraction.md against this course and import the JSON via PUT /api/courses/{id}/skills/graph"
+          body="Generate one from this course's chapters, then edit and publish it."
+          cta={
+            <Button variant="primary" onClick={() => void handleRegenerate()} disabled={regenerating}>
+              {regenerating ? "Generating…" : "Generate skill map"}
+            </Button>
+          }
         />
       </div>
     );
@@ -76,6 +116,7 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
 
   const layout = computeSkillMapLayout(nodes, edges);
   const reviewTarget = mostNeedsReview(nodes);
+  const levels = Array.from(new Set(nodes.map((node) => node.level))).sort((a, b) => a - b);
 
   return (
     <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 px-9 py-8">
@@ -94,8 +135,73 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
             to review · skills build left to right
           </p>
         </div>
-        <MapViewToggle />
+        <div className="flex flex-wrap items-center gap-3">
+          <MapViewToggle />
+          <Button
+            variant="secondary"
+            onClick={() => void handleRegenerate()}
+            disabled={regenerating || locked}
+            title={locked ? "Locked — you've started learning" : undefined}
+          >
+            {regenerating ? "Regenerating…" : "Regenerate"}
+          </Button>
+          <LinkButton href={`/course/${courseId}/skills/edit`} variant="secondary">
+            Edit skill map
+          </LinkButton>
+        </div>
       </div>
+
+      {locked && (
+        <p className="text-sm text-muted-foreground">
+          This skill map is locked because you&apos;ve started learning — you can still edit it
+          manually, but a fresh auto-generation is disabled to protect your progress.
+        </p>
+      )}
+
+      {regenMessage && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {regenMessage}
+        </p>
+      )}
+
+      {/* <Card className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            Skill map preview
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {nodes.length} concept{nodes.length === 1 ? "" : "s"} · {edges.length} prerequisite
+            {edges.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {levels.map((level) => (
+            <div key={level} className="flex flex-col gap-1">
+              <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Level {level}
+                {level === 1 ? " · Foundations" : ""}
+              </p>
+              {nodes
+                .filter((node) => node.level === level)
+                .map((node) => (
+                  <div key={node.id} className="flex items-baseline justify-between gap-2 text-sm">
+                    <Link
+                      href={`/course/${courseId}/skills/${node.id}`}
+                      className="min-w-0 flex-1 truncate hover:text-accent-700 hover:underline"
+                    >
+                      {node.label}
+                    </Link>
+                    <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                      {node.readiness_estimate == null
+                        ? "—"
+                        : `${Math.round(node.readiness_estimate * 100)}%`}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          ))}
+        </div>
+      </Card> */}
 
       <div className="overflow-x-auto pb-2">
         <div className="relative" style={{ width: layout.canvasWidth, height: layout.canvasHeight }}>
@@ -152,18 +258,22 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
             if (!pos) return null;
             const status = node.status as SkillStatus;
             return (
-              <Link
+              <div
                 key={node.id}
-                href={`/course/${courseId}/skills/${node.id}`}
                 style={{ left: pos.leftPx, top: pos.topPx, width: SKILL_CARD_WIDTH, height: SKILL_CARD_HEIGHT }}
-                className={`absolute flex flex-col gap-[7px] rounded-lg bg-surface-raised p-[14px_16px] text-foreground shadow-sm transition-[box-shadow,translate] hover:-translate-y-px hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
+                className={`absolute flex flex-col gap-[7px] rounded-lg bg-surface-raised p-[14px_16px] text-foreground shadow-sm ${
                   status === "likely_struggling"
                     ? "border-[1.5px] border-accent"
                     : "border border-divider"
                 }`}
               >
                 <span className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-bold">{node.label}</span>
+                  <Link
+                    href={`/course/${courseId}/skills/${node.id}`}
+                    className="min-w-0 flex-1 truncate text-sm font-bold hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                  >
+                    {node.label}
+                  </Link>
                   <Badge tone={STATUS_BADGE_TONE[status]}>{STATUS_LABEL[status]}</Badge>
                 </span>
                 {node.readiness_estimate == null ? (
@@ -176,7 +286,15 @@ export default function SkillMapView({ courseId }: SkillMapViewProps) {
                   />
                 )}
                 <span className="text-xs text-muted-foreground">{describeNode(node)}</span>
-              </Link>
+                {node.section_id && (
+                  <Link
+                    href={`/course/${courseId}/read?section=${node.section_id}`}
+                    className="truncate text-xs font-semibold text-accent-700 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                  >
+                    Read: {node.chapter_label ?? "where it's taught"}
+                  </Link>
+                )}
+              </div>
             );
           })}
         </div>

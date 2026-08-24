@@ -31,6 +31,8 @@ import type {
 } from "@/lib/reader/types";
 import { nextViewMode } from "@/lib/reader/viewMode";
 
+import SkillMapStatusBanner from "@/components/skills/SkillMapStatusBanner";
+
 import CourseChatDrawer from "./CourseChatDrawer";
 import type { LessonDisplayStatus } from "./LessonPane";
 import NotesPanel from "./NotesPanel";
@@ -509,6 +511,7 @@ export default function CourseReader({ course, initialProgress }: CourseReaderPr
         pagesAvailable={pagesAvailable}
         onChangeViewMode={setStoredMode}
       />
+      <SkillMapStatusBanner courseId={course.id} />
       <div className="flex min-h-0 flex-1">
         {!transientReaderChrome && !sidebarCollapsed && (
           <Sidebar

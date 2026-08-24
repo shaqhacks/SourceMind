@@ -778,6 +778,66 @@
         "title": "CurriculumClaimOut",
         "type": "object"
       },
+      "CurriculumConceptAddIn": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Aliases",
+            "type": "array"
+          },
+          "chapter_label": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
+          "description_md": {
+            "default": "",
+            "maxLength": 20000,
+            "title": "Description Md",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "stable_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Stable Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stable_key",
+          "label"
+        ],
+        "title": "CurriculumConceptAddIn",
+        "type": "object"
+      },
       "CurriculumConceptEditIn": {
         "properties": {
           "aliases": {
@@ -810,6 +870,18 @@
             "minLength": 1,
             "title": "Label",
             "type": "string"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
           }
         },
         "required": [
@@ -859,6 +931,28 @@
             "title": "Review State",
             "type": "string"
           },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "section_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Title"
+          },
           "stable_key": {
             "title": "Stable Key",
             "type": "string"
@@ -871,6 +965,8 @@
           "description_md",
           "aliases",
           "chapter_label",
+          "section_id",
+          "section_title",
           "review_state",
           "is_active"
         ],
@@ -946,6 +1042,60 @@
           "target_concept_id"
         ],
         "title": "CurriculumMergeIn",
+        "type": "object"
+      },
+      "CurriculumRelationAddIn": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "from_concept_id": {
+            "title": "From Concept Id",
+            "type": "string"
+          },
+          "kind": {
+            "default": "requires",
+            "enum": [
+              "requires",
+              "recommended_before",
+              "related_to",
+              "develops_into"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "rationale_md": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale Md"
+          },
+          "to_concept_id": {
+            "title": "To Concept Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_concept_id",
+          "to_concept_id"
+        ],
+        "title": "CurriculumRelationAddIn",
         "type": "object"
       },
       "CurriculumRelationOut": {
@@ -3836,7 +3986,9 @@
           "provider": {
             "enum": [
               "anthropic",
-              "ollama"
+              "ollama",
+              "deepseek",
+              "gemini"
             ],
             "title": "Provider",
             "type": "string"
@@ -3865,6 +4017,14 @@
             "title": "Credentials Present",
             "type": "object"
           },
+          "curriculum_model": {
+            "title": "Curriculum Model",
+            "type": "string"
+          },
+          "curriculum_provider": {
+            "title": "Curriculum Provider",
+            "type": "string"
+          },
           "model": {
             "title": "Model",
             "type": "string"
@@ -3883,6 +4043,8 @@
         "required": [
           "provider",
           "model",
+          "curriculum_provider",
+          "curriculum_model",
           "credentials_present",
           "credentials",
           "rollout",
@@ -3899,6 +4061,36 @@
             },
             "title": "Credentials",
             "type": "object"
+          },
+          "curriculum_model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curriculum Model"
+          },
+          "curriculum_provider": {
+            "anyOf": [
+              {
+                "enum": [
+                  "anthropic",
+                  "ollama",
+                  "deepseek",
+                  "gemini"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curriculum Provider"
           },
           "model": {
             "anyOf": [
@@ -3918,7 +4110,9 @@
               {
                 "enum": [
                   "anthropic",
-                  "ollama"
+                  "ollama",
+                  "deepseek",
+                  "gemini"
                 ],
                 "type": "string"
               },
@@ -3937,6 +4131,13 @@
           "cards_count": {
             "title": "Cards Count",
             "type": "integer"
+          },
+          "linked_items": {
+            "items": {
+              "$ref": "#/components/schemas/SkillLinkedItemOut"
+            },
+            "title": "Linked Items",
+            "type": "array"
           },
           "missed_questions": {
             "items": {
@@ -3968,6 +4169,7 @@
           "node",
           "taught_in",
           "missed_questions",
+          "linked_items",
           "cards_count",
           "quiz_correct",
           "quiz_wrong"
@@ -4127,6 +4329,109 @@
         "title": "SkillGraphSectionRefIn",
         "type": "object"
       },
+      "SkillLinkedItemOut": {
+        "properties": {
+          "attempt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Id"
+          },
+          "back_or_answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Back Or Answer"
+          },
+          "card_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Id"
+          },
+          "claim_statement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Statement"
+          },
+          "evidence_item_id": {
+            "title": "Evidence Item Id",
+            "type": "string"
+          },
+          "item_type": {
+            "enum": [
+              "quiz_question",
+              "flashcard"
+            ],
+            "title": "Item Type",
+            "type": "string"
+          },
+          "preview": {
+            "title": "Preview",
+            "type": "string"
+          },
+          "review_state": {
+            "title": "Review State",
+            "type": "string"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
+          "source_index": {
+            "title": "Source Index",
+            "type": "integer"
+          },
+          "test_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Test Id"
+          }
+        },
+        "required": [
+          "item_type",
+          "evidence_item_id",
+          "preview",
+          "source_index",
+          "review_state"
+        ],
+        "title": "SkillLinkedItemOut",
+        "type": "object"
+      },
       "SkillMapOut": {
         "properties": {
           "edges": {
@@ -4194,6 +4499,17 @@
       },
       "SkillNodeOut": {
         "properties": {
+          "chapter_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapter Label"
+          },
           "distinct_item_count": {
             "anyOf": [
               {
@@ -4328,6 +4644,17 @@
             ],
             "title": "Review Estimate"
           },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section Id"
+          },
           "slug": {
             "title": "Slug",
             "type": "string"
@@ -4367,6 +4694,85 @@
           "status"
         ],
         "title": "SkillNodeOut",
+        "type": "object"
+      },
+      "SkillStatusOut": {
+        "properties": {
+          "concept_count": {
+            "title": "Concept Count",
+            "type": "integer"
+          },
+          "draft_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Version Id"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "locked": {
+            "default": false,
+            "title": "Locked",
+            "type": "boolean"
+          },
+          "phase": {
+            "enum": [
+              "none",
+              "generating",
+              "draft_ready",
+              "failed",
+              "published"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "published": {
+            "title": "Published",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "phase",
+          "published",
+          "concept_count"
+        ],
+        "title": "SkillStatusOut",
         "type": "object"
       },
       "SkillTaughtInOut": {
@@ -7296,6 +7702,48 @@
         ]
       }
     },
+    "/api/courses/{course_id}/skills/status": {
+      "get": {
+        "operationId": "get_skill_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Skill Status",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
     "/api/courses/{course_id}/skills/{concept_id}": {
       "get": {
         "operationId": "get_skill_detail",
@@ -7647,6 +8095,50 @@
       }
     },
     "/api/curriculum/relations/{relation_id}": {
+      "delete": {
+        "operationId": "delete_relation_api_curriculum_relations__relation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "relation_id",
+            "required": true,
+            "schema": {
+              "title": "Relation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Relation Api Curriculum Relations  Relation Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Relation",
+        "tags": [
+          "curriculum"
+        ]
+      },
       "patch": {
         "operationId": "review_relation_api_curriculum_relations__relation_id__patch",
         "parameters": [
@@ -7767,6 +8259,62 @@
         ]
       }
     },
+    "/api/curriculum/{version_id}/concepts": {
+      "post": {
+        "operationId": "add_concept_api_curriculum__version_id__concepts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurriculumConceptAddIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Add Concept Api Curriculum  Version Id  Concepts Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Concept",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
     "/api/curriculum/{version_id}/concepts/merge": {
       "post": {
         "operationId": "merge_concepts_api_curriculum__version_id__concepts_merge_post",
@@ -7824,6 +8372,59 @@
       }
     },
     "/api/curriculum/{version_id}/concepts/{concept_id}": {
+      "delete": {
+        "operationId": "delete_concept_api_curriculum__version_id__concepts__concept_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "concept_id",
+            "required": true,
+            "schema": {
+              "title": "Concept Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Concept Api Curriculum  Version Id  Concepts  Concept Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Concept",
+        "tags": [
+          "curriculum"
+        ]
+      },
       "patch": {
         "operationId": "edit_concept_api_curriculum__version_id__concepts__concept_id__patch",
         "parameters": [
@@ -8050,6 +8651,62 @@
           }
         },
         "summary": "Reject Curriculum",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/curriculum/{version_id}/relations": {
+      "post": {
+        "operationId": "add_relation_api_curriculum__version_id__relations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurriculumRelationAddIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Add Relation Api Curriculum  Version Id  Relations Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Relation",
         "tags": [
           "curriculum"
         ]

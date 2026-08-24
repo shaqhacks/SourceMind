@@ -36,8 +36,8 @@ _SUPERVISOR_TICK_SECONDS = 5.0
 class OllamaProvider(Provider):
     supports_embeddings = True
 
-    def __init__(self) -> None:
-        self.model_name = llm_model()
+    def __init__(self, model: str | None = None) -> None:
+        self.model_name = model or llm_model()
         self.base_url = ollama_base_url()
 
     def _complete_impl(

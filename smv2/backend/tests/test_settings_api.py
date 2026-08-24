@@ -52,6 +52,82 @@ def test_settings_round_trips_provider_model_and_redacted_credentials(client):
     assert secrets["anthropic_api_key"] == "sk-ant-test-secret"
 
 
+def test_settings_round_trips_deepseek_provider_and_credential(client):
+    headers = _csrf_headers(client)
+
+    resp = client.put(
+        "/api/settings",
+        json={
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "credentials": {"deepseek_api_key": "sk-deepseek-test-secret"},
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200
+
+    body = client.get("/api/settings").json()
+    assert body["provider"] == "deepseek"
+    assert body["model"] == "deepseek-chat"
+    assert body["credentials_present"]["deepseek"] is True
+    assert "sk-deepseek-test-secret" not in client.get("/api/settings").text
+
+    secrets = tomllib.loads((data_dir() / "secrets.toml").read_text())
+    assert secrets["deepseek_api_key"] == "sk-deepseek-test-secret"
+
+
+def test_settings_round_trips_gemini_provider_and_credential(client):
+    headers = _csrf_headers(client)
+
+    resp = client.put(
+        "/api/settings",
+        json={
+            "provider": "gemini",
+            "model": "gemini-3.6-flash",
+            "credentials": {"gemini_api_key": "AIza-gemini-test-secret"},
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200
+
+    body = client.get("/api/settings").json()
+    assert body["provider"] == "gemini"
+    assert body["model"] == "gemini-3.6-flash"
+    assert body["credentials_present"]["gemini"] is True
+    assert "AIza-gemini-test-secret" not in client.get("/api/settings").text
+
+    secrets = tomllib.loads((data_dir() / "secrets.toml").read_text())
+    assert secrets["gemini_api_key"] == "AIza-gemini-test-secret"
+
+
+def test_settings_round_trips_separate_curriculum_provider_and_model(client):
+    headers = _csrf_headers(client)
+
+    resp = client.put(
+        "/api/settings",
+        json={
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "curriculum_provider": "gemini",
+            "curriculum_model": "gemini-3.6-flash",
+            "credentials": {"deepseek_api_key": "sk-ds", "gemini_api_key": "AIza-g"},
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200
+
+    body = client.get("/api/settings").json()
+    assert body["provider"] == "deepseek"
+    assert body["model"] == "deepseek-chat"
+    assert body["curriculum_provider"] == "gemini"
+    assert body["curriculum_model"] == "gemini-3.6-flash"
+
+    local_settings = tomllib.loads((data_dir() / "local_settings.toml").read_text())
+    assert local_settings["provider"] == "deepseek"
+    assert local_settings["curriculum_provider"] == "gemini"
+    assert local_settings["curriculum_model"] == "gemini-3.6-flash"
+
+
 def test_settings_clear_removes_only_selected_provider_credential(client, monkeypatch):
     async def fake_discover(base_url: str) -> list[str]:
         assert base_url == "http://127.0.0.1:11434"

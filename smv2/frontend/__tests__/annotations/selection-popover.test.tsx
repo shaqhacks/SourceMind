@@ -51,6 +51,8 @@ vi.mock("@/lib/api/client", () => ({
     (assetId: string, page: number) => `https://mock/api/assets/${assetId}/html/${page}`,
   ),
   getAssetHtmlManifest: vi.fn(),
+  getSkillStatus: vi.fn(() => Promise.resolve({ data: null, ok: true, status: 200 })),
+  startCurriculumExtraction: vi.fn(),
 }));
 
 // Same guard as course-reader.test.tsx/reading-column-highlights.test.tsx:

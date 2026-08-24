@@ -105,7 +105,7 @@ export default function CompetencyDetailView({ courseId, skillId }: CompetencyDe
     );
   }
 
-  const { node, taught_in: taughtIn, missed_questions: missed } = detail;
+  const { node, taught_in: taughtIn, missed_questions: missed, linked_items: linkedItems } = detail;
   const status = node.status as SkillStatus;
   const primaryTaught = taughtIn[0];
   const quizTotal = detail.quiz_correct + detail.quiz_wrong;
@@ -195,7 +195,7 @@ export default function CompetencyDetailView({ courseId, skillId }: CompetencyDe
               </div>
               {i === 0 && <Badge tone="accent">Most relevant</Badge>}
               <LinkButton
-                href={`/course/${courseId}?section=${t.section_id}`}
+                href={`/course/${courseId}/read?section=${t.section_id}`}
                 variant={i === 0 ? "primary" : "secondary"}
                 className="text-xs"
               >
@@ -228,6 +228,53 @@ export default function CompetencyDetailView({ courseId, skillId }: CompetencyDe
         )}
       </section>
 
+      <section className="flex flex-col gap-3">
+        <h4 className="text-base font-semibold">Linked test questions and flashcards</h4>
+        {linkedItems.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No questions or flashcards are mapped to this skill yet.
+          </p>
+        ) : (
+          linkedItems.map((item) => (
+            <Card key={item.evidence_item_id} className="flex flex-col gap-2 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={item.item_type === "quiz_question" ? "accent" : "good"}>
+                  {item.item_type === "quiz_question" ? "Test question" : "Flashcard"}
+                </Badge>
+                {item.review_state !== "verified" && <Badge tone="warning">unverified</Badge>}
+              </div>
+              <p className="text-sm font-semibold">{item.preview || "(no preview)"}</p>
+              {item.back_or_answer && (
+                <p className="text-sm text-muted-foreground">{item.back_or_answer}</p>
+              )}
+              {item.claim_statement && (
+                <p className="text-xs text-muted-foreground">Mapped to: {item.claim_statement}</p>
+              )}
+              <div className="flex gap-2">
+                {item.item_type === "quiz_question" && item.attempt_id && (
+                  <LinkButton
+                    href={`/course/${courseId}/test/${item.attempt_id}`}
+                    variant="secondary"
+                    className="text-xs"
+                  >
+                    Open test attempt
+                  </LinkButton>
+                )}
+                {item.item_type === "flashcard" && (
+                  <LinkButton
+                    href={`/review?course=${courseId}`}
+                    variant="secondary"
+                    className="text-xs"
+                  >
+                    Review cards
+                  </LinkButton>
+                )}
+              </div>
+            </Card>
+          ))
+        )}
+      </section>
+
       <Card className="flex flex-row items-center gap-4 py-5 shadow-md">
         <div className="flex-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-accent-800">Next study step</span>
@@ -238,7 +285,7 @@ export default function CompetencyDetailView({ courseId, skillId }: CompetencyDe
           </p>
         </div>
         <LinkButton
-          href={primaryTaught ? `/course/${courseId}?section=${primaryTaught.section_id}` : `/course/${courseId}`}
+          href={primaryTaught ? `/course/${courseId}/read?section=${primaryTaught.section_id}` : `/course/${courseId}`}
           variant="primary"
         >
           {primaryTaught ? `Start with ${primaryTaught.title}` : "Open the reader"}

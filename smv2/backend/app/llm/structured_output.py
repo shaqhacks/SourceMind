@@ -257,6 +257,31 @@ CURRICULUM_SCHEMA = {
     },
 }
 
+# Cross-chapter prerequisite-linking pass: relations only, no concepts/claims.
+PREREQ_LINK_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["relations"],
+    "properties": {
+        "relations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["from_key", "to_key", "kind", "external_ref", "confidence", "rationale_md"],
+                "properties": {
+                    "from_key": _string_schema(),
+                    "to_key": _string_schema(),
+                    "kind": _string_schema(),
+                    "external_ref": _string_schema(nullable=True),
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "rationale_md": _string_schema(),
+                },
+            },
+        },
+    },
+}
+
 CONCEPT_PRACTICE_SCHEMA = {
     "type": "array",
     "items": {

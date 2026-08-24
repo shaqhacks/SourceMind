@@ -7,6 +7,7 @@ from typing import Any
 
 from app.db.engine import get_session
 from app.db.models import (
+    Card,
     Concept,
     ConceptEdge,
     ConceptRelation,
@@ -16,12 +17,16 @@ from app.db.models import (
     CurriculumVersion,
     EvidenceItem,
     EvidenceItemConceptLink,
+    Job,
     LearnerConceptState,
     LearnerEvidenceEvent,
     LearningClaim,
+    LearningClaimRevision,
     Section,
+    TestAttempt,
     utcnow,
 )
+from app.jobs.error_envelope import decode_job_error
 from app.services import learner_context
 
 def derive_levels(node_ids: list[str], edges: list[tuple[str, str]]) -> dict[str, int]:
@@ -231,7 +236,8 @@ def import_graph(course_id: str, payload: dict[str, Any]) -> dict[str, int]:
 def build_map(
     session, course_id: str, learner_id: str | None = None
 ) -> dict[str, Any]:
-    """Read the current curriculum and its rebuildable learner projection.
+    """Read the current (published) curriculum and its rebuildable learner
+    projection.
 
     Missing evidence stays nullable. Structural relations may suggest review,
     but they never lock navigation or assert that one concept caused another
@@ -251,6 +257,10 @@ def build_map(
                 ConceptRevision.review_state != "rejected",
             )
         }
+    # No current version => the legacy import path (import_graph writes
+    # Concept/ConceptEdge/ConceptSectionLink directly, with no CurriculumVersion)
+    # is the source of truth, so every course concept is shown. A current
+    # version => filter to its active revisions.
     concept_query = session.query(Concept).filter(Concept.course_id == course_id)
     if revisions:
         concept_query = concept_query.filter(Concept.id.in_(revisions))
@@ -386,6 +396,12 @@ def build_map(
                 "slug": concept.slug,
                 "label": revisions.get(concept.id).label if concept.id in revisions else concept.label,
                 "level": levels.get(concept.id, 1),
+                "section_id": concept.section_id,
+                "chapter_label": (
+                    revisions.get(concept.id).chapter_label
+                    if concept.id in revisions
+                    else concept.chapter_label
+                ),
                 "status": projection.status if projection is not None else "insufficient_evidence",
                 "readiness_estimate": (
                     projection.readiness_estimate if projection is not None else None
@@ -475,7 +491,95 @@ def _taught_in(session, course_id: str, concept_id: str) -> list[dict[str, Any]]
                     "relevance_md": link.rationale_md,
                 }
             )
+    # `Concept.section_id` is the "introduced here" pointer. Prepend it as the
+    # rank-0 entry whenever it isn't already covered by a link/source row, so
+    # the detail always links to where a competency is first introduced even
+    # for concepts that carry only the bare pointer.
+    concept = session.get(Concept, concept_id)
+    if concept is not None and concept.section_id and concept.section_id not in seen_section_ids:
+        primary = session.get(Section, concept.section_id)
+        if primary is not None:
+            result.insert(
+                0,
+                {
+                    "section_id": primary.id,
+                    "chapter_label": primary.chapter_label,
+                    "title": primary.title,
+                    "rank": 0,
+                    "relevance_md": "Introduced here",
+                },
+            )
+            for i, item in enumerate(result):
+                item["rank"] = i
     return result
+
+
+def _linked_items(session, course_id: str, concept_id: str) -> list[dict[str, Any]]:
+    """Quiz questions and flashcards mapped to a concept (via
+    EvidenceItemConceptLink, ADR-028), with ids the frontend turns into
+    navigation links back to the source test/card."""
+    current_version_id = (
+        session.query(CurriculumVersion.id)
+        .filter_by(course_id=course_id, is_current=True)
+        .scalar()
+    )
+    if current_version_id is None:
+        return []
+    rows = (
+        session.query(EvidenceItemConceptLink, EvidenceItem, LearningClaim)
+        .join(EvidenceItem, EvidenceItem.id == EvidenceItemConceptLink.evidence_item_id)
+        .join(LearningClaim, LearningClaim.id == EvidenceItemConceptLink.learning_claim_id)
+        .filter(
+            EvidenceItemConceptLink.curriculum_version_id == current_version_id,
+            EvidenceItemConceptLink.role == "primary",
+            EvidenceItemConceptLink.review_state != "rejected",
+            LearningClaim.concept_id == concept_id,
+            EvidenceItem.course_id == course_id,
+        )
+        .order_by(EvidenceItem.item_type, EvidenceItem.created_at)
+        .all()
+    )
+    if not rows:
+        return []
+    claim_ids = {claim.id for _, _, claim in rows}
+    statements = {
+        claim_id: statement
+        for claim_id, statement in session.query(
+            LearningClaimRevision.learning_claim_id, LearningClaimRevision.statement
+        )
+        .filter(
+            LearningClaimRevision.curriculum_version_id == current_version_id,
+            LearningClaimRevision.learning_claim_id.in_(claim_ids),
+        )
+        .all()
+    }
+    items: list[dict[str, Any]] = []
+    for link, item, claim in rows:
+        content = item.content_json or {}
+        entry: dict[str, Any] = {
+            "item_type": item.item_type,
+            "evidence_item_id": item.id,
+            "preview": str(content.get("question") or content.get("front") or ""),
+            "back_or_answer": str(content.get("explanation") or content.get("back") or "") or None,
+            "source_index": item.source_index,
+            "claim_statement": statements.get(claim.id),
+            "review_state": link.review_state,
+        }
+        if item.item_type == "quiz_question":
+            entry["test_id"] = item.source_record_id
+            attempt = (
+                session.query(TestAttempt)
+                .filter(TestAttempt.test_id == item.source_record_id)
+                .order_by(TestAttempt.created_at.desc())
+                .first()
+            )
+            entry["attempt_id"] = attempt.id if attempt is not None else None
+        else:  # flashcard
+            card = session.get(Card, item.source_record_id)
+            entry["card_id"] = item.source_record_id
+            entry["section_id"] = card.section_id if card is not None else None
+        items.append(entry)
+    return items
 
 
 def get_skill_map(course_id: str, *, learner_id: str | None = None) -> dict[str, Any]:
@@ -510,9 +614,105 @@ def get_skill_detail(
             "node": node,
             "taught_in": _taught_in(session, course_id, concept_id),
             "missed_questions": data["missed_by_concept"].get(concept_id, []),
+            "linked_items": _linked_items(session, course_id, concept_id),
             "cards_count": data["cards_count"].get(concept_id, 0),
             "quiz_correct": data["quiz_correct"].get(concept_id, 0),
             "quiz_wrong": data["quiz_wrong"].get(concept_id, 0),
+        }
+    finally:
+        session.close()
+
+
+def get_skill_status(course_id: str) -> dict[str, Any]:
+    """Lightweight phase for the reader banner and the skill-map editor:
+    where the course's skill map currently is (generating / draft ready /
+    published / failed / none). Course existence is checked by the router."""
+    session = get_session()
+    try:
+        published_version = session.query(CurriculumVersion).filter_by(
+            course_id=course_id, is_current=True
+        ).one_or_none()
+        draft_version = (
+            session.query(CurriculumVersion)
+            .filter_by(course_id=course_id, status="draft")
+            .order_by(CurriculumVersion.created_at.desc())
+            .first()
+        )
+        extraction_job = next(
+            (
+                job
+                for job in session.query(Job)
+                .filter(Job.type == "concept_extraction")
+                .order_by(Job.created_at.desc())
+                .all()
+                if (job.payload or {}).get("course_id") == course_id
+            ),
+            None,
+        )
+
+        published = published_version is not None
+        concept_count = 0
+        if published_version is not None:
+            concept_count = (
+                session.query(ConceptRevision)
+                .filter(
+                    ConceptRevision.curriculum_version_id == published_version.id,
+                    ConceptRevision.is_active.is_(True),
+                )
+                .count()
+            )
+        elif draft_version is not None:
+            concept_count = (
+                session.query(ConceptRevision)
+                .filter(
+                    ConceptRevision.curriculum_version_id == draft_version.id,
+                    ConceptRevision.is_active.is_(True),
+                )
+                .count()
+            )
+
+        if extraction_job is not None and extraction_job.status in {"queued", "running"}:
+            phase = "generating"
+        elif extraction_job is not None and extraction_job.status == "failed":
+            phase = "failed"
+        elif published and concept_count:
+            phase = "published"
+        elif draft_version is not None and concept_count:
+            phase = "draft_ready"
+        else:
+            phase = "none"
+
+        # "Locked" mirrors curriculum_service.learner_started: any evidence
+        # event or quiz attempt means regeneration must not orphan that
+        # version-scoped learner data.
+        locked = (
+            session.query(LearnerEvidenceEvent)
+            .filter_by(course_id=course_id)
+            .first()
+            is not None
+        ) or (
+            session.query(TestAttempt).filter_by(course_id=course_id).first()
+            is not None
+        )
+
+        error_message = None
+        error_code = None
+        if extraction_job is not None and extraction_job.status == "failed":
+            error_message, error_detail = decode_job_error(extraction_job.error)
+            if isinstance(error_detail, dict):
+                code = error_detail.get("code")
+                if isinstance(code, str):
+                    error_code = code
+
+        return {
+            "phase": phase,
+            "job_id": extraction_job.id if extraction_job is not None else None,
+            "draft_version_id": draft_version.id if draft_version is not None else None,
+            "published": published,
+            "concept_count": concept_count,
+            "locked": locked,
+            "error": error_message,
+            "error_code": error_code,
         }
     finally:
         session.close()

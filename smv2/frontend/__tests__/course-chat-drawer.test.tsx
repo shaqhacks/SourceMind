@@ -161,7 +161,7 @@ describe("CourseChatDrawer", () => {
 
     // The chip's own label is the verbatim source_ref (display-only), but
     // navigation must use section_id, not anything parsed from that string.
-    expect(mockPush).toHaveBeenCalledWith("/course/course-1?section=sec-xyz");
+    expect(mockPush).toHaveBeenCalledWith("/course/course-1/read?section=sec-xyz");
     // Docked panel: navigating via a citation doesn't lose the
     // conversation — only the narrow-viewport overlay fallback closes on
     // citation click (see the next test).
@@ -188,7 +188,7 @@ describe("CourseChatDrawer", () => {
     const chip = await screen.findByRole("button", { name: /ref:p\.9/i });
     await user.click(chip);
 
-    expect(mockPush).toHaveBeenCalledWith("/course/course-1?section=sec-xyz");
+    expect(mockPush).toHaveBeenCalledWith("/course/course-1/read?section=sec-xyz");
     expect(onClose).toHaveBeenCalled();
   });
 

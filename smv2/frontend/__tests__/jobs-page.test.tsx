@@ -91,7 +91,7 @@ describe("JobsPage", () => {
     expect(screen.getByRole("heading", { name: /generate cards/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /generate lesson/i })).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /open course course-1/i })[0]).toHaveAttribute("href", "/course/course-1");
-    expect(screen.getByRole("link", { name: /open section sec-2/i })).toHaveAttribute("href", "/course/course-1?section=sec-2");
+    expect(screen.getByRole("link", { name: /open section sec-2/i })).toHaveAttribute("href", "/course/course-1/read?section=sec-2");
   });
 
   it("highlights the job requested by query string", async () => {

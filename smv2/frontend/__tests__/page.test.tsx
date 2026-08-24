@@ -218,7 +218,7 @@ describe("Home page", () => {
       ).toHaveAttribute("aria-valuenow", "50");
 
       await userEvent.setup().click(screen.getByRole("button", { name: /resume/i }));
-      expect(mockPush).toHaveBeenCalledWith("/course/b");
+      expect(mockPush).toHaveBeenCalledWith("/course/b/read");
     });
 
     it("shows no continue-reading card when no course has saved progress", async () => {

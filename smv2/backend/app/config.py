@@ -153,6 +153,29 @@ def llm_model() -> str:
     return "claude-sonnet-5"
 
 
+def curriculum_provider() -> str:
+    """Provider for skill-map (curriculum) generation only. Falls back to the
+    default generation provider when not explicitly set, so existing setups
+    keep a single provider for everything."""
+    env = os.environ.get("SMV2_CURRICULUM_PROVIDER")
+    if env:
+        return env
+    from_local = _read_local_settings().get("curriculum_provider")
+    if isinstance(from_local, str) and from_local:
+        return from_local
+    return llm_provider()
+
+
+def curriculum_model() -> str:
+    env = os.environ.get("SMV2_CURRICULUM_MODEL")
+    if env:
+        return env
+    from_local = _read_local_settings().get("curriculum_model")
+    if isinstance(from_local, str) and from_local:
+        return from_local
+    return llm_model()
+
+
 def llm_max_concurrency() -> int:
     raw = os.environ.get("SMV2_LLM_MAX_CONCURRENCY", "2")
     try:
@@ -192,6 +215,28 @@ def anthropic_api_key() -> str | None:
     return from_secrets if isinstance(from_secrets, str) and from_secrets else None
 
 
+def deepseek_api_key() -> str | None:
+    """Precedence: DEEPSEEK_API_KEY env var > secrets.toml > None."""
+    env = os.environ.get("DEEPSEEK_API_KEY")
+    if env:
+        return env
+    from_secrets = _read_secrets().get("deepseek_api_key")
+    return from_secrets if isinstance(from_secrets, str) and from_secrets else None
+
+
+def gemini_api_key() -> str | None:
+    """Precedence: GEMINI_API_KEY env var > secrets.toml > None."""
+    env = os.environ.get("GEMINI_API_KEY")
+    if env:
+        return env
+    from_secrets = _read_secrets().get("gemini_api_key")
+    return from_secrets if isinstance(from_secrets, str) and from_secrets else None
+
+
+def gemini_embed_model() -> str:
+    return os.environ.get("GEMINI_EMBED_MODEL", "gemini-embedding-001")
+
+
 def course_spend_cap_usd() -> float | None:
     raw = os.environ.get("SMV2_COURSE_SPEND_CAP_USD")
     if raw is None or not raw.strip():
@@ -225,6 +270,15 @@ def chat_history_turns() -> int:
 def sample_course_enabled() -> bool:
     raw = os.environ.get("SMV2_SAMPLE_COURSE_ENABLED", "1")
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def skill_map_autogen_enabled() -> bool:
+    """Whether a successful ingest auto-queues concept extraction (ADR-030).
+    On by default; '0'/'false'/'no'/'off' disables it (tests force it off so
+    the auto-queued job never interleaves with the single-claim worker idiom
+    they drive by hand, same reasoning as SMV2_HTML_CONVERSION)."""
+    raw = os.environ.get("SMV2_SKILL_MAP_AUTOGEN", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
 
 
 def html_conversion_enabled() -> bool:

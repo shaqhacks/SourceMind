@@ -1096,3 +1096,41 @@ documentation (`https://python-docx.readthedocs.io/en/latest/`),
 `python-pptx` documentation (`https://python-pptx.readthedocs.io/en/stable/`),
 and EbookLib package/license metadata (`https://pypi.org/project/EbookLib/`,
 `https://github.com/aerkalov/ebooklib`).
+
+## ADR-030 — Skill map auto-generated on upload, editable as a draft (2026-08-21)
+
+The skill map (versioned curriculum: concepts, learning claims, prerequisite
+relations — ADR-028) is now generated automatically when a course ingests,
+instead of only via the manual `POST /api/courses/{id}/curriculum/extract`
+endpoint. At the end of a successful ingest, `_run_ingest` inserts a queued
+`concept_extraction` job into the same transaction as the rest of the
+destructive write, exactly like the existing fire-and-forget `convert_html`
+enhancement (ADR-020). Ingest itself still makes zero LLM calls: the durable
+job worker performs the extraction later, so ADR-010 is not violated — this
+decision deviates from UX law #4's "lazy/opt-in generation" default, and is
+recorded as such because the owner asked for the map to appear on upload.
+
+Generation is transparent and non-blocking. The reader shows a
+"skill map generating" status (from a new lightweight
+`GET /api/courses/{id}/skills/status`), and extraction failure degrades to a
+visible retryable state rather than blocking the reader — the course is
+readable with zero skill map, same as before.
+
+The generated map lands as an editable `draft` curriculum version. Editing
+(rename/describe, add/remove concept, add/remove prerequisite relation,
+reassign the introduced-in section) mutates only the draft via the existing
+versioned-curriculum endpoints (extended with add/delete-concept and
+add/delete-relation). The learner-facing skill map and competency detail
+continue to read the *published* (`is_current`) version only, so learner
+evidence history stays stable until the owner explicitly publishes the
+draft — matching ADR-028's "instructor review is part of the validity
+argument, not ground truth."
+
+`Concept.section_id` + `Concept.chapter_label` remain the "introduced here"
+pointer and are now surfaced on each skill-map node so the map links each
+competency to its chapter/section; `_taught_in` prepends that pointer as the
+rank-0 "introduced here" entry when it is not already covered by a source
+link. Competency detail additionally lists the quiz questions and flashcards
+mapped to that concept (via `EvidenceItemConceptLink`, ADR-028) with links
+back to their source test/card, so the owner can review the items a
+competency is assessed by.

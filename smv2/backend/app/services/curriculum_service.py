@@ -14,7 +14,10 @@ from app.db.models import (
     EvidenceItemConceptLink,
     LearningClaim,
     LearningClaimRevision,
+    LearnerEvidenceEvent,
     Job,
+    Section,
+    TestAttempt,
     utcnow,
 )
 
@@ -40,6 +43,35 @@ class PublishedCurriculumImmutableError(ValueError):
 
 class InvalidCurriculumOperationError(ValueError):
     pass
+
+
+class SkillMapLockedError(ValueError):
+    """Raised when regeneration is blocked because the learner has already
+    started learning (evidence or quiz attempts exist) — the skill tree is
+    locked to protect their progress."""
+
+
+def learner_started(course_id: str) -> bool:
+    """True once the learner has any evidence event or quiz attempt for the
+    course — the signal that the skill tree must be locked against a fresh
+    auto-extraction (which would orphan that version-scoped data)."""
+    session = get_session()
+    try:
+        if (
+            session.query(LearnerEvidenceEvent)
+            .filter_by(course_id=course_id)
+            .first()
+            is not None
+        ):
+            return True
+        return (
+            session.query(TestAttempt)
+            .filter_by(course_id=course_id)
+            .first()
+            is not None
+        )
+    finally:
+        session.close()
 
 
 def _draft(session, version_id: str) -> CurriculumVersion:
@@ -159,51 +191,79 @@ def create_draft(
         session.close()
 
 
-def start_extraction(course_id: str) -> tuple[Job, CurriculumVersion]:
-    from app.services import jobs_service, llm_readiness_service
+def queue_extraction_in_session(
+    session, course_id: str, *, require_ready: bool = False
+) -> tuple[Job, CurriculumVersion]:
+    """Create (or reuse) a draft curriculum version and a queued
+    `concept_extraction` job in the caller's session. Does NOT commit — the
+    caller owns the transaction boundary (ingest adds this to its one
+    all-or-nothing write; start_extraction commits right after).
 
+    Idempotent: if a queued/running `concept_extraction` job already exists
+    for the course, that job and its draft version are returned untouched.
+    `require_ready` gates NEW job creation on LLM readiness (the manual
+    endpoint); auto-queue from ingest leaves it False so a missing provider
+    surfaces as a cleanly failed job, never as a failed ingest.
+    """
+    from app.services import llm_readiness_service
+
+    for job in session.query(Job).filter(
+        Job.type == "concept_extraction", Job.status.in_(["queued", "running"])
+    ):
+        if (job.payload or {}).get("course_id") == course_id:
+            version = session.get(
+                CurriculumVersion, (job.payload or {}).get("curriculum_version_id")
+            )
+            if version is not None:
+                return job, version
+
+    if require_ready:
+        llm_readiness_service.assert_curriculum_ready()
+
+    version = (
+        session.query(CurriculumVersion)
+        .filter_by(course_id=course_id, status="draft")
+        .order_by(CurriculumVersion.created_at.desc())
+        .first()
+    )
+    if version is None:
+        current = session.query(CurriculumVersion).filter_by(
+            course_id=course_id, is_current=True
+        ).one_or_none()
+        version = CurriculumVersion(
+            course_id=course_id,
+            parent_version_id=current.id if current is not None else None,
+            status="draft",
+            is_current=False,
+            label="Book extraction draft",
+        )
+        session.add(version)
+        session.flush()
+        if current is not None:
+            _copy_version_rows(session, current.id, version.id)
+    # Insert the Job row directly (not jobs_service.create_job_in_session),
+    # which would re-assert LLM readiness for concept_extraction. Auto-queue
+    # from ingest must never fail the ingest over a missing provider — the
+    # worker fails the job cleanly instead.
+    job = Job(
+        type="concept_extraction",
+        status="queued",
+        payload={"course_id": course_id, "curriculum_version_id": version.id},
+    )
+    session.add(job)
+    return job, version
+
+
+def start_extraction(course_id: str) -> tuple[Job, CurriculumVersion]:
     session = get_session()
     try:
         if session.get(Course, course_id) is None:
             raise CurriculumNotFoundError(f"course not found: {course_id}")
-        active_jobs = session.query(Job).filter(
-            Job.type == "concept_extraction", Job.status.in_(["queued", "running"])
-        )
-        for job in active_jobs:
-            if (job.payload or {}).get("course_id") == course_id:
-                version = session.get(
-                    CurriculumVersion, (job.payload or {}).get("curriculum_version_id")
-                )
-                if version is not None:
-                    return job, version
-
-        llm_readiness_service.assert_ready_for_generation()
-        version = (
-            session.query(CurriculumVersion)
-            .filter_by(course_id=course_id, status="draft")
-            .order_by(CurriculumVersion.created_at.desc())
-            .first()
-        )
-        if version is None:
-            current = session.query(CurriculumVersion).filter_by(
-                course_id=course_id, is_current=True
-            ).one_or_none()
-            version = CurriculumVersion(
-                course_id=course_id,
-                parent_version_id=current.id if current is not None else None,
-                status="draft",
-                is_current=False,
-                label="Book extraction draft",
+        if learner_started(course_id):
+            raise SkillMapLockedError(
+                "the skill map is locked because learning has already started"
             )
-            session.add(version)
-            session.flush()
-            if current is not None:
-                _copy_version_rows(session, current.id, version.id)
-        job = jobs_service.create_job_in_session(
-            session,
-            "concept_extraction",
-            {"course_id": course_id, "curriculum_version_id": version.id},
-        )
+        job, version = queue_extraction_in_session(session, course_id, require_ready=True)
         session.commit()
         return job, version
     finally:
@@ -242,6 +302,13 @@ def get_curriculum(course_id: str, *, draft: bool = False) -> dict[str, Any] | N
                 )
             )
         }
+        section_ids = {
+            concept.section_id for concept in concepts.values() if concept.section_id
+        }
+        section_titles = {
+            section.id: section.title
+            for section in session.query(Section).filter(Section.id.in_(section_ids))
+        } if section_ids else {}
         return {
             "id": version.id,
             "course_id": version.course_id,
@@ -259,6 +326,8 @@ def get_curriculum(course_id: str, *, draft: bool = False) -> dict[str, Any] | N
                     "description_md": revision.description_md,
                     "aliases": revision.aliases,
                     "chapter_label": revision.chapter_label,
+                    "section_id": concepts[revision.concept_id].section_id,
+                    "section_title": section_titles.get(concepts[revision.concept_id].section_id),
                     "review_state": revision.review_state,
                     "is_active": revision.is_active,
                 }
@@ -408,11 +477,16 @@ def add_concept(
     description_md: str,
     aliases: list[str] | None = None,
     chapter_label: str | None = None,
+    section_id: str | None = None,
     review_state: str = "unverified",
 ) -> Concept:
     session = get_session()
     try:
         version = _draft(session, version_id)
+        if section_id is not None:
+            section = session.get(Section, section_id)
+            if section is None or section.course_id != version.course_id:
+                raise CurriculumNotFoundError(f"section not found for curriculum: {section_id}")
         concept = (
             session.query(Concept)
             .filter_by(course_id=version.course_id, slug=stable_key)
@@ -424,9 +498,12 @@ def add_concept(
                 slug=stable_key,
                 label=label,
                 chapter_label=chapter_label,
+                section_id=section_id,
             )
             session.add(concept)
             session.flush()
+        elif section_id is not None:
+            concept.section_id = section_id
         existing = session.query(ConceptRevision).filter_by(
             curriculum_version_id=version.id, concept_id=concept.id
         ).one_or_none()
@@ -459,15 +536,20 @@ def edit_concept(
     description_md: str,
     aliases: list[str],
     chapter_label: str | None = None,
+    section_id: str | None = None,
 ) -> ConceptRevision:
     session = get_session()
     try:
-        _draft(session, version_id)
+        version = _draft(session, version_id)
         revision = session.query(ConceptRevision).filter_by(
             curriculum_version_id=version_id, concept_id=concept_id
         ).one_or_none()
         if revision is None:
             raise CurriculumNotFoundError(f"concept revision not found: {concept_id}")
+        if section_id is not None:
+            section = session.get(Section, section_id)
+            if section is None or section.course_id != version.course_id:
+                raise CurriculumNotFoundError(f"section not found for curriculum: {section_id}")
         revision.label = label
         revision.description_md = description_md
         revision.aliases = list(aliases)
@@ -476,8 +558,47 @@ def edit_concept(
         assert concept is not None
         concept.label = label
         concept.chapter_label = chapter_label
+        if section_id is not None:
+            concept.section_id = section_id
         session.commit()
         return revision
+    finally:
+        session.close()
+
+
+def delete_concept(version_id: str, concept_id: str) -> Concept:
+    """Remove a concept from a draft by deactivating its revision (same
+    mechanism merge_concepts uses for its absorbed sources) — the stable
+    Concept row survives, but the draft no longer lists it and the learner
+    map drops it once published."""
+    session = get_session()
+    try:
+        version = _draft(session, version_id)
+        revision = session.query(ConceptRevision).filter_by(
+            curriculum_version_id=version_id, concept_id=concept_id
+        ).one_or_none()
+        if revision is None:
+            raise CurriculumNotFoundError(f"concept revision not found: {concept_id}")
+        concept = session.get(Concept, concept_id)
+        if concept is None or concept.course_id != version.course_id:
+            raise CurriculumNotFoundError(f"concept not found for curriculum: {concept_id}")
+        revision.is_active = False
+        session.commit()
+        return concept
+    finally:
+        session.close()
+
+
+def remove_relation_by_id(relation_id: str) -> ConceptRelation:
+    session = get_session()
+    try:
+        relation = session.get(ConceptRelation, relation_id)
+        if relation is None:
+            raise CurriculumNotFoundError(f"relation not found: {relation_id}")
+        _draft(session, relation.curriculum_version_id)
+        session.delete(relation)
+        session.commit()
+        return relation
     finally:
         session.close()
 

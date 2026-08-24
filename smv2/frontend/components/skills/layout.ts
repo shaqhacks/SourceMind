@@ -10,7 +10,7 @@ import type { SkillEdgeOut, SkillNodeOut } from "@/lib/api/client";
  */
 
 const CARD_W = 260;
-const CARD_H = 118;
+const CARD_H = 140;
 const LANE_PITCH = 370;
 const ROW_PITCH = 170;
 const TOP = 30;
@@ -124,3 +124,40 @@ export function computeSkillMapLayout(nodes: SkillNodeOut[], edges: SkillEdgeOut
 
 export const SKILL_CARD_WIDTH = CARD_W;
 export const SKILL_CARD_HEIGHT = CARD_H;
+
+/**
+ * Longest-path level assignment over prerequisite edges, mirroring the
+ * backend's derive_levels: nodes with no prerequisites are level 1, and each
+ * `from -> to` edge means `to`'s level is at least `from`'s level + 1.
+ */
+export function deriveLevels(
+  nodeIds: string[],
+  edges: { from_id: string; to_id: string }[],
+): Record<string, number> {
+  const levels: Record<string, number> = {};
+  const indegree: Record<string, number> = {};
+  const adjacency: Record<string, string[]> = {};
+  for (const id of nodeIds) {
+    levels[id] = 0;
+    indegree[id] = 0;
+    adjacency[id] = [];
+  }
+  for (const e of edges) {
+    if (!adjacency[e.from_id]) continue;
+    adjacency[e.from_id].push(e.to_id);
+    if (e.to_id in indegree) indegree[e.to_id] += 1;
+  }
+
+  const queue = nodeIds.filter((id) => indegree[id] === 0);
+  for (const id of queue) levels[id] = 1;
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    for (const child of adjacency[id]) {
+      levels[child] = Math.max(levels[child], levels[id] + 1);
+      indegree[child] -= 1;
+      if (indegree[child] === 0) queue.push(child);
+    }
+  }
+  for (const id of nodeIds) if (levels[id] === 0) levels[id] = 1;
+  return levels;
+}

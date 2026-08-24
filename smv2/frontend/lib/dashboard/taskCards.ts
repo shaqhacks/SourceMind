@@ -66,7 +66,7 @@ export function buildTaskCards({
         : continueCourse.title,
       progressPercent: continueChapter?.percent,
       actionLabel: "Resume",
-      actionHref: `/course/${continueCourse.id}`,
+      actionHref: `/course/${continueCourse.id}/read`,
       actionVariant: "primary",
     });
   }

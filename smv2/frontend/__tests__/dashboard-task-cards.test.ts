@@ -53,7 +53,7 @@ describe("buildTaskCards", () => {
         meta: "Distributed Systems · 42% through",
         progressPercent: 42,
         actionLabel: "Resume",
-        actionHref: "/course/a",
+        actionHref: "/course/a/read",
         actionVariant: "primary",
       },
     ]);

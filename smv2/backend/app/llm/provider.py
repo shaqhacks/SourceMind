@@ -13,7 +13,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from app.config import llm_provider
+from app.config import curriculum_model, curriculum_provider, llm_model, llm_provider
 from app.llm.completion_control import CompletionOptions, ProviderCancelledError
 from app.llm.ledger import record_llm_call
 from app.llm.limiter import llm_slot
@@ -215,13 +215,30 @@ class Provider(ABC):
 
 
 def get_provider() -> Provider:
-    backend = llm_provider()
+    return _build_provider(llm_provider(), llm_model())
+
+
+def get_curriculum_provider() -> Provider:
+    """Provider for skill-map (curriculum) generation only — the one path
+    that may run a different model (e.g. Gemini) than everything else."""
+    return _build_provider(curriculum_provider(), curriculum_model())
+
+
+def _build_provider(backend: str, model: str) -> Provider:
     if backend == "anthropic":
         from app.llm.anthropic_provider import AnthropicProvider
 
-        return AnthropicProvider()
+        return AnthropicProvider(model=model)
     if backend == "ollama":
         from app.llm.ollama_provider import OllamaProvider
 
-        return OllamaProvider()
+        return OllamaProvider(model=model)
+    if backend == "deepseek":
+        from app.llm.deepseek_provider import DeepSeekProvider
+
+        return DeepSeekProvider(model=model)
+    if backend == "gemini":
+        from app.llm.gemini_provider import GeminiProvider
+
+        return GeminiProvider(model=model)
     raise ValueError(f"unknown LLM provider: {backend}")

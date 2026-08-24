@@ -7,11 +7,20 @@ from typing import Any
 import anthropic
 import httpx
 
-from app.config import anthropic_api_key, embed_model, llm_model, ollama_base_url
+from app.config import (
+    anthropic_api_key,
+    deepseek_api_key,
+    embed_model,
+    gemini_api_key,
+    llm_model,
+    ollama_base_url,
+)
 from app.security.local_settings import normalize_ollama_base_url
 
 _OLLAMA_PROBE_TIMEOUT_SECONDS = 5.0
 _OLLAMA_PROBE_TIMEOUT = httpx.Timeout(_OLLAMA_PROBE_TIMEOUT_SECONDS, connect=1.0, read=5.0)
+_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
 _MAX_RESPONSE_BYTES = 1024 * 1024
 
 
@@ -29,7 +38,51 @@ def probe_provider(provider: str) -> ProbeResult:
         return _probe_anthropic()
     if provider == "ollama":
         return _probe_ollama()
+    if provider == "deepseek":
+        return _probe_deepseek()
+    if provider == "gemini":
+        return _probe_gemini()
     return ProbeResult(False, f"unknown LLM provider: {provider}")
+
+
+def _probe_gemini() -> ProbeResult:
+    key = gemini_api_key()
+    if not key:
+        return ProbeResult(
+            False,
+            "Gemini API key is not configured.",
+            failure_category="missing_credentials",
+        )
+    try:
+        with httpx.Client(timeout=_OLLAMA_PROBE_TIMEOUT) as client:
+            response = client.get(
+                f"{_GEMINI_BASE_URL}/v1beta/models",
+                headers={"x-goog-api-key": key},
+            )
+            response.raise_for_status()
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        return ProbeResult(False, str(exc), failure_category="unreachable")
+    return ProbeResult(True, completion=True, embeddings=True)
+
+
+def _probe_deepseek() -> ProbeResult:
+    key = deepseek_api_key()
+    if not key:
+        return ProbeResult(
+            False,
+            "DeepSeek API key is not configured.",
+            failure_category="missing_credentials",
+        )
+    try:
+        with httpx.Client(timeout=_OLLAMA_PROBE_TIMEOUT) as client:
+            response = client.get(
+                f"{_DEEPSEEK_BASE_URL}/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            response.raise_for_status()
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        return ProbeResult(False, str(exc), failure_category="unreachable")
+    return ProbeResult(True, completion=True)
 
 
 def _probe_anthropic() -> ProbeResult:

@@ -37,6 +37,8 @@ function makeSettings(overrides: Partial<SettingsOut> = {}): SettingsOut {
   return {
     provider: "anthropic",
     model: "claude-sonnet-4-5",
+    curriculum_provider: "anthropic",
+    curriculum_model: "claude-sonnet-4-5",
     credentials_present: { anthropic: true, ollama: false },
     credentials: { anthropic_api_key: "[redacted]" },
     rollout: { local_settings_enabled: true },
@@ -89,8 +91,8 @@ describe("SettingsPage", () => {
     render(<SettingsPage />);
 
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByDisplayValue("anthropic")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("claude-sonnet-4-5")).toBeInTheDocument();
+    expect(screen.getByLabelText(/ai provider/i)).toHaveValue("anthropic");
+    expect(screen.getByLabelText(/ai model/i)).toHaveValue("claude-sonnet-4-5");
     expect(screen.getByText(/ready/i)).toBeInTheDocument();
     expect(screen.getByText(/anthropic credential saved/i)).toBeInTheDocument();
     expect(screen.queryByText("[redacted]")).not.toBeInTheDocument();
@@ -125,33 +127,68 @@ describe("SettingsPage", () => {
 
     render(<SettingsPage />);
 
-    expect(await screen.findByLabelText(/provider/i)).toBeEnabled();
-    expect(screen.getByLabelText(/model/i)).toBeEnabled();
+    expect(await screen.findByLabelText(/ai provider/i)).toBeEnabled();
+    expect(screen.getByLabelText(/ai model/i)).toBeEnabled();
     expect(screen.getByLabelText(/anthropic api key/i)).toBeEnabled();
-    expect(screen.getByLabelText(/ollama base url/i)).toBeEnabled();
     expect(screen.getByRole("button", { name: /save settings/i })).toBeEnabled();
   });
 
-  it("clears all credential-like inputs after a successful save", async () => {
+  it("clears the credential input after a successful save", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
 
     const anthropicInput = await screen.findByLabelText(/anthropic api key/i);
-    const ollamaInput = screen.getByLabelText(/ollama base url/i);
     await user.type(anthropicInput, "sk-ant-new-secret");
-    await user.type(ollamaInput, "http://127.0.0.1:11434");
     await user.click(screen.getByRole("button", { name: /save settings/i }));
 
     await waitFor(() => expect(mockedSaveSettings).toHaveBeenCalledTimes(1));
     expect(anthropicInput).toHaveValue("");
-    expect(ollamaInput).toHaveValue("");
+  });
+
+  it("shows the DeepSeek key input once deepseek is selected for either provider", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    expect(await screen.findByLabelText(/ai provider/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/deepseek api key/i)).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText(/ai provider/i), "deepseek");
+
+    expect(screen.getByLabelText(/deepseek api key/i)).toBeInTheDocument();
+  });
+
+  it("shows a separate skill map provider with its own model and key", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    await user.selectOptions(await screen.findByLabelText(/skill map provider/i), "gemini");
+    await user.selectOptions(screen.getByLabelText(/skill map model/i), "gemini-3.6-flash");
+
+    expect(screen.getByLabelText(/gemini api key/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save settings/i })).toBeEnabled();
+  });
+
+  it("offers a DeepSeek model dropdown and requires a selection before saving", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+
+    await user.selectOptions(await screen.findByLabelText(/ai provider/i), "deepseek");
+
+    const modelSelect = screen.getByLabelText(/ai model/i);
+    expect(modelSelect).toHaveValue("");
+    expect(screen.getByRole("option", { name: "deepseek-chat" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "deepseek-reasoner" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
+
+    await user.selectOptions(modelSelect, "deepseek-chat");
+    expect(screen.getByRole("button", { name: /save settings/i })).toBeEnabled();
   });
 
   it("discovers Ollama models with the default first-time URL when switching providers", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
 
-    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+    await user.selectOptions(await screen.findByLabelText(/ai provider/i), "ollama");
 
     await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(1));
     expect(mockedDiscoverOllamaModels).toHaveBeenCalledWith({
@@ -164,10 +201,10 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
 
-    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+    await user.selectOptions(await screen.findByLabelText(/ai provider/i), "ollama");
     await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(1));
 
-    await user.pointer({ keys: "[MouseLeft>]", target: screen.getByLabelText(/model/i) });
+    await user.pointer({ keys: "[MouseLeft>]", target: screen.getByLabelText(/ai model/i) });
 
     await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(2));
   });
@@ -181,8 +218,8 @@ describe("SettingsPage", () => {
     mockedDiscoverOllamaModels.mockReturnValue(pendingDiscovery);
     render(<SettingsPage />);
 
-    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
-    await user.pointer({ keys: "[MouseLeft>]", target: screen.getByLabelText(/model/i) });
+    await user.selectOptions(await screen.findByLabelText(/ai provider/i), "ollama");
+    await user.pointer({ keys: "[MouseLeft>]", target: screen.getByLabelText(/ai model/i) });
 
     expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(1);
     resolveDiscovery!({
@@ -205,11 +242,11 @@ describe("SettingsPage", () => {
     mockedDiscoverOllamaModels.mockReturnValue(pendingDiscovery);
     render(<SettingsPage />);
 
-    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
-    await user.selectOptions(screen.getByLabelText(/provider/i), "anthropic");
+    await user.selectOptions(await screen.findByLabelText(/ai provider/i), "ollama");
+    await user.selectOptions(screen.getByLabelText(/ai provider/i), "anthropic");
 
-    expect(screen.getByLabelText(/provider/i)).toHaveValue("anthropic");
-    expect(screen.getByLabelText(/model/i)).toHaveValue("claude-sonnet-4-5");
+    expect(screen.getByLabelText(/ai provider/i)).toHaveValue("anthropic");
+    expect(screen.getByLabelText(/ai model/i)).toHaveValue("claude-sonnet-4-5");
 
     resolveDiscovery!({
       status: 200,
@@ -222,7 +259,7 @@ describe("SettingsPage", () => {
     });
     await pendingDiscovery;
 
-    expect(screen.getByLabelText(/model/i)).toHaveValue("claude-sonnet-4-5");
+    expect(screen.getByLabelText(/ai model/i)).toHaveValue("claude-sonnet-4-5");
     expect(screen.queryByRole("option", { name: "gemma3:4b" })).not.toBeInTheDocument();
   });
 
@@ -250,7 +287,7 @@ describe("SettingsPage", () => {
     render(<SettingsPage />);
 
     expect(await screen.findByText(missingConfiguredModelMessage)).toBeInTheDocument();
-    const modelSelect = screen.getByLabelText(/model/i);
+    const modelSelect = screen.getByLabelText(/ai model/i);
     expect(modelSelect).toHaveValue("");
     expect(screen.queryByRole("option", { name: "missing:latest" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
@@ -277,7 +314,7 @@ describe("SettingsPage", () => {
     });
     render(<SettingsPage />);
 
-    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+    await user.selectOptions(await screen.findByLabelText(/ai provider/i), "ollama");
 
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(screen.queryByText(/raw upstream body/i)).not.toBeInTheDocument();
@@ -288,16 +325,16 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
 
-    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+    await user.selectOptions(await screen.findByLabelText(/ai provider/i), "ollama");
     await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(1));
-    await user.selectOptions(screen.getByLabelText(/model/i), "gemma3:4b");
+    await user.selectOptions(screen.getByLabelText(/ai model/i), "gemma3:4b");
     await user.clear(screen.getByLabelText(/ollama base url/i));
     await user.type(screen.getByLabelText(/ollama base url/i), "http://127.0.0.1:11434");
 
-    expect(screen.getByLabelText(/model/i)).toHaveValue("");
+    expect(screen.getByLabelText(/ai model/i)).toHaveValue("");
     expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
 
-    await user.pointer({ keys: "[MouseLeft>]", target: screen.getByLabelText(/model/i) });
+    await user.pointer({ keys: "[MouseLeft>]", target: screen.getByLabelText(/ai model/i) });
 
     await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenLastCalledWith({
       base_url: "http://127.0.0.1:11434",
@@ -309,17 +346,19 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
 
-    await user.selectOptions(await screen.findByLabelText(/provider/i), "ollama");
+    await user.selectOptions(await screen.findByLabelText(/ai provider/i), "ollama");
     await waitFor(() => expect(mockedDiscoverOllamaModels).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: /save settings/i })).toBeDisabled();
 
-    await user.selectOptions(screen.getByLabelText(/model/i), "llama3.2:latest");
+    await user.selectOptions(screen.getByLabelText(/ai model/i), "llama3.2:latest");
     await user.click(screen.getByRole("button", { name: /save settings/i }));
 
     await waitFor(() => expect(mockedSaveSettings).toHaveBeenCalledTimes(1));
     expect(mockedSaveSettings).toHaveBeenCalledWith({
       provider: "ollama",
       model: "llama3.2:latest",
+      curriculum_provider: "anthropic",
+      curriculum_model: "claude-sonnet-4-5",
       credentials: { ollama_base_url: "http://localhost:11434" },
     });
   });

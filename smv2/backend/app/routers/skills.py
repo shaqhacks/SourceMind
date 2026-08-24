@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from app.schemas import SkillDetailOut, SkillGraphImportOut, SkillGraphIn, SkillMapOut
+from app.schemas import (
+    SkillDetailOut,
+    SkillGraphImportOut,
+    SkillGraphIn,
+    SkillMapOut,
+    SkillStatusOut,
+)
 from app.services import courses_service, learner_context, skills_service
 
 router = APIRouter(prefix="/api/courses/{course_id}/skills", tags=["skills"])
@@ -19,6 +25,13 @@ def import_skill_graph(course_id: str, body: SkillGraphIn) -> SkillGraphImportOu
     except skills_service.GraphValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return SkillGraphImportOut.model_validate(result)
+
+
+@router.get("/status", operation_id="get_skill_status", response_model=SkillStatusOut)
+def get_skill_status(course_id: str) -> SkillStatusOut:
+    if courses_service.get_course(course_id) is None:
+        raise HTTPException(status_code=404, detail="course not found")
+    return SkillStatusOut.model_validate(skills_service.get_skill_status(course_id))
 
 
 @router.get("", operation_id="get_skill_map", response_model=SkillMapOut)

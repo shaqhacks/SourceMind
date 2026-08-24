@@ -21,7 +21,7 @@ export default function ContinueCard({ course }: ContinueCardProps) {
 
   return (
     <Link
-      href={`/course/${course.id}`}
+      href={`/course/${course.id}/read`}
       className="block rounded-lg border border-border bg-accent-soft/60 p-4 transition-colors hover:border-muted-foreground"
     >
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

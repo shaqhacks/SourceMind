@@ -1,6 +1,6 @@
 import createClient from "openapi-fetch";
 
-import { getCachedCsrfToken, setCsrfToken } from "@/lib/security/csrf";
+import { clearCsrfToken, getCachedCsrfToken, setCsrfToken } from "@/lib/security/csrf";
 import type { components, paths } from "./schema";
 
 /**
@@ -89,10 +89,15 @@ export type SkillEdgeOut = components["schemas"]["SkillEdgeOut"];
 export type SkillMapOut = components["schemas"]["SkillMapOut"];
 export type SkillTaughtInOut = components["schemas"]["SkillTaughtInOut"];
 export type SkillMissedQuestionOut = components["schemas"]["SkillMissedQuestionOut"];
+export type SkillLinkedItemOut = components["schemas"]["SkillLinkedItemOut"];
 export type SkillDetailOut = components["schemas"]["SkillDetailOut"];
+export type SkillStatusOut = components["schemas"]["SkillStatusOut"];
 export type CurriculumVersionOut = components["schemas"]["CurriculumVersionOut"];
 export type CurriculumConceptOut = components["schemas"]["CurriculumConceptOut"];
 export type CurriculumClaimOut = components["schemas"]["CurriculumClaimOut"];
+export type CurriculumConceptAddIn = components["schemas"]["CurriculumConceptAddIn"];
+export type CurriculumRelationAddIn = components["schemas"]["CurriculumRelationAddIn"];
+export type CurriculumRelationOut = components["schemas"]["CurriculumRelationOut"];
 export type EvidenceMappingReviewOut = components["schemas"]["EvidenceMappingReviewOut"];
 export type DiagnosticBlindCaseOut = components["schemas"]["DiagnosticBlindCaseOut"];
 export type DiagnosticJudgmentIn = components["schemas"]["DiagnosticJudgmentIn"];
@@ -198,24 +203,44 @@ export function getSettings(): Promise<ApiResult<SettingsOut>> {
 }
 
 export async function saveSettings(body: SettingsUpdateIn): Promise<ApiResult<SettingsOut>> {
-  return request(client.PUT("/api/settings", {
-    headers: await csrfHeaders(),
-    body: {
-      provider: body.provider ?? null,
-      model: body.model ?? null,
-      credentials: body.credentials ?? {},
-    },
-  }));
+  const send = async () =>
+    request(client.PUT("/api/settings", {
+      headers: await csrfHeaders(),
+      body: {
+        provider: body.provider ?? null,
+        model: body.model ?? null,
+        curriculum_provider: body.curriculum_provider ?? null,
+        curriculum_model: body.curriculum_model ?? null,
+        credentials: body.credentials ?? {},
+      },
+    }));
+
+  let result = await send();
+  if (result.status === 403) {
+    // The backend may have restarted (dev --reload) and regenerated its CSRF
+    // token; drop the stale cached token and retry once with a fresh one.
+    clearCsrfToken();
+    result = await send();
+  }
+  return result;
 }
 
 export async function clearProviderSecret(
   provider: SettingsClearIn["provider"],
   confirmation: SettingsClearIn["confirmation"],
 ): Promise<ApiResult<SettingsOut>> {
-  return request(client.DELETE("/api/settings", {
-    headers: await csrfHeaders(),
-    body: { provider, confirmation },
-  }));
+  const send = async () =>
+    request(client.DELETE("/api/settings", {
+      headers: await csrfHeaders(),
+      body: { provider, confirmation },
+    }));
+
+  let result = await send();
+  if (result.status === 403) {
+    clearCsrfToken();
+    result = await send();
+  }
+  return result;
 }
 
 export async function discoverOllamaModels(
@@ -249,6 +274,14 @@ export function getCurriculum(courseId: string, view: "current" | "draft" = "cur
   );
 }
 
+export function startCurriculumExtraction(courseId: string) {
+  return request(
+    client.POST("/api/courses/{course_id}/curriculum/extract", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
 export function createCurriculumDraft(courseId: string, label?: string) {
   return request(
     client.POST("/api/courses/{course_id}/curriculum/drafts", {
@@ -267,6 +300,40 @@ export function editCurriculumConcept(
     client.PATCH("/api/curriculum/{version_id}/concepts/{concept_id}", {
       params: { path: { version_id: versionId, concept_id: conceptId } },
       body,
+    }),
+  );
+}
+
+export function addCurriculumConcept(versionId: string, body: CurriculumConceptAddIn) {
+  return request(
+    client.POST("/api/curriculum/{version_id}/concepts", {
+      params: { path: { version_id: versionId } },
+      body,
+    }),
+  );
+}
+
+export function deleteCurriculumConcept(versionId: string, conceptId: string) {
+  return request(
+    client.DELETE("/api/curriculum/{version_id}/concepts/{concept_id}", {
+      params: { path: { version_id: versionId, concept_id: conceptId } },
+    }),
+  );
+}
+
+export function addCurriculumRelation(versionId: string, body: CurriculumRelationAddIn) {
+  return request(
+    client.POST("/api/curriculum/{version_id}/relations", {
+      params: { path: { version_id: versionId } },
+      body,
+    }),
+  );
+}
+
+export function deleteCurriculumRelation(relationId: string) {
+  return request(
+    client.DELETE("/api/curriculum/relations/{relation_id}", {
+      params: { path: { relation_id: relationId } },
     }),
   );
 }
@@ -941,6 +1008,14 @@ export function getChatHistory(courseId: string) {
 export function getSkillMap(courseId: string) {
   return request(
     client.GET("/api/courses/{course_id}/skills", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function getSkillStatus(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/skills/status", {
       params: { path: { course_id: courseId } },
     }),
   );

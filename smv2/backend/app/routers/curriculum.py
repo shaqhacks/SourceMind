@@ -6,11 +6,13 @@ from fastapi import APIRouter, HTTPException
 
 from app.schemas import (
     CurriculumClaimEditIn,
+    CurriculumConceptAddIn,
     CurriculumConceptEditIn,
     CurriculumDraftIn,
     CurriculumDraftOut,
     CurriculumExtractionOut,
     CurriculumMergeIn,
+    CurriculumRelationAddIn,
     CurriculumSplitIn,
     CurriculumVersionOut,
     EvidenceMappingReviewIn,
@@ -103,6 +105,63 @@ def edit_concept(
     except ValueError as exc:
         _raise_curriculum_error(exc)
     return {"concept_id": revision.concept_id}
+
+
+@router.post(
+    "/api/curriculum/{version_id}/concepts",
+    status_code=201,
+)
+def add_concept(version_id: str, body: CurriculumConceptAddIn) -> dict[str, str]:
+    try:
+        concept = curriculum_service.add_concept(
+            version_id,
+            stable_key=body.stable_key,
+            label=body.label,
+            description_md=body.description_md,
+            aliases=body.aliases,
+            chapter_label=body.chapter_label,
+            section_id=body.section_id,
+        )
+    except ValueError as exc:
+        _raise_curriculum_error(exc)
+    return {"concept_id": concept.id}
+
+
+@router.delete("/api/curriculum/{version_id}/concepts/{concept_id}")
+def delete_concept(version_id: str, concept_id: str) -> dict[str, str]:
+    try:
+        curriculum_service.delete_concept(version_id, concept_id)
+    except ValueError as exc:
+        _raise_curriculum_error(exc)
+    return {"concept_id": concept_id}
+
+
+@router.post(
+    "/api/curriculum/{version_id}/relations",
+    status_code=201,
+)
+def add_relation(version_id: str, body: CurriculumRelationAddIn) -> dict[str, str]:
+    try:
+        relation = curriculum_service.add_relation(
+            version_id,
+            from_concept_id=body.from_concept_id,
+            to_concept_id=body.to_concept_id,
+            kind=body.kind,
+            confidence=body.confidence,
+            rationale_md=body.rationale_md,
+        )
+    except ValueError as exc:
+        _raise_curriculum_error(exc)
+    return {"relation_id": relation.id}
+
+
+@router.delete("/api/curriculum/relations/{relation_id}")
+def delete_relation(relation_id: str) -> dict[str, str]:
+    try:
+        curriculum_service.remove_relation_by_id(relation_id)
+    except ValueError as exc:
+        _raise_curriculum_error(exc)
+    return {"relation_id": relation_id}
 
 
 @router.patch("/api/curriculum/{version_id}/claims/{claim_id}")

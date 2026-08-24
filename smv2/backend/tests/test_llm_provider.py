@@ -169,6 +169,65 @@ def test_get_provider_rejects_unknown_backend(client, monkeypatch):
         get_provider()
 
 
+def test_get_provider_returns_deepseek_when_configured(client, monkeypatch):
+    from app.llm.provider import get_provider
+
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    provider = get_provider()
+    assert type(provider).__name__ == "DeepSeekProvider"
+
+
+def test_deepseek_provider_requires_api_key(client, monkeypatch):
+    import pytest
+    from app.llm.provider import ProviderNotConfiguredError, get_provider
+
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "deepseek")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    with pytest.raises(ProviderNotConfiguredError):
+        get_provider()
+
+
+def test_get_provider_returns_gemini_when_configured(client, monkeypatch):
+    from app.llm.provider import get_provider
+
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
+    provider = get_provider()
+    assert type(provider).__name__ == "GeminiProvider"
+    assert provider.supports_embeddings is True
+
+
+def test_gemini_provider_requires_api_key(client, monkeypatch):
+    import pytest
+    from app.llm.provider import ProviderNotConfiguredError, get_provider
+
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "gemini")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with pytest.raises(ProviderNotConfiguredError):
+        get_provider()
+
+
+def test_get_curriculum_provider_uses_separate_config(client, monkeypatch):
+    from app.llm.provider import get_curriculum_provider
+
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("SMV2_CURRICULUM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
+    provider = get_curriculum_provider()
+    assert type(provider).__name__ == "GeminiProvider"
+
+
+def test_get_curriculum_provider_falls_back_to_default(client, monkeypatch):
+    from app.llm.provider import get_curriculum_provider
+
+    monkeypatch.setenv("SMV2_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    provider = get_curriculum_provider()
+    assert type(provider).__name__ == "DeepSeekProvider"
+
+
 def test_embed_base_class_default_is_none_per_text(client):
     """A provider that doesn't override _embed_impl at all (the base
     class's own default) returns None per text — this is what

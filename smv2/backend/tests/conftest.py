@@ -44,6 +44,8 @@ def _setup_isolated_env(tmp_path, monkeypatch, *, sample_course_enabled: bool = 
     # provider-not-configured tests pass/fail depending on whose machine
     # runs them — clear it explicitly so tests are deterministic everywhere.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     # html_conversion_enabled()'s 'auto' default is True on any machine with
     # a `docker` binary on PATH — left alone, every successful ingest_course
     # call would enqueue a REAL convert_html job that (a) tries to invoke
@@ -53,6 +55,12 @@ def _setup_isolated_env(tmp_path, monkeypatch, *, sample_course_enabled: bool = 
     # test that ingests more than once. Force it off by default; tests of
     # the conversion feature itself override this explicitly.
     monkeypatch.setenv("SMV2_HTML_CONVERSION", "0")
+    # Same reasoning as SMV2_HTML_CONVERSION above: auto-queued concept
+    # extraction (ADR-030) would leave a second queued job behind after every
+    # ingest_course, and the next run_due_jobs_once() call a test makes would
+    # claim that job instead of the one the test actually queued. Force it off
+    # by default; tests of the auto-queue behavior override it explicitly.
+    monkeypatch.setenv("SMV2_SKILL_MAP_AUTOGEN", "0")
     dispose_engine()
     init_db()
 
@@ -166,9 +174,10 @@ class StubProvider(Provider):
 # needs its own patch target here.
 _GET_PROVIDER_PATCH_TARGETS = (
     "app.llm.provider.get_provider",
+    "app.llm.provider.get_curriculum_provider",
     "app.pipeline.generation.get_provider",
     "app.pipeline.cards_generation.get_provider",
-    "app.pipeline.concept_extraction.get_provider",
+    "app.pipeline.concept_extraction.get_curriculum_provider",
     "app.pipeline.concept_practice_generation.get_provider",
     "app.pipeline.quiz_generation.get_provider",
     "app.pipeline.practice_extraction.get_provider",

@@ -13,9 +13,15 @@ import {
 
 import { err, ok } from "./support/api-result";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 vi.mock("@/lib/api/client", () => ({
   getCourse: vi.fn(),
   getSkillMap: vi.fn(),
+  getSkillStatus: vi.fn(() => Promise.resolve({ data: null, ok: true, status: 200 })),
+  startCurriculumExtraction: vi.fn(),
 }));
 
 const mockedGetCourse = vi.mocked(getCourse);
@@ -79,9 +85,14 @@ describe("SkillMapView", () => {
       expect(screen.getAllByText(node.label).length).toBeGreaterThan(0);
     }
 
-    // A concept card links to its evidence detail page.
-    const strugglingLink = screen.getByRole("link", { name: /^Token counting/ });
-    expect(strugglingLink).toHaveAttribute("href", "/course/course-1/skills/token-counting");
+    // A concept card links to its evidence detail page (the label also
+    // appears once in the top "Skill map preview", so match all and assert
+    // they point at the same detail page).
+    const strugglingLinks = screen.getAllByRole("link", { name: /^Token counting/ });
+    expect(strugglingLinks.length).toBeGreaterThan(0);
+    for (const link of strugglingLinks) {
+      expect(link).toHaveAttribute("href", "/course/course-1/skills/token-counting");
+    }
   });
 
   it("renders weak edges as dashed paths and met edges as solid", async () => {
@@ -126,16 +137,14 @@ describe("SkillMapView", () => {
     expect(byChapter).toHaveAttribute("title", "By-chapter view isn't built yet");
   });
 
-  it("shows an EmptyState with no CTA when the course has no skill graph yet", async () => {
+  it("shows a generate CTA when the course has no skill graph yet", async () => {
     mockedGetCourse.mockResolvedValue(ok(makeCourse()));
     mockedGetSkillMap.mockResolvedValue(ok({ nodes: [], edges: [] }));
 
     render(<SkillMapView courseId="course-1" />);
 
     expect(await screen.findByText("No skill graph yet")).toBeInTheDocument();
-    expect(screen.getByText(/prereq_extraction\.md/)).toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /generate skill map/i })).toBeInTheDocument();
   });
 
   it("shows a retryable error banner when the course fails to load", async () => {

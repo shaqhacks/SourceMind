@@ -55,11 +55,17 @@ def test_load_prompt_resolves_per_file_not_globally():
     v3_dir = _BACKEND_ROOT / "prompts" / "v3"
     assert os.path.isdir(v3_dir)
     v3_files = {p.name for p in v3_dir.iterdir()}
-    assert v3_files == {"cards.md", "chat.md", "practice_assessment.md", "quiz.md"}
+    assert v3_files == {
+        "cards.md",
+        "chat.md",
+        "practice_assessment.md",
+        "prereq_extraction.md",
+        "quiz.md",
+    }
 
     assert load_prompt("chat")[1] == "v3"
     assert load_prompt("practice_assessment")[1] == "v4"
     assert load_prompt("lesson")[1] == "v2"
     assert load_prompt("cards")[1] == "v3"
     assert load_prompt("quiz")[1] == "v3"
-    assert load_prompt("prereq_extraction")[1] == "v2"
+    assert load_prompt("prereq_extraction")[1] == "v3"

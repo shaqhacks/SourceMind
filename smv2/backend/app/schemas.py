@@ -126,6 +126,8 @@ class CurriculumConceptOut(BaseModel):
     description_md: str
     aliases: list[str]
     chapter_label: str | None
+    section_id: str | None
+    section_title: str | None
     review_state: str
     is_active: bool
 
@@ -208,6 +210,24 @@ class CurriculumConceptEditIn(BaseModel):
     description_md: str = Field(max_length=20000)
     aliases: list[str] = Field(default_factory=list, max_length=100)
     chapter_label: str | None = Field(default=None, max_length=500)
+    section_id: str | None = Field(default=None, max_length=200)
+
+
+class CurriculumConceptAddIn(BaseModel):
+    stable_key: str = Field(min_length=1, max_length=200)
+    label: str = Field(min_length=1, max_length=500)
+    description_md: str = Field(default="", max_length=20000)
+    aliases: list[str] = Field(default_factory=list, max_length=100)
+    chapter_label: str | None = Field(default=None, max_length=500)
+    section_id: str | None = Field(default=None, max_length=200)
+
+
+class CurriculumRelationAddIn(BaseModel):
+    from_concept_id: str
+    to_concept_id: str
+    kind: Literal["requires", "recommended_before", "related_to", "develops_into"] = "requires"
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    rationale_md: str | None = Field(default=None, max_length=5000)
 
 
 class CurriculumClaimEditIn(BaseModel):
@@ -420,13 +440,15 @@ class SettingsBootstrapOut(BaseModel):
 
 
 class SettingsUpdateIn(BaseModel):
-    provider: Literal["anthropic", "ollama"] | None = None
+    provider: Literal["anthropic", "ollama", "deepseek", "gemini"] | None = None
     model: str | None = Field(default=None, min_length=1, max_length=200)
+    curriculum_provider: Literal["anthropic", "ollama", "deepseek", "gemini"] | None = None
+    curriculum_model: str | None = Field(default=None, min_length=1, max_length=200)
     credentials: dict[str, str] = Field(default_factory=dict)
 
 
 class SettingsClearIn(BaseModel):
-    provider: Literal["anthropic", "ollama"]
+    provider: Literal["anthropic", "ollama", "deepseek", "gemini"]
     confirmation: str
 
 
@@ -444,6 +466,8 @@ class OllamaModelsDiscoverOut(BaseModel):
 class SettingsOut(BaseModel):
     provider: str
     model: str
+    curriculum_provider: str
+    curriculum_model: str
     credentials_present: dict[str, bool]
     credentials: dict[str, str]
     rollout: LocalSettingsRolloutOut
@@ -924,6 +948,8 @@ class SkillNodeOut(BaseModel):
     label: str
     level: int
     status: str
+    section_id: str | None = None
+    chapter_label: str | None = None
     readiness_estimate: float | None = None
     evidence_state: str | None = None
     uncertainty: float | None = None
@@ -966,13 +992,39 @@ class SkillMissedQuestionOut(BaseModel):
     attempted_at: datetime
 
 
+class SkillLinkedItemOut(BaseModel):
+    item_type: Literal["quiz_question", "flashcard"]
+    evidence_item_id: str
+    preview: str
+    back_or_answer: str | None = None
+    source_index: int
+    test_id: str | None = None
+    attempt_id: str | None = None
+    card_id: str | None = None
+    section_id: str | None = None
+    claim_statement: str | None = None
+    review_state: str
+
+
 class SkillDetailOut(BaseModel):
     node: SkillNodeOut
     taught_in: list[SkillTaughtInOut]
     missed_questions: list[SkillMissedQuestionOut]
+    linked_items: list[SkillLinkedItemOut]
     cards_count: int
     quiz_correct: int
     quiz_wrong: int
+
+
+class SkillStatusOut(BaseModel):
+    phase: Literal["none", "generating", "draft_ready", "failed", "published"]
+    job_id: str | None = None
+    draft_version_id: str | None = None
+    published: bool
+    concept_count: int
+    locked: bool = False
+    error: str | None = None
+    error_code: str | None = None
 
 
 class DiagnosticBlindCaseOut(BaseModel):

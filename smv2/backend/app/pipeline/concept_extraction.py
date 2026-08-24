@@ -21,8 +21,13 @@ from app.db.models import (
 from app.jobs.llm_job_control import completion_options_for_job
 from app.llm.ledger import ensure_spend_cap, record_llm_call
 from app.llm.prompts import load_prompt
-from app.llm.provider import get_provider
-from app.llm.structured_output import CURRICULUM_SCHEMA, InvalidModelOutputError, repair_messages
+from app.llm.provider import get_curriculum_provider
+from app.llm.structured_output import (
+    CURRICULUM_SCHEMA,
+    PREREQ_LINK_SCHEMA,
+    InvalidModelOutputError,
+    repair_messages,
+)
 from app.pipeline._common import report_progress as _report_progress
 from app.pipeline._common import (
     report_progress_in_session as _report_progress_in_session,
@@ -31,6 +36,7 @@ from app.pipeline._common import strip_leading_fence
 
 _MAX_INPUT_CHARS = 30_000
 _MAX_TOKENS = 8192
+_MAX_TOKENS_LINK = 4096
 _RELATION_KINDS = {
     "is_part_of",
     "requires",
@@ -245,43 +251,131 @@ def build_curriculum_source_message(sections: list[dict[str, Any]]) -> str:
     return "\n".join(parts)[:_MAX_INPUT_CHARS]
 
 
-def run_concept_extraction(
-    session: Session, job: Job, course_id: str, curriculum_version_id: str
-) -> dict[str, Any]:
-    version = session.get(CurriculumVersion, curriculum_version_id)
-    if version is None or version.course_id != course_id or version.status != "draft":
-        raise ValueError("concept extraction requires a draft for the requested course")
-    sections = (
-        session.query(Section)
-        .filter(Section.course_id == course_id)
-        .order_by(Section.order_index)
-        .all()
-    )
-    if not sections:
-        raise ValueError("course has no sections to extract curriculum from")
-    section_payloads = [
-        {
-            "id": section.id,
-            "title": section.title,
-            "chapter_label": section.chapter_label,
-            "body_md": section.body_md,
-            "content_hash": section.content_hash,
-        }
-        for section in sections
-    ]
-    allowed_ids = {section.id for section in sections}
-    source_message = build_curriculum_source_message(section_payloads)
-    system_prompt, prompt_version = load_prompt("prereq_extraction")
-    provider = get_provider()
-    messages = [{"role": "user", "content": source_message}]
-    _report_progress(job.id, stage="loading", pct=None, message="preparing curriculum draft")
-    completion_options = replace(
-        completion_options_for_job(job.id, artifact="curriculum"),
-        response_schema=CURRICULUM_SCHEMA,
-    )
+def parse_prereq_relations(
+    text: str, allowed_concept_keys: set[str]
+) -> list[dict[str, Any]]:
+    """Parse the cross-chapter prerequisite-linking pass: a `relations`-only
+    JSON object whose edges must reference the provided concept keys."""
+    data = json.loads(strip_leading_fence(text), parse_constant=lambda value: (_ for _ in ()).throw(
+        ValueError(f"invalid JSON constant: {value}")
+    ))
+    if not isinstance(data, dict) or not isinstance(data.get("relations"), list):
+        raise ValueError("expected a JSON object with a relations array")
 
-    parsed = None
-    last_error = None
+    relations: list[dict[str, Any]] = []
+    for index, item in enumerate(data["relations"]):
+        if not isinstance(item, dict):
+            raise ValueError(f"relation {index} must be an object")
+        from_key = _text(item.get("from_key"), "relation.from_key")
+        to_key = _text(item.get("to_key"), "relation.to_key")
+        if from_key not in allowed_concept_keys:
+            raise ValueError(f"relation references unknown concept: {from_key}")
+        if to_key not in allowed_concept_keys:
+            raise ValueError(f"relation references unknown concept: {to_key}")
+        if from_key == to_key:
+            raise ValueError("relation must connect two distinct concepts")
+        relations.append(
+            {
+                "from_key": from_key,
+                "to_key": to_key,
+                "kind": "requires",
+                "external_ref": None,
+                "confidence": _confidence(item.get("confidence"), "relation.confidence"),
+                "rationale_md": _text(item.get("rationale_md"), "relation.rationale_md"),
+            }
+        )
+    return relations
+
+
+def build_prereq_link_message(concepts: list[dict[str, Any]]) -> str:
+    lines = ["<concepts>"]
+    for concept in concepts:
+        chapter = concept.get("chapter_label") or "—"
+        lines.append(
+            f'- stable_key: "{concept["stable_key"]}", '
+            f'label: "{concept["label"]}", chapter: "{chapter}"'
+        )
+    lines.append("</concepts>")
+    return "\n".join(lines)
+
+
+_UNSET = object()
+
+
+def _group_sections_by_chapter(sections: list[Section]) -> list[list[Section]]:
+    """Group consecutive sections into per-chapter extraction chunks so each
+    LLM call stays small enough to avoid output truncation (a whole-book
+    curriculum exceeds a single call's output token budget)."""
+    chunks: list[list[Section]] = []
+    current: list[Section] = []
+    current_label: object = _UNSET
+    for section in sections:
+        if current_label is not _UNSET and section.chapter_label != current_label:
+            chunks.append(current)
+            current = []
+        current.append(section)
+        current_label = section.chapter_label
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _merge_concepts(concepts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_key: dict[str, dict[str, Any]] = {}
+    for concept in concepts:
+        key = concept["stable_key"]
+        if key in by_key:
+            existing = by_key[key]
+            existing["sources"].extend(concept["sources"])
+            existing["confidence"] = max(existing["confidence"], concept["confidence"])
+        else:
+            by_key[key] = {**concept, "sources": list(concept["sources"])}
+    return list(by_key.values())
+
+
+def _merge_claims(claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_key: dict[str, dict[str, Any]] = {}
+    for claim in claims:
+        key = claim["stable_key"]
+        if key not in by_key:
+            by_key[key] = {**claim, "sources": list(claim["sources"])}
+    return list(by_key.values())
+
+
+def _merge_relations(relations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str | None, str]] = set()
+    merged: list[dict[str, Any]] = []
+    for relation in relations:
+        key = (relation["from_key"], relation["to_key"], relation["kind"])
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(relation)
+    return merged
+
+
+def _requires_edges(relations: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    return [
+        (relation["from_key"], relation["to_key"])
+        for relation in relations
+        if relation["kind"] == "requires" and relation["to_key"] is not None
+    ]
+
+
+def _extract_chunk(
+    provider,
+    job: Job,
+    course_id: str,
+    prompt_version: str,
+    system_prompt: str,
+    completion_options,
+    messages: list[dict],
+    allowed_ids: set[str],
+) -> dict[str, Any]:
+    """One bounded extraction for a single chapter chunk, with the same
+    one-retry-then-fail discipline as the pre-chunking path. An empty
+    (zero-concept) chunk is a valid "nothing to extract" result here —
+    the all-chunks-empty check happens at the end of run_concept_extraction."""
     current_messages = messages
     for attempt in range(2):
         ensure_spend_cap(course_id)
@@ -296,13 +390,11 @@ def run_concept_extraction(
             options=completion_options,
         )
         try:
-            parsed = parse_curriculum(result.text, allowed_section_ids=allowed_ids)
-            break
+            return parse_curriculum(result.text, allowed_section_ids=allowed_ids)
         except (json.JSONDecodeError, ValueError) as exc:
-            last_error = exc
             if attempt == 0:
                 _report_progress(
-                    job.id, stage="retrying", pct=45, message="retrying invalid curriculum"
+                    job.id, stage="retrying", pct=None, message="retrying invalid curriculum"
                 )
                 current_messages = repair_messages(messages, exc)
                 continue
@@ -317,9 +409,157 @@ def run_concept_extraction(
                 status="parse_failure",
                 course_id=course_id,
             )
-    if parsed is None:
-        assert last_error is not None
-        raise InvalidModelOutputError(last_error) from last_error
+            raise InvalidModelOutputError(exc) from exc
+    raise AssertionError("unreachable")
+
+
+def _extract_cross_chapter_requires(
+    provider,
+    job: Job,
+    course_id: str,
+    prompt_version: str,
+    completion_options,
+    concepts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Second pass: link strict `requires` prerequisites across chapters.
+    Degrades gracefully to an empty list (the intra-chapter edges already
+    extracted are kept) rather than failing the whole job."""
+    link_prompt, link_prompt_version = load_prompt("prereq_link")
+    allowed_keys = {concept["stable_key"] for concept in concepts}
+    messages = [{"role": "user", "content": build_prereq_link_message(concepts)}]
+    link_options = replace(completion_options, response_schema=PREREQ_LINK_SCHEMA)
+    current_messages = messages
+    for attempt in range(2):
+        ensure_spend_cap(course_id)
+        result = provider.complete(
+            current_messages,
+            max_tokens=_MAX_TOKENS_LINK,
+            purpose="concept_extraction",
+            course_id=course_id,
+            prompt_version=link_prompt_version,
+            system=link_prompt,
+            wait_for_slot=True,
+            options=link_options,
+        )
+        try:
+            return parse_prereq_relations(result.text, allowed_keys)
+        except (json.JSONDecodeError, ValueError) as exc:
+            if attempt == 0:
+                current_messages = repair_messages(messages, exc)
+                continue
+            record_llm_call(
+                purpose="concept_extraction",
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                latency_ms=0,
+                cost_estimate=None,
+                prompt_version=link_prompt_version,
+                status="parse_failure",
+                course_id=course_id,
+            )
+            return []
+    return []
+
+
+def run_concept_extraction(
+    session: Session, job: Job, course_id: str, curriculum_version_id: str
+) -> dict[str, Any]:
+    version = session.get(CurriculumVersion, curriculum_version_id)
+    if version is None or version.course_id != course_id or version.status != "draft":
+        raise ValueError("concept extraction requires a draft for the requested course")
+    sections = (
+        session.query(Section)
+        .filter(Section.course_id == course_id)
+        .order_by(Section.order_index)
+        .all()
+    )
+    if not sections:
+        raise ValueError("course has no sections to extract curriculum from")
+
+    system_prompt, prompt_version = load_prompt("prereq_extraction")
+    provider = get_curriculum_provider()
+    completion_options = replace(
+        completion_options_for_job(job.id, artifact="curriculum"),
+        response_schema=CURRICULUM_SCHEMA,
+    )
+    _report_progress(job.id, stage="loading", pct=None, message="preparing curriculum draft")
+
+    chunks = _group_sections_by_chapter(sections)
+    all_concepts: list[dict[str, Any]] = []
+    all_claims: list[dict[str, Any]] = []
+    intra_relations: list[dict[str, Any]] = []
+    for index, chunk in enumerate(chunks):
+        _report_progress(
+            job.id,
+            stage="loading",
+            pct=None,
+            message=f"extracting curriculum from chapter {index + 1} of {len(chunks)}",
+        )
+        chunk_payloads = [
+            {
+                "id": section.id,
+                "title": section.title,
+                "chapter_label": section.chapter_label,
+                "body_md": section.body_md,
+                "content_hash": section.content_hash,
+            }
+            for section in chunk
+        ]
+        source_message = build_curriculum_source_message(chunk_payloads)
+        messages = [{"role": "user", "content": source_message}]
+        parsed = _extract_chunk(
+            provider,
+            job,
+            course_id,
+            prompt_version,
+            system_prompt,
+            completion_options,
+            messages,
+            {section.id for section in chunk},
+        )
+        all_concepts.extend(parsed["concepts"])
+        all_claims.extend(parsed["claims"])
+        intra_relations.extend(parsed["relations"])
+
+    concepts = _merge_concepts(all_concepts)
+    claims = _merge_claims(all_claims)
+    relations = _merge_relations(intra_relations)
+
+    if not concepts:
+        raise InvalidModelOutputError(
+            ValueError("curriculum extraction produced zero concepts")
+        )
+
+    if len(chunks) > 1:
+        _report_progress(
+            job.id, stage="loading", pct=None, message="linking prerequisites across chapters"
+        )
+        cross_relations = _extract_cross_chapter_requires(
+            provider, job, course_id, prompt_version, completion_options, concepts
+        )
+        if cross_relations:
+            combined = _merge_relations(relations + cross_relations)
+            try:
+                _reject_requires_cycle(
+                    {concept["stable_key"] for concept in concepts},
+                    _requires_edges(combined),
+                )
+                relations = combined
+            except ValueError:
+                # A cross-chapter link introduced a cycle — keep the acyclic
+                # intra-chapter edges only.
+                pass
+
+    parsed = {"concepts": concepts, "claims": claims, "relations": relations}
+
+    # Replace, don't accumulate: prior revisions for this draft are superseded
+    # by this extraction. Concepts/LearningClaims are course-scoped (shared
+    # across versions) so only the version-scoped revisions are removed here;
+    # ConceptRelation/ConceptSourceLink are version-scoped too and cleared
+    # just below, before their re-add.
+    session.query(ConceptRevision).filter_by(curriculum_version_id=version.id).delete()
+    session.query(LearningClaimRevision).filter_by(curriculum_version_id=version.id).delete()
 
     concept_by_key: dict[str, Concept] = {}
     section_by_id = {section.id: section for section in sections}

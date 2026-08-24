@@ -32,7 +32,7 @@ const curriculum: CurriculumVersionOut = {
   label: "Review draft",
   created_at: "2026-01-01T00:00:00Z",
   published_at: null,
-  concepts: [{ id: "concept-1", stable_key: "fractions", label: "Fractions", description_md: "Compare fractions.", aliases: [], chapter_label: "Chapter 1", review_state: "unverified", is_active: true }],
+  concepts: [{ id: "concept-1", stable_key: "fractions", label: "Fractions", description_md: "Compare fractions.", aliases: [], chapter_label: "Chapter 1", section_id: null, section_title: null, review_state: "unverified", is_active: true }],
   claims: [{ id: "claim-1", stable_key: "compare", concept_id: "concept-1", statement: "Compare two fractions.", success_criteria_md: "Chooses and explains.", aliases: [], cognitive_demand: "apply", review_state: "unverified", is_active: true }],
   relations: [],
   sources: [],

@@ -53,19 +53,30 @@ def _extraction_response(section_id: str, chapter_label: str | None) -> str:
     )
 
 
+def _completion(text: str) -> CompletionResult:
+    return CompletionResult(text=text, input_tokens=10, output_tokens=20, model="stub-model")
+
+
+# headings_no_bookmarks.pdf yields 6 chapter chunks (Chapter 1..5 plus a
+# trailing "Answers" section grouped with Chapter 1's label), so a full
+# extraction is 6 chunk calls + 1 cross-chapter linking call.
+_EMPTY_CURRICULUM = json.dumps({"concepts": [], "claims": [], "relations": []})
+_EMPTY_LINK = json.dumps({"relations": []})
+
+
 def test_curriculum_extraction_job_is_idempotent_reviewable_and_publishable(
     client, ingest_course, stub_provider
 ):
     course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
     sections = client.get(f"/api/courses/{course_id}/sections").json()
     section = next(item for item in sections if item["chapter_label"] is not None)
+    # The first chunk (the chapter containing `section`) returns the real
+    # curriculum; the remaining 5 chunks are empty, and the cross-chapter
+    # linking pass returns no extra edges.
     stub_provider.responses = [
-        CompletionResult(
-            text=_extraction_response(section["id"], section["chapter_label"]),
-            input_tokens=10,
-            output_tokens=20,
-            model="stub-model",
-        )
+        _completion(_extraction_response(section["id"], section["chapter_label"])),
+        *[_completion(_EMPTY_CURRICULUM) for _ in range(5)],
+        _completion(_EMPTY_LINK),
     ]
 
     first = client.post(f"/api/courses/{course_id}/curriculum/extract")
@@ -122,6 +133,113 @@ def test_curriculum_extraction_job_is_idempotent_reviewable_and_publishable(
         },
     )
     assert immutable_edit.status_code == 409
+
+
+def test_curriculum_extraction_empty_result_fails_instead_of_succeeding(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    # Every chunk returns an empty curriculum — the all-empty guard fails the
+    # job before the cross-chapter linking pass ever runs.
+    stub_provider.responses = [_completion(_EMPTY_CURRICULUM) for _ in range(6)]
+
+    resp = client.post(f"/api/courses/{course_id}/curriculum/extract")
+    assert resp.status_code == 202
+    assert run_due_jobs_once() is True
+    job = client.get(f"/api/jobs/{resp.json()['job_id']}").json()
+    assert job["status"] == "failed", job["error"]
+    assert job["error_detail"]["code"] == "invalid_model_output"
+
+    status = client.get(f"/api/courses/{course_id}/skills/status").json()
+    assert status["phase"] == "failed"
+    assert status["error_code"] == "invalid_model_output"
+    assert status["error"] is not None
+
+
+def test_regeneration_replaces_draft_concepts_not_appends(
+    client, ingest_course, stub_provider
+):
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+    sections = client.get(f"/api/courses/{course_id}/sections").json()
+    section = next(item for item in sections if item["chapter_label"] is not None)
+
+    def concept_response(stable_key: str, label: str) -> str:
+        return json.dumps(
+            {
+                "concepts": [
+                    {
+                        "stable_key": stable_key,
+                        "label": label,
+                        "description_md": "desc",
+                        "aliases": [],
+                        "chapter_label": section["chapter_label"],
+                        "sources": [
+                            {
+                                "section_id": section["id"],
+                                "source_ref": "src",
+                                "excerpt_md": "excerpt",
+                            }
+                        ],
+                        "confidence": 0.9,
+                        "rationale_md": "rationale",
+                    }
+                ],
+                "claims": [],
+                "relations": [],
+            }
+        )
+
+    stub_provider.responses = [
+        _completion(concept_response("alpha", "Alpha")),
+        *[_completion(_EMPTY_CURRICULUM) for _ in range(5)],
+        _completion(_EMPTY_LINK),
+    ]
+    client.post(f"/api/courses/{course_id}/curriculum/extract")
+    assert run_due_jobs_once() is True
+
+    stub_provider.responses = [
+        _completion(concept_response("beta", "Beta")),
+        *[_completion(_EMPTY_CURRICULUM) for _ in range(5)],
+        _completion(_EMPTY_LINK),
+    ]
+    client.post(f"/api/courses/{course_id}/curriculum/extract")
+    assert run_due_jobs_once() is True
+
+    draft = client.get(f"/api/courses/{course_id}/curriculum?view=draft").json()
+    assert [c["label"] for c in draft["concepts"]] == ["Beta"]
+
+
+def test_curriculum_extraction_locked_once_learning_started(client, ingest_course):
+    from app.db.models import Test, TestAttempt
+    from app.services import learner_context
+
+    course_id, *_ = ingest_course("headings_no_bookmarks.pdf")
+
+    session = get_session()
+    try:
+        profile = learner_context.ensure_course_learning_profile(
+            session, learner_context.LEGACY_LOCAL_LEARNER_ID, course_id
+        )
+        test = Test(course_id=course_id, questions=[])
+        session.add(test)
+        session.flush()
+        session.add(
+            TestAttempt(
+                course_learning_profile_id=profile.id,
+                test_id=test.id,
+                course_id=course_id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    resp = client.post(f"/api/courses/{course_id}/curriculum/extract")
+    assert resp.status_code == 409
+    assert "locked" in resp.json()["detail"]
+
+    status = client.get(f"/api/courses/{course_id}/skills/status").json()
+    assert status["locked"] is True
 
 
 def test_curriculum_extraction_unconfigured_provider_fails_before_job_creation(

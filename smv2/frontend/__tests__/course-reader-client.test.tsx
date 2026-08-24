@@ -47,6 +47,8 @@ vi.mock("@/lib/api/client", () => ({
   createHighlight: vi.fn(),
   updateHighlight: vi.fn(),
   deleteHighlight: vi.fn(),
+  getSkillStatus: vi.fn(() => Promise.resolve({ data: null, ok: true, status: 200 })),
+  startCurriculumExtraction: vi.fn(),
 }));
 
 // The reader tree imports PdfPagesView, which imports pdfjs-dist at

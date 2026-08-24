@@ -114,6 +114,21 @@ def assert_ready_for_generation() -> None:
         raise LlmReadinessUnavailableError(readiness_failure_detail(payload))
 
 
+def assert_curriculum_ready() -> None:
+    """Gate skill-map (curriculum) generation on the *curriculum* provider's
+    credentials — that path may use a different provider (e.g. Gemini) than
+    everything else, so the generic assert_ready_for_generation() (which
+    checks the default provider) is not sufficient."""
+    provider = config.curriculum_provider()
+    configured, category, remediation = _configured_state(provider)
+    if not configured:
+        raise LlmReadinessUnavailableError(
+            readiness_failure_detail(
+                {"failure_category": category, "remediation": remediation}
+            )
+        )
+
+
 def readiness_failure_detail(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or status_payload()
     return {
@@ -147,8 +162,13 @@ def _public_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _config_identity(provider: str, model: str) -> str:
-    if provider == "anthropic":
-        credential = config.anthropic_api_key() or ""
+    if provider in ("anthropic", "deepseek", "gemini"):
+        if provider == "anthropic":
+            credential = config.anthropic_api_key() or ""
+        elif provider == "deepseek":
+            credential = config.deepseek_api_key() or ""
+        else:
+            credential = config.gemini_api_key() or ""
         material = f"{provider}\0{model}\0{_digest(credential)}"
     elif provider == "ollama":
         material = f"{provider}\0{model}\0{config.embed_model()}\0{config.ollama_base_url()}"
@@ -169,6 +189,20 @@ def _configured_state(provider: str) -> tuple[bool, str | None, str | None]:
             None if configured else "missing_credentials",
             None if configured else _remediation(provider),
         )
+    if provider == "deepseek":
+        configured = bool(config.deepseek_api_key())
+        return (
+            configured,
+            None if configured else "missing_credentials",
+            None if configured else _remediation(provider),
+        )
+    if provider == "gemini":
+        configured = bool(config.gemini_api_key())
+        return (
+            configured,
+            None if configured else "missing_credentials",
+            None if configured else _remediation(provider),
+        )
     if provider == "ollama":
         configured = config.ollama_base_url_configured()
         return (
@@ -182,7 +216,7 @@ def _configured_state(provider: str) -> tuple[bool, str | None, str | None]:
 def _capabilities(provider: str, available: bool) -> dict[str, bool]:
     if not available:
         return {"completion": False, "embeddings": False}
-    return {"completion": True, "embeddings": provider == "ollama"}
+    return {"completion": True, "embeddings": provider in {"ollama", "gemini"}}
 
 
 def _capabilities_from_probe(probe) -> dict[str, bool]:
@@ -199,6 +233,10 @@ def _cache_is_fresh(payload: dict[str, Any]) -> bool:
 def _remediation(provider: str) -> str:
     if provider == "anthropic":
         return "Add ANTHROPIC_API_KEY or save an Anthropic API key in local settings."
+    if provider == "deepseek":
+        return "Add DEEPSEEK_API_KEY or save a DeepSeek API key in local settings."
+    if provider == "gemini":
+        return "Add GEMINI_API_KEY or save a Gemini API key in local settings."
     if provider == "ollama":
         return "Start Ollama locally and confirm the configured base URL is reachable."
     return "Select anthropic or ollama in local settings."

@@ -64,7 +64,7 @@ export default function JobGroup({ courseId, type, jobs, highlightedJobId, readi
                 Open course {courseId}
               </Link>
               {section && (
-                <Link href={`/course/${courseId}?section=${encodeURIComponent(section)}`} className="text-accent hover:underline">
+                <Link href={`/course/${courseId}/read?section=${encodeURIComponent(section)}`} className="text-accent hover:underline">
                   Open section {section}
                 </Link>
               )}

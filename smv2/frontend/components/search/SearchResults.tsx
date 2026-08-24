@@ -24,7 +24,7 @@ function locatorText(result: SearchResultOut): string {
 export function resultHref(result: SearchResultOut): string {
   const section = result.section_id ? `?section=${encodeURIComponent(result.section_id)}` : "";
   const hash = result.source_locator.heading ? `#${slugify(result.source_locator.heading)}` : "";
-  return `/course/${encodeURIComponent(result.course_id)}${section}${hash}`;
+  return `/course/${encodeURIComponent(result.course_id)}/read${section}${hash}`;
 }
 
 export interface SearchResultsProps {

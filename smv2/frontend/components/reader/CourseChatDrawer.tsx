@@ -171,7 +171,7 @@ export default function CourseChatDrawer({
 
   const handleCitationClick = useCallback(
     (citation: ChatCitation) => {
-      router.push(`/course/${courseId}?section=${citation.sectionId}`);
+      router.push(`/course/${courseId}/read?section=${citation.sectionId}`);
       // Docked (wide viewport): the chat and reading column are
       // independent panels side by side, so there's no reason to lose
       // the conversation just to follow a citation — stay open, just

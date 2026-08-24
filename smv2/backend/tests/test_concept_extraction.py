@@ -5,7 +5,15 @@ import json
 import pytest
 
 from app.llm.structured_output import CURRICULUM_SCHEMA
-from app.pipeline.concept_extraction import build_curriculum_source_message, parse_curriculum
+from app.pipeline.concept_extraction import (
+    _group_sections_by_chapter,
+    _merge_concepts,
+    _merge_relations,
+    build_curriculum_source_message,
+    build_prereq_link_message,
+    parse_curriculum,
+    parse_prereq_relations,
+)
 
 
 def _payload() -> dict:
@@ -177,3 +185,127 @@ def test_source_message_treats_prompt_injection_shaped_book_text_as_data():
     assert '<section id="section-1"' in message
     assert "IGNORE PRIOR INSTRUCTIONS" in message
     assert "untrusted_source_text" in message
+
+
+def test_parse_prereq_relations_accepts_grounded_edges():
+    relations = parse_prereq_relations(
+        json.dumps(
+            {
+                "relations": [
+                    {
+                        "from_key": "fractions",
+                        "to_key": "equivalent-fractions",
+                        "kind": "requires",
+                        "external_ref": None,
+                        "confidence": 0.8,
+                        "rationale_md": "Equivalence presumes fraction meaning.",
+                    }
+                ]
+            }
+        ),
+        {"fractions", "equivalent-fractions"},
+    )
+    assert relations[0]["kind"] == "requires"
+    assert relations[0]["from_key"] == "fractions"
+    assert relations[0]["to_key"] == "equivalent-fractions"
+
+
+def test_parse_prereq_relations_rejects_unknown_concepts():
+    with pytest.raises(ValueError, match="unknown concept"):
+        parse_prereq_relations(
+            json.dumps(
+                {
+                    "relations": [
+                        {
+                            "from_key": "fractions",
+                            "to_key": "invented",
+                            "kind": "requires",
+                            "external_ref": None,
+                            "confidence": 0.8,
+                            "rationale_md": "x",
+                        }
+                    ]
+                }
+            ),
+            {"fractions"},
+        )
+
+
+def test_parse_prereq_relations_rejects_self_edge():
+    with pytest.raises(ValueError, match="distinct"):
+        parse_prereq_relations(
+            json.dumps(
+                {
+                    "relations": [
+                        {
+                            "from_key": "fractions",
+                            "to_key": "fractions",
+                            "kind": "requires",
+                            "external_ref": None,
+                            "confidence": 0.8,
+                            "rationale_md": "x",
+                        }
+                    ]
+                }
+            ),
+            {"fractions"},
+        )
+
+
+def test_merge_concepts_dedups_and_combines_sources():
+    merged = _merge_concepts(
+        [
+            {
+                "stable_key": "x",
+                "label": "X",
+                "sources": [{"section_id": "s1", "source_ref": "a", "excerpt_md": "x"}],
+                "confidence": 0.5,
+            },
+            {
+                "stable_key": "x",
+                "label": "X",
+                "sources": [{"section_id": "s2", "source_ref": "b", "excerpt_md": "y"}],
+                "confidence": 0.8,
+            },
+        ]
+    )
+    assert len(merged) == 1
+    assert len(merged[0]["sources"]) == 2
+    assert merged[0]["confidence"] == 0.8
+
+
+def test_merge_relations_dedups_by_endpoints_and_kind():
+    merged = _merge_relations(
+        [
+            {"from_key": "a", "to_key": "b", "kind": "requires"},
+            {"from_key": "a", "to_key": "b", "kind": "requires"},
+            {"from_key": "b", "to_key": "c", "kind": "requires"},
+        ]
+    )
+    assert len(merged) == 2
+
+
+def test_group_sections_by_chapter_preserves_order():
+    from types import SimpleNamespace
+
+    sections = [
+        SimpleNamespace(chapter_label="Ch 1"),
+        SimpleNamespace(chapter_label="Ch 1"),
+        SimpleNamespace(chapter_label="Ch 2"),
+        SimpleNamespace(chapter_label=None),
+        SimpleNamespace(chapter_label="Ch 1"),
+    ]
+    chunks = _group_sections_by_chapter(sections)  # type: ignore[arg-type]
+    assert [len(c) for c in chunks] == [2, 1, 1, 1]
+
+
+def test_prereq_link_message_lists_concepts():
+    message = build_prereq_link_message(
+        [
+            {"stable_key": "fractions", "label": "Fractions", "chapter_label": "Chapter 1"},
+            {"stable_key": "decimals", "label": "Decimals", "chapter_label": None},
+        ]
+    )
+    assert 'stable_key: "fractions"' in message
+    assert 'chapter: "Chapter 1"' in message
+    assert 'chapter: "—"' in message

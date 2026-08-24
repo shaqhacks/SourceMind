@@ -54,9 +54,13 @@ async def update_settings(
         next_settings["provider"] = body.provider
     if body.model is not None:
         next_settings["model"] = body.model
+    if body.curriculum_provider is not None:
+        next_settings["curriculum_provider"] = body.curriculum_provider
+    if body.curriculum_model is not None:
+        next_settings["curriculum_model"] = body.curriculum_model
 
     next_secrets = dict(secrets)
-    for key in ("anthropic_api_key", "ollama_base_url"):
+    for key in ("anthropic_api_key", "ollama_base_url", "deepseek_api_key", "gemini_api_key"):
         value = body.credentials.get(key)
         if value:
             next_secrets[key] = value
@@ -132,6 +136,10 @@ def clear_settings(
     secrets = local_settings_service.read_local_settings(config.secrets_path())
     if body.provider == "anthropic":
         secrets.pop("anthropic_api_key", None)
+    if body.provider == "deepseek":
+        secrets.pop("deepseek_api_key", None)
+    if body.provider == "gemini":
+        secrets.pop("gemini_api_key", None)
     if body.provider == "ollama":
         secrets.pop("ollama_base_url", None)
     local_settings_service.write_local_settings(config.secrets_path(), secrets)
@@ -142,12 +150,18 @@ def clear_settings(
 def _settings_payload() -> dict[str, Any]:
     anthropic_present = bool(config.anthropic_api_key())
     ollama_present = config.ollama_base_url_configured()
+    deepseek_present = bool(config.deepseek_api_key())
+    gemini_present = bool(config.gemini_api_key())
     return {
         "provider": config.llm_provider(),
         "model": config.llm_model(),
+        "curriculum_provider": config.curriculum_provider(),
+        "curriculum_model": config.curriculum_model(),
         "credentials_present": {
             "anthropic": anthropic_present,
             "ollama": ollama_present,
+            "deepseek": deepseek_present,
+            "gemini": gemini_present,
         },
         "credentials": {},
         "rollout": _rollout(),

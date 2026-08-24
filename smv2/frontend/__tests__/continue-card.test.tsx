@@ -59,7 +59,7 @@ describe("ContinueCard", () => {
   it("links to the course and shows its title immediately", () => {
     render(<ContinueCard course={COURSE} />);
 
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/course/course-1");
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/course/course-1/read");
     expect(screen.getByText("Distributed Systems")).toBeInTheDocument();
   });
 

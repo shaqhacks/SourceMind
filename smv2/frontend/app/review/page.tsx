@@ -1037,7 +1037,7 @@ function ReviewPageInner() {
           <div className="mt-auto flex flex-wrap items-center gap-2 pt-6">
             {card.is_new && <Badge tone="neutral">New card</Badge>}
             <Link
-              href={`/course/${courseId}?section=${card.section_id}`}
+              href={`/course/${courseId}/read?section=${card.section_id}`}
               className="ml-auto text-xs font-medium text-accent hover:underline"
             >
               Open in chapter →

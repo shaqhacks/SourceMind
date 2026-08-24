@@ -79,7 +79,7 @@ function suggestionHref(courseId: string, item: StudyNextItemOut): string {
   if (item.reason === "due_cards") {
     return `/review?course=${courseId}&start=due`;
   }
-  return `/course/${courseId}`;
+  return `/course/${courseId}/read`;
 }
 
 /**

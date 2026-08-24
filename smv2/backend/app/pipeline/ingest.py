@@ -32,7 +32,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.config import html_conversion_enabled, pages_per_window
+from app.config import html_conversion_enabled, pages_per_window, skill_map_autogen_enabled
 from app.config import skip_front_matter as _skip_front_matter_enabled
 from app.db.identity import section_id_for
 from app.db.models import (
@@ -478,6 +478,14 @@ def _run_ingest(session: Session, job: Job, course_id: str) -> None:
     # so this is nothing more than inserting a queued Job row.
     if any_extracted_ok and html_conversion_enabled():
         session.add(Job(type="convert_html", status="queued", payload={"course_id": course_id}))
+    # Same fire-and-forget pattern, now for the skill map (ADR-030): auto-queue
+    # concept extraction after a successful ingest. Ingest itself still makes
+    # zero LLM calls — the durable worker runs this later — and a missing
+    # provider surfaces as a cleanly failed job, never a failed ingest.
+    if any_extracted_ok and skill_map_autogen_enabled():
+        from app.services import curriculum_service
+
+        curriculum_service.queue_extraction_in_session(session, course_id)
     search_index.rebuild_fts_if_present(session)
     _report_progress_in_session(job, stage="done", pct=100, message="ingest complete")
     session.commit()
