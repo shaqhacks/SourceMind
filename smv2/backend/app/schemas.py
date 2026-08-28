@@ -230,6 +230,37 @@ class CurriculumRelationAddIn(BaseModel):
     rationale_md: str | None = Field(default=None, max_length=5000)
 
 
+class SkillMapUploadConceptIn(BaseModel):
+    """One skill from a user-pasted AI-generated skill map. `label` is
+    required; `introduced_in` is a free-text chapter/section reference the
+    backend best-effort matches to a real section (falling back to a
+    display-only label); `page` is an optional secondary identifier matched
+    against the section's page range; `prerequisites` names other skills in
+    this same payload by label."""
+
+    label: str = Field(min_length=1, max_length=500)
+    description: str = Field(default="", max_length=20000)
+    introduced_in: str | None = Field(default=None, max_length=500)
+    page: int | None = Field(default=None, ge=1)
+    prerequisites: list[str] = Field(default_factory=list, max_length=100)
+
+
+class SkillMapUploadIn(BaseModel):
+    concepts: list[SkillMapUploadConceptIn] = Field(min_length=1, max_length=20)
+
+
+class SkillMapUploadOut(BaseModel):
+    curriculum_version_id: str
+    concept_count: int
+    relation_count: int
+    matched_sections: int
+    unmatched_sections: list[str]
+
+
+class SkillMapUploadTemplateOut(BaseModel):
+    prompt: str
+
+
 class CurriculumClaimEditIn(BaseModel):
     concept_id: str | None = None
     statement: str | None = Field(default=None, min_length=1, max_length=5000)

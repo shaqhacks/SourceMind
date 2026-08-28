@@ -98,6 +98,10 @@ export type CurriculumClaimOut = components["schemas"]["CurriculumClaimOut"];
 export type CurriculumConceptAddIn = components["schemas"]["CurriculumConceptAddIn"];
 export type CurriculumRelationAddIn = components["schemas"]["CurriculumRelationAddIn"];
 export type CurriculumRelationOut = components["schemas"]["CurriculumRelationOut"];
+export type SkillMapUploadConceptIn = components["schemas"]["SkillMapUploadConceptIn"];
+export type SkillMapUploadIn = components["schemas"]["SkillMapUploadIn"];
+export type SkillMapUploadOut = components["schemas"]["SkillMapUploadOut"];
+export type SkillMapUploadTemplateOut = components["schemas"]["SkillMapUploadTemplateOut"];
 export type EvidenceMappingReviewOut = components["schemas"]["EvidenceMappingReviewOut"];
 export type DiagnosticBlindCaseOut = components["schemas"]["DiagnosticBlindCaseOut"];
 export type DiagnosticJudgmentIn = components["schemas"]["DiagnosticJudgmentIn"];
@@ -278,6 +282,23 @@ export function startCurriculumExtraction(courseId: string) {
   return request(
     client.POST("/api/courses/{course_id}/curriculum/extract", {
       params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function getSkillMapUploadTemplate(courseId: string) {
+  return request(
+    client.GET("/api/courses/{course_id}/curriculum/upload-template", {
+      params: { path: { course_id: courseId } },
+    }),
+  );
+}
+
+export function uploadSkillMap(courseId: string, body: SkillMapUploadIn) {
+  return request(
+    client.POST("/api/courses/{course_id}/curriculum/upload", {
+      params: { path: { course_id: courseId } },
+      body,
     }),
   );
 }

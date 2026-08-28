@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any
 
 from app.db.engine import get_session
@@ -819,5 +821,264 @@ def publish(version_id: str) -> CurriculumVersion:
         version.published_at = utcnow()
         session.commit()
         return version
+    finally:
+        session.close()
+
+
+# --- Skill map upload (owner-pasted, AI-generated) --------------------
+
+
+_SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(label: str) -> str:
+    slug = _SLUG_STRIP.sub("-", label.strip().lower()).strip("-")
+    return slug or "skill"
+
+
+def _normalize_text(text: str | None) -> str:
+    # Strip punctuation to a single space so "Chapter 5. Replication",
+    # "Chapter 5: Replication", and "chapter-5-replication" all compare equal.
+    return _SLUG_STRIP.sub(" ", (text or "").lower()).strip()
+
+
+def _match_section(
+    sections: list[Section], text: str | None, page: int | None = None
+) -> tuple[str | None, str | None]:
+    """Best-effort map a free-text 'introduced_in' reference (and optional
+    page number) to a section. Returns (section_id, chapter_label);
+    section_id is None when no match."""
+    key = _normalize_text(text)
+    if key:
+        by_title = {_normalize_text(s.title): s for s in sections}
+        by_chapter = {
+            _normalize_text(s.chapter_label): s for s in sections if s.chapter_label
+        }
+        if key in by_title:
+            s = by_title[key]
+            return s.id, s.chapter_label
+        if key in by_chapter:
+            s = by_chapter[key]
+            return s.id, s.chapter_label
+        # Fallback: the AI often writes just the topic ("Replication") or a
+        # chapter reference whose prefix/numbering differs; match when the
+        # section's title or chapter label ends with the reference.
+        if len(key) >= 4:
+            for s in sections:
+                title = _normalize_text(s.title)
+                if title == key or title.endswith(f" {key}"):
+                    return s.id, s.chapter_label
+            for s in sections:
+                chapter = _normalize_text(s.chapter_label)
+                if chapter and (chapter == key or chapter.endswith(f" {key}")):
+                    return s.id, s.chapter_label
+    if page is not None:
+        for s in sections:
+            if s.page_start is None or s.page_end is None:
+                continue
+            if s.page_start <= page <= s.page_end:
+                return s.id, s.chapter_label
+    return None, None
+
+
+def _has_cycle(node_count: int, edges: list[tuple[int, int]]) -> bool:
+    adjacency: list[list[int]] = [[] for _ in range(node_count)]
+    indegree = [0] * node_count
+    for src, dst in edges:
+        adjacency[src].append(dst)
+        indegree[dst] += 1
+    queue = [i for i in range(node_count) if indegree[i] == 0]
+    processed = 0
+    while queue:
+        node = queue.pop()
+        processed += 1
+        for child in adjacency[node]:
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                queue.append(child)
+    return processed != node_count
+
+
+def get_upload_template() -> str:
+    """The copy-paste prompt a course owner pastes into an external AI (e.g.
+    NotebookLM, ChatGPT) to turn their PDF into a skill-map JSON this app can
+    ingest via upload_skill_map. Lives as a file, not a code literal, so the
+    prompt <-> upload-schema coupling stays reviewable."""
+    path = Path(__file__).resolve().parents[2] / "prompts" / "skill_map_upload_prompt.md"
+    return path.read_text()
+
+
+def upload_skill_map(course_id: str, concepts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Replace the course's draft curriculum with an owner-pasted skill map.
+
+    Accepts a human-friendly shape (labels + free-text `introduced_in` +
+    prerequisites-by-label) rather than the internal extraction shape, since
+    the source is an external AI with no knowledge of our section ids or
+    stable keys. Validates (duplicate labels, unknown/self prerequisites,
+    cycles), resolves introduced_in to a section where possible, and writes
+    the result into a draft the owner still has to publish — learner evidence
+    is untouched until then.
+    """
+    session = get_session()
+    try:
+        if session.get(Course, course_id) is None:
+            raise CurriculumNotFoundError(f"course not found: {course_id}")
+
+        labels = [c["label"].strip() for c in concepts]
+        if any(not label for label in labels):
+            raise InvalidCurriculumOperationError("every skill needs a non-empty label")
+        normalized = [label.lower() for label in labels]
+        if len(normalized) != len(set(normalized)):
+            raise InvalidCurriculumOperationError("duplicate skill label in upload")
+
+        slugs: list[str] = []
+        seen_slugs: set[str] = set()
+        for label in labels:
+            base = _slugify(label)
+            slug = base
+            n = 2
+            while slug in seen_slugs:
+                slug = f"{base}-{n}"
+                n += 1
+            seen_slugs.add(slug)
+            slugs.append(slug)
+
+        label_index = {normalized[i]: i for i in range(len(labels))}
+
+        sections = (
+            session.query(Section)
+            .filter(Section.course_id == course_id, Section.kind == "content")
+            .all()
+        )
+
+        rows: list[dict[str, Any]] = []
+        for i, concept in enumerate(concepts):
+            introduced = concept.get("introduced_in")
+            page = concept.get("page")
+            section_id, chapter_label = _match_section(sections, introduced, page)
+            if section_id is None and introduced:
+                chapter_label = introduced.strip()
+            rows.append(
+                {
+                    "slug": slugs[i],
+                    "label": labels[i],
+                    "description_md": concept.get("description") or "",
+                    "section_id": section_id,
+                    "chapter_label": chapter_label,
+                    "introduced_text": (introduced or "").strip(),
+                    "prerequisites": [
+                        p.strip() for p in concept.get("prerequisites") or [] if p.strip()
+                    ],
+                }
+            )
+
+        edges: list[tuple[int, int]] = []
+        for i, row in enumerate(rows):
+            for prereq in row["prerequisites"]:
+                key = prereq.lower()
+                if key == normalized[i]:
+                    raise InvalidCurriculumOperationError(
+                        f"skill {labels[i]!r} cannot require itself"
+                    )
+                if key not in label_index:
+                    raise InvalidCurriculumOperationError(
+                        f"prerequisite {prereq!r} is not one of the uploaded skills"
+                    )
+                edges.append((label_index[key], i))
+
+        edges = sorted(set(edges))
+        if _has_cycle(len(rows), edges):
+            raise InvalidCurriculumOperationError("prerequisites must not form a cycle")
+
+        version = (
+            session.query(CurriculumVersion)
+            .filter_by(course_id=course_id, status="draft")
+            .order_by(CurriculumVersion.created_at.desc())
+            .first()
+        )
+        if version is None:
+            current = (
+                session.query(CurriculumVersion)
+                .filter_by(course_id=course_id, is_current=True)
+                .one_or_none()
+            )
+            version = CurriculumVersion(
+                course_id=course_id,
+                parent_version_id=current.id if current is not None else None,
+                status="draft",
+                is_current=False,
+                label="Uploaded skill map",
+            )
+            session.add(version)
+            session.flush()
+
+        # Replace the draft's contents entirely (ADR-030 owner-edit flow).
+        session.query(ConceptRelation).filter_by(curriculum_version_id=version.id).delete()
+        session.query(ConceptSourceLink).filter_by(curriculum_version_id=version.id).delete()
+        session.query(LearningClaimRevision).filter_by(curriculum_version_id=version.id).delete()
+        session.query(ConceptRevision).filter_by(curriculum_version_id=version.id).delete()
+
+        existing = {
+            c.slug: c for c in session.query(Concept).filter(Concept.course_id == course_id)
+        }
+        slug_to_id: dict[str, str] = {}
+        for row in rows:
+            concept = existing.get(row["slug"])
+            if concept is None:
+                concept = Concept(
+                    course_id=course_id,
+                    slug=row["slug"],
+                    label=row["label"],
+                    chapter_label=row["chapter_label"],
+                    section_id=row["section_id"],
+                )
+                session.add(concept)
+                session.flush()
+            else:
+                concept.label = row["label"]
+                concept.chapter_label = row["chapter_label"]
+                if row["section_id"] is not None:
+                    concept.section_id = row["section_id"]
+            slug_to_id[row["slug"]] = concept.id
+            session.add(
+                ConceptRevision(
+                    curriculum_version_id=version.id,
+                    concept_id=concept.id,
+                    label=row["label"],
+                    description_md=row["description_md"],
+                    aliases=[],
+                    chapter_label=row["chapter_label"],
+                    review_state="unverified",
+                    is_active=True,
+                )
+            )
+
+        for from_idx, to_idx in edges:
+            session.add(
+                ConceptRelation(
+                    course_id=course_id,
+                    curriculum_version_id=version.id,
+                    from_concept_id=slug_to_id[rows[from_idx]["slug"]],
+                    to_concept_id=slug_to_id[rows[to_idx]["slug"]],
+                    kind="requires",
+                    review_state="unverified",
+                )
+            )
+
+        session.commit()
+
+        matched = sum(1 for row in rows if row["section_id"] is not None)
+        unmatched = [
+            row["introduced_text"]
+            for row in rows
+            if row["section_id"] is None and row["introduced_text"]
+        ]
+        return {
+            "curriculum_version_id": version.id,
+            "concept_count": len(rows),
+            "relation_count": len(edges),
+            "matched_sections": matched,
+            "unmatched_sections": unmatched,
+        }
     finally:
         session.close()

@@ -18,6 +18,9 @@ from app.schemas import (
     EvidenceMappingReviewIn,
     EvidenceMappingReviewOut,
     RelationReviewIn,
+    SkillMapUploadIn,
+    SkillMapUploadOut,
+    SkillMapUploadTemplateOut,
     StandardAlignmentIn,
 )
 from app.services import curriculum_service, llm_readiness_service
@@ -67,6 +70,30 @@ def get_curriculum(
     if result is None:
         raise HTTPException(status_code=404, detail="curriculum not found")
     return CurriculumVersionOut(**result)
+
+
+@router.get(
+    "/api/courses/{course_id}/curriculum/upload-template",
+    response_model=SkillMapUploadTemplateOut,
+)
+def get_skill_map_upload_template(course_id: str) -> SkillMapUploadTemplateOut:
+    return SkillMapUploadTemplateOut(prompt=curriculum_service.get_upload_template())
+
+
+@router.post(
+    "/api/courses/{course_id}/curriculum/upload",
+    response_model=SkillMapUploadOut,
+)
+def upload_skill_map(course_id: str, body: SkillMapUploadIn) -> SkillMapUploadOut:
+    try:
+        result = curriculum_service.upload_skill_map(
+            course_id, [concept.model_dump() for concept in body.concepts]
+        )
+    except curriculum_service.CurriculumNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return SkillMapUploadOut(**result)
 
 
 @router.get(

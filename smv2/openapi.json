@@ -4456,6 +4456,127 @@
         "title": "SkillMapOut",
         "type": "object"
       },
+      "SkillMapUploadConceptIn": {
+        "description": "One skill from a user-pasted AI-generated skill map. `label` is\nrequired; `introduced_in` is a free-text chapter/section reference the\nbackend best-effort matches to a real section (falling back to a\ndisplay-only label); `page` is an optional secondary identifier matched\nagainst the section's page range; `prerequisites` names other skills in\nthis same payload by label.",
+        "properties": {
+          "description": {
+            "default": "",
+            "maxLength": 20000,
+            "title": "Description",
+            "type": "string"
+          },
+          "introduced_in": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Introduced In"
+          },
+          "label": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "prerequisites": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Prerequisites",
+            "type": "array"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "SkillMapUploadConceptIn",
+        "type": "object"
+      },
+      "SkillMapUploadIn": {
+        "properties": {
+          "concepts": {
+            "items": {
+              "$ref": "#/components/schemas/SkillMapUploadConceptIn"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Concepts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "concepts"
+        ],
+        "title": "SkillMapUploadIn",
+        "type": "object"
+      },
+      "SkillMapUploadOut": {
+        "properties": {
+          "concept_count": {
+            "title": "Concept Count",
+            "type": "integer"
+          },
+          "curriculum_version_id": {
+            "title": "Curriculum Version Id",
+            "type": "string"
+          },
+          "matched_sections": {
+            "title": "Matched Sections",
+            "type": "integer"
+          },
+          "relation_count": {
+            "title": "Relation Count",
+            "type": "integer"
+          },
+          "unmatched_sections": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unmatched Sections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "curriculum_version_id",
+          "concept_count",
+          "relation_count",
+          "matched_sections",
+          "unmatched_sections"
+        ],
+        "title": "SkillMapUploadOut",
+        "type": "object"
+      },
+      "SkillMapUploadTemplateOut": {
+        "properties": {
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "SkillMapUploadTemplateOut",
+        "type": "object"
+      },
       "SkillMissedQuestionOut": {
         "properties": {
           "attempted_at": {
@@ -6259,6 +6380,100 @@
           }
         },
         "summary": "List Evidence Mappings",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/curriculum/upload": {
+      "post": {
+        "operationId": "upload_skill_map_api_courses__course_id__curriculum_upload_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillMapUploadIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillMapUploadOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Skill Map",
+        "tags": [
+          "curriculum"
+        ]
+      }
+    },
+    "/api/courses/{course_id}/curriculum/upload-template": {
+      "get": {
+        "operationId": "get_skill_map_upload_template_api_courses__course_id__curriculum_upload_template_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_id",
+            "required": true,
+            "schema": {
+              "title": "Course Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillMapUploadTemplateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Skill Map Upload Template",
         "tags": [
           "curriculum"
         ]

@@ -252,6 +252,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/courses/{course_id}/curriculum/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Skill Map */
+        post: operations["upload_skill_map_api_courses__course_id__curriculum_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/courses/{course_id}/curriculum/upload-template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Skill Map Upload Template */
+        get: operations["get_skill_map_upload_template_api_courses__course_id__curriculum_upload_template_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/courses/{course_id}/diagnostics/validation/judgments": {
         parameters: {
             query?: never;
@@ -2864,6 +2898,53 @@ export interface components {
             /** Nodes */
             nodes: components["schemas"]["SkillNodeOut"][];
         };
+        /**
+         * SkillMapUploadConceptIn
+         * @description One skill from a user-pasted AI-generated skill map. `label` is
+         *     required; `introduced_in` is a free-text chapter/section reference the
+         *     backend best-effort matches to a real section (falling back to a
+         *     display-only label); `page` is an optional secondary identifier matched
+         *     against the section's page range; `prerequisites` names other skills in
+         *     this same payload by label.
+         */
+        SkillMapUploadConceptIn: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Introduced In */
+            introduced_in?: string | null;
+            /** Label */
+            label: string;
+            /** Page */
+            page?: number | null;
+            /** Prerequisites */
+            prerequisites?: string[];
+        };
+        /** SkillMapUploadIn */
+        SkillMapUploadIn: {
+            /** Concepts */
+            concepts: components["schemas"]["SkillMapUploadConceptIn"][];
+        };
+        /** SkillMapUploadOut */
+        SkillMapUploadOut: {
+            /** Concept Count */
+            concept_count: number;
+            /** Curriculum Version Id */
+            curriculum_version_id: string;
+            /** Matched Sections */
+            matched_sections: number;
+            /** Relation Count */
+            relation_count: number;
+            /** Unmatched Sections */
+            unmatched_sections: string[];
+        };
+        /** SkillMapUploadTemplateOut */
+        SkillMapUploadTemplateOut: {
+            /** Prompt */
+            prompt: string;
+        };
         /** SkillMissedQuestionOut */
         SkillMissedQuestionOut: {
             /**
@@ -3759,6 +3840,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvidenceMappingReviewOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_skill_map_api_courses__course_id__curriculum_upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillMapUploadIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillMapUploadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_skill_map_upload_template_api_courses__course_id__curriculum_upload_template_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillMapUploadTemplateOut"];
                 };
             };
             /** @description Validation Error */
